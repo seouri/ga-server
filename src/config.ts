@@ -11,6 +11,7 @@ export type GaConfig = {
   clientSecret: string;
   patientId: string;
   converterUrl: string;
+  adminPassword?: string; // rotated by ga setup; also the Medplum app (http://localhost:3000) login for admin@example.com
 };
 
 // Resolved from this module, not cwd: agents spawn `ga` from arbitrary directories.

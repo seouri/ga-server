@@ -9,7 +9,7 @@ Prerequisites: Docker Desktop, Node 26 (runs the `.ts` sources directly).
 ```sh
 docker compose up -d     # Medplum, Postgres, binary storage, C-CDA converter
 npm install
-node src/cli.ts setup    # creates the patient and .ga/config.json
+node src/cli.ts setup    # creates the patient and .ga/config.json, rotates the Medplum admin password
 npm link                 # optional: puts `ga` on your PATH (examples below use it)
 ```
 
@@ -33,6 +33,10 @@ The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`.
 
 Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Ports bind to `127.0.0.1` only; nothing is exposed to the network.
 
+## Admin app
+
+The Medplum app runs at http://localhost:3000. Log in as `admin@example.com` with the `adminPassword` from `.ga/config.json`: `ga setup` replaces Medplum's seeded default with a random password and stores it there (mode 0600). Re-running setup reuses it.
+
 ## Security
 
-The default Medplum admin password is a setup shortcut. Change it before sharing the machine or exposing any port.
+The server accepts browser requests only from the app origin `http://localhost:3000` (`MEDPLUM_ALLOWED_ORIGINS`), so other web pages open in your browser can't call it. VM-context bots are disabled. Ports bind to `127.0.0.1`. Anyone who can read `.ga/config.json` has full access.
