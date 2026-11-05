@@ -65,7 +65,10 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
     const n = norm(d.name);
     const byName = schedule.vaccines.filter((v) => v.names.some((a) => n.includes(a)) && !v.excludeNames?.some((x) => n.includes(x)));
     const vs = byCvx.length ? byCvx : byName.length === 1 && d.name ? byName : [];
-    if (!vs.length || !d.date) unmatched.push(d);
+    if (!vs.length || !d.date) {
+      unmatched.push(d); // a dose without a date can't be placed in a series
+      continue;
+    }
     for (const v of vs) byVaccine.set(v.id, [...(byVaccine.get(v.id) ?? []), d]);
   }
   const results = schedule.vaccines.map((v) => {
@@ -115,8 +118,8 @@ const src = (r: { meta?: { source?: string } }) => (r.meta?.source ? basename(r.
 
 // Reads the patient's own GA data so values never pass through the agent.
 export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf))) throw new GaError('asOf must be a date (YYYY-MM-DD)');
-  const p = await client.readResource('Patient', patientId) as Patient;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf)) || !new Date(asOf).toISOString().startsWith(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
+  const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   if (p.gender !== 'male' && p.gender !== 'female') throw new GaError('Patient gender in GA must be male or female to apply the schedule');
   // Every page: a patient can hold more than one page of Observations.

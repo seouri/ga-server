@@ -104,3 +104,12 @@ test('MMR immunity needs all three antibodies', () => {
   const three = evaluateVaccines(schedule, { ...base, immunity: [pos('Measles IgG'), pos('Mumps IgG'), pos('Rubella IgG')] }, AS_OF);
   expect(status(three, 'mmr')?.status).toBe('immune');
 });
+
+test('a record without a date is listed, never counted', () => {
+  const dated = { date: '2024-01-10', name: 'Shingrix', source: 'ehi' };
+  const undated = { date: '', name: 'Shingrix', source: 'ehi' };
+  const r = evaluateVaccines(schedule, { ...base, immunizations: [dated, undated] }, AS_OF);
+  expect(status(r, 'zoster')).toMatchObject({ status: 'overdue', records: [{ date: '2024-01-10' }] });
+  expect(r.unmatched).toEqual([undated]);
+  expect(status(evaluateVaccines(schedule, { ...base, immunizations: [undated] }, AS_OF), 'zoster')?.status).toBe('due');
+});
