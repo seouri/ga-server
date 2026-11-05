@@ -36,6 +36,94 @@ The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`.
 - Claude Code: open this repo; `.mcp.json` registers `ga-server`.
 - Codex / Hermes: register a stdio MCP server with command `node /absolute/path/to/ga-server/src/cli.ts mcp`. Point the agent at `AGENTS.md` for the PDF extraction rules.
 
+## Using GA in Claude Code
+
+Start Claude Code in this repo and approve `ga-server` (check with `/mcp`). To use GA from any folder, register it once for your user:
+
+```sh
+claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cli.ts mcp
+```
+
+The server tells Claude that GA is your health record, so plain questions work. Claude reads with `fhir_search`/`fhir_read` and cites the records it used.
+
+**Ask about your health**
+
+```
+> Is starting Atorvastatin 40 mg the right decision?
+> How is my liver function over time? Any concerns?
+> What were my last three LDL results, and where did each come from?
+> List my active medications and problems.
+> Did my blood pressure change after I lost weight?
+```
+
+**Import documents**
+
+```
+> Import /path/to/checkup-2024.pdf into GA.
+> Import ~/Downloads/HealthSummary_export into GA.
+```
+
+Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`). The MCP tools can't import C-CDA themselves.
+
+**Review and tidy**
+
+```
+> Show records tagged possible-duplicate and explain each pair.
+> Which records were extracted by AI, and from which files?
+> Is any active medication older than my newest Epic import?
+```
+
+**Visualize**
+
+```
+> Show me a nice visualization of my lipid profile over time.
+> Chart my weight and BMI since 2019.
+```
+
+Claude builds a local HTML page from GA data and opens it in your browser.
+
+Answers support a conversation with your clinician; they don't replace one.
+
+## Adding a skill
+
+A skill is a repeatable report, visualization or workflow that the agent runs against GA. It adds no server code. Each skill is a folder in `.claude/skills/`, and Claude Code loads it for anyone who opens this repo. It runs when you type `/<name>`, or when your request matches its description.
+
+```
+.claude/skills/ga-lipids/
+  SKILL.md          # instructions (required)
+  template.html     # optional supporting files: templates, examples
+```
+
+`SKILL.md` starts with frontmatter, then plain instructions:
+
+```markdown
+---
+name: ga-lipids
+description: Visualize the user's lipid panels from GA over time. Use when asked about cholesterol, LDL, HDL or triglyceride trends.
+argument-hint: "[since YYYY]"
+allowed-tools: mcp__ga-server__fhir_search mcp__ga-server__fhir_read
+---
+
+1. Search GA Observations for total cholesterol (LOINC 2093-3), HDL (2085-9), triglycerides (2571-8)
+   and LDL as calculated (13457-7), direct (18262-6) or text-only "LDL cholesterol". Limit to $ARGUMENTS if given.
+2. Fill the data slot in template.html, save the page and open it.
+3. Report which tests were found, which are missing, and which values were extracted by AI from PDFs.
+```
+
+Rules for skills in this repo:
+
+- **Read data from GA every time.** Never put values in the skill or its templates. Each person who clones the repo sees only their own data.
+- **No personal details:** no names, file paths, dates or results from anyone's record. Skills are committed and may be public.
+- **Expect varied coding.** The same test can arrive with different LOINC codes, or as text only from a PDF. Search for every form, and say what was found and what's missing rather than guessing.
+- **Cite records and keep GA's flags visible:** `possible-duplicate`, `extracted-by-llm`, and medications that may no longer be active.
+- **Writes go through `ga_import` only,** so dedup applies.
+- **Fast and exact: ship a script.** When a skill only moves data from GA into a page or file, put that in a script in the skill folder. It reads GA with `src/config.ts` (`loadConfig`, `getClient`), and `SKILL.md` just runs it and relays its summary. The data never passes through the model, so it's fast and can't be mistyped. See `.claude/skills/ga-lipids/build.ts`, tested in `tests/ga-lipids.test.ts`.
+- **Exact math belongs in code, not skill instructions.** A risk score, for example, should be a tested MCP tool, and the skill calls it.
+- **Mirror the skill for other agents.** Add a line to `AGENTS.md` naming the skill and its folder, so Codex and Hermes can follow the same instructions.
+- **Try it before committing.** Run `/<name>` in Claude Code against your own GA. Also check what it does with an empty record.
+
+Add `disable-model-invocation: true` to the frontmatter if a skill should run only when typed. PDF extraction instructions currently live in `skills/ga-extract/SKILL.md`, a folder Claude Code doesn't load automatically.
+
 ## Where data lives
 
 Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Ports bind to `127.0.0.1` only; nothing is exposed to the network.

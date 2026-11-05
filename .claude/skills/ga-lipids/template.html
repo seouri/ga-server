@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lipid Profile Trend</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e3e2de; --grid: #ecebe7;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c; --grid: #262624;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e88;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #111110; --surface-1: #1a1a19; --border: #2e2e2c; --grid: #262624;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e88;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; }
+.sub { color: var(--text-secondary); margin: 0 0 24px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.tile .k { color: var(--text-secondary); font-size: 12px; }
+.tile .v { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .v small { font-size: 13px; color: var(--text-muted); font-weight: 400; margin-left: 4px; }
+.tile .d { color: var(--text-muted); font-size: 12px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 8px; color: var(--text-secondary); font-size: 13px; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; background: var(--c); }
+.legend .ref::before { background: none; border-top: 2px dashed var(--text-muted); height: 0; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.axis text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.gridline { stroke: var(--grid); }
+.ref { stroke: var(--text-muted); stroke-dasharray: 4 4; }
+.reflbl { fill: var(--text-muted); font-size: 11px; }
+.endlbl { fill: var(--text-primary); font-size: 12px; font-weight: 500; }
+.ann { stroke: var(--text-secondary); stroke-width: 1; }
+.annlbl { fill: var(--text-secondary); font-size: 11px; }
+.xh { stroke: var(--text-muted); stroke-width: 1; }
+.empty { padding: 48px 16px; text-align: center; color: var(--text-secondary); }
+#tip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; min-width: 170px; }
+#tip .t { font-weight: 600; margin-bottom: 4px; }
+#tip .row { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
+#tip .row b { color: var(--text-primary); font-variant-numeric: tabular-nums; font-weight: 500; }
+#tip .row i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 6px; }
+#tip .src { color: var(--text-muted); margin-top: 4px; }
+details { margin-top: 16px; }
+summary { cursor: pointer; color: var(--text-secondary); }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th:first-child, td:first-child, td:last-child, th:last-child { text-align: left; }
+th { color: var(--text-secondary); font-weight: 500; }
+.note { color: var(--text-muted); font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Lipid profile</h1>
+  <p class="sub" id="sub"></p>
+  <div class="tiles" id="tiles"></div>
+  <div class="card">
+    <div class="legend" id="legend"></div>
+    <svg id="chart" role="img" aria-label="Line chart of total cholesterol, LDL, HDL and triglycerides over time"></svg>
+    <details>
+      <summary>Show data table</summary>
+      <table id="tbl"></table>
+    </details>
+    <p class="note" id="note"></p>
+  </div>
+</main>
+<div id="tip"></div>
+<!-- build.ts replaces this JSON with data from GA (fill()). Everything else stays as is. -->
+<script id="ga-data" type="application/json">{ "panels": [], "annotations": [] }</script>
+<script>
+const { panels: raw = [], annotations = [] } = JSON.parse(document.getElementById('ga-data').textContent);
+const data = raw.filter(r => r && r.d).sort((a, b) => a.d.localeCompare(b.d));
+const series = [
+  { k: 'tc',  name: 'Total cholesterol', c: '--s2' },
+  { k: 'ldl', name: 'LDL',               c: '--s1' },
+  { k: 'tg',  name: 'Triglycerides',     c: '--s4' },
+  { k: 'hdl', name: 'HDL',               c: '--s3' },
+];
+const refs = [{ v: 190, t: 'LDL 190', dy: -4 }, { v: 160, t: 'LDL 160', dy: 12 }];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const has = v => typeof v === 'number' && isFinite(v);
+const fmt = v => has(v) ? String(Math.round(v * 10) / 10) : '—';
+const nonHdl = r => has(r.tc) && has(r.hdl) ? r.tc - r.hdl : null;
+const last = k => [...data].reverse().find(r => has(r[k]));
+
+// Header, tiles, table, note
+const sub = document.getElementById('sub');
+if (!data.length) {
+  sub.textContent = 'No lipid results found in GA.';
+} else {
+  const l = last('ldl'), f = data.find(r => has(r.ldl));
+  sub.textContent = `${data.length} panel${data.length > 1 ? 's' : ''}, ${data[0].d} to ${data.at(-1).d}.` +
+    (l && f && l !== f ? ` LDL ${fmt(f.ldl)} → ${fmt(l.ldl)} mg/dL.` : '');
+}
+const tile = (k, label, extra) => {
+  const r = k === 'nonhdl' ? [...data].reverse().find(x => has(nonHdl(x))) : last(k);
+  const v = r ? (k === 'nonhdl' ? nonHdl(r) : r[k]) : null;
+  return `<div class="tile"><div class="k">${label} (latest)</div><div class="v">${fmt(v)}<small>mg/dL</small></div><div class="d">${r ? r.d : 'no result'}${extra && r ? ' · ' + extra(r) : ''}</div></div>`;
+};
+document.getElementById('tiles').innerHTML = data.length ? [
+  tile('ldl', 'LDL', r => r.ldlKind ? r.ldlKind : ''),
+  tile('nonhdl', 'Non-HDL'),
+  tile('hdl', 'HDL'),
+  tile('tg', 'Triglycerides'),
+].join('') : '';
+document.getElementById('legend').innerHTML = series.map(s => `<span style="--c:var(${s.c})">${s.name}</span>`).join('') + '<span class="ref">LDL thresholds</span>';
+document.getElementById('tbl').innerHTML = '<tr><th>Date</th><th>Total</th><th>LDL</th><th>HDL</th><th>Non-HDL</th><th>TG</th><th>Source</th></tr>' +
+  data.map(r => `<tr><td>${r.d}</td><td>${fmt(r.tc)}</td><td>${fmt(r.ldl)}</td><td>${fmt(r.hdl)}</td><td>${fmt(nonHdl(r))}</td><td>${fmt(r.tg)}</td><td>${esc(r.src ?? '')}${r.llm ? ' (AI-extracted)' : ''}</td></tr>`).join('');
+document.getElementById('note').textContent = 'Source: GA (Guardian Angel) records. Values marked AI-extracted were read from documents by an agent; check them against the original.';
+
+// Chart
+const svg = document.getElementById('chart');
+const tip = document.getElementById('tip');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const t = s => Date.parse(s);
+
+function draw() {
+  if (!data.length) { svg.outerHTML = '<div class="empty">Nothing to chart yet. Import lab results into GA, then run /ga-lipids again.</div>'; return; }
+  const W = svg.clientWidth || 900, H = Math.max(300, Math.min(440, W * 0.5));
+  const m = { l: 40, r: W < 560 ? 16 : 130, t: 16, b: 28 };
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const span = Math.max(t(data.at(-1).d) - t(data[0].d), 365 * 864e5);
+  const x0 = t(data[0].d) - span * 0.05, x1 = t(data.at(-1).d) + span * 0.05;
+  const vals = data.flatMap(r => series.map(s => r[s.k]).filter(has));
+  const ymax = Math.max(250, Math.ceil(Math.max(...vals) / 50) * 50);
+  const X = v => m.l + (t(v) - x0) / (x1 - x0) * (W - m.l - m.r);
+  const Y = v => H - m.b - v / ymax * (H - m.t - m.b);
+  let g = '';
+  for (let v = 0; v <= ymax; v += 50) g += `<line class="gridline" x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}"/><g class="axis"><text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end">${v}</text></g>`;
+  const y0 = new Date(x0).getUTCFullYear() + 1, y1 = new Date(x1).getUTCFullYear();
+  const step = Math.max(1, Math.ceil((y1 - y0 + 1) / 10));
+  for (let y = y0; y <= y1; y += step) g += `<g class="axis"><text x="${X(y + '-01-01')}" y="${H - 8}" text-anchor="middle">${y}</text></g>`;
+  for (const r of refs) g += `<line class="ref" x1="${m.l}" x2="${W - m.r}" y1="${Y(r.v)}" y2="${Y(r.v)}"/><text class="reflbl" x="${m.l + 4}" y="${Y(r.v) + r.dy}">${r.t}</text>`;
+  for (const a of annotations.filter(a => a && a.d && t(a.d) >= x0 && t(a.d) <= x1)) {
+    g += `<line class="ann" x1="${X(a.d)}" x2="${X(a.d)}" y1="${m.t}" y2="${H - m.b}"/><text class="annlbl" x="${X(a.d) - 6}" y="${m.t + 10}" text-anchor="end">${esc(a.label)} →</text>`;
+  }
+  const ends = [];
+  for (const s of series) {
+    const col = css(s.c);
+    const pts = data.filter(r => has(r[s.k])).map(r => [X(r.d), Y(r[s.k]), r[s.k]]);
+    if (!pts.length) continue;
+    if (pts.length > 1) g += `<polyline fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(p => p[0] + ',' + p[1]).join(' ')}"/>`;
+    for (const p of pts) g += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${col}" stroke="${css('--surface-1')}" stroke-width="2"/>`;
+    ends.push({ x: pts.at(-1)[0], y: pts.at(-1)[1], txt: `${s.name} ${fmt(pts.at(-1)[2])}` });
+  }
+  if (m.r > 100) {
+    ends.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+    for (const e of ends) g += `<text class="endlbl" x="${e.x + 10}" y="${e.y + 4}">${e.txt}</text>`;
+  }
+  g += `<line id="xh" class="xh" y1="${m.t}" y2="${H - m.b}" style="display:none"/><rect id="hit" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
+  svg.innerHTML = g;
+
+  const hit = svg.querySelector('#hit'), xh = svg.querySelector('#xh');
+  hit.addEventListener('pointermove', ev => {
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const lx = pt.matrixTransform(svg.getScreenCTM().inverse()).x;
+    const r = data.reduce((a, b) => Math.abs(X(b.d) - lx) < Math.abs(X(a.d) - lx) ? b : a);
+    xh.setAttribute('x1', X(r.d)); xh.setAttribute('x2', X(r.d)); xh.style.display = '';
+    tip.innerHTML = `<div class="t">${r.d}</div>` + series.map(s => `<div class="row"><span><i style="--c:var(${s.c})"></i>${s.name}</span><b>${fmt(r[s.k])}</b></div>`).join('') +
+      `<div class="row"><span>Non-HDL</span><b>${fmt(nonHdl(r))}</b></div><div class="src">${esc(r.src ?? '')}${r.llm ? ' · AI-extracted' : ''}</div>`;
+    tip.style.display = 'block';
+    const tx = ev.clientX + 16 + tip.offsetWidth > innerWidth ? ev.clientX - tip.offsetWidth - 16 : ev.clientX + 16;
+    tip.style.left = tx + 'px'; tip.style.top = Math.max(8, ev.clientY - tip.offsetHeight / 2) + 'px';
+  });
+  hit.addEventListener('pointerleave', () => { tip.style.display = 'none'; xh.style.display = 'none'; });
+}
+draw();
+addEventListener('resize', draw);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+</script>
+</body>
+</html>
