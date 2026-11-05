@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { extractWithApi } from '../src/llm.ts';
 
+const stub = (msg: any) => ({ messages: { stream: () => ({ finalMessage: async () => msg }) } });
 const cli = (args: string[], env: Record<string, string> = {}) =>
   spawnSync('node', ['src/cli.ts', ...args], { encoding: 'utf8', env: { PATH: process.env.PATH!, ...env } });
 
@@ -27,12 +28,12 @@ test('extractWithApi parses tool output into resources', async () => {
   const calls: any[] = [];
   const fake = {
     messages: {
-      create: async (p: any) => {
+      stream: (p: any) => {
         calls.push(p);
-        return {
+        return { finalMessage: async () => ({
           stop_reason: 'tool_use',
           content: [{ type: 'tool_use', name: 'submit_resources', input: { resources: [{ resourceType: 'Observation' }] } }],
-        };
+        }) };
       },
     },
   };
@@ -47,6 +48,26 @@ test('extractWithApi rejects a response with no tool output', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ga-llm-'));
   const file = join(dir, 'r.png');
   writeFileSync(file, 'x');
-  const fake = { messages: { create: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'hi' }] }) } };
+  const fake = stub({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'hi' }] });
   await expect(extractWithApi(file, 'k', fake as any)).rejects.toThrow('no resources');
+});
+
+test('extractWithApi reports max_tokens as too long', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ga-llm-')), 'r.pdf');
+  writeFileSync(file, 'x');
+  await expect(extractWithApi(file, 'k', stub({ stop_reason: 'max_tokens', content: [] }) as any)).rejects.toThrow('document too long for one extraction call');
+});
+
+test.each([
+  ['r.png', 'image', 'image/png'],
+  ['r.jpg', 'image', 'image/jpeg'],
+  ['r.jpeg', 'image', 'image/jpeg'],
+  ['r.pdf', 'document', 'application/pdf'],
+])('%s is sent as a %s block', async (name, type, media) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'ga-llm-')), name);
+  writeFileSync(file, 'x');
+  let sent: any;
+  const fake = { messages: { stream: (p: any) => ((sent = p), { finalMessage: async () => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_resources', input: { resources: [{ resourceType: 'Observation' }] } }] }) }) } };
+  await extractWithApi(file, 'k', fake as any);
+  expect(sent.messages[0].content[0]).toMatchObject({ type, source: { type: 'base64', media_type: media } });
 });

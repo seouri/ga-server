@@ -21,8 +21,8 @@ try {
       const resources = await extractWithApi(file, key);
       console.log(JSON.stringify(await importExtracted(await getClient(cfg), cfg, resources, file)));
     } else {
-    const cfg = loadConfig();
-    console.log(JSON.stringify(await importPath(await getClient(cfg), cfg, process.argv[3])));
+      const cfg = loadConfig();
+      console.log(JSON.stringify(await importPath(await getClient(cfg), cfg, process.argv[3])));
     }
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
