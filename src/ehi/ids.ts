@@ -12,9 +12,9 @@ export const PATIENT_REF = { reference: 'Patient/ehi-patient' };
 
 export const ehiId = (ctx: EhiCtx, table: string, pk: string): Identifier => ({ system: `urn:ga-server:id:ehi:${ctx.org}`, value: `${table}|${pk}` });
 
-// Suffixes under the org root, from recon (d). Immunization ids match nothing in the C-CDA, so they have no root here.
+// Suffixes under the org root, from recon (d). imm: IMMUNE_ID (R15: all 28 match C-CDA immunization ids; same root as problems).
 // dx: a visit diagnosis, value `<CSN>-<DX_ID>` (R12: matched 53 of 77 real PAT_ENC_DX rows).
-const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1' };
+const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', imm: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1' };
 // R13: C-CDAs carry a CSN under the org root or under 1.2.840.114350.1.72.75210, so a CSN gets both.
 export const epicId = (ctx: EhiCtx, kind: keyof typeof EPIC_SUFFIX, value: string): Identifier[] =>
   ctx.epicOrgNumber && value

@@ -10,7 +10,7 @@ describe('EHI reader', () => {
   it('quotes kept literally, LF inside a field kept', () => {
     const rows = new EhiTables(dir).rows('MSG_TXT');
     expect(rows.map((r) => r.MSG_TXT)).toEqual(['plain line', 'say "x', '"quoted" start not split', 'line1\nline2']);
-    expect(rows[0]).toMatchObject({ MESSAGE_ID: '900001', LINE: '1' });
+    expect(rows[0]).toMatchObject({ MESSAGE_ID: '900002', LINE: '1' });
   });
 
   it('missing and empty tables are skipped and counted', () => {

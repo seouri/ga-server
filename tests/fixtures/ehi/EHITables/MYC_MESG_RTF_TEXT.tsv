@@ -1,2 +1,3 @@
 MESSAGE_ID	LINE	RTF_TXT
-900001	1	{\rtf1 Hello}
+900001	10	lo there\par Second\u8217?s line}
+900001	9	{\rtf1\ansi{\fonttbl{\f0 Arial;}}\f0 Hel

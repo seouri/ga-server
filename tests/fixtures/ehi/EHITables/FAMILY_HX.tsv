@@ -1,2 +1,7 @@
 LINE	MEDICAL_HX_C_NAME	MEDICAL_OTHER	COMMENTS	PAT_ENC_CSN_ID	FAM_HX_SRC_C_NAME	RELATION_C_NAME	FAM_RELATION_NAME	AGE_OF_ONSET	FAM_MED_REL_ID	FAM_MEDICAL_DX_ID	AGE_OF_ONSET_END
-1	Test condition			8000001		Mother					
+1	Old condition			7999999		Mother			1		
+1	Test condition			8000001		Mother		50	1		
+2	Other condition		test comment	8000001		Mother			1		
+3	Test condition			8000001		Maternal Grandfather			2		
+4	Cancer			8000001		Neg HX			3		
+1	Only old			7999999		Father			4		
