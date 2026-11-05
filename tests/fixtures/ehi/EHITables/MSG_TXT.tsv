@@ -1,4 +1,6 @@
 MESSAGE_ID	LINE	MSG_TXT
 900001	1	plain line
-900001	2	"a	b
-c ""q"""
+900001	2	say "x
+900001	3	"quoted" start not split
+900001	4	line1
+line2
