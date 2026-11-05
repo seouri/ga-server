@@ -57,6 +57,12 @@ describe('EHI mappers', () => {
     expect(hdl.code).toEqual({ text: 'HDL' });
   });
 
+  it('mappers never emit empty strings, arrays or objects', () => {
+    const empty = (v: unknown): boolean =>
+      v === '' || (Array.isArray(v) ? !v.length || v.some(empty) : v && typeof v === 'object' ? !Object.keys(v).length || Object.values(v).some(empty) : false);
+    for (const r of [...mapLabs(t(), ctx), ...mapEncounters(t(), ctx), ...mapConditions(t(), ctx)]) expect(empty(r), r.id).toBe(false);
+  });
+
   it('no Epic org number: no link identifiers', () => {
     const [dr] = of<DiagnosticReport>(mapLabs(t(), { ...ctx, epicOrgNumber: undefined }), 'DiagnosticReport');
     expect(dr.identifier).toEqual([{ system: SYS, value: 'ORDER_PROC|9000001' }]);
@@ -73,6 +79,7 @@ describe('EHI mappers', () => {
       period: { start: '2026-01-15' },
       subject: PATIENT_REF,
     });
+    expect(e.class).toBeUndefined(); // unknown: left out (R11)
   });
 
   it('mapConditions sets category and resolved status', () => {
@@ -81,8 +88,13 @@ describe('EHI mappers', () => {
     const status = (c: Condition) => c.clinicalStatus?.coding?.[0]?.code;
     const dx = cs.filter((c) => cat(c) === 'encounter-diagnosis');
     const pl = cs.filter((c) => cat(c) === 'problem-list-item');
-    expect(dx).toHaveLength(1);
-    expect(dx[0].identifier).toEqual([{ system: SYS, value: 'PAT_ENC_DX|8000001-1' }]);
+    expect(dx).toHaveLength(2);
+    // R12: the visit diagnosis's own Epic id, `<CSN>-<DX_ID>`.
+    expect(dx[0].identifier).toEqual([
+      { system: SYS, value: 'PAT_ENC_DX|8000001-1' },
+      { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.1.1099.1', value: '8000001-7000001' },
+    ]);
+    expect(dx[1].code).toBeUndefined(); // no name in the export: omitted, never empty
     expect(dx[0].encounter).toEqual({ reference: 'Encounter/PAT_ENC-8000001' });
     expect(dx[0].code).toEqual({ text: 'Test problem' }); // named via DX_LINK_PROB_ID
     expect(pl.map((c) => [c.code?.text, status(c), c.abatementDateTime])).toEqual([

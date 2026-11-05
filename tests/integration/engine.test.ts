@@ -371,3 +371,36 @@ test('a second EHI record with an Epic id already linked by another EHI record i
   expect(found).toHaveLength(2);
   expect(found.every((c) => tagged(c, 'possible-duplicate'))).toBe(true);
 });
+
+// R11: an EHI update keeps top-level fields the export lacks; the export's own fields win.
+test('an EHI problem without a name keeps the C-CDA name and takes the EHI status', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [problem([pl], 'active')], ccda('2024-01-01'), pid, 'h');
+  const { code: _c, ...nameless } = problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'resolved') as Resource & { code?: unknown };
+  expect(await importResources(client, [nameless as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ updated: 1, created: 0 });
+  const [found] = await byId('Condition', pl.system, pl.value);
+  expect(found.code?.text).toBe('synthetic-problem');
+  expect(found.clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+  expect(await importResources(client, [nameless as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ updated: 0, skipped: 1 });
+});
+
+test('an EHI Encounter without class keeps the C-CDA class', async () => {
+  const csn = { system: CSN_OID, value: uid('csn') };
+  await importResources(client, [enc([csn], 'finished')], ccda('2024-01-01'), pid, 'h');
+  const { class: _k, ...classless } = enc([{ system: EHI_SYS, value: `PAT_ENC|${csn.value}` }, csn], 'cancelled') as Resource & { class?: unknown };
+  expect(await importResources(client, [classless as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ updated: 1 });
+  const [found] = await byId('Encounter', csn.system, csn.value);
+  expect(found.class?.code).toBe('AMB');
+  expect(found.status).toBe('cancelled');
+});
+
+test('a newer C-CDA update still replaces the body', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  const id = uid('src');
+  await importResources(client, [{ ...problem([pl], 'active'), id, identifier: src(id) } as Resource], ccda('2024-01-01'), pid, 'h');
+  const { code: _c, ...nameless } = { ...problem([pl], 'resolved'), id, identifier: src(id) } as Resource & { code?: unknown };
+  expect(await importResources(client, [nameless as Resource], ccda('2025-01-01'), pid, 'h')).toMatchObject({ updated: 1 });
+  const [found] = await client.searchResources('Condition', { identifier: key('Condition', id) }, { cache: 'no-cache' });
+  expect(found.code).toBeUndefined();
+  expect(found.clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+});

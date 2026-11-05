@@ -1,5 +1,6 @@
 import type { MedplumClient } from '@medplum/core';
-import type { Identifier } from '@medplum/fhirtypes';
+import type { Condition, Encounter, Identifier, Resource } from '@medplum/fhirtypes';
+import { EPIC_OID } from '../identity.ts';
 import type { EhiTables } from './read.ts';
 
 // epicOrgNumber: n in Epic's org OID root 1.2.840.114350.1.13.<n>; absent = no link identifiers.
@@ -11,7 +12,8 @@ export const PATIENT_REF = { reference: 'Patient/ehi-patient' };
 export const ehiId = (ctx: EhiCtx, table: string, pk: string): Identifier => ({ system: `urn:ga-server:id:ehi:${ctx.org}`, value: `${table}|${pk}` });
 
 // Suffixes under the org root, from recon (d). Immunization ids match nothing in the C-CDA, so they have no root here.
-const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', csn: '2.7.3.698084.8' };
+// dx: a visit diagnosis, value `<CSN>-<DX_ID>` (R12: matched 53 of 77 real PAT_ENC_DX rows).
+const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1' };
 export const epicId = (ctx: EhiCtx, kind: keyof typeof EPIC_SUFFIX, value: string): Identifier[] =>
   ctx.epicOrgNumber && value ? [{ system: `urn:oid:1.2.840.114350.1.13.${ctx.epicOrgNumber}.${EPIC_SUFFIX[kind]}`, value }] : [];
 
@@ -39,4 +41,34 @@ export async function epicOrgNumber(client: MedplumClient, patientId: string): P
   const best = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (!best) console.error('no Epic org number in GA: EHI records get no link identifiers');
   return best;
+}
+
+// Before import: a record whose Epic link id finds no existing record of the patient is new to GA. A new Condition
+// without a name says nothing: skipped and counted. A new Encounter gets class UNK (required; the export has none),
+// while a linked one leaves class out so the engine keeps the C-CDA class (R11).
+export async function resolveUnlinked(
+  client: MedplumClient,
+  resources: Resource[],
+  patientId: string,
+): Promise<{ resources: Resource[]; skippedNoName: number }> {
+  const out: Resource[] = [];
+  let skippedNoName = 0;
+  for (const r of structuredClone(resources)) {
+    const nameless = r.resourceType === 'Condition' && !(r as Condition).code;
+    const classless = r.resourceType === 'Encounter' && !(r as Encounter).class;
+    if (nameless || classless) {
+      let linked = false;
+      for (const i of ((r as Condition | Encounter).identifier ?? []).filter((x) => x.system?.startsWith(EPIC_OID) && x.value)) {
+        const q = { identifier: `${i.system}|${i.value}`, subject: `Patient/${patientId}` };
+        if ((await client.searchResources(r.resourceType as 'Condition' | 'Encounter', q, { cache: 'no-cache' })).length) linked = true;
+      }
+      if (!linked && nameless) {
+        skippedNoName++;
+        continue;
+      }
+      if (!linked && classless) (r as Encounter).class = { system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor', code: 'UNK' };
+    }
+    out.push(r);
+  }
+  return { resources: out, skippedNoName };
 }

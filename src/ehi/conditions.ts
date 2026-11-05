@@ -20,7 +20,8 @@ export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
     return {
       resourceType: 'Condition',
       id: localId('PAT_ENC_DX', pk),
-      identifier: [ehiId(ctx, 'PAT_ENC_DX', pk)], // R7: a visit diagnosis carries no link identifier
+      // R12: the visit diagnosis's own Epic id; C-CDA visit diagnoses carry it.
+      identifier: [ehiId(ctx, 'PAT_ENC_DX', pk), ...(r.DX_ID ? epicId(ctx, 'dx', `${r.PAT_ENC_CSN_ID}-${r.DX_ID}`) : [])],
       category: category('encounter-diagnosis'),
       ...(name && { code: { text: name } }),
       subject: PATIENT_REF,

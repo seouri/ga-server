@@ -8,7 +8,7 @@ import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { mapConditions } from '../../src/ehi/conditions.ts';
 import { mapEncounters } from '../../src/ehi/encounters.ts';
-import { type EhiCtx, epicOrgNumber, PATIENT_REF } from '../../src/ehi/ids.ts';
+import { type EhiCtx, epicOrgNumber, PATIENT_REF, resolveUnlinked } from '../../src/ehi/ids.ts';
 import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
@@ -56,17 +56,23 @@ async function importEhi(ctx: EhiCtx, edit: (rs: Resource[]) => void = () => {})
   const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...mapConditions(t, ctx), ...mapLabs(t, ctx)];
   edit(batch);
   const linked = await linkResultsToExisting(client, batch, pid);
+  const { resources, skippedNoName } = await resolveUnlinked(client, linked.resources, pid);
   const src: SourceInfo = { kind: 'ehi', file: EHI, date: ctx.date, writer: 'importer' };
-  return { ...linked, report: await importResources(client, linked.resources, src, pid, 'synthetic-ehi') };
+  return { ...linked, skippedNoName, report: await importResources(client, resources, src, pid, 'synthetic-ehi') };
 }
 
 test('EHI result merges with the C-CDA result of the same order', async () => {
   const n = await epicOrgNumber(client, pid);
   expect(n).toBe('99');
   const ctx: EhiCtx = { ...exportInfo(EHI), epicOrgNumber: n };
-  const { identified, unidentified, report } = await importEhi(ctx);
-  expect({ identified, unidentified }).toEqual({ identified: 1, unidentified: 1 });
-  expect(report.possibleDuplicates).toBe(0);
+  const { identified, unidentified, skippedNoName, report } = await importEhi(ctx);
+  expect({ identified, unidentified, skippedNoName }).toEqual({ identified: 1, unidentified: 1, skippedNoName: 1 });
+  expect(report).toMatchObject({ possibleDuplicates: 0, invalid: 0 });
+  // The unlinked Encounter was created with class UNK; the named visit diagnosis was kept.
+  const [e] = await client.searchResources('Encounter', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+  expect(e.class?.code).toBe('UNK');
+  const dx = await client.searchResources('Condition', { subject: `Patient/${pid}`, category: 'encounter-diagnosis' }, { cache: 'no-cache' });
+  expect(dx.map((c) => c.code?.text)).toEqual(['Test problem']);
   const found = await ldl();
   expect(found).toHaveLength(1);
   expect(found[0].valueQuantity?.value).toBe(111);
@@ -78,7 +84,7 @@ test('EHI result merges with the C-CDA result of the same order', async () => {
   expect(dr.code.coding?.[0]?.code).toBe('57698-3');
   // Re-import is a no-op.
   const again = await importEhi(ctx);
-  expect(again.report).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0 });
+  expect(again.report).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0, invalid: 0 });
 });
 
 test('an EHI result of the same order with a different value is a possible duplicate', async () => {

@@ -30,13 +30,13 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx): Resource[] {
     const effectiveDateTime = ehiDate(r.COMP_OBS_INST_TM || r.RESULT_DATE, ctx);
     const encounter = enc(r.PAT_ENC_CSN_ID);
     const long = r.COMPON_LNC_ID_LNC_LONG_NAME;
-    const o: Observation = {
+    const o = {
       resourceType: 'Observation',
       id: localId('ORDER_RESULTS', pk),
       identifier: [ehiId(ctx, 'ORDER_RESULTS', pk)], // R7: results carry no link identifier
       status: status(r.RESULT_STATUS_C_NAME),
       category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
-      code: { text: r.COMPONENT_ID_NAME, ...(long && { coding: [{ display: long }] }) },
+      ...((r.COMPONENT_ID_NAME || long) && { code: { ...(r.COMPONENT_ID_NAME && { text: r.COMPONENT_ID_NAME }), ...(long && { coding: [{ display: long }] }) } }),
       subject: PATIENT_REF,
       ...(encounter && { encounter }),
       ...(effectiveDateTime && { effectiveDateTime }),
@@ -44,10 +44,10 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(NUM.test(r.ORD_VALUE) ? { valueQuantity: q(r.ORD_VALUE) } : r.ORD_VALUE ? { valueString: r.ORD_VALUE } : {}),
       ...(r.RESULT_FLAG_C_NAME && { interpretation: [{ text: r.RESULT_FLAG_C_NAME }] }),
       ...(range && { referenceRange: [range] }),
-    };
+    } as Observation;
     byOrder.set(r.ORDER_PROC_ID, [...(byOrder.get(r.ORDER_PROC_ID) ?? []), o]);
   }
-  const reports = t.rows('ORDER_PROC').map((r): DiagnosticReport => {
+  const reports = t.rows('ORDER_PROC').map((r) => {
     const id = r.ORDER_PROC_ID;
     const results = byOrder.get(id) ?? [];
     const lab = r.LAB_STATUS_C_NAME;
@@ -59,12 +59,12 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx): Resource[] {
       id: localId('ORDER_PROC', id),
       identifier: [ehiId(ctx, 'ORDER_PROC', id), ...epicId(ctx, 'order', id)],
       status: lab ? status(lab) : /complete/i.test(r.ORDER_STATUS_C_NAME) ? 'final' : 'unknown',
-      code: name ? { text: name } : {},
+      ...(name && { code: { text: name } }),
       subject: PATIENT_REF,
       ...(encounter && { encounter }),
       ...(effectiveDateTime && { effectiveDateTime }),
       ...(results.length && { result: results.map((o) => ({ reference: `Observation/${o.id}` })) }),
-    };
+    } as DiagnosticReport;
   });
   return [...reports, ...[...byOrder.values()].flat()];
 }

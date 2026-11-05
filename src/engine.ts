@@ -59,6 +59,15 @@ function body(r: R): unknown {
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 
+// R11: an EHI export leaves out what it doesn't know, so its update keeps the existing top-level fields it lacks
+// (its own fields win). C-CDA bodies are complete documents and replace as before.
+const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension']);
+function fillFrom(existing: R, incoming: R, s: SourceInfo): R {
+  if (s.kind !== 'ehi') return incoming;
+  const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !BOOKKEEPING.has(k) && (incoming as unknown as Record<string, unknown>)[k] === undefined));
+  return { ...kept, ...incoming } as R;
+}
+
 // author: GA's own writer reference (ClientApplication/<id>); a record last changed by anyone else is a person's edit.
 export function decide(existingRes: Resource | undefined, incomingRes: Resource, author?: string): Decision {
   if (!existingRes) return 'create';
@@ -231,9 +240,10 @@ export async function importResources(
       let target: Resource;
       if (existing) {
         target = existing;
-        const d = decide(existing, incoming, author);
+        const filled = fillFrom(existing, incoming, source);
+        const d = decide(existing, filled, author);
         if (d === 'update') {
-          await unionUpdate(client, existing, incoming);
+          await unionUpdate(client, existing, filled);
           report.updated++;
         } else if (d === 'conflict') {
           if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
@@ -249,12 +259,13 @@ export async function importResources(
         const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
-          const d = decide(same, incoming, author);
+          const filled = fillFrom(same, incoming, source);
+          const d = decide(same, filled, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           if (d === 'conflict') report.skipped++;
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
-            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent')) await unionUpdate(client, same, incoming);
+            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent')) await unionUpdate(client, same, filled);
             else await client.updateResource(protect({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource));
             report.merged++;
           }
