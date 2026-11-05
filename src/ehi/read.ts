@@ -64,7 +64,11 @@ export function exportInfo(dir: string): { org: string; date: string } {
   const buf = readFileSync(join(dir, name));
   const org = /\bfrom (.+?)\. At the time of export/.exec(pdfText(buf))?.[1];
   if (!org) throw new GaError('cannot read the organization from readme.PDF');
-  const d = /\/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})/.exec(buf.toString('latin1'));
+  // D:YYYYMMDD[HHmmSS][Z|±HH'mm']. A full dateTime, so an export made the day after a C-CDA compares as newer.
+  const d = /\/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?(?:([+-])(\d{2})'?(\d{2})?)?/.exec(buf.toString('latin1'));
   if (!d) throw new GaError('cannot read the creation date from readme.PDF');
-  return { org: org.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), date: `${d[1]}-${d[2]}-${d[3]}` };
+  const [, y, mo, da, h = '00', mi = '00', se = '00', sign, zh, zm = '00'] = d;
+  // shortcut: no zone (or Z) reads as UTC; PDF spec calls it unknown, local time could be off by the UTC offset.
+  const zone = sign ? `${sign}${zh}:${zm}` : 'Z';
+  return { org: org.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), date: `${y}-${mo}-${da}T${h}:${mi}:${se}${zone}` };
 }

@@ -20,6 +20,19 @@ const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
+// Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
+const COMPARTMENT: Record<string, string> = {
+  ...Object.fromEntries(
+    ['Observation', 'DiagnosticReport', 'Encounter', 'Condition', 'MedicationRequest', 'MedicationStatement', 'MedicationAdministration',
+      'MedicationDispense', 'Procedure', 'DocumentReference', 'Communication', 'QuestionnaireResponse', 'ServiceRequest', 'CarePlan', 'Goal',
+      'Composition', 'Specimen', 'ImagingStudy', 'Media', 'List', 'CareTeam', 'ClinicalImpression', 'RiskAssessment', 'Flag', 'DeviceRequest',
+      'DeviceUseStatement'].map((t) => [t, 'subject']),
+  ),
+  ...Object.fromEntries(['Immunization', 'AllergyIntolerance', 'FamilyMemberHistory', 'Device', 'EpisodeOfCare', 'Consent'].map((t) => [t, 'patient'])),
+  Coverage: 'beneficiary',
+};
+// Not patient data: linked globally. Any other type is not linked.
+const SHARED = new Set(['Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Medication']);
 // Medplum's validator reports 400 with structure/invariant issues carrying an element path. Generic 'invalid'
 // (badRequest, e.g. bad search params), server errors and anything without a path are not per-resource validation.
 const VALIDATION = ['structure', 'invariant', 'value', 'required'];
@@ -162,19 +175,30 @@ export async function importResources(
   const colliding = new Set([...groups].filter(([, h]) => h.size > 1).map(([k]) => k));
   for (const r of ordered) if (colliding.has(keyOf(r))) console.error(`source id collision: ${r.resourceType}`);
 
-  // Link lookup: the one record of this patient carrying one of the incoming Epic ids. A candidate that already has an
-  // identifier in the incoming stable system is a different record from the same kind of source (Epic reuses entry ids
-  // within and across C-CDA documents; one batch must not merge into itself). Several candidates: ambiguous, no link.
-  const linkHit = async (incoming: R, ident: Identifier): Promise<R | undefined> => {
-    const scope = 'subject' in incoming ? 'subject' : 'patient' in incoming ? 'patient' : undefined;
-    const found = new Map<string, R>();
-    for (const i of idList(incoming).filter((x) => x.system?.startsWith(EPIC_OID) && x.value)) {
-      const q = new URLSearchParams([['identifier', idKey(i)], ...(scope ? [[scope, `Patient/${patientId}`]] : [])]);
-      for (const c of (await client.searchResources(incoming.resourceType, q)) as R[])
-        if (!idList(c).some((x) => x.system === ident.system)) found.set(c.id as string, c);
+  // Link lookup by Epic id. A candidate that already has an identifier in the incoming stable system is a different
+  // record from the same kind of source (Epic reuses entry ids; one batch must not merge into itself). One remaining
+  // candidate is a link; several, or only same-source ones, are possible duplicates (C-CDA excepted: milestone 1 already
+  // tells same-id entries apart by content, and real documents reuse ids across whole groups of entries).
+  const linkHit = async (incoming: R, ident: Identifier): Promise<{ hit?: R; dups: R[] }> => {
+    const type = incoming.resourceType;
+    const field = COMPARTMENT[type];
+    if (!field && !SHARED.has(type)) return { dups: [] };
+    const ref = field && (incoming as unknown as Record<string, { reference?: string } | undefined>)[field]?.reference;
+    const epic = idList(incoming).filter((x) => x.system?.startsWith(EPIC_OID) && x.value);
+    if (!epic.length) return { dups: [] };
+    if (field && ref !== `Patient/${patientId}`) {
+      console.error(`link skipped, no patient: ${type}`);
+      return { dups: [] };
     }
-    if (found.size > 1) console.error(`ambiguous link: ${incoming.resourceType}`);
-    return found.size === 1 ? [...found.values()][0] : undefined;
+    const found = new Map<string, R>();
+    for (const i of epic) {
+      const q = new URLSearchParams([['identifier', idKey(i)], ...(field ? [[field, ref as string]] : [])]);
+      for (const c of (await client.searchResources(type, q)) as R[]) found.set(c.id as string, c);
+    }
+    const free = [...found.values()].filter((c) => !idList(c).some((x) => x.system === ident.system));
+    if (free.length === 1) return { hit: free[0], dups: [] };
+    if (free.length) return { dups: free };
+    return { dups: source.kind === 'ccda' ? [] : [...found.values()] };
   };
 
   const idMap = new Map<string, string>();
@@ -189,18 +213,20 @@ export async function importResources(
     const type = incoming.resourceType;
     // Searches stay outside the try: only a write's validation failure is tolerated.
     const byStable = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
-    const linked = byStable ? undefined : await linkHit(incoming, ident);
+    const link = byStable ? { dups: [] } : await linkHit(incoming, ident);
+    const linked = link.hit;
     const existing = byStable ?? linked;
     const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
     // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time on that (UTC) day.
     const day = key?.split('|')[2];
     const next = day && new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10);
-    const matches = key
+    const contentMatches = key
       ? await client.searchResources(
           'Observation',
           new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
         )
       : [];
+    const matches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[];
     try {
       let target: Resource;
       if (existing) {
@@ -220,7 +246,7 @@ export async function importResources(
         } else report.skipped++;
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
-        const same = matches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
+        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
           const d = decide(same, incoming, author);
@@ -233,11 +259,11 @@ export async function importResources(
             report.merged++;
           }
         } else if (matches.length) {
-          const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `Observation/${o.id}` } });
+          const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
             withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
-          for (const m of matches as R[]) {
+          for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
             await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
           }

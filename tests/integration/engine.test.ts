@@ -322,3 +322,52 @@ test('a C-CDA batch with two different Encounters sharing one CSN stores both; r
   expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 2 });
   expect(await byId('Encounter', csn.system, csn.value)).toHaveLength(2);
 });
+
+test('a patient-compartment resource without a subject does not link to another patient record', async () => {
+  const other = await createTestPatient(client);
+  const csn = { system: CSN_OID, value: uid('csn') };
+  const ehiId = { system: EHI_SYS, value: `PAT_ENC|${csn.value}` };
+  try {
+    await importResources(client, [enc([csn], 'finished', other)], ccda('2024-01-01'), other, 'h');
+    const { subject: _s, ...noSubject } = enc([ehiId, csn], 'cancelled') as Resource & { subject?: unknown };
+    expect(await importResources(client, [noSubject as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 1, updated: 0, merged: 0 });
+    const theirs = (await byId('Encounter', csn.system, csn.value)).find((e) => e.subject?.reference === `Patient/${other}`) as Resource;
+    expect(systems(theirs)).not.toContain(EHI_SYS);
+    expect((theirs as { status?: string }).status).toBe('finished');
+  } finally {
+    // outside any patient compartment, so cleanupTestPatient would miss it
+    for (const e of await byId('Encounter', ehiId.system, ehiId.value)) await client.deleteResource('Encounter', e.id as string);
+    await cleanupTestPatient(client, other);
+  }
+});
+
+const dupOf = (r: Resource) => ((r as Observation).extension ?? []).filter((e) => e.url === 'urn:ga-server:ext:possible-duplicate-of').map((e) => e.valueReference?.reference);
+
+test('an ambiguous link creates a possible-duplicate pointing at every candidate', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  // two different C-CDA problems sharing one Epic id (collision guard stores both)
+  const a = { ...problem([pl], 'active'), code: { text: 'synthetic-a' } } as Resource;
+  const b = { ...problem([pl], 'active'), code: { text: 'synthetic-b' } } as Resource;
+  expect(await importResources(client, [a, b], ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
+  const e = problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'resolved');
+  expect(await importResources(client, [e], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, possibleDuplicates: 1 });
+  const found = await byId('Condition', pl.system, pl.value);
+  expect(found).toHaveLength(3);
+  expect(found.every((c) => tagged(c, 'possible-duplicate'))).toBe(true);
+  const created = found.find((c) => systems(c).includes(EHI_SYS)) as Resource;
+  const olds = found.filter((c) => c !== created);
+  expect(dupOf(created).sort()).toEqual(olds.map((c) => `Condition/${c.id}`).sort());
+  for (const c of olds) expect(dupOf(c)).toEqual([`Condition/${created.id}`]);
+  expect(await importResources(client, [e], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0, skipped: 1 });
+});
+
+test('a second EHI record with an Epic id already linked by another EHI record is flagged, not merged', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [problem([pl], 'active')], ccda('2024-01-01'), pid, 'h');
+  const e1 = problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'active');
+  const e2 = { ...problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}-2` }, pl], 'resolved'), code: { text: 'synthetic-other' } } as Resource;
+  expect(await importResources(client, [e1, e2], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 0, updated: 1, possibleDuplicates: 1 });
+  const found = await byId('Condition', pl.system, pl.value);
+  expect(found).toHaveLength(2);
+  expect(found.every((c) => tagged(c, 'possible-duplicate'))).toBe(true);
+});
