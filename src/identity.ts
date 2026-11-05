@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { Identifier, Observation, Resource } from '@medplum/fhirtypes';
+import { GaError } from './config.ts';
 
 export type SourceInfo = {
-  kind: 'ccda' | 'pdf';
+  kind: 'ccda' | 'pdf' | 'ehi';
   file: string;
   date: string;
   writer: 'importer' | 'agent';
@@ -52,7 +53,16 @@ function ccdaKey(r: Resource, patientId: string): string {
   return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }
 
+// Epic OIDs (any org root): the Epic-native ids C-CDA and EHI records share, used to link records across sources.
+export const EPIC_OID = 'urn:oid:1.2.840.114350.';
+
 export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = ''): Identifier {
+  if (s.kind === 'ehi') {
+    // EHI mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>) first.
+    const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
+    if (!id?.system?.startsWith('urn:ga-server:id:ehi:') || !id.value) throw new GaError(`${r.resourceType} has no EHI identifier`);
+    return { system: id.system, value: id.value };
+  }
   if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };
   let key: string;
   if (r.resourceType === 'Observation') {

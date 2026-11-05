@@ -3,7 +3,7 @@ import type { MedicationStatement, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
 import { decide, importResources } from '../src/engine.ts';
-import { stamp, type SourceInfo } from '../src/identity.ts';
+import { stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
 const ID = { system: 'urn:ga-server:id:ccda', value: 'm1' };
@@ -121,4 +121,23 @@ test('merging a source into a person-edited match keeps it protected with source
   } as unknown as MedplumClient;
   expect(await importResources(client, [obs('o1')], src('2024-01-01'), 'p', 'h')).toMatchObject({ merged: 1 });
   expect(writes.at(-1)?.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+});
+
+const ehi: SourceInfo = { kind: 'ehi', file: '/x/ehi', date: '2026-11-04', writer: 'importer' };
+const EHI_ID = { system: 'urn:ga-server:id:ehi:synthetic-org', value: 'PAT_ENC|123' };
+const EPIC_CSN = { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.3.698084.8', value: '123' };
+
+test('stableIdentifier for ehi uses identifier[0]', () => {
+  const enc = { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, identifier: [EHI_ID, EPIC_CSN] } as Resource;
+  expect(stableIdentifier(enc, ehi, 'h', 'p')).toEqual(EHI_ID);
+  // singular identifier types (QuestionnaireResponse) carry it as an object
+  const qr = { resourceType: 'QuestionnaireResponse', status: 'completed', identifier: EHI_ID } as Resource;
+  expect(stableIdentifier(qr, ehi, 'h', 'p')).toEqual(EHI_ID);
+});
+
+test('stableIdentifier for ehi without a GA identifier throws', () => {
+  const enc = (identifier?: unknown) => ({ resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, identifier }) as Resource;
+  expect(() => stableIdentifier(enc(), ehi, 'h', 'p')).toThrow(/EHI identifier/);
+  expect(() => stableIdentifier(enc([EPIC_CSN, EHI_ID]), ehi, 'h', 'p')).toThrow(/EHI identifier/);
+  expect(() => stableIdentifier(enc([{ system: EHI_ID.system }]), ehi, 'h', 'p')).toThrow(/EHI identifier/);
 });

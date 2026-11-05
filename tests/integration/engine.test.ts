@@ -239,3 +239,86 @@ test('source patient demographics fill the GA patient once and never overwrite',
   expect(p3.birthDate).toBe('1970-01-02');
   expect(p3.meta?.versionId).toBe(p1.meta?.versionId);
 });
+
+// EHI: GA identifier first, then Epic link identifiers (synthetic values under Epic-standard OID roots).
+const ehiSrc = (date: string, file = 'synthetic-ehi'): SourceInfo => ({ kind: 'ehi', file, date, writer: 'importer' });
+const EHI_SYS = 'urn:ga-server:id:ehi:synthetic-org';
+const CSN_OID = 'urn:oid:1.2.840.114350.1.13.99.2.7.3.698084.8';
+const PROBLEM_OID = 'urn:oid:1.2.840.114350.1.13.99.2.7.2.768076';
+const enc = (ids: { system: string; value: string }[], status: 'finished' | 'cancelled', patient = pid) =>
+  ({ resourceType: 'Encounter', id: uid('e'), identifier: ids, status, class: { code: 'AMB' }, subject: { reference: `Patient/${patient}` } }) as Resource;
+const problem = (ids: { system: string; value: string }[], status: 'active' | 'resolved', patient = pid) =>
+  ({
+    resourceType: 'Condition',
+    id: uid('c'),
+    identifier: ids,
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: status }] },
+    code: { text: 'synthetic-problem' },
+    subject: { reference: `Patient/${patient}` },
+  }) as Resource;
+const byId = <T extends 'Encounter' | 'Condition'>(type: T, system: string, value: string) =>
+  client.searchResources(type, { identifier: `${system}|${value}` }, { cache: 'no-cache' });
+const systems = (r: Resource) => ((r as Observation).identifier ?? []).map((i) => i.system).sort();
+
+test('link identifier merges an EHI Encounter into the C-CDA Encounter with the same CSN', async () => {
+  const csn = { system: CSN_OID, value: uid('csn') };
+  await importResources(client, [enc([csn], 'finished')], ccda('2024-01-01'), pid, 'h');
+  const e = enc([{ system: EHI_SYS, value: `PAT_ENC|${csn.value}` }, csn], 'cancelled');
+  expect(await importResources(client, [e], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 0, updated: 1 });
+  const found = await byId('Encounter', csn.system, csn.value);
+  expect(found).toHaveLength(1);
+  expect(systems(found[0])).toEqual([CSN_OID, EHI_SYS, 'urn:ga-server:id:ccda'].sort());
+  expect(found[0].status).toBe('cancelled');
+  expect(await importResources(client, [e], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 1 });
+});
+
+test('newer export updates a problem; older export does not revert', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  const ehiId = { system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` };
+  await importResources(client, [problem([pl], 'active')], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [problem([ehiId, pl], 'resolved')], ehiSrc('2026-01-01'), pid, 'h')).toMatchObject({ updated: 1, created: 0 });
+  expect(await importResources(client, [problem([ehiId, pl], 'active')], ehiSrc('2025-06-01', 'older-ehi'), pid, 'h')).toMatchObject({
+    created: 0,
+    updated: 0,
+    skipped: 1,
+  });
+  const found = await byId('Condition', pl.system, pl.value);
+  expect(found).toHaveLength(1);
+  expect(found[0].clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+});
+
+test('link identifier never crosses patients', async () => {
+  const other = await createTestPatient(client);
+  try {
+    const pl = { system: PROBLEM_OID, value: uid('pl') };
+    await importResources(client, [problem([pl], 'active', other)], ccda('2024-01-01'), other, 'h');
+    const r = await importResources(client, [problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'resolved')], ehiSrc('2026-11-04'), pid, 'h');
+    expect(r).toMatchObject({ created: 1, updated: 0, merged: 0 });
+    const found = await byId('Condition', pl.system, pl.value);
+    expect(found.map((c) => c.subject?.reference).sort()).toEqual([`Patient/${other}`, `Patient/${pid}`].sort());
+    const theirs = found.find((c) => c.subject?.reference === `Patient/${other}`) as Resource;
+    expect(systems(theirs)).not.toContain(EHI_SYS);
+  } finally {
+    await cleanupTestPatient(client, other);
+  }
+});
+
+test('an older EHI source only adds its identifier to the linked record; re-import is a no-op', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  const e = problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'resolved');
+  await importResources(client, [problem([pl], 'active')], ccda('2026-06-01'), pid, 'h');
+  expect(await importResources(client, [e], ehiSrc('2026-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 1 });
+  const found = await byId('Condition', pl.system, pl.value);
+  expect(found).toHaveLength(1);
+  expect(systems(found[0])).toContain(EHI_SYS);
+  expect(found[0].clinicalStatus?.coding?.[0]?.code).toBe('active');
+  expect(await importResources(client, [e], ehiSrc('2026-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 1 });
+});
+
+test('a C-CDA batch with two different Encounters sharing one CSN stores both; re-import is a no-op', async () => {
+  const csn = { system: CSN_OID, value: uid('csn') };
+  const batch = [enc([csn], 'finished'), enc([csn], 'cancelled')];
+  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
+  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 2 });
+  expect(await byId('Encounter', csn.system, csn.value)).toHaveLength(2);
+});

@@ -1,7 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { contentHash, contentKey, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { contentHash, contentKey, EPIC_OID, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -162,6 +162,21 @@ export async function importResources(
   const colliding = new Set([...groups].filter(([, h]) => h.size > 1).map(([k]) => k));
   for (const r of ordered) if (colliding.has(keyOf(r))) console.error(`source id collision: ${r.resourceType}`);
 
+  // Link lookup: the one record of this patient carrying one of the incoming Epic ids. A candidate that already has an
+  // identifier in the incoming stable system is a different record from the same kind of source (Epic reuses entry ids
+  // within and across C-CDA documents; one batch must not merge into itself). Several candidates: ambiguous, no link.
+  const linkHit = async (incoming: R, ident: Identifier): Promise<R | undefined> => {
+    const scope = 'subject' in incoming ? 'subject' : 'patient' in incoming ? 'patient' : undefined;
+    const found = new Map<string, R>();
+    for (const i of idList(incoming).filter((x) => x.system?.startsWith(EPIC_OID) && x.value)) {
+      const q = new URLSearchParams([['identifier', idKey(i)], ...(scope ? [[scope, `Patient/${patientId}`]] : [])]);
+      for (const c of (await client.searchResources(incoming.resourceType, q)) as R[])
+        if (!idList(c).some((x) => x.system === ident.system)) found.set(c.id as string, c);
+    }
+    if (found.size > 1) console.error(`ambiguous link: ${incoming.resourceType}`);
+    return found.size === 1 ? [...found.values()][0] : undefined;
+  };
+
   const idMap = new Map<string, string>();
   for (const src of ordered) {
     const r = structuredClone(src) as R;
@@ -173,7 +188,9 @@ export async function importResources(
     delete incoming.id;
     const type = incoming.resourceType;
     // Searches stay outside the try: only a write's validation failure is tolerated.
-    const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
+    const byStable = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
+    const linked = byStable ? undefined : await linkHit(incoming, ident);
+    const existing = byStable ?? linked;
     const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
     // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time on that (UTC) day.
     const day = key?.split('|')[2];
@@ -195,6 +212,11 @@ export async function importResources(
         } else if (d === 'conflict') {
           if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
           report.conflicts++;
+        } else if (linked) {
+          // Equal or older source: only record its identifiers, so the next import finds it by stable identifier.
+          const have = new Set(idList(existing).map(idKey));
+          await client.updateResource(protect({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] } as Resource));
+          report.merged++;
         } else report.skipped++;
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
