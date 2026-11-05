@@ -1,0 +1,129 @@
+{
+  "edition": "CDC Adult Immunization Schedule, Ages 19 Years or Older, United States, 2025 (Addendum updated July 2, 2025)",
+  "sourceUrl": "https://www.cdc.gov/vaccines/hcp/imz-schedules/adult-age.html",
+  "notesUrl": "https://www.cdc.gov/vaccines/hcp/imz-schedules/adult-notes.html",
+  "transcribed": "2026-11-05",
+  "notEvaluated": [
+    "Table 2 (by medical condition) and every 'Special situations' note: pregnancy, immunocompromising conditions, HIV infection, asplenia/complement deficiency or inhibitor use, solid organ transplant, chronic liver/heart/lung/renal disease, diabetes, cochlear implant or CSF leak, alcoholism, smoking",
+    "Occupational, travel and exposure indications: health care personnel, international travel, college students in residential housing, military recruits, laboratory workers, sexual exposure risk, injection drug use, incarceration, close contacts of immunosuppressed persons or international adoptees",
+    "Tdap/Td: 'Pregnancy: 1 dose Tdap during each pregnancy' and 'Wound management'; whether a Tdap dose was received at age 10 years or older (any Td or Tdap counts toward the 10-year booster)",
+    "Shared clinical decision-making recommendations (HPV 27-45 years, MenB 16-23 years, HepB age 60+ with diabetes, pneumococcal after PCV13+PPSV23 at 65+)",
+    "Haemophilus influenzae type b (Hib) and Mpox: indication-based only",
+    "Contraindications and precautions (Appendix)",
+    "Minimum intervals and repeat-if-too-soon rules: doses are counted by date, not validated against minimum intervals",
+    "Serologic immunity is accepted only from qualitative results (positive/reactive/immune); numeric titers are not interpreted"
+  ],
+  "vaccines": [
+    {
+      "id": "influenza", "name": "Influenza",
+      "cvx": ["15", "16", "88", "111", "135", "140", "141", "144", "149", "150", "151", "153", "155", "158", "161", "166", "168", "171", "185", "186", "194", "197", "200", "201", "202", "205", "231", "320", "331", "333", "337", "338"],
+      "names": ["influenza", "flu"],
+      "excludeNames": ["parainfluenza", "haemophilus", "hib", "h1n1", "h5n1", "h5n8", " h5 ", "avian"],
+      "rules": [ { "ages": [19, null], "doses": 1, "seasonal": true, "reason": "Age 19 years or older: 1 dose any influenza vaccine appropriate for age and health status annually." } ]
+    },
+    {
+      "id": "covid-19", "name": "COVID-19",
+      "cvx": ["207", "208", "211", "212", "213", "217", "218", "219", "221", "227", "228", "229", "230", "300", "301", "302", "308", "309", "310", "311", "312", "313", "334"],
+      "names": ["covid", "sars cov 2", "spikevax", "comirnaty", "mnexspike", "nuvaxovid", "novavax"],
+      "rules": [
+        { "ages": [19, 64], "status": "not-evaluated", "reason": "Schedule: '1 or more doses of 2024–2025 vaccine (See Notes)'; the notes depend on product (Moderna, Pfizer-BioNTech, Novavax, Janssen) and on doses before the 2024–25 vaccine, and the 2024–25 formula no longer matches the current season." },
+        { "ages": [65, null], "status": "not-evaluated", "reason": "Schedule: '2 or more doses of 2024-2025 vaccine (See Notes)'; the notes depend on product (Moderna, Pfizer-BioNTech, Novavax, Janssen) and on doses before the 2024–25 vaccine, and the 2024–25 formula no longer matches the current season." }
+      ]
+    },
+    {
+      "id": "rsv", "name": "Respiratory syncytial virus (RSV)",
+      "cvx": ["303", "305", "326"],
+      "names": ["rsv", "respiratory syncytial", "arexvy", "abrysvo", "mresvia"],
+      "excludeNames": ["mab", "nirsevimab", "clesrovimab", "beyfortus", "enflonsia", "igiv", "immune globulin"],
+      "rules": [
+        { "ages": [50, 74], "doses": 1, "status": "not-evaluated", "reason": "Age 50–74 years: 'Unvaccinated and at increased risk of severe RSV disease: 1 dose' (risk-based, not evaluated)." },
+        { "ages": [75, null], "doses": 1, "reason": "Age 75 years or older: 'Unvaccinated: 1 dose (Arexvy or Abrysvo or mResvia). Additional doses not recommended.'" }
+      ]
+    },
+    {
+      "id": "td-tdap", "name": "Tetanus, diphtheria, pertussis (Tdap or Td)",
+      "cvx": ["09", "113", "115", "138", "139", "196"],
+      "names": ["tdap", " td ", "tetanus", "boostrix", "adacel", "tenivac"],
+      "excludeNames": ["immune globulin"],
+      "rules": [ { "ages": [19, null], "doses": 1, "repeatYears": 10, "reason": "1 dose Tdap, then Td or Tdap booster every 10 years." } ]
+    },
+    {
+      "id": "mmr", "name": "Measles, mumps, rubella (MMR)",
+      "cvx": ["03", "94"],
+      "names": ["mmr", "m m r", "measles mumps rubella", "measles mumps and rubella", "priorix"],
+      "rules": [
+        { "ages": [19, null], "born": [1957, null], "doses": 1, "reason": "No evidence of immunity to measles, mumps, or rubella: 1 dose (if born in 1957 or later)." },
+        { "ages": [19, null], "born": [null, 1956], "status": "not-recommended", "reason": "Evidence of immunity: Born before 1957 (except for health care personnel)." }
+      ],
+      "immuneIf": { "names": ["measles", "mumps", "rubella"], "all": true, "positive": ["positive", "reactive", "immune"] }
+    },
+    {
+      "id": "varicella", "name": "Varicella (VAR)",
+      "cvx": ["21", "94"],
+      "names": ["varicella", "varivax", "chickenpox"],
+      "excludeNames": ["immune globulin", "varizig", "zoster"],
+      "rules": [
+        { "ages": [19, null], "born": [1980, null], "doses": 2, "intervalMonths": 2, "reason": "No evidence of immunity to varicella: 2-dose series 4–8 weeks apart (born in 1980 or later)." },
+        { "ages": [19, null], "born": [null, 1979], "doses": 2, "status": "not-evaluated", "reason": "Evidence of immunity: 'U.S.-born before 1980 (except for pregnant women and health care personnel)'; GA does not record birthplace." }
+      ],
+      "immuneIf": { "names": ["varicella", "vzv"], "positive": ["positive", "reactive", "immune"] }
+    },
+    {
+      "id": "zoster", "name": "Zoster recombinant (RZV)",
+      "cvx": ["187"],
+      "names": ["shingrix", "recombinant zoster", "zoster recombinant", "zoster vaccine recombinant", "rzv"],
+      "excludeNames": ["live", "zostavax", "zvl"],
+      "rules": [ { "ages": [50, null], "doses": 2, "intervalMonths": 6, "reason": "Age 50 years or older: 2–dose series recombinant zoster vaccine (RZV, Shingrix) 2–6 months apart, regardless of previous herpes zoster or history of zoster vaccine live (ZVL, Zostavax)." } ]
+    },
+    {
+      "id": "hpv", "name": "Human papillomavirus (HPV)",
+      "cvx": ["62", "118", "137", "165"],
+      "names": ["hpv", "papilloma", "gardasil", "cervarix"],
+      "rules": [
+        { "ages": [19, 26], "doses": 3, "dueIfNone": true, "status": "not-evaluated", "reason": "All persons through age 26 years: 'complete 2– or 3–dose series depending on age at initial vaccination or condition' (fewer than 3 recorded doses not judged)." },
+        { "ages": [27, 45], "doses": 3, "status": "not-evaluated", "reason": "Adults age 27–45 years: 'Based on shared clinical decision-making, complete a 2-dose series (if initiated age 9-14 years) or 3-dose series (if initiated ≥15 years)'." }
+      ]
+    },
+    {
+      "id": "pneumococcal", "name": "Pneumococcal (PCV15, PCV20, PCV21, PPSV23)",
+      "cvx": ["33", "100", "109", "133", "152", "215", "216", "327"],
+      "names": ["pneumococcal", "pcv", "ppsv", "ppv23", "prevnar", "pneumovax", "vaxneuvance", "capvaxive"],
+      "rules": [
+        { "ages": [50, null], "dueIfNone": true, "status": "not-evaluated",
+          "completeIf": { "cvx": ["216", "327"], "names": ["pcv20", "pcv21", "prevnar 20", "capvaxive"], "reason": "Adults aged 19 years and older who have received PCV20 or PCV21: no additional pneumococcal vaccine dose recommended." },
+          "reason": "Prior pneumococcal doses other than PCV20/PCV21: 'For guidance on determining which pneumococcal vaccines a patient needs and when, please refer to the mobile app'. With no prior dose: 1 dose PCV15 or PCV20 or PCV21." }
+      ]
+    },
+    {
+      "id": "hepatitis-a", "name": "Hepatitis A (HepA)",
+      "cvx": ["31", "52", "83", "84", "85", "104"],
+      "names": ["hep a", "hepatitis a", "havrix", "vaqta"],
+      "excludeNames": ["immune globulin", " ig "],
+      "rules": [ { "ages": [19, null], "doses": 2, "status": "not-evaluated", "reason": "Risk-based or on request: 'Any person who is not fully vaccinated and requests vaccination (identification of risk factor not required): complete 2–dose series HepA'." } ],
+      "immuneIf": { "names": ["hepatitis a antibody", "hepatitis a ab", "hepatitis a virus ab", "hepatitis a virus antibody", "hepatitis a igg", "hep a ab", "hav ab", "anti hav", "hav igg", "hav total"], "positive": ["positive", "reactive", "immune"] }
+    },
+    {
+      "id": "hepatitis-b", "name": "Hepatitis B (HepB)",
+      "cvx": ["08", "42", "43", "44", "45", "104", "189", "220"],
+      "names": ["hep b", "hepb", "hepatitis b", "engerix", "heplisav", "recombivax", "prehevbrio"],
+      "excludeNames": ["immune globulin", "hbig"],
+      "rules": [
+        { "ages": [19, 59], "doses": 3, "altDoses": { "cvx": ["189"], "names": ["heplisav", "hepb cpg"], "doses": 2 }, "reason": "Age 19 through 59 years: complete a 2- or 3- or 4-dose series (2-dose series only applies when 2 doses of Heplisav-B are used)." },
+        { "ages": [60, null], "doses": 3, "altDoses": { "cvx": ["189"], "names": ["heplisav", "hepb cpg"], "doses": 2 }, "status": "not-evaluated", "reason": "Age 60 years or older: 'without known risk factors for hepatitis B virus infection may receive a HepB vaccine series'; with known risk factors should receive one (risk factors not evaluated)." }
+      ],
+      "immuneIf": { "names": ["hepatitis b surface antibody", "hepatitis b surface ab", "hep b surface ab", "hbsab", "hbs ab", "anti hbs"], "positive": ["positive", "reactive", "immune"] }
+    },
+    {
+      "id": "meningococcal", "name": "Meningococcal (MenACWY, MenB)",
+      "cvx": ["32", "103", "108", "114", "136", "147", "162", "163", "164", "167", "203", "316", "328"],
+      "names": ["mening", "menactra", "menveo", "menquadfi", "bexsero", "trumenba", "penbraya", "penmenvy"],
+      "rules": [ { "ages": [19, null], "status": "not-evaluated", "reason": "MenACWY: 1 or 2 doses depending on indication; MenB: risk-based, or shared clinical decision-making at 16–23 years (indications not evaluated)." } ]
+    },
+    {
+      "id": "polio", "name": "Inactivated poliovirus (IPV)",
+      "cvx": ["02", "10", "89", "182"],
+      "names": ["polio", "ipv", "opv", "ipol"],
+      "rules": [ { "ages": [19, null], "doses": 3, "status": "not-evaluated", "reason": "Complete 3-dose series if incompletely vaccinated; 'most adults who were born and raised in the United States can assume they were vaccinated against polio as children' (childhood history not judged)." } ]
+    }
+  ]
+}

@@ -125,6 +125,22 @@ test('risk_score returns PREVENT and PCE', async () => {
   expect(JSON.parse(r.text)).toMatchObject({ preventAscvd: expect.closeTo(0.019, 3), pce: expect.closeTo(0.0309, 3) });
 });
 
+test('vaccine_gaps reads the test patient from GA and reports per-vaccine status', async () => {
+  expect((await call('vaccine_gaps', {})).text).toBe('Patient has no birthDate in GA');
+  const p = await client.readResource('Patient', pid);
+  await client.updateResource({ ...p, birthDate: '1970-06-15', gender: 'male' });
+  const imm = { resourceType: 'Immunization' as const, status: 'completed' as const, patient: { reference: `Patient/${pid}` } };
+  await client.createResource({ ...imm, vaccineCode: { coding: [{ system: 'urn:oid:2.16.840.1.113883.12.292', code: '115' }], text: 'Tdap' }, occurrenceDateTime: '2014-03-01' });
+  await client.createResource({ ...imm, vaccineCode: { text: 'Typhoid Vi' }, occurrenceDateTime: '2019-05-01' });
+  await client.createResource({ ...imm, status: 'not-done', vaccineCode: { text: 'Shingrix' }, occurrenceDateTime: '2024-01-10' });
+  const r = JSON.parse((await call('vaccine_gaps', { asOf: '2026-11-05' })).text);
+  expect(r.edition).toMatch(/2025/);
+  const by = Object.fromEntries(r.results.map((x: { vaccine: string; status: string }) => [x.vaccine, x.status]));
+  expect(by).toMatchObject({ 'td-tdap': 'overdue', zoster: 'due', influenza: 'due', hpv: 'not-recommended' });
+  expect(r.unmatched).toEqual([{ date: '2019-05-01', name: 'Typhoid Vi', source: '' }]);
+  expect((await call('vaccine_gaps', { asOf: 'tomorrow' })).text).toMatch(/^asOf must be/);
+});
+
 test('ga_import rejects non-document files, unsupported types and invalid resources without writing', async () => {
   const docs = () => client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' });
   const before = (await docs()).length;

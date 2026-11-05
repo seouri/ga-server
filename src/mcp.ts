@@ -10,6 +10,7 @@ import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
 import { riskScore } from './risk.ts';
+import { vaccineGaps } from './vaccines.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -143,6 +144,24 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
       },
     },
     async (input) => text(riskScore(input)),
+  );
+  server.registerTool(
+    'vaccine_gaps',
+    {
+      description:
+        "Adult vaccination status from GA against the shipped CDC adult immunization schedule: reads the user's birth date, sex, Immunizations and " +
+        'immunity lab results from GA itself. Use this instead of judging the schedule yourself. Returns per vaccine: status ' +
+        '(complete/due/overdue/not-recommended/immune/not-evaluated), the GA records used (date, source) and the reason; unmatched records; ' +
+        'possible-duplicate records; and the schedule edition. asOf defaults to today (YYYY-MM-DD).',
+      inputSchema: { asOf: z.string().optional() },
+    },
+    async ({ asOf }) => {
+      try {
+        return text(await vaccineGaps(client, patientId, asOf));
+      } catch (e) {
+        return fail(e);
+      }
+    },
   );
   server.registerTool(
     'ga_import',
