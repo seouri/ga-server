@@ -1,4 +1,6 @@
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import type {
   Communication, Condition, DiagnosticReport, DocumentReference, Encounter, FamilyMemberHistory, Immunization, MedicationRequest, Observation,
   Procedure, QuestionnaireResponse, Resource,
@@ -298,7 +300,7 @@ describe('EHI mappers', () => {
       identifier: [{ system: SYS, value: 'SOCIAL_HX|8000001|smoking' }],
       code: { coding: [{ system: 'http://loinc.org', code: '72166-2' }], text: 'Tobacco smoking status' },
       category: [{ coding: [{ code: 'social-history' }] }],
-      valueCodeableConcept: { text: 'Never' },
+      valueCodeableConcept: { coding: [{ system: 'http://snomed.info/sct', code: '266919005' }], text: 'Never' },
       effectiveDateTime: '2026-01-15',
       encounter: { reference: 'Encounter/PAT_ENC-8000001' },
     });
@@ -325,7 +327,7 @@ describe('EHI mappers', () => {
     expect(other.component).toBeUndefined();
     const procs = rs.filter((r) => r.resourceType === 'Procedure') as Procedure[];
     expect(procs).toEqual([{
-      resourceType: 'Procedure', id: 'HM_HISTORY-1', identifier: [{ system: SYS, value: 'HM_HISTORY|1' }], status: 'completed',
+      resourceType: 'Procedure', id: 'HM_HISTORY-1', identifier: [{ system: SYS, value: 'HM_HISTORY|Immunization|2026-01-15T20:30:00Z' }], status: 'completed',
       code: { text: 'Health maintenance completion: Immunization' }, subject: PATIENT_REF, performedDateTime: '2026-01-15T20:30:00Z',
     }]);
     expect(counts.skippedNoDate).toBe(1);
@@ -409,5 +411,63 @@ describe('EHI mappers', () => {
     expect(c.content).toEqual([{ attachment: { title: 'No text in export' } }]);
     expect(c.date).toBeUndefined(); // a date without time is not an instant
     expect(c.type).toEqual({ text: 'Telephone Encounter' });
+  });
+
+  it('R20: Epic smoking status names map to the C-CDA SNOMED codes; others stay text', () => {
+    const base = t();
+    const names = ['Former', 'Current Every Day', 'Current Some Day', 'Never Assessed', 'Unknown', 'never', 'Heavy Smoker'];
+    const rows = (table: string) =>
+      table === 'SOCIAL_HX' ? names.map((n, i) => ({ ...base.rows(table)[0], PAT_ENC_CSN_ID: `80000${i}`, SMOKING_TOB_USE_C_NAME: n, ALCOHOL_USE_C_NAME: '', ALCOHOL_OZ_PER_WK: '' })) : base.rows(table);
+    const vs = (mapSocial({ rows } as unknown as EhiTables, ctx) as Observation[]).map((o) => o.valueCodeableConcept);
+    expect(vs.map((v) => v?.coding?.[0]?.code)).toEqual(['8517006', '449868002', '428041000124106', '266927001', '266927001', '266919005', undefined]);
+    expect(vs[6]).toEqual({ text: 'Heavy Smoker' });
+  });
+
+  it('an RTF message without text falls back to MSG_TXT', () => {
+    const base = t();
+    const rows = (table: string) => (table === 'MYC_MESG_RTF_TEXT' ? [...base.rows(table), { MESSAGE_ID: '900002', LINE: '1', RTF_TXT: '{\\rtf1 {\\fonttbl{\\f0 Arial;}}}' }] : base.rows(table));
+    const reply = (mapMessages({ rows } as unknown as EhiTables, ctx) as Communication[])[1];
+    expect(reply.payload?.[0]?.contentString).toBe('plain line\nsay "x\n"quoted" start not split\nline1\nline2');
+  });
+
+  it('a note\'s RTF segments are read in numeric order', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ehi-'));
+    mkdirSync(join(dir, 'Rich Text'));
+    writeFileSync(join(dir, 'Rich Text', 'HNO_77_56510_41.RTF'), '{\\rtf1 second}');
+    writeFileSync(join(dir, 'Rich Text', 'HNO_77_9.5_41.RTF'), '{\\rtf1 first}');
+    const rows = (table: string) => (table === 'HNO_INFO' ? [{ NOTE_ID: '77' }] : []);
+    const { resources, rtf } = mapNotes({ rows } as unknown as EhiTables, ctx, dir);
+    expect(rtf.get('HNO_INFO-77')?.map((f) => basename(f).split('_')[2])).toEqual(['9.5', '56510']);
+    expect((resources[0] as DocumentReference).content.map((c) => Buffer.from(c.attachment.data as string, 'base64').toString())).toEqual(['first', 'second']);
+  });
+
+  it('R18 compares IMMUNE and IMM_ADMIN dates by day', () => {
+    const base = t();
+    const rows = (table: string) =>
+      table === 'IMMUNE' ? [{ ...base.rows(table)[0], IMMUNE_DATE: '1/15/2026 9:00:00 AM' }]
+        : table === 'IMM_ADMIN' ? [{ ...base.rows(table)[1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT1' }, { ...base.rows(table)[0], IMM_DATE: '1/15/2026 12:00:00 AM' }]
+          : base.rows(table);
+    const counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 };
+    const rs = mapImmunizations({ rows } as unknown as EhiTables, ctx, counts);
+    expect(rs.map((r) => r.id)).toEqual(['IMMUNE-6100001']); // same lot that day: the same dose; same name that day: already IMMUNE
+    expect(counts.immAdminSameDose).toBe(1);
+  });
+
+  it('family history never has an empty relationship: a known relative without a relation name is a family member', () => {
+    const base = t();
+    const rows = (table: string) =>
+      table === 'FAMILY_HX' ? [{ ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '9' }, { ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '' }] : base.rows(table);
+    const counts = { skippedNoRelative: 0 };
+    const fh = mapFamilyHistory({ rows } as unknown as EhiTables, ctx, counts) as FamilyMemberHistory[];
+    expect(fh.map((f) => f.relationship)).toEqual([{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-RoleCode', code: 'FAMMEMB' }] }]);
+    expect(counts.skippedNoRelative).toBe(1);
+  });
+
+  it('HM completions are keyed by type and time; LINE breaks only a tie', () => {
+    const base = t();
+    const row = base.rows('HM_HISTORY')[0];
+    const rows = (table: string) => (table === 'HM_HISTORY' ? [row, { ...row, LINE: '7' }, { ...row, LINE: '8', HM_COMP_TYPE_C_NAME: 'LOS Code' }] : base.rows(table));
+    const keys = mapHealthMaintenance({ rows } as unknown as EhiTables, ctx).filter((r) => r.resourceType === 'Procedure').map((r) => (r as Procedure).identifier?.[0].value);
+    expect(keys).toEqual(['HM_HISTORY|Immunization|2026-01-15T20:30:00Z|1', 'HM_HISTORY|Immunization|2026-01-15T20:30:00Z|7', 'HM_HISTORY|LOS Code|2026-01-15T20:30:00Z']);
   });
 });

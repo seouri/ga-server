@@ -56,7 +56,7 @@ export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
       counts.skippedNoName++;
       continue;
     }
-    seen.add(`${norm(name)}|${date}`);
+    seen.add(`${norm(name)}|${date.slice(0, 10)}`);
     const encounter = enc(r.IMM_CSN);
     const b = immBody({ name, date, status: r.IMMNZTN_STATUS_C_NAME, ndc: r.NDC_NUM_ID_NDC_CODE, mfg: r.MFG_C_NAME, lot: r.LOT, exp: r.EXPIRATION_DATE, site: r.SITE_C_NAME, route: r.ROUTE_C_NAME, amount: r.IMMNZTN_DOSE_AMOUNT, unit: r.IMMNZTN_DOSE_UNIT_C_NAME }, ctx);
     const { resourceType, status, vaccineCode, patient, occurrenceDateTime, ...rest } = b;
@@ -82,13 +82,13 @@ export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
       counts.skippedNoName++;
       continue;
     }
-    const k = `${norm(name)}|${date}`;
+    const k = `${norm(name)}|${date.slice(0, 10)}`;
     if (seen.has(k)) continue;
     const prev = latest.get(k);
     if (!prev || Number(r.CONTACT_DATE_REAL) > Number(prev.CONTACT_DATE_REAL)) latest.set(k, r);
   }
   const immune = [...out];
-  const immuneOn = (date: string) => immune.filter((i) => i.occurrenceDateTime === date);
+  const immuneOn = (day: string) => immune.filter((i) => i.occurrenceDateTime?.slice(0, 10) === day);
   for (const [k, r] of latest) {
     const [n, date] = k.split('|');
     const same = immuneOn(date);
@@ -171,11 +171,12 @@ const ROLE_SYS = 'http://terminology.hl7.org/CodeSystem/v3-RoleCode';
 
 // FAMILY_HX is re-recorded at visits (snapshots by CSN): each relative (FAM_MED_REL_ID) is taken from their latest
 // snapshot (highest CSN). R4 FamilyMemberHistory has no encounter element. "Neg HX" lists conditions absent from the family: kept as a note, never as conditions.
-export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx): Resource[] {
+export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNoRelative: 0 }): Resource[] {
   const byRel = new Map<string, Row[]>();
   for (const r of t.rows('FAMILY_HX')) {
     const k = r.FAM_MED_REL_ID || r.RELATION_C_NAME;
     if (k) byRel.set(k, [...(byRel.get(k) ?? []), r]);
+    else counts.skippedNoRelative++; // neither a relation nor a relative id: whose history is unknown
   }
   const out: FamilyMemberHistory[] = [];
   for (const [k, all] of byRel) {
@@ -192,7 +193,8 @@ export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx): Resource[] {
         ...(r.COMMENTS && { note: [{ text: r.COMMENTS }] }),
       }));
     if (!names.length) continue; // a relative with no condition says nothing
-    const role = neg ? 'FAMMEMB' : ROLE[norm(relation)];
+    // No relation name but a relative id: a family member of unknown relation (relationship is 1..1, never empty).
+    const role = neg || !relation ? 'FAMMEMB' : ROLE[norm(relation)];
     out.push({
       resourceType: 'FamilyMemberHistory',
       id: localId('FAMILY_HX', k),
@@ -215,7 +217,8 @@ const VITALS: [RegExp, Vital][] = [
   [/^(PULSE OXIMETRY|SPO2)$/, { code: '59408-5', unit: '%' }],
   [/^(RESPIRATIONS|RESP(IRATORY)? RATE)$/, { code: '9279-1', unit: '/min' }],
   [/^(R )?BMI$/, { code: '39156-5', unit: 'kg/m2' }],
-  // Epic's own kg (C-CDA): lb x 0.4536, truncated to 3 decimals (reproduces 4 of 4 same-time real C-CDA weights; exact factors: 0).
+  // shortcut: Epic's own kg (C-CDA) as lb x 0.4536 truncated to 3 decimals, fitted on 4 of 4 same-time real C-CDA weights
+  // (exact factors matched 0; R16a); re-check if a weight flags at the same time.
   [/^WEIGHT(\/SCALE)?$/, { code: '29463-7', unit: 'kg', digits: 3, trunc: true, from: { ounces: (v) => (v / 16) * 0.4536, lb: (v) => v * 0.4536, kg: (v) => v } }],
   [/^HEIGHT$/, { code: '8302-2', unit: 'cm', digits: 1, from: { inches: (v) => v * 2.54, cm: (v) => v } }],
   [/^TEMPERATURE$/, { code: '8310-5', unit: 'Cel', digits: 2, from: { '°F': (v) => ((v - 32) * 5) / 9, '°C': (v) => v } }],
@@ -279,6 +282,16 @@ export function mapVitals(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 
   return out;
 }
 
+// R20: Epic smoking status names -> the SNOMED codes the C-CDA smoking-status entries carry; others stay text only.
+const SMOKING: Record<string, string> = {
+  never: '266919005', former: '8517006', 'current every day': '449868002', 'current some day': '428041000124106',
+  'never assessed': '266927001', unknown: '266927001', 'unknown if ever smoked': '266927001',
+};
+const smokingValue = (name: string): CodeableConcept => {
+  const code = SMOKING[norm(name)];
+  return { ...(code && { coding: [{ system: 'http://snomed.info/sct', code }] }), text: name };
+};
+
 // SOCIAL_HX, one row per visit: smoking status (72166-2), alcohol use (11331-6) and ounces per week (no LOINC: by name).
 export function mapSocial(t: EhiTables, ctx: EhiCtx): Resource[] {
   const enc = encounterRef(t);
@@ -300,7 +313,7 @@ export function mapSocial(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(effectiveDateTime && { effectiveDateTime }),
       ...value,
     });
-    if (r.SMOKING_TOB_USE_C_NAME) out.push(obs('smoking', { coding: [{ system: LOINC, code: '72166-2' }], text: 'Tobacco smoking status' }, { valueCodeableConcept: { text: r.SMOKING_TOB_USE_C_NAME } }));
+    if (r.SMOKING_TOB_USE_C_NAME) out.push(obs('smoking', { coding: [{ system: LOINC, code: '72166-2' }], text: 'Tobacco smoking status' }, { valueCodeableConcept: smokingValue(r.SMOKING_TOB_USE_C_NAME) }));
     if (r.ALCOHOL_USE_C_NAME)
       out.push(obs('alcohol', { coding: [{ system: LOINC, code: '11331-6' }], text: 'Alcohol use' }, { valueCodeableConcept: { text: r.ALCOHOL_USE_C_NAME }, ...(r.ALCOHOL_COMMENT && { note: [{ text: r.ALCOHOL_COMMENT }] }) }));
     if (NUM.test(r.ALCOHOL_OZ_PER_WK ?? '')) out.push(obs('alcohol-oz', { text: 'Alcohol oz per week' }, { valueQuantity: { value: Number(r.ALCOHOL_OZ_PER_WK), unit: 'oz/wk' } }));
@@ -337,16 +350,21 @@ export function mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skipp
     };
   });
   const done: Procedure[] = [];
-  for (const r of t.rows('HM_HISTORY')) {
+  // Keyed by completion type and time (LINE is a list position, not an id); LINE only breaks a tie between equal rows.
+  const keyed = t.rows('HM_HISTORY').flatMap((r) => {
     const performedDateTime = ehiDate(r.HM_COMP_UTC_DTTM, { ...ctx, timeZone: 'UTC' }); // the column is UTC
     if (!performedDateTime || !r.HM_COMP_TYPE_C_NAME) {
       counts.skippedNoDate++;
-      continue;
+      return [];
     }
+    return [{ r, performedDateTime, key: `${r.HM_COMP_TYPE_C_NAME}|${performedDateTime}` }];
+  });
+  for (const { r, performedDateTime, key } of keyed) {
+    const tie = keyed.filter((x) => x.key === key).length > 1;
     done.push({
       resourceType: 'Procedure',
       id: localId('HM_HISTORY', r.LINE),
-      identifier: [ehiId(ctx, 'HM_HISTORY', r.LINE)],
+      identifier: [ehiId(ctx, 'HM_HISTORY', tie ? `${key}|${r.LINE}` : key)],
       status: 'completed',
       code: { text: `Health maintenance completion: ${r.HM_COMP_TYPE_C_NAME}` },
       subject: PATIENT_REF,

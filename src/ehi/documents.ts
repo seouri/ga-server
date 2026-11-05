@@ -36,7 +36,8 @@ export function mapMessages(t: EhiTables, ctx: EhiCtx): Resource[] {
   return msgs
     .map((r): Communication => {
       const id = r.MESSAGE_ID;
-      const text = rtf.has(id) ? rtfToText((rtf.get(id) ?? []).join('')) : (txt.get(id) ?? []).join('\n').trim();
+      // An RTF with no text (e.g. only tables of formatting) falls back to MSG_TXT.
+      const text = (rtf.has(id) && rtfToText((rtf.get(id) ?? []).join(''))) || (txt.get(id) ?? []).join('\n').trim();
       const sent = ehiDate(r.CREATED_TIME, ctx);
       const encounter = enc(r.PAT_ENC_CSN_ID);
       const toPatient = /to patient/i.test(r.TOFROM_PAT_C_NAME);
@@ -74,7 +75,8 @@ export function mapNotes(t: EhiTables, ctx: EhiCtx, dir: string): { resources: R
   const rtf = new Map<string, string[]>();
   const resources = t.rows('HNO_INFO').map((r): DocumentReference => {
     const id = localId('HNO_INFO', r.NOTE_ID);
-    const mine = files.filter((f) => f.split('_')[1] === r.NOTE_ID).map((f) => join(rtfDir, f));
+    // Segment 2 (`NNNNN` or `NNNNN.NN`) orders a note's files: numeric, not string order.
+    const mine = files.filter((f) => f.split('_')[1] === r.NOTE_ID).sort((a, b) => Number(a.split('_')[2]) - Number(b.split('_')[2])).map((f) => join(rtfDir, f));
     if (mine.length) rtf.set(id, mine);
     const texts = mine.length
       ? mine.map((f) => textAttachment(rtfToText(readFileSync(f, 'latin1')), `${basename(f)} (text)`))
