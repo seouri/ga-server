@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Observation, Resource } from '@medplum/fhirtypes';
+import type { Encounter, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
@@ -94,8 +94,20 @@ test('an EHI result of the same order with a different value is a possible dupli
     const o = rs.find((r) => r.resourceType === 'Observation' && (r as Observation).code?.text === 'LDL CALCULATED') as Observation;
     o.valueQuantity = { ...o.valueQuantity, value: 112 };
   });
-  expect(report.possibleDuplicates).toBeGreaterThanOrEqual(1);
+  expect(report.possibleDuplicates).toBe(1); // the LDL only
   const found = await ldl();
   expect(found.map((o) => o.valueQuantity?.value).sort()).toEqual([111, 112]);
   expect(found.every((o) => tagged(o, 'possible-duplicate'))).toBe(true);
+});
+
+test('an ambiguous CSN link counts as unlinked: the EHI Encounter gets class UNK and is flagged, not rejected', async () => {
+  const csn = `syn-${randomUUID()}`;
+  const ids = [{ system: 'urn:oid:1.2.840.114350.1.13.99.2.7.3.698084.8', value: csn }];
+  const ccdaEnc = (n: string): Resource => ({ resourceType: 'Encounter', id: n, identifier: [{ system: 'urn:test:src', value: n }, ...ids], status: 'finished', class: { code: 'AMB' }, subject: { reference: `Patient/${pid}` } }) as Resource;
+  await importResources(client, [ccdaEnc(`a-${csn}`), ccdaEnc(`b-${csn}`)], { kind: 'ccda', file: 'synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
+  const e = { resourceType: 'Encounter', id: 'x', identifier: [{ system: 'urn:ga-server:id:ehi:synthetic-health', value: `PAT_ENC|${csn}` }, ...ids], status: 'finished', subject: { reference: `Patient/${pid}` } } as Encounter;
+  const { resources } = await resolveUnlinked(client, [e], pid);
+  expect((resources[0] as Encounter).class?.code).toBe('UNK');
+  const r = await importResources(client, resources, { kind: 'ehi', file: EHI, date: '2026-01-17T08:30:00-05:00', writer: 'importer' }, pid, 'h');
+  expect(r).toMatchObject({ possibleDuplicates: 1, invalid: 0 });
 });

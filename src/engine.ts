@@ -60,12 +60,44 @@ function body(r: R): unknown {
 }
 
 // R11: an EHI export leaves out what it doesn't know, so its update keeps the existing top-level fields it lacks
-// (its own fields win). C-CDA bodies are complete documents and replace as before.
-const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension']);
+// (its own fields win). Never kept: a field contradicting the incoming record, or the old narrative.
+// C-CDA bodies are complete documents and replace as before.
+const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
+// Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
+const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
+const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
 function fillFrom(existing: R, incoming: R, s: SourceInfo): R {
   if (s.kind !== 'ehi') return incoming;
-  const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !BOOKKEEPING.has(k) && (incoming as unknown as Record<string, unknown>)[k] === undefined));
+  const inc = incoming as unknown as Record<string, unknown>;
+  const incBases = new Set(Object.keys(inc).filter((k) => inc[k] !== undefined).map(choiceBase));
+  const drop = (k: string): boolean => {
+    if (BOOKKEEPING.has(k) || inc[k] !== undefined || incBases.has(choiceBase(k))) return true;
+    if (incoming.resourceType !== 'Condition') return false;
+    // An open problem has no abatement; an entered-in-error one has no clinical status.
+    if (k.startsWith('abatement') && inc.clinicalStatus && !['resolved', 'inactive', 'remission'].includes(code0(inc.clinicalStatus) ?? '')) return true;
+    return k === 'clinicalStatus' && code0(inc.verificationStatus) === 'entered-in-error';
+  };
+  const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !drop(k)));
   return { ...kept, ...incoming } as R;
+}
+
+// Records carrying any of these Epic ids (scoped to the patient for compartment types), and those of them not yet
+// holding an identifier in the incoming stable system. Exactly one free candidate is a link; shared with the EHI pre-pass.
+export async function linkCandidates(
+  client: MedplumClient,
+  type: string,
+  epic: Identifier[],
+  patientId: string,
+  stableSystem: string,
+): Promise<{ found: Resource[]; free: Resource[] }> {
+  const field = COMPARTMENT[type];
+  const found = new Map<string, R>();
+  for (const i of epic) {
+    const q = new URLSearchParams([['identifier', idKey(i)], ...(field ? [[field, `Patient/${patientId}`]] : [])]);
+    for (const c of (await client.searchResources(type as Resource['resourceType'], q, { cache: 'no-cache' })) as R[]) found.set(c.id as string, c);
+  }
+  const free = [...found.values()].filter((c) => !idList(c).some((x) => x.system === stableSystem));
+  return { found: [...found.values()], free };
 }
 
 // author: GA's own writer reference (ClientApplication/<id>); a record last changed by anyone else is a person's edit.
@@ -199,15 +231,12 @@ export async function importResources(
       console.error(`link skipped, no patient: ${type}`);
       return { dups: [] };
     }
-    const found = new Map<string, R>();
-    for (const i of epic) {
-      const q = new URLSearchParams([['identifier', idKey(i)], ...(field ? [[field, ref as string]] : [])]);
-      for (const c of (await client.searchResources(type, q)) as R[]) found.set(c.id as string, c);
-    }
-    const free = [...found.values()].filter((c) => !idList(c).some((x) => x.system === ident.system));
+    const { found: all, free: open } = await linkCandidates(client, type, epic, patientId, ident.system as string);
+    const found = all as R[];
+    const free = open as R[];
     if (free.length === 1) return { hit: free[0], dups: [] };
     if (free.length) return { dups: free };
-    return { dups: source.kind === 'ccda' ? [] : [...found.values()] };
+    return { dups: source.kind === 'ccda' ? [] : found };
   };
 
   const idMap = new Map<string, string>();

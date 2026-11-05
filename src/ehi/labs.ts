@@ -16,10 +16,15 @@ function status(s: string): Observation['status'] {
 
 // DiagnosticReport per ORDER_PROC, Observation per ORDER_RESULTS line. The export has no LOINC codes, only LOINC
 // long names (recon b): kept as a display without a code, so nothing reads as a code; the component name is code.text.
-export function mapLabs(t: EhiTables, ctx: EhiCtx): Resource[] {
+// A line with neither a component name nor a LOINC long name says nothing: skipped, counted in counts.skippedNoName.
+export function mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }): Resource[] {
   const enc = encounterRef(t);
   const byOrder = new Map<string, Observation[]>();
   for (const r of t.rows('ORDER_RESULTS')) {
+    if (!r.COMPONENT_ID_NAME && !r.COMPON_LNC_ID_LNC_LONG_NAME) {
+      counts.skippedNoName++;
+      continue;
+    }
     const pk = `${r.ORDER_PROC_ID}-${r.LINE}`;
     const unit = r.REFERENCE_UNIT || undefined;
     const q = (v: string): Quantity => ({ value: Number(v), ...(unit && { unit }) });
@@ -36,7 +41,7 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx): Resource[] {
       identifier: [ehiId(ctx, 'ORDER_RESULTS', pk)], // R7: results carry no link identifier
       status: status(r.RESULT_STATUS_C_NAME),
       category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
-      ...((r.COMPONENT_ID_NAME || long) && { code: { ...(r.COMPONENT_ID_NAME && { text: r.COMPONENT_ID_NAME }), ...(long && { coding: [{ display: long }] }) } }),
+      code: { ...(r.COMPONENT_ID_NAME && { text: r.COMPONENT_ID_NAME }), ...(long && { coding: [{ display: long }] }) },
       subject: PATIENT_REF,
       ...(encounter && { encounter }),
       ...(effectiveDateTime && { effectiveDateTime }),
@@ -98,22 +103,26 @@ export async function linkResultsToExisting(
     // One search, not reads: a report can keep a reference to a result that was never written (invalid at import).
     const ids = (existing.result ?? []).map((r) => /^Observation\/([^/]+)$/.exec(r.reference ?? '')?.[1]).filter(Boolean);
     const olds = ids.length ? await client.searchResources('Observation', { _id: ids.join(','), _count: '1000' }, { cache: 'no-cache' }) : [];
-    for (const ref of dr.result ?? []) {
-      const o = byRef.get(ref.reference ?? '');
-      if (!o) continue;
+    // Candidates first, then pairs: a line is identified only when it has exactly one candidate and no other line
+    // claims that result. A tie leaves both sides unidentified (merging both would silently drop one line).
+    const lines = (dr.result ?? []).map((ref) => byRef.get(ref.reference ?? '')).filter((o): o is Observation => !!o);
+    const pick = lines.map((o) => {
       const mine = names(o);
       const sameUnit = olds.filter((x) => unitOf(x) === unitOf(o));
       const byName = sameUnit.filter((x) => names(x).some((n) => mine.includes(n)));
       const byValue = sameUnit.filter((x) => !names(x).length && valueOf(x) === valueOf(o));
-      const match = byName.length === 1 ? byName[0] : !byName.length && byValue.length === 1 ? byValue[0] : undefined;
-      if (!match) {
+      return byName.length === 1 ? byName[0] : !byName.length && byValue.length === 1 ? byValue[0] : undefined;
+    });
+    lines.forEach((o, i) => {
+      const match = pick[i];
+      if (!match || pick.filter((m) => m === match).length !== 1) {
         unidentified++;
-        continue;
+        return;
       }
       identified++;
       if (match.code?.coding?.length) o.code = { ...o.code, coding: match.code.coding };
       if (match.effectiveDateTime) o.effectiveDateTime = match.effectiveDateTime;
-    }
+    });
   }
   return { resources: out, identified, unidentified };
 }

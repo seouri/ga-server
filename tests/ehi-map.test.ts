@@ -5,7 +5,8 @@ import { mapConditions } from '../src/ehi/conditions.ts';
 import { ehiDate } from '../src/ehi/dates.ts';
 import { mapEncounters } from '../src/ehi/encounters.ts';
 import { type EhiCtx, PATIENT_REF } from '../src/ehi/ids.ts';
-import { mapLabs } from '../src/ehi/labs.ts';
+import { linkResultsToExisting, mapLabs } from '../src/ehi/labs.ts';
+import type { MedplumClient } from '@medplum/core';
 import { EhiTables } from '../src/ehi/read.ts';
 
 const t = () => new EhiTables(join(import.meta.dirname, 'fixtures/ehi'));
@@ -75,6 +76,7 @@ describe('EHI mappers', () => {
       identifier: [
         { system: SYS, value: 'PAT_ENC|8000001' },
         { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.3.698084.8', value: '8000001' },
+        { system: 'urn:oid:1.2.840.114350.1.72.75210', value: '8000001' }, // R13: both CSN roots
       ],
       period: { start: '2026-01-15' },
       subject: PATIENT_REF,
@@ -106,5 +108,39 @@ describe('EHI mappers', () => {
       { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.768076', value: '6000002' },
     ]);
     expect(pl[1].onsetDateTime).toBe('2020-03-02');
+  });
+
+  it('mapLabs skips and counts a result line without any name', () => {
+    const base = t();
+    const rows = (table: string) =>
+      table === 'ORDER_RESULTS' ? [...base.rows(table), { ...base.rows(table)[0], LINE: '3', COMPONENT_ID_NAME: '', COMPON_LNC_ID_LNC_LONG_NAME: '' }] : base.rows(table);
+    const counts = { skippedNoName: 0 };
+    const rs = mapLabs({ rows } as unknown as EhiTables, ctx, counts);
+    expect(of<Observation>(rs, 'Observation')).toHaveLength(2);
+    expect(of<DiagnosticReport>(rs, 'DiagnosticReport')[0].result).toHaveLength(2);
+    expect(counts.skippedNoName).toBe(1);
+  });
+
+  it('two EHI lines claiming one existing result: neither is identified', async () => {
+    const existing: Observation = {
+      resourceType: 'Observation', id: 'old', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '1-1' }] },
+      effectiveDateTime: '2024-03-01', valueQuantity: { value: 0, unit: '%' },
+    };
+    const report: DiagnosticReport = { resourceType: 'DiagnosticReport', id: 'r', status: 'final', code: { text: 'x' }, result: [{ reference: 'Observation/old' }] };
+    const client = {
+      searchResources: async (type: string) => (type === 'DiagnosticReport' ? [report] : [existing]),
+    } as unknown as MedplumClient;
+    const line = (id: string): Observation => ({ resourceType: 'Observation', id, status: 'final', code: { text: id }, valueQuantity: { value: 0, unit: '%' } });
+    const dr: DiagnosticReport = {
+      resourceType: 'DiagnosticReport', id: 'ehi', status: 'final', code: { text: 'x' },
+      identifier: [{ system: SYS, value: 'ORDER_PROC|1' }, { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.798268', value: '1' }],
+      result: [{ reference: 'Observation/a' }, { reference: 'Observation/b' }],
+    };
+    const out = await linkResultsToExisting(client, [dr, line('a'), line('b')], 'p');
+    expect(out).toMatchObject({ identified: 0, unidentified: 2 });
+    expect(of<Observation>(out.resources, 'Observation').map((o) => [o.code.coding, o.effectiveDateTime])).toEqual([[undefined, undefined], [undefined, undefined]]);
+    // One line alone takes the existing code and time.
+    const one = await linkResultsToExisting(client, [{ ...dr, result: [{ reference: 'Observation/a' }] }, line('a')], 'p');
+    expect(one).toMatchObject({ identified: 1, unidentified: 0 });
   });
 });

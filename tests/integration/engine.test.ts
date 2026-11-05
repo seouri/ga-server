@@ -404,3 +404,31 @@ test('a newer C-CDA update still replaces the body', async () => {
   expect(found.code).toBeUndefined();
   expect(found.clinicalStatus?.coding?.[0]?.code).toBe('resolved');
 });
+
+// R11 fill never keeps a field that contradicts the incoming record.
+test('an active EHI problem over a C-CDA problem with abatement drops the abatement', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [{ ...problem([pl], 'resolved'), abatementDateTime: '2023-01-01', onsetPeriod: { start: '2020-01-01' }, text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml">old</div>' } } as Resource], ccda('2024-01-01'), pid, 'h');
+  const { code: _c, ...e } = { ...problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'active'), onsetDateTime: '2020-01-02' } as Resource & { code?: unknown };
+  expect(await importResources(client, [e as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ updated: 1 });
+  const [found] = await byId('Condition', pl.system, pl.value);
+  expect(found.code?.text).toBe('synthetic-problem');
+  expect(found.clinicalStatus?.coding?.[0]?.code).toBe('active');
+  expect(found.abatementDateTime).toBeUndefined();
+  expect(found.onsetDateTime).toBe('2020-01-02');
+  expect(found.onsetPeriod).toBeUndefined();
+  expect(found.text).toBeUndefined();
+});
+
+test('an entered-in-error EHI problem drops the C-CDA clinical status', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [problem([pl], 'active')], ccda('2024-01-01'), pid, 'h');
+  const { code: _c, clinicalStatus: _s, ...e } = {
+    ...problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'active'),
+    verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'entered-in-error' }] },
+  } as Resource & { code?: unknown; clinicalStatus?: unknown };
+  expect(await importResources(client, [e as Resource], ehiSrc('2026-11-04'), pid, 'h')).toMatchObject({ updated: 1 });
+  const [found] = await byId('Condition', pl.system, pl.value);
+  expect(found.clinicalStatus).toBeUndefined();
+  expect(found.verificationStatus?.coding?.[0]?.code).toBe('entered-in-error');
+});

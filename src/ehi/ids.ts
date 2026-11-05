@@ -1,5 +1,6 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Condition, Encounter, Identifier, Resource } from '@medplum/fhirtypes';
+import { linkCandidates } from '../engine.ts';
 import { EPIC_OID } from '../identity.ts';
 import type { EhiTables } from './read.ts';
 
@@ -14,8 +15,14 @@ export const ehiId = (ctx: EhiCtx, table: string, pk: string): Identifier => ({ 
 // Suffixes under the org root, from recon (d). Immunization ids match nothing in the C-CDA, so they have no root here.
 // dx: a visit diagnosis, value `<CSN>-<DX_ID>` (R12: matched 53 of 77 real PAT_ENC_DX rows).
 const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1' };
+// R13: C-CDAs carry a CSN under the org root or under 1.2.840.114350.1.72.75210, so a CSN gets both.
 export const epicId = (ctx: EhiCtx, kind: keyof typeof EPIC_SUFFIX, value: string): Identifier[] =>
-  ctx.epicOrgNumber && value ? [{ system: `urn:oid:1.2.840.114350.1.13.${ctx.epicOrgNumber}.${EPIC_SUFFIX[kind]}`, value }] : [];
+  ctx.epicOrgNumber && value
+    ? [
+        { system: `urn:oid:1.2.840.114350.1.13.${ctx.epicOrgNumber}.${EPIC_SUFFIX[kind]}`, value },
+        ...(kind === 'csn' ? [{ system: 'urn:oid:1.2.840.114350.1.72.75210', value }] : []),
+      ]
+    : [];
 
 // Resource id for intra-batch references (the engine replaces it on write).
 export const localId = (table: string, pk: string): string => `${table}-${pk}`;
@@ -57,11 +64,13 @@ export async function resolveUnlinked(
     const nameless = r.resourceType === 'Condition' && !(r as Condition).code;
     const classless = r.resourceType === 'Encounter' && !(r as Encounter).class;
     if (nameless || classless) {
-      let linked = false;
-      for (const i of ((r as Condition | Encounter).identifier ?? []).filter((x) => x.system?.startsWith(EPIC_OID) && x.value)) {
-        const q = { identifier: `${i.system}|${i.value}`, subject: `Patient/${patientId}` };
-        if ((await client.searchResources(r.resourceType as 'Condition' | 'Encounter', q, { cache: 'no-cache' })).length) linked = true;
-      }
+      // Linked = already in GA under its own EHI id, or exactly one free link candidate (the engine's rule; 2+ is
+      // an ambiguous link that the engine creates from this record, unfilled).
+      const [own, ...rest] = (r as Condition | Encounter).identifier ?? [];
+      const type = r.resourceType as 'Condition' | 'Encounter';
+      const stored = (await client.searchResources(type, { identifier: `${own.system}|${own.value}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' })).length > 0;
+      const epic = rest.filter((x) => x.system?.startsWith(EPIC_OID) && x.value);
+      const linked = stored || (epic.length > 0 && (await linkCandidates(client, type, epic, patientId, own.system as string)).free.length === 1);
       if (!linked && nameless) {
         skippedNoName++;
         continue;
