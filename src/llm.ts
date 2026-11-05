@@ -9,7 +9,7 @@ const TOOL = 'submit_resources';
 
 // Single source of truth: the agent skill text, minus its frontmatter.
 const instructions = () =>
-  readFileSync(new URL('../skills/ga-extract/SKILL.md', import.meta.url), 'utf8').replace(/^---[\s\S]*?---\n/, '');
+  readFileSync(new URL('../.claude/skills/ga-extract/SKILL.md', import.meta.url), 'utf8').replace(/^---[\s\S]*?---\n/, '');
 
 type Sdk = { messages: { stream: (p: any) => { finalMessage: () => Promise<Anthropic.Message> } } };
 

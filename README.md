@@ -20,7 +20,7 @@ ga import <folder>             # C-CDA export (folder of XML files); re-importin
 ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPIC_API_KEY); once per file
 ```
 
-`--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `skills/ga-extract/SKILL.md` and `AGENTS.md`).
+`--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-extract/SKILL.md`, also `/ga-extract <file>` in Claude Code, and `AGENTS.md`).
 
 ## Review flags and limits
 
@@ -31,7 +31,7 @@ ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPI
 
 ## Connect an agent
 
-The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`.
+The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`, and `risk_score` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
 
 - Claude Code: open this repo; `.mcp.json` registers `ga-server`.
 - Codex / Hermes: register a stdio MCP server with command `node /absolute/path/to/ga-server/src/cli.ts mcp`. Point the agent at `AGENTS.md` for the PDF extraction rules.
@@ -45,6 +45,8 @@ claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cl
 ```
 
 The server tells Claude that GA is your health record, so plain questions work. Claude reads with `fhir_search`/`fhir_read` and cites the records it used.
+
+**Slash commands** (shipped in `.claude/skills/`): `/ga <question>` answers strictly from GA with citations; `/ga-extract <file>` imports a PDF or photo; `/ga-lipids [since YYYY]` charts your lipid panels.
 
 **Ask about your health**
 
@@ -122,7 +124,7 @@ Rules for skills in this repo:
 - **Mirror the skill for other agents.** Add a line to `AGENTS.md` naming the skill and its folder, so Codex and Hermes can follow the same instructions.
 - **Try it before committing.** Run `/<name>` in Claude Code against your own GA. Also check what it does with an empty record.
 
-Add `disable-model-invocation: true` to the frontmatter if a skill should run only when typed. PDF extraction instructions currently live in `skills/ga-extract/SKILL.md`, a folder Claude Code doesn't load automatically.
+Add `disable-model-invocation: true` to the frontmatter if a skill should run only when typed.
 
 ## Where data lives
 

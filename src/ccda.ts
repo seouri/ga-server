@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Condition, Encounter, Identifier, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { type GaConfig, GaError } from './config.ts';
 import { importResources, type ImportReport } from './engine.ts';
@@ -53,50 +53,112 @@ function problemStatus(obs: X, act?: string): string | undefined {
   return ACT_STATUS[act ?? ''];
 }
 
-// Per source entry <id>: substanceAdministration statusCode, and each observation's problem status (see problemStatus).
-function sourceStatuses(xml: string): { med: Map<string, string>; prob: Map<string, string> } {
+// Text of a narrative node (mixed content), whitespace collapsed.
+const textOf = (n: unknown): string =>
+  (typeof n === 'string' || typeof n === 'number' ? String(n)
+    : Array.isArray(n) ? n.map(textOf).join(' ')
+    : n && typeof n === 'object' ? Object.entries(n).filter(([k]) => !k.startsWith('@_')).map(([, v]) => textOf(v)).join(' ')
+    : '').replace(/\s+/g, ' ').trim();
+
+const RXNORM_OID = '2.16.840.1.113883.6.88';
+const PROBLEM_SECTION = /^2\.16\.840\.1\.113883\.10\.20\.22\.2\.5(\.1)?$/;
+type MedInfo = { name?: string; rxnorm?: string };
+
+// Per source entry <id>: substanceAdministration status and drug (narrative name, RxNorm), and each observation's
+// problem status (see problemStatus) and whether it sits in the Problems section (problem list) or elsewhere (visit diagnoses).
+function sourceInfo(xml: string) {
   const med = new Map<string, string>();
+  const drug = new Map<string, MedInfo>();
   const prob = new Map<string, string>();
-  const walk = (o: X, act?: string) => {
+  const problemList = new Map<string, boolean>();
+  const narrative = new Map<string, string>();
+  const root = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true }).parse(xml) as X;
+  const collect = (o: unknown) => {
+    for (const c of arr(o as X | X[])) {
+      if (!c || typeof c !== 'object') continue;
+      const id = attr(c, 'ID');
+      if (id && !narrative.has(id)) narrative.set(id, textOf(c));
+      for (const [k, v] of Object.entries(c)) if (!k.startsWith('@_')) collect(v);
+    }
+  };
+  collect(root);
+  const walk = (o: X, act: string | undefined, inProblems: boolean) => {
     for (const [k, v] of Object.entries(o)) {
       if (k.startsWith('@_')) continue;
       for (const c of arr(v)) {
         if (!c || typeof c !== 'object') continue;
-        const code = attr((c as X).statusCode, 'code');
-        if (k === 'substanceAdministration' && code) for (const key of cdaKeys(c as X)) if (!med.has(key)) med.set(key, code);
-        if (k === 'observation') {
-          const st = problemStatus(c as X, act);
-          if (st) for (const key of cdaKeys(c as X)) if (!prob.has(key)) prob.set(key, st);
+        const n = c as X;
+        const code = attr(n.statusCode, 'code');
+        const problems = k === 'section' ? arr(n.templateId as X | X[]).some((t) => PROBLEM_SECTION.test(attr(t, 'root') ?? '')) : inProblems;
+        if (k === 'substanceAdministration') {
+          const mat = ((n.consumable as X)?.manufacturedProduct as X)?.manufacturedMaterial as X | undefined;
+          const mc = mat?.code as X | undefined;
+          const ref = attr((mc?.originalText as X)?.reference, 'value')?.replace(/^#/, '');
+          const info: MedInfo = {
+            name: (ref && narrative.get(ref)) || attr(mc, 'displayName') || undefined,
+            rxnorm: attr(mc, 'codeSystem') === RXNORM_OID ? attr(mc, 'code') : undefined,
+          };
+          for (const key of cdaKeys(n)) {
+            if (code && !med.has(key)) med.set(key, code);
+            if ((info.name || info.rxnorm) && !drug.has(key)) drug.set(key, info);
+          }
         }
-        walk(c as X, k === 'act' ? code : act);
+        if (k === 'observation') {
+          const st = problemStatus(n, act);
+          for (const key of cdaKeys(n)) {
+            if (st && !prob.has(key)) prob.set(key, st);
+            if (!problemList.has(key)) problemList.set(key, problems);
+          }
+        }
+        walk(n, k === 'act' ? code : act, problems);
       }
     }
   };
-  walk(new XMLParser({ ignoreAttributes: false, removeNSPrefix: true }).parse(xml) as X);
-  return { med, prob };
+  walk(root, undefined, false);
+  return { med, drug, prob, problemList };
 }
 
 const MED_STATUS: Record<string, MedicationStatement['status']> = { active: 'active', completed: 'completed', aborted: 'stopped', suspended: 'on-hold' };
 const cc = (system: string, code: string) => ({ coding: [{ system, code }] });
+const RXNORM = 'http://www.nlm.nih.gov/research/umls/rxnorm';
+const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
 // Fixes converter template gaps from the source XML; only neutral values ('unknown') when the source has nothing.
 // Drops the converter's DocumentReference: storeDocument keeps the original file.
 export function repair(rs: Resource[], xml: string): Resource[] {
-  const { med, prob } = sourceStatuses(xml);
-  const lookup = (m: Map<string, string>, r: Resource) =>
+  const { med, drug, prob, problemList } = sourceInfo(xml);
+  const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
     [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []]
       .flat()
       .map((i) => fhirKey(i))
       .map((k) => (k ? m.get(k) : undefined))
-      .find(Boolean);
+      .find((v) => v !== undefined);
+  // The converter keeps only the NDC package code: name each Medication from its statement's source entry.
+  const drugOf = new Map<string, MedInfo>();
+  for (const r of rs) {
+    const ref = r.resourceType === 'MedicationStatement' ? (r as MedicationStatement).medicationReference?.reference : undefined;
+    const info = ref && lookup(drug, r);
+    if (ref && info) drugOf.set(ref, info);
+  }
+  const named = (c: CodeableConcept | undefined, info: MedInfo): CodeableConcept => {
+    const coding = [...(c?.coding ?? [])];
+    if (info.rxnorm && !coding.some((x) => x.system === RXNORM && x.code === info.rxnorm)) coding.push({ system: RXNORM, code: info.rxnorm, display: info.name });
+    return { ...c, coding, text: info.name ?? c?.text };
+  };
   return rs
     .filter((r) => r.resourceType !== 'DocumentReference')
     .map((r) => {
+      if (r.resourceType === 'Medication') {
+        const info = drugOf.get(`Medication/${r.id}`);
+        return info ? { ...r, code: named((r as Medication).code, info) } : r;
+      }
       if (r.resourceType === 'MedicationStatement') {
         return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
       }
       if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
       if (r.resourceType === 'Condition') {
+        const inList = lookup(problemList, r);
+        if (inList !== undefined) r = { ...r, category: [cc(CATEGORY, inList ? 'problem-list-item' : 'encounter-diagnosis')] } as Condition;
         const s = lookup(prob, r);
         if (!s) return r;
         const clinicalStatus = cc('http://terminology.hl7.org/CodeSystem/condition-clinical', s);

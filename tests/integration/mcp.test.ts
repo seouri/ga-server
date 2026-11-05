@@ -120,6 +120,11 @@ test('fhir_search returns imported LDL', async () => {
   expect(JSON.parse(read.text).valueQuantity.value).toBe(111);
 });
 
+test('risk_score returns PREVENT and PCE', async () => {
+  const r = await call('risk_score', { age: 50, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 });
+  expect(JSON.parse(r.text)).toMatchObject({ preventAscvd: expect.closeTo(0.019, 3), pce: expect.closeTo(0.0309, 3) });
+});
+
 test('ga_import rejects non-document files, unsupported types and invalid resources without writing', async () => {
   const docs = () => client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' });
   const before = (await docs()).length;

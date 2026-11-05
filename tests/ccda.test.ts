@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import type { Condition, Encounter, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { ccdaDate, ccdaFiles, repair } from '../src/ccda.ts';
 
 test('ccdaDate parses effectiveTime', () => {
@@ -81,4 +81,33 @@ test('condition status precedence: status observation > effectiveTime/high > con
   const out = repair(['p-status-inactive', 'p-high', 'p-open', ''].map(cond) as Resource[], xml) as Condition[];
   expect(out.map((c) => c.clinicalStatus?.coding?.[0]?.code)).toEqual(['inactive', 'resolved', 'active', undefined]);
   expect(out[1].verificationStatus?.coding?.[0]?.code).toBe('confirmed');
+});
+
+test('repair names medications from the narrative and labels problem-list vs visit diagnoses', () => {
+  const doc = `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody>
+  <component><section><text><list><item><content ID="med1">examplestatin 10 mg tablet</content></item></list></text>
+    <entry><substanceAdministration><id root="9.9" extension="m1"/><statusCode code="active"/>
+      <consumable><manufacturedProduct><manufacturedMaterial><code code="123" codeSystem="2.16.840.1.113883.6.88"><originalText><reference value="#med1"/></originalText></code></manufacturedMaterial></manufacturedProduct></consumable>
+    </substanceAdministration></entry></section></component>
+  <component><section><templateId root="2.16.840.1.113883.10.20.22.2.5.1"/>
+    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="8.8" extension="pl"/></observation></entryRelationship></act></entry></section></component>
+  <component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <entry><encounter><entryRelationship><act><entryRelationship><observation><id root="8.8" extension="dx"/></observation></entryRelationship></act></entryRelationship></encounter></entry></section></component>
+  </structuredBody></component></ClinicalDocument>`;
+  const out = repair(
+    [
+      { resourceType: 'Medication', id: 'med-a', code: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.69', code: '0000-0000-00' }] } },
+      { ...ms('urn:oid:9.9', 'm1'), medicationReference: { reference: 'Medication/med-a' } },
+      { resourceType: 'Condition', identifier: [{ system: 'urn:oid:8.8', value: 'pl' }], subject: { reference: 'Patient/p' } },
+      { resourceType: 'Condition', identifier: [{ system: 'urn:oid:8.8', value: 'dx' }], subject: { reference: 'Patient/p' } },
+    ] as Resource[],
+    doc,
+  );
+  const med = out[0] as Medication;
+  expect(med.code?.text).toBe('examplestatin 10 mg tablet');
+  expect(med.code?.coding).toContainEqual({ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '123', display: 'examplestatin 10 mg tablet' });
+  expect(med.code?.coding?.[0].code).toBe('0000-0000-00');
+  const [pl, dx] = out.slice(2) as Condition[];
+  expect(pl.category?.[0].coding?.[0].code).toBe('problem-list-item');
+  expect(dx.category?.[0].coding?.[0].code).toBe('encounter-diagnosis');
 });

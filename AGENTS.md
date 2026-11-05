@@ -1,11 +1,14 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `risk_score`.
+
+- Cardiovascular risk: gather inputs from GA and call `risk_score` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
+- Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
 
 - Claude Code: `.mcp.json` registers it; Claude Code launches project MCP servers with the project directory as cwd, and `ga mcp` finds its config via `GA_CONFIG` or the package root regardless of cwd. If your agent starts it elsewhere, use the absolute path to `src/cli.ts`.
 - Codex/Hermes: register `node /absolute/path/to/ga-server/src/cli.ts mcp` as a stdio MCP server.
 
-## PDF extraction (mirrors skills/ga-extract/SKILL.md)
+## PDF extraction (mirrors .claude/skills/ga-extract/SKILL.md)
 
 Extract health records from a local PDF or image into GA through the `ga-server` MCP tools. GA never sends data anywhere: you read the file yourself.
 
@@ -28,4 +31,6 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 
 Repeatable reports live in `.claude/skills/<name>/SKILL.md` (Claude Code runs them as `/<name>`). Other agents: when the user asks for one, read that file and follow it.
 
+- `ga`: answer a health question strictly from GA with citations ("/ga <question>"). Follow `.claude/skills/ga/SKILL.md`.
+- `ga-extract`: import a PDF or image ("/ga-extract <file>"); same rules as the PDF extraction section above.
 - `ga-lipids`: lipid panel trend chart ("ga lipids", "chart my cholesterol"). Run `node .claude/skills/ga-lipids/build.ts [since YYYY]` from the repo root and relay its summary.

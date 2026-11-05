@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
+import { riskScore } from './risk.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -128,6 +129,20 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         return fail(e);
       }
     },
+  );
+  server.registerTool(
+    'risk_score',
+    {
+      description:
+        '10-year cardiovascular risk from inputs you read from GA: AHA PREVENT base model (ASCVD and total CVD) and the 2013 Pooled Cohort Equations. ' +
+        'Use this instead of computing risk yourself. Cholesterol in mg/dL; returns probabilities (0-1) and notes on out-of-range inputs.',
+      inputSchema: {
+        age: z.number(), sex: z.enum(['male', 'female']), totalC: z.number(), hdlC: z.number(), sbp: z.number(),
+        bpTx: z.boolean(), statin: z.boolean(), diabetes: z.boolean(), smoker: z.boolean(), egfr: z.number(),
+        race: z.enum(['black', 'other']).optional(),
+      },
+    },
+    async (input) => text(riskScore(input)),
   );
   server.registerTool(
     'ga_import',
