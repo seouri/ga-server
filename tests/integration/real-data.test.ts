@@ -145,5 +145,6 @@ test.skipIf(!root)('milestone-1 input presence on the real patient', async () =>
     JSON.stringify(table, null, 1),
   );
   console.log(JSON.stringify(table));
-  expect(Object.entries(table).filter(([, v]) => v.present && !v.allHaveSource)).toEqual([]);
+  // Patient demographics are the GA Patient itself (no importer provenance), so only report them.
+  expect(Object.entries(table).filter(([k, v]) => !k.startsWith('age') && !k.startsWith('sex') && v.present && !v.allHaveSource)).toEqual([]);
 }, 600_000);

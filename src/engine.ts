@@ -127,7 +127,18 @@ export async function importResources(
     have.add(idKey(i));
     missing.push(i);
   }
-  if (missing.length) await client.updateResource<Patient>({ ...patient, identifier: [...(patient.identifier ?? []), ...missing] });
+  // Demographics fill only what the GA Patient lacks; a differing source value is logged (field name only), never applied.
+  const next: Patient = { ...patient };
+  for (const sp of resources.filter((r): r is Patient => r.resourceType === 'Patient')) {
+    for (const f of ['birthDate', 'gender', 'name'] as const) {
+      const v = sp[f];
+      if (v === undefined || (Array.isArray(v) && !v.length)) continue;
+      if (next[f] === undefined || (Array.isArray(next[f]) && !(next[f] as unknown[]).length)) Object.assign(next, { [f]: v });
+      else if (JSON.stringify(next[f]) !== JSON.stringify(v)) console.error(`patient demographic conflict: ${f}`);
+    }
+  }
+  const filled = (['birthDate', 'gender', 'name'] as const).some((f) => next[f] !== patient[f]);
+  if (missing.length || filled) await client.updateResource<Patient>({ ...next, identifier: [...(patient.identifier ?? []), ...missing] });
 
   // Same stable identifier twice in one batch with different content would make the second a silent skip:
   // give every member of such a group source id + content hash (deterministic, order-independent).

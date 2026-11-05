@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, MedicationStatement, Observation, Patient, Resource } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
 import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
@@ -193,4 +193,23 @@ test('two different resources sharing one source id are both stored; re-import i
   expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
   expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, skipped: 2 });
   expect(await client.searchResources('Condition', { identifier: `urn:test:src|${sid}` }, { cache: 'no-cache' })).toHaveLength(2);
+});
+
+test('source patient demographics fill the GA patient once and never overwrite', async () => {
+  const sp = (birthDate: string): Patient => ({ resourceType: 'Patient', id: 'src-demo', birthDate, gender: 'female', name: [{ family: 'Synthetic', given: ['Test'] }] });
+  await importResources(client, [sp('1970-01-02')], ccda('2024-01-01'), pid, 'h');
+  const p1 = await client.readResource('Patient', pid);
+  expect([p1.birthDate, p1.gender, p1.name?.[0]?.family]).toEqual(['1970-01-02', 'female', 'Synthetic']);
+  await importResources(client, [sp('1970-01-02')], ccda('2024-01-01'), pid, 'h');
+  expect((await client.readResource('Patient', pid)).meta?.versionId).toBe(p1.meta?.versionId);
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await importResources(client, [sp('1999-09-09')], ccda('2024-01-01'), pid, 'h');
+    expect(err).toHaveBeenCalledWith('patient demographic conflict: birthDate');
+  } finally {
+    err.mockRestore();
+  }
+  const p3 = await client.readResource('Patient', pid);
+  expect(p3.birthDate).toBe('1970-01-02');
+  expect(p3.meta?.versionId).toBe(p1.meta?.versionId);
 });
