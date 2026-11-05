@@ -139,6 +139,10 @@ test('vaccine_gaps reads the test patient from GA and reports per-vaccine status
   expect(by).toMatchObject({ 'td-tdap': 'overdue', zoster: 'due', influenza: 'due', hpv: 'not-recommended' });
   expect(r.unmatched).toEqual([{ date: '2019-05-01', name: 'Typhoid Vi', source: '' }]);
   expect((await call('vaccine_gaps', { asOf: 'tomorrow' })).text).toMatch(/^asOf must be/);
+  await client.updateResource({ ...(await client.readResource('Patient', pid, { cache: 'no-cache' })), gender: 'other' });
+  const other = JSON.parse((await call('vaccine_gaps', { asOf: '2026-11-05' })).text);
+  expect(other.note).toMatch(/gender in GA is other/);
+  expect(other.results.find((x: { vaccine: string }) => x.vaccine === 'td-tdap').status).toBe('overdue');
 });
 
 test('ga_import rejects non-document files, unsupported types and invalid resources without writing', async () => {

@@ -25,8 +25,12 @@ test('Td/Tdap overdue after 10 years', () => {
   expect(status(r, 'td-tdap')?.status).toBe('overdue');
   const none = evaluateVaccines(schedule, base, AS_OF);
   expect(status(none, 'td-tdap')?.status).toBe('due');
-  const td = evaluateVaccines(schedule, { ...base, immunizations: [{ date: '2020-03-01', name: 'Td', source: 'ehi' }] }, AS_OF);
-  expect(status(td, 'td-tdap')?.status).toBe('complete');
+  const tdap = { date: '2012-03-01', cvx: '115', source: 'ccda.xml' };
+  const td = { date: '2020-03-01', name: 'Td', source: 'ehi' };
+  expect(status(evaluateVaccines(schedule, { ...base, immunizations: [tdap, td] }, AS_OF), 'td-tdap')?.status).toBe('complete');
+  // Td boosters alone never satisfy the 1-dose Tdap rule.
+  const tdOnly = status(evaluateVaccines(schedule, { ...base, immunizations: [td] }, AS_OF), 'td-tdap');
+  expect(tdOnly).toMatchObject({ status: 'due', reason: expect.stringMatching(/No Tdap dose recorded/) });
 });
 
 test('zoster 2 doses complete at 50+', () => {
@@ -112,4 +116,36 @@ test('a record without a date is listed, never counted', () => {
   expect(status(r, 'zoster')).toMatchObject({ status: 'overdue', records: [{ date: '2024-01-10' }] });
   expect(r.unmatched).toEqual([undated]);
   expect(status(evaluateVaccines(schedule, { ...base, immunizations: [undated] }, AS_OF), 'zoster')?.status).toBe('due');
+});
+
+test('doses under 28 days apart count once', () => {
+  const imms = [{ date: '2024-01-10', cvx: '187', source: 'ccda.xml' }, { date: '2024-01-11', name: 'Shingrix', source: 'ehi' }];
+  const r = status(evaluateVaccines(schedule, { ...base, immunizations: imms }, AS_OF), 'zoster');
+  expect(r).toMatchObject({ status: 'overdue', reason: expect.stringMatching(/1 of 2 doses/) });
+  expect(r?.records).toHaveLength(2);
+});
+
+test('records dated after asOf are ignored', () => {
+  const imms = [{ date: '2024-01-10', cvx: '187', source: 'x' }, { date: '2024-04-10', cvx: '187', source: 'x' }];
+  const r = evaluateVaccines(schedule, { ...base, immunizations: imms }, '2024-02-01');
+  expect(status(r, 'zoster')).toMatchObject({ status: 'due', records: [{ date: '2024-01-10' }] });
+  const lab = [{ name: 'Hepatitis B surface antibody', value: 'Positive', date: '2025-01-01', source: 'x' }];
+  const young = { ...base, birthDate: '1990-01-01' };
+  expect(status(evaluateVaccines(schedule, { ...young, immunity: lab }, '2024-12-31'), 'hepatitis-b')?.status).toBe('due');
+  expect(status(evaluateVaccines(schedule, { ...young, immunity: lab }, '2025-01-01'), 'hepatitis-b')?.status).toBe('immune');
+});
+
+test('names match across punctuation and spacing (PCV-20, PCV 20)', () => {
+  const old = { ...base, birthDate: '1950-01-01' };
+  for (const name of ['PCV-20', 'PCV 20', 'Prevnar-20']) {
+    const r = evaluateVaccines(schedule, { ...old, immunizations: [{ date: '2023-01-01', name, source: 'x' }] }, AS_OF);
+    expect(status(r, 'pneumococcal')?.status, name).toBe('complete');
+  }
+  const sars = evaluateVaccines(schedule, { ...base, immunizations: [{ date: '2023-01-01', name: 'SARS-CoV-2 vaccine', source: 'x' }] }, AS_OF);
+  expect(status(sars, 'covid-19')?.records).toHaveLength(1);
+});
+
+test('sex outside male/female still runs the schedule', () => {
+  const r = evaluateVaccines(schedule, { ...base, sex: undefined }, AS_OF);
+  expect(status(r, 'td-tdap')?.status).toBe('due');
 });

@@ -20,6 +20,7 @@ type Rule = {
   dueIfNone?: boolean; // a forced not-evaluated rule is still due when no dose is recorded
   completeIf?: Match & { reason: string }; // any such dose completes it (PCV20/PCV21)
   altDoses?: Match & { doses: number }; // dose count when every dose is this product (Heplisav-B)
+  requireOne?: Match & { reason: string }; // at least one dose must be this product (Tdap), else due
   reason?: string;
 };
 export type Schedule = {
@@ -30,7 +31,8 @@ export type Schedule = {
 };
 type Dose = { date: string; cvx?: string; name?: string; source: string };
 type Evidence = { name: string; value: string; date: string; source: string };
-export type VaccineInput = { birthDate: string; sex: 'male' | 'female'; immunizations: Dose[]; immunity: Evidence[] };
+// sex is absent when GA's gender is neither male nor female: sex-specific rules (none in the 2025 schedule) then never apply.
+export type VaccineInput = { birthDate: string; sex?: 'male' | 'female'; immunizations: Dose[]; immunity: Evidence[] };
 type Status = 'complete' | 'due' | 'overdue' | 'not-recommended' | 'immune' | 'not-evaluated';
 type Ref = { date: string; source: string };
 
@@ -42,15 +44,19 @@ export function loadSchedule(): Schedule {
   return JSON.parse(readFileSync(join(DIR, file), 'utf8')) as Schedule;
 }
 
-const norm = (s = '') => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+// "PCV-20", "PCV 20" and "pcv20" all become "pcv20"; aliases get the same treatment but keep their edge spaces (" td ").
+const squash = (s = '') => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/([a-z]) (?=\d)/g, '$1');
+const norm = (s = '') => ` ${squash(s).trim()} `;
+const has = (name: string, alias: string) => name.includes(squash(alias));
 const cvxNorm = (c = '') => c.trim().replace(/^0+(?=\d)/, '');
-const hits = (m: Match, d: Dose) => (d.cvx !== undefined && m.cvx.some((c) => cvxNorm(c) === cvxNorm(d.cvx))) || m.names.some((n) => norm(d.name).includes(n));
+const hits = (m: Match, d: Dose) => (d.cvx !== undefined && m.cvx.some((c) => cvxNorm(c) === cvxNorm(d.cvx))) || m.names.some((n) => has(norm(d.name), n));
 const NEGATED = /\bnon|\bnot\b|\bneg|\bno\b|equivocal|indeterminate/;
 const addMonths = (date: string, n: number) => {
   const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() + n);
   return d.toISOString().slice(0, 10);
 };
+const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 const ageOn = (birth: string, asOf: string) => Number(asOf.slice(0, 4)) - Number(birth.slice(0, 4)) - (asOf.slice(5, 10) < birth.slice(5, 10) ? 1 : 0);
 
 export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: string) {
@@ -60,10 +66,12 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
   // CVX codes are exact (a combo code counts for each of its vaccines); a name must point to exactly one vaccine.
   const byVaccine = new Map<string, Dose[]>();
   const unmatched: Dose[] = [];
-  for (const d of input.immunizations) {
+  // Nothing after asOf counts: the answer is "as of" that day.
+  const immunity = input.immunity.filter((e) => e.date.slice(0, 10) <= day);
+  for (const d of input.immunizations.filter((x) => x.date.slice(0, 10) <= day)) {
     const byCvx = d.cvx === undefined ? [] : schedule.vaccines.filter((v) => v.cvx.some((c) => cvxNorm(c) === cvxNorm(d.cvx)));
     const n = norm(d.name);
-    const byName = schedule.vaccines.filter((v) => v.names.some((a) => n.includes(a)) && !v.excludeNames?.some((x) => n.includes(x)));
+    const byName = schedule.vaccines.filter((v) => v.names.some((a) => has(n, a)) && !v.excludeNames?.some((x) => has(n, x)));
     const vs = byCvx.length ? byCvx : byName.length === 1 && d.name ? byName : [];
     if (!vs.length || !d.date) {
       unmatched.push(d); // a dose without a date can't be placed in a series
@@ -74,13 +82,15 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
   const results = schedule.vaccines.map((v) => {
     const recs = (byVaccine.get(v.id) ?? []).sort((a, b) => a.date.localeCompare(b.date));
     const records: Ref[] = recs.map((d) => ({ date: d.date, source: d.source }));
-    // Same vaccine on the same day is one dose (C-CDA and EHI copies, possible duplicates).
-    const doses = [...new Map(recs.map((d) => [d.date.slice(0, 10), d])).values()];
+    // A dose under 28 days after the previous counted one is the same dose (C-CDA/EHI copies a day apart, possible
+    // duplicates); 4 weeks is the CDC minimum interval for RZV, HepB and HPV. shortcut: undercounts Twinrix 0/7/21-day.
+    const doses: Dose[] = [];
+    for (const d of recs) if (!doses.length || d.date.slice(0, 10) >= addDays(doses.at(-1)!.date, 28)) doses.push(d);
     const last = doses.at(-1)?.date.slice(0, 10);
     const out = (status: Status, reason: string, used: Ref[] = records) => ({ vaccine: v.id, status, records: used, reason });
 
-    const pos = (e: Evidence) => v.immuneIf!.positive.some((p) => norm(e.value).includes(p)) && !NEGATED.test(norm(e.value));
-    const ev = (n: string) => input.immunity.filter((e) => norm(e.name).includes(n) && pos(e));
+    const pos = (e: Evidence) => v.immuneIf!.positive.some((p) => has(norm(e.value), p)) && !NEGATED.test(norm(e.value));
+    const ev = (n: string) => immunity.filter((e) => has(norm(e.name), n) && pos(e));
     if (v.immuneIf) {
       const groups = v.immuneIf.names.map(ev);
       const ok = v.immuneIf.all ? groups.every((g) => g.length) : groups.some((g) => g.length);
@@ -98,6 +108,7 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
     }
     if (rule.repeatYears) {
       if (!last) return out('due', `${why} No dose recorded.`);
+      if (rule.requireOne && !doses.some((d) => hits(rule.requireOne!, d))) return out('due', `${why} ${rule.requireOne.reason}`);
       const next = addMonths(last, rule.repeatYears * 12);
       return next > day ? out('complete', `${why} Next booster ${next}.`) : out('overdue', `${why} Last dose ${last}; booster was due ${next}.`);
     }
@@ -121,7 +132,7 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf)) || !new Date(asOf).toISOString().startsWith(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
-  if (p.gender !== 'male' && p.gender !== 'female') throw new GaError('Patient gender in GA must be male or female to apply the schedule');
+  const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
   // Every page: a patient can hold more than one page of Observations.
   const all = async (type: 'Immunization' | 'Observation', q: Record<string, string>) => {
     const out: unknown[] = [];
@@ -129,7 +140,7 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
     return out;
   };
   const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
-  const obs = ((await all('Observation', { subject: `Patient/${patientId}` })) as Observation[]).filter((o) => o.status !== 'entered-in-error');
+  const obs = ((await all('Observation', { subject: `Patient/${patientId}` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
   const immunizations = imms.map((i) => {
     const cvx = i.vaccineCode?.coding?.find((c) => CVX.includes(c.system ?? ''))?.code; // NDC codings are ignored
     const name = i.vaccineCode?.text ?? i.vaccineCode?.coding?.find((c) => c.display)?.display;
@@ -143,5 +154,6 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
   const possibleDuplicates = imms
     .filter((i) => i.meta?.tag?.some((t) => t.system === TAG && t.code === 'possible-duplicate'))
     .map((i) => ({ date: (i.occurrenceDateTime ?? '').slice(0, 10), name: i.vaccineCode?.text, source: src(i) }));
-  return { ...evaluateVaccines(loadSchedule(), { birthDate: p.birthDate, sex: p.gender, immunizations, immunity }, asOf), asOf, possibleDuplicates };
+  return { ...evaluateVaccines(loadSchedule(), { birthDate: p.birthDate, sex, immunizations, immunity }, asOf), asOf, possibleDuplicates,
+    ...(!sex && { note: `Patient gender in GA is ${p.gender ?? 'missing'}: sex-specific rules not applied (the schedule has none).` }) };
 }

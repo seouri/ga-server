@@ -6,7 +6,7 @@
   "notEvaluated": [
     "Table 2 (by medical condition) and every 'Special situations' note: pregnancy, immunocompromising conditions, HIV infection, asplenia/complement deficiency or inhibitor use, solid organ transplant, chronic liver/heart/lung/renal disease, diabetes, cochlear implant or CSF leak, alcoholism, smoking",
     "Occupational, travel and exposure indications: health care personnel, international travel, college students in residential housing, military recruits, laboratory workers, sexual exposure risk, injection drug use, incarceration, close contacts of immunosuppressed persons or international adoptees",
-    "Tdap/Td: 'Pregnancy: 1 dose Tdap during each pregnancy' and 'Wound management'; whether a Tdap dose was received at age 10 years or older (any Td or Tdap counts toward the 10-year booster)",
+    "Tdap/Td: 'Pregnancy: 1 dose Tdap during each pregnancy' and 'Wound management'; whether the Tdap dose was received at age 10 years or older (a recorded Tdap at any age satisfies the 1-dose Tdap rule; any Td or Tdap counts toward the 10-year booster)",
     "Shared clinical decision-making recommendations (HPV 27-45 years, MenB 16-23 years, HepB age 60+ with diabetes, pneumococcal after PCV13+PPSV23 at 65+)",
     "Haemophilus influenzae type b (Hib) and Mpox: indication-based only",
     "Contraindications and precautions (Appendix)",
@@ -45,7 +45,8 @@
       "cvx": ["09", "113", "115", "138", "139", "196"],
       "names": ["tdap", " td ", "tetanus", "boostrix", "adacel", "tenivac"],
       "excludeNames": ["immune globulin"],
-      "rules": [ { "ages": [19, null], "doses": 1, "repeatYears": 10, "reason": "1 dose Tdap, then Td or Tdap booster every 10 years." } ]
+      "rules": [ { "ages": [19, null], "doses": 1, "repeatYears": 10, "reason": "1 dose Tdap, then Td or Tdap booster every 10 years.",
+        "requireOne": { "cvx": ["115"], "names": ["tdap", "boostrix", "adacel"], "reason": "No Tdap dose recorded: 'Completed primary series and did NOT receive Tdap at age 10 years or older: 1 dose Tdap'." } } ]
     },
     {
       "id": "mmr", "name": "Measles, mumps, rubella (MMR)",
