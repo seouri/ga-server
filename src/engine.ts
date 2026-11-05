@@ -1,7 +1,7 @@
-import { type MedplumClient, OperationOutcomeError } from '@medplum/core';
+import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { contentKey, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { contentHash, contentKey, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -20,7 +20,14 @@ const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
-const VALIDATION = ['structure', 'required', 'value', 'invariant', 'invalid'];
+// Medplum's validator reports 400 with structure/invariant issues carrying an element path. Generic 'invalid'
+// (badRequest, e.g. bad search params), server errors and anything without a path are not per-resource validation.
+const VALIDATION = ['structure', 'invariant', 'value', 'required'];
+const isValidationFailure = (e: unknown): e is OperationOutcomeError => {
+  if (!(e instanceof OperationOutcomeError)) return false;
+  const issues = e.outcome.issue ?? [];
+  return getStatus(e.outcome) === 400 && issues.length > 0 && issues.every((i) => VALIDATION.includes(i.code) && !!i.expression?.length);
+};
 
 const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
@@ -122,19 +129,40 @@ export async function importResources(
   }
   if (missing.length) await client.updateResource<Patient>({ ...patient, identifier: [...(patient.identifier ?? []), ...missing] });
 
+  // Same stable identifier twice in one batch with different content would make the second a silent skip:
+  // give every member of such a group source id + content hash (deterministic, order-independent).
+  const keyOf = (r: Resource) => stableIdentifier(r, source, fileHash, patientId).value as string;
+  const groups = new Map<string, Set<string>>();
+  for (const r of ordered) {
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, new Set());
+    groups.get(k)?.add(contentHash(r, patientId));
+  }
+  const colliding = new Set([...groups].filter(([, h]) => h.size > 1).map(([k]) => k));
+  for (const r of ordered) if (colliding.has(keyOf(r))) console.error(`source id collision: ${r.resourceType}`);
+
   const idMap = new Map<string, string>();
   for (const src of ordered) {
     const r = structuredClone(src) as R;
     walkReferences(r, (ref) => idMap.get(ref));
-    const ident = stableIdentifier(r, source, fileHash);
+    let ident = stableIdentifier(r, source, fileHash, patientId);
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
+    if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };
     const incoming = stamp(r, source, ident) as R;
     delete incoming.id;
     const type = incoming.resourceType;
+    // Searches stay outside the try: only a write's validation failure is tolerated.
+    const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
+    const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
+    const matches = key
+      ? await client.searchResources('Observation', {
+          subject: `Patient/${patientId}`,
+          code: key.split('|').slice(0, 2).join('|'),
+          date: key.split('|')[2],
+        })
+      : [];
     try {
-      const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
       let target: Resource;
-
       if (existing) {
         target = existing;
         const d = decide(existing, incoming);
@@ -146,14 +174,6 @@ export async function importResources(
           report.conflicts++;
         } else report.skipped++;
       } else {
-        const key = type === 'Observation' ? contentKey(incoming as Observation) : undefined;
-        const matches = key
-          ? await client.searchResources('Observation', {
-              subject: `Patient/${patientId}`,
-              code: key.split('|').slice(0, 2).join('|'),
-              date: key.split('|')[2],
-            })
-          : [];
         const same = matches.find((m) => sameValue(m, incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
@@ -182,10 +202,9 @@ export async function importResources(
       }
       for (const k of sourceKeys(src)) idMap.set(k, `${type}/${target.id}`);
     } catch (e) {
-      const issues = e instanceof OperationOutcomeError ? (e.outcome.issue ?? []) : [];
-      if (!issues.length || !issues.every((i) => VALIDATION.includes(i.code))) throw e;
+      if (!isValidationFailure(e)) throw e;
       // Element paths only: server diagnostics can echo values. References to this resource stay unresolved.
-      console.error(`invalid ${issues.map((i) => `${type}/${i.expression?.join(',') ?? '?'}`).join(' ')}`);
+      console.error(`invalid ${(e.outcome.issue ?? []).map((i) => `${type}/${i.expression?.join(',')}`).join(' ')}`);
       report.invalid++;
     }
   }

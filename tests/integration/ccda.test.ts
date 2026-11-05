@@ -25,12 +25,14 @@ beforeAll(async () => {
 // including Practitioner/Organization/Medication and the Binary, which $everything doesn't reach.
 afterAll(async () => {
   for (const r of await convertCcda(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
-    const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '');
+    const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
-      if (hit.resourceType !== 'Patient') await client.deleteResource(hit.resourceType, hit.id as string);
+      // Ownership check: identifier search is global; only delete what this fixture wrote.
+      if (hit.resourceType !== 'Patient' && hit.meta?.source === FIXTURE) await client.deleteResource(hit.resourceType, hit.id as string);
     }
   }
   for (const d of await client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' })) {
+    if (d.subject?.reference !== `Patient/${pid}`) continue;
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
     if (bin) await client.deleteResource('Binary', bin);
     await client.deleteResource('DocumentReference', d.id as string);
@@ -54,8 +56,9 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(meds).toHaveLength(1);
   expect(meds[0].status).toBe('active');
   const conds = await client.searchResources('Condition', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
-  expect(conds.map((c) => c.code?.coding?.[0]?.code)).toEqual(['55822004']);
-  expect(conds[0].clinicalStatus?.coding?.[0]?.code).toBe('active');
+  const status = Object.fromEntries(conds.map((c) => [c.code?.coding?.[0]?.code, c.clinicalStatus?.coding?.[0]?.code]));
+  // Hyperlipidemia: concern act active. Asthma: Problem Status observation says resolved, overriding the active act.
+  expect(status).toEqual({ '55822004': 'active', '195967001': 'resolved' });
   // The converter's Patient collapsed onto the GA patient: no second Patient for the fake MRN.
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
   expect((await all()).filter((r) => r.resourceType === 'Patient').map((r) => r.id)).toEqual([pid]);

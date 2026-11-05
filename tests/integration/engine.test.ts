@@ -108,7 +108,7 @@ test('content match with different identifier merges', async () => {
   expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ created: 0, merged: 1 });
   const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-04-01' });
   expect(found).toHaveLength(1);
-  expect(ccdaIds(found[0]).sort()).toEqual([a, b].map((o) => stableIdentifier(o, ccda('x'), 'h').value).sort());
+  expect(ccdaIds(found[0]).sort()).toEqual([a, b].map((o) => stableIdentifier(o, ccda('x'), 'h', pid).value).sort());
   expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ skipped: 1, merged: 0 });
 });
 
@@ -183,4 +183,14 @@ test('one invalid resource does not abort the batch', async () => {
   const bad = { resourceType: 'Observation', id: uid('obs'), status: 'final', subject: me() } as Observation; // no code
   const r = await importResources(client, [bad, chol(uid('obs'), 121, '2023-09-01')], ccda('2024-01-01'), pid, 'h');
   expect(r).toMatchObject({ created: 1, invalid: 1 });
+});
+
+test('two different resources sharing one source id are both stored; re-import is a no-op', async () => {
+  const sid = uid('cond');
+  const c = (code: string): Resource =>
+    ({ resourceType: 'Condition', id: uid('c'), identifier: src(sid), code: { coding: [{ system: 'http://snomed.info/sct', code }] }, subject: me() }) as Resource;
+  const batch = [c('111'), c('222')];
+  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
+  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, skipped: 2 });
+  expect(await client.searchResources('Condition', { identifier: `urn:test:src|${sid}` }, { cache: 'no-cache' })).toHaveLength(2);
 });

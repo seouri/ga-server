@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
 import type { MedicationStatement, Resource } from '@medplum/fhirtypes';
-import { decide } from '../src/engine.ts';
+import type { MedplumClient } from '@medplum/core';
+import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
+import { decide, importResources } from '../src/engine.ts';
 import { stamp, type SourceInfo } from '../src/identity.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
@@ -49,4 +51,38 @@ test('re-stamped Composition with singular identifier skips', () => {
   const comp = { resourceType: 'Composition', status: 'final', title: 't', identifier: { value: 'doc' } } as Resource;
   expect(decide(existing(comp, src('2024-01-01')), stamp(comp, src('2024-01-01'), ID))).toBe('skip');
   expect(decide(existing(comp, src('2024-01-01')), stamp({ ...comp, title: 'u' } as Resource, src('2024-02-01'), ID))).toBe('update');
+});
+
+
+// Fake client: one failure injected at search or create.
+const fake = (where: 'search' | 'create', err: Error) =>
+  ({
+    readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
+    updateResource: async (r: Resource) => r,
+    searchOne: async () => {
+      if (where === 'search') throw err;
+      return undefined;
+    },
+    searchResources: async () => [],
+    createResource: async (r: Resource) => {
+      if (where === 'create') throw err;
+      return { ...r, id: 'new' };
+    },
+  }) as unknown as MedplumClient;
+const one = [{ ...ms('active'), id: 'm1' } as Resource];
+
+test('a 400 validation failure on write is counted invalid, not thrown', async () => {
+  const err = new OperationOutcomeError(validationError('missing', ['MedicationStatement.status']));
+  expect(await importResources(fake('create', err), one, src('2024-01-01'), 'p', 'h')).toMatchObject({ invalid: 1, created: 0 });
+});
+
+test('non-validation errors abort the import', async () => {
+  for (const [where, err] of [
+    ['create', new OperationOutcomeError(serverError(new Error('boom')))],
+    ['create', new OperationOutcomeError(badRequest('generic bad request', 'MedicationStatement.status'))],
+    ['search', new OperationOutcomeError(validationError('bad search param', ['identifier']))],
+    ['create', new Error('network')],
+  ] as const) {
+    await expect(importResources(fake(where, err), one, src('2024-01-01'), 'p', 'h')).rejects.toThrow();
+  }
 });

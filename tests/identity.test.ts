@@ -76,3 +76,10 @@ test('ccda stableIdentifier keys on the source identifier, else a reference-free
   expect(stableIdentifier({ ...allergy, id: 'a2', meta: { versionId: '3' }, patient: { reference: 'Patient/p2' } } as Resource, ccda, 'h')).toEqual(h);
   expect(stableIdentifier({ ...allergy, code: { text: 'y' } } as Resource, ccda, 'h')).not.toEqual(h);
 });
+
+test('ccda content hash is patient-scoped for patient resources only', () => {
+  const allergy = { resourceType: 'AllergyIntolerance', code: { text: 'x' }, patient: { reference: 'Patient/a' } } as Resource;
+  expect(stableIdentifier(allergy, ccda, 'h', 'p1').value).not.toBe(stableIdentifier(allergy, ccda, 'h', 'p2').value);
+  const medication = { resourceType: 'Medication', code: { text: 'x' } } as Resource;
+  expect(stableIdentifier(medication, ccda, 'h', 'p1').value).toBe(stableIdentifier(medication, ccda, 'h', 'p2').value);
+});

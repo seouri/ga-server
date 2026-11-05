@@ -32,23 +32,28 @@ export function contentKey(o: Observation): string | undefined {
 const sorted = (_k: string, v: unknown) =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
 
-// Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
-// Without one: hash of the content minus id, meta and references (which point at per-document converter ids).
+// Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
+// Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
+export function contentHash(r: Resource, patientId = ''): string {
+  const { id: _id, meta: _meta, ...rest } = r;
+  const scope = 'subject' in r || 'patient' in r ? patientId : '';
+  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? undefined : sorted(k, v)))}`);
+}
+
 // Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
 // diagnostic: 32 Observation and 6 Encounter groups), so for these types the source id alone is not unique.
 const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
 
-function ccdaKey(r: Resource): string {
+// Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
+function ccdaKey(r: Resource, patientId: string): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-  const { id: _id, meta: _meta, ...rest } = r;
-  const hash = () => sha256(`${r.resourceType}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? undefined : sorted(k, v)))}`);
-  if (!src?.value) return `${r.resourceType}|${hash()}`;
+  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId)}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
-  return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${hash()}` : key;
+  return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }
 
-export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string): Identifier {
-  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r) };
+export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = ''): Identifier {
+  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };
   let key: string;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;

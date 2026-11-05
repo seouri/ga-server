@@ -31,6 +31,17 @@ const xml = `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody
   <component><section>
     <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-active"/><statusCode code="completed"/></observation></entryRelationship></act></entry>
     <entry><act><statusCode code="completed"/><entryRelationship><observation><id root="2.2" extension="p-done"/><statusCode code="completed"/></observation></entryRelationship></act></entry>
+    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-status-inactive"/><statusCode code="completed"/>
+      <effectiveTime><low value="2020"/><high value="2021"/></effectiveTime>
+      <entryRelationship typeCode="REFR"><observation><code code="33999-4"/><value code="73425007" displayName="Inactive"/></observation></entryRelationship>
+    </observation></entryRelationship></act></entry>
+    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-high"/><statusCode code="completed"/>
+      <effectiveTime><low value="2020"/><high value="2021"/></effectiveTime></observation></entryRelationship></act></entry>
+    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-open"/><statusCode code="completed"/>
+      <effectiveTime><low value="2020"/><high nullFlavor="UNK"/></effectiveTime></observation></entryRelationship></act></entry>
+    <entry><act><statusCode code="active"/><entryRelationship><observation><id nullFlavor="NI"/><statusCode code="completed"/>
+      <entryRelationship typeCode="REFR"><observation><code code="33999-4"/><value code="413322009" displayName="Resolved"/></observation></entryRelationship>
+    </observation></entryRelationship></act></entry>
   </section></component></structuredBody></component></ClinicalDocument>`;
 const ms = (system: string, value: string): MedicationStatement =>
   ({ resourceType: 'MedicationStatement', identifier: [{ system, value }], subject: { reference: 'Patient/p' } }) as MedicationStatement;
@@ -64,4 +75,10 @@ test('repair recovers statuses from the source entries and drops the converter D
   expect(n.clinicalStatus).toBeUndefined();
   expect((out.find((r) => r.resourceType === 'Encounter') as Encounter).status).toBe('unknown');
   expect(out.some((r) => r.resourceType === 'DocumentReference')).toBe(false);
+});
+
+test('condition status precedence: status observation > effectiveTime/high > concern act', () => {
+  const out = repair(['p-status-inactive', 'p-high', 'p-open', ''].map(cond) as Resource[], xml) as Condition[];
+  expect(out.map((c) => c.clinicalStatus?.coding?.[0]?.code)).toEqual(['inactive', 'resolved', 'active', undefined]);
+  expect(out[1].verificationStatus?.coding?.[0]?.code).toBe('confirmed');
 });
