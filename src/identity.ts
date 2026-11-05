@@ -16,7 +16,7 @@ const SRC_DATE = 'urn:ga-server:ext:source-date';
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
 
-const effective = (o: Observation): string | undefined => o.effectiveDateTime ?? o.effectivePeriod?.start;
+export const effective = (o: Observation): string | undefined => o.effectiveDateTime ?? o.effectivePeriod?.start;
 
 function firstCode(o: Observation): string | undefined {
   const c = o.code?.coding?.[0];

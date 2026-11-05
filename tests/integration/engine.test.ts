@@ -168,6 +168,32 @@ test('equal value already written by the agent is skipped without a conflict', a
   expect(ccdaIds(found[0])).toHaveLength(0);
 });
 
+test('same day but different time of day flags possible-duplicate, not a merge', async () => {
+  const a = chol(uid('obs'), 230, '2023-10-01T08:00:00Z');
+  const b = chol(uid('obs'), 230, '2023-10-01T17:30:00Z');
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 1, merged: 0 });
+  const found = await client.searchResources('Observation', `subject=Patient/${pid}&code=http://loinc.org|2093-3&date=ge2023-10-01&date=lt2023-10-02`);
+  expect(found).toHaveLength(2);
+  expect(found.every((o) => tagged(o, 'possible-duplicate'))).toBe(true);
+});
+
+test('agent value equal to an importer record only adds its identifier; the hospital body stays', async () => {
+  const a = { ...chol(uid('obs'), 240, '2023-11-01'), interpretation: [{ text: 'hospital' }] };
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  const [before] = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-11-01' });
+  const agent: SourceInfo = { kind: 'pdf', file: 'synthetic.pdf', date: '2025-01-01', writer: 'agent', llm: true };
+  const b = { ...chol(uid('obs'), 240, '2023-11-01'), interpretation: [{ text: 'llm' }] };
+  expect(await importResources(client, [b], agent, pid, uid('file'))).toMatchObject({ merged: 1, created: 0, updated: 0 });
+  const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-11-01' }, { cache: 'no-cache' });
+  expect(found).toHaveLength(1);
+  const gaIds = (found[0].identifier ?? []).filter((i) => i.system?.startsWith('urn:ga-server:id:'));
+  expect(gaIds.map((i) => i.system).sort()).toEqual(['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf']);
+  expect(found[0].interpretation).toEqual(before.interpretation);
+  expect(tagged(found[0], 'writer-importer')).toBe(true);
+  expect(await importResources(client, [a], ccda('2024-01-01'), pid, 'h')).toMatchObject({ skipped: 1, updated: 0, merged: 0 });
+});
+
 test('newer importer source does not overwrite agent-written record', async () => {
   const id = uid('med');
   // Same ccda identifier on both sides so the importer finds the agent's record by identifier.

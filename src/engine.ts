@@ -1,7 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { contentHash, contentKey, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { contentHash, contentKey, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -46,7 +46,8 @@ function body(r: R): unknown {
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 
-export function decide(existingRes: Resource | undefined, incomingRes: Resource): Decision {
+// author: GA's own writer reference (ClientApplication/<id>); a record last changed by anyone else is a person's edit.
+export function decide(existingRes: Resource | undefined, incomingRes: Resource, author?: string): Decision {
   if (!existingRes) return 'create';
   const existing = existingRes as R;
   const incoming = incomingRes as R;
@@ -56,7 +57,9 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource)
   const have = new Set(idList(existing).map(idKey));
   const subset = idList(incoming).every((i) => have.has(idKey(i)));
   if (subset && canon(body(existing)) === canon(body(incoming))) return 'skip';
-  // Only a write that would actually happen is a conflict.
+  // Only a write that would actually happen is a conflict. The source-conflict tag sticks: tagging it made GA the author.
+  const lastBy = existing.meta?.author?.reference;
+  if ((author && lastBy && lastBy !== author) || hasTag(existing, 'source-conflict')) return 'conflict';
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
 
@@ -118,6 +121,8 @@ export async function importResources(
   const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
+  const me = client.getProfile();
+  const author = me ? `${me.resourceType}/${me.id}` : undefined;
 
   const patient = await client.readResource('Patient', patientId);
   const have = new Set((patient.identifier ?? []).map(idKey));
@@ -165,18 +170,20 @@ export async function importResources(
     // Searches stay outside the try: only a write's validation failure is tolerated.
     const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
     const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
+    // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time on that (UTC) day.
+    const day = key?.split('|')[2];
+    const next = day && new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10);
     const matches = key
-      ? await client.searchResources('Observation', {
-          subject: `Patient/${patientId}`,
-          code: key.split('|').slice(0, 2).join('|'),
-          date: key.split('|')[2],
-        })
+      ? await client.searchResources(
+          'Observation',
+          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
+        )
       : [];
     try {
       let target: Resource;
       if (existing) {
         target = existing;
-        const d = decide(existing, incoming);
+        const d = decide(existing, incoming, author);
         if (d === 'update') {
           await unionUpdate(client, existing, incoming);
           report.updated++;
@@ -185,14 +192,16 @@ export async function importResources(
           report.conflicts++;
         } else report.skipped++;
       } else {
-        const same = matches.find((m) => sameValue(m, incoming as Observation)) as R | undefined;
+        // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
+        const same = matches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
-          const d = decide(same, incoming);
+          const d = decide(same, incoming, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           if (d === 'conflict') report.skipped++;
           else {
-            if (d === 'update') await unionUpdate(client, same, incoming);
+            // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
+            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent')) await unionUpdate(client, same, incoming);
             else await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
             report.merged++;
           }

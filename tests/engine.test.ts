@@ -53,10 +53,23 @@ test('re-stamped Composition with singular identifier skips', () => {
   expect(decide(existing(comp, src('2024-01-01')), stamp({ ...comp, title: 'u' } as Resource, src('2024-02-01'), ID))).toBe('update');
 });
 
+test('a record last changed by someone other than GA conflicts; the source-conflict tag sticks', () => {
+  const GA = 'ClientApplication/ga';
+  const by = (author: string, tag?: string): Resource => {
+    const ex = existing(ms('active'), src('2024-01-01'));
+    return { ...ex, meta: { ...ex.meta, author: { reference: author }, tag: [...(ex.meta?.tag ?? []), ...(tag ? [{ system: 'urn:ga-server:tag', code: tag }] : [])] } };
+  };
+  const newer = stamp(ms('stopped'), src('2024-06-01'), ID);
+  expect(decide(by('Practitioner/person'), newer, GA)).toBe('conflict');
+  expect(decide(by(GA, 'source-conflict'), newer, GA)).toBe('conflict');
+  expect(decide(by(GA), newer, GA)).toBe('update');
+  expect(decide(by('Practitioner/person'), stamp(ms('active'), src('2024-06-01'), ID), GA)).toBe('skip'); // nothing to write
+});
 
 // Fake client: one failure injected at search or create.
 const fake = (where: 'search' | 'create', err: Error) =>
   ({
+    getProfile: () => undefined,
     readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
     updateResource: async (r: Resource) => r,
     searchOne: async () => {
