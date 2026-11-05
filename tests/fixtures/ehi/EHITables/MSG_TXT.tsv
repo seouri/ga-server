@@ -1,0 +1,4 @@
+MESSAGE_ID	LINE	MSG_TXT
+900001	1	plain line
+900001	2	"a	b
+c ""q"""
