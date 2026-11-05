@@ -136,3 +136,39 @@ test('older source after newer does not revert', async () => {
   const m = await client.searchOne('MedicationStatement', { identifier: `urn:ga-server:id:ccda|${id}` });
   expect(m?.status).toBe('stopped');
 });
+
+test('merged observation differing in a non-key field re-imports as a no-op', async () => {
+  const a = { ...chol(uid('obs'), 205, '2023-07-01'), issued: '2023-07-02T00:00:00Z' };
+  const b = { ...chol(uid('obs'), 205, '2023-07-01'), issued: '2023-07-09T00:00:00Z' };
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ merged: 1, created: 0 });
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ skipped: 1, updated: 0, merged: 0 });
+  expect(await importResources(client, [a], ccda('2024-01-01'), pid, 'h')).toMatchObject({ skipped: 1, updated: 0, merged: 0 });
+  const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-07-01' });
+  expect(found).toHaveLength(1);
+  expect(found[0].identifier).toHaveLength(2);
+});
+
+test('equal value already written by the agent is skipped without a conflict', async () => {
+  const agent: SourceInfo = { kind: 'pdf', file: 'synthetic.pdf', date: '2024-01-01', writer: 'agent', llm: true };
+  await importResources(client, [chol(uid('obs'), 210, '2023-08-01')], agent, pid, uid('file'));
+  const b = chol(uid('obs'), 210, '2023-08-01');
+  for (let i = 0; i < 2; i++) {
+    expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ skipped: 1, conflicts: 0, merged: 0, created: 0 });
+  }
+  const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-08-01' });
+  expect(found).toHaveLength(1);
+  expect(tagged(found[0], 'source-conflict')).toBe(false);
+  expect(found[0].identifier).toHaveLength(1);
+});
+
+test('newer importer source does not overwrite agent-written record', async () => {
+  const id = uid('med');
+  // Same ccda identifier on both sides so the importer finds the agent's record by identifier.
+  await importResources(client, [med(id, 'active')], { ...ccda('2024-01-01'), writer: 'agent' }, pid, 'h');
+  expect(await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h')).toMatchObject({ conflicts: 1, updated: 0 });
+  expect(await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h')).toMatchObject({ conflicts: 1, updated: 0 });
+  const m = await client.searchOne('MedicationStatement', { identifier: `urn:ga-server:id:ccda|${id}` });
+  expect(m?.status).toBe('active');
+  expect(m?.meta?.tag?.filter((t) => t.system === TAG && t.code === 'source-conflict')).toHaveLength(1);
+});

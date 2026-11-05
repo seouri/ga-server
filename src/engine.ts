@@ -33,13 +33,14 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource)
   if (!existingRes) return 'create';
   const existing = existingRes as R;
   const incoming = incomingRes as R;
-  if (hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer')) return 'conflict';
   const ed = srcDate(existing);
   const id = srcDate(incoming);
   if (ed && id && Date.parse(id) <= Date.parse(ed)) return 'skip';
   const have = new Set((existing.identifier ?? []).map(idKey));
   const subset = (incoming.identifier ?? []).every((i) => have.has(idKey(i)));
-  return subset && canon(body(existing)) === canon(body(incoming)) ? 'skip' : 'update';
+  if (subset && canon(body(existing)) === canon(body(incoming))) return 'skip';
+  // Only a write that would actually happen is a conflict.
+  return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
 
 const sourceKeys = (r: Resource) => (r.id ? [`${r.resourceType}/${r.id}`, `urn:uuid:${r.id}`] : []);
@@ -73,6 +74,21 @@ const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.m
 function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueQuantity && b.valueQuantity) return a.valueQuantity.value === b.valueQuantity.value && a.valueQuantity.unit === b.valueQuantity.unit;
   return a.valueString !== undefined && a.valueString === b.valueString;
+}
+
+// Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
+async function unionUpdate(client: MedplumClient, existing: R, incoming: R): Promise<void> {
+  const ids = [...(existing.identifier ?? [])];
+  for (const i of incoming.identifier ?? []) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
+  const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
+  const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF);
+  await client.updateResource({
+    ...incoming,
+    id: existing.id,
+    identifier: ids,
+    meta: { ...incoming.meta, tag: [...(incoming.meta?.tag ?? []), ...kept] },
+    extension: [...(incoming.extension ?? []), ...dupOf],
+  } as Resource);
 }
 
 export async function importResources(
@@ -112,17 +128,7 @@ export async function importResources(
       target = existing;
       const d = decide(existing, incoming);
       if (d === 'update') {
-        const ids = [...(existing.identifier ?? [])];
-        for (const i of incoming.identifier ?? []) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
-        const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
-        const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF);
-        await client.updateResource({
-          ...incoming,
-          id: existing.id,
-          identifier: ids,
-          meta: { ...incoming.meta, tag: [...(incoming.meta?.tag ?? []), ...kept] },
-          extension: [...(incoming.extension ?? []), ...dupOf],
-        } as Resource);
+        await unionUpdate(client, existing, incoming);
         report.updated++;
       } else if (d === 'conflict') {
         if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
@@ -139,9 +145,15 @@ export async function importResources(
         : [];
       const same = matches.find((m) => sameValue(m, incoming as Observation)) as R | undefined;
       if (same) {
-        await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
         target = same;
-        report.merged++;
+        const d = decide(same, incoming);
+        // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
+        if (d === 'conflict') report.skipped++;
+        else {
+          if (d === 'update') await unionUpdate(client, same, incoming);
+          else await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
+          report.merged++;
+        }
       } else if (matches.length) {
         const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `Observation/${o.id}` } });
         target = await client.createResource(

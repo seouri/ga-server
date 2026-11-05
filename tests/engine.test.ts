@@ -38,3 +38,9 @@ test('agent-written conflicts', () => {
   const ex = existing(ms('active'), src('2024-01-01', 'agent'));
   expect(decide(ex, stamp(ms('stopped'), src('2024-06-01'), ID))).toBe('conflict');
 });
+
+test('agent-written equal content skips', () => {
+  const ex = existing(ms('active'), src('2024-01-01', 'agent'));
+  expect(decide(ex, stamp(ms('active'), src('2024-06-01'), ID))).toBe('skip');
+  expect(decide(ex, stamp(ms('stopped'), src('2023-06-01'), ID))).toBe('skip');
+});
