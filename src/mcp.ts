@@ -97,10 +97,17 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
   console.log = console.info = console.error;
   const client = await getClient(cfg);
   const patientId = process.env.GA_PATIENT_ID || cfg.patientId; // env override is for tests only
-  const server = new McpServer({ name: 'ga-server', version: '0.1.0' });
+  const server = new McpServer(
+    { name: 'ga-server', version: '0.1.0' },
+    {
+      instructions:
+        "GA (Guardian Angel) is the user's personal health record: labs, vitals, medications, problems and documents from their hospitals. " +
+        "For any question about the user's own health, look here first and cite the records you use.",
+    },
+  );
   server.registerTool(
     'fhir_search',
-    { description: 'Search GA FHIR resources.', inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) } },
+    { description: "Search the user's personal health record (GA) by FHIR resource type and search params.", inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) } },
     async ({ resourceType, params }) => {
       try {
         const b = await client.search(resourceType as 'Observation', { ...params, _count: String(Math.min(Number(params._count) || 20, 1000)) }, { cache: 'no-cache' });
@@ -113,7 +120,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
   );
   server.registerTool(
     'fhir_read',
-    { description: 'Read one GA FHIR resource.', inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() } },
+    { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() } },
     async ({ resourceType, id }) => {
       try {
         return text(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' }));
