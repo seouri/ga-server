@@ -1,0 +1,39 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { MedplumClient } from '@medplum/core';
+
+export class GaError extends Error {}
+
+export type GaConfig = {
+  baseUrl: string;
+  clientId: string;
+  clientSecret: string;
+  patientId: string;
+  converterUrl: string;
+};
+
+// Resolved from this module, not cwd: agents spawn `ga` from arbitrary directories.
+export const defaultConfigPath = (): string =>
+  process.env.GA_CONFIG || join(dirname(fileURLToPath(import.meta.url)), '..', '.ga', 'config.json');
+
+export function loadConfig(path = defaultConfigPath()): GaConfig {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as GaConfig;
+  } catch {
+    throw new GaError('run ga setup first');
+  }
+}
+
+export async function getClient(cfg: GaConfig): Promise<MedplumClient> {
+  const client = new MedplumClient({ baseUrl: cfg.baseUrl });
+  try {
+    await client.startClientLogin(cfg.clientId, cfg.clientSecret);
+  } catch (e) {
+    if (JSON.stringify([e, (e as Error)?.cause]).includes('ECONNREFUSED') || (e as Error)?.message === 'fetch failed') {
+      throw new GaError('GA is not running: run docker compose up');
+    }
+    throw e;
+  }
+  return client;
+}

@@ -1,2 +1,8 @@
 .DS_Store
 .superpowers/
+.ga/
+data/
+node_modules/
+.env
+*.pdf
+!tests/fixtures/**/*.pdf

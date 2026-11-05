@@ -1,0 +1,26 @@
+{
+  "name": "ga-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "bin": {
+    "ga": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run --exclude 'tests/integration/**'",
+    "test:int": "vitest run tests/integration --no-file-parallelism",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@medplum/core": "5.2.14",
+    "@medplum/fhirtypes": "5.2.14"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
