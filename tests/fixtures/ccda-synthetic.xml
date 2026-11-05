@@ -125,7 +125,7 @@
           <entry>
             <organizer classCode="BATTERY" moodCode="EVN">
               <templateId root="2.16.840.1.113883.10.20.22.4.1" extension="2015-08-01"/>
-              <id root="2.25.7001" extension="syn-panel-1"/>
+              <id root="1.2.840.114350.1.13.99.2.7.2.798268" extension="9000001"/>
               <code code="57698-3" codeSystem="2.16.840.1.113883.6.1" displayName="Lipid panel"/>
               <statusCode code="completed"/>
               <effectiveTime value="20240301"/>
@@ -133,7 +133,7 @@
                 <observation classCode="OBS" moodCode="EVN">
                   <templateId root="2.16.840.1.113883.10.20.22.4.2" extension="2015-08-01"/>
                   <id root="2.25.7002" extension="syn-ldl-1"/>
-                  <code code="13457-7" codeSystem="2.16.840.1.113883.6.1" displayName="LDL Cholesterol (calc)"/>
+                  <code code="13457-7" codeSystem="2.16.840.1.113883.6.1" displayName="LDL CALCULATED"/>
                   <statusCode code="completed"/>
                   <effectiveTime value="20240301"/>
                   <value xsi:type="PQ" value="111" unit="mg/dL"/>
