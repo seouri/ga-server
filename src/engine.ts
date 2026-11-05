@@ -211,7 +211,10 @@ export async function importResources(
             withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches as R[]) {
-            const tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
+            let tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
+            // This write makes GA the author: keep a person's edit protected through the sticky source-conflict tag.
+            const lastBy = m.meta?.author?.reference;
+            if (author && lastBy && lastBy !== author && !hasTag(tag, 'source-conflict')) tag = withTag(tag, 'source-conflict');
             await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
           }
           report.possibleDuplicates++;
