@@ -68,9 +68,9 @@ export async function resolveUnlinked(
       // an ambiguous link that the engine creates from this record, unfilled).
       const [own, ...rest] = (r as Condition | Encounter).identifier ?? [];
       const type = r.resourceType as 'Condition' | 'Encounter';
-      const stored = (await client.searchResources(type, { identifier: `${own.system}|${own.value}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' })).length > 0;
+      const stored = !!own?.value && (await client.searchResources(type, { identifier: `${own.system}|${own.value}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' })).length > 0;
       const epic = rest.filter((x) => x.system?.startsWith(EPIC_OID) && x.value);
-      const linked = stored || (epic.length > 0 && (await linkCandidates(client, type, epic, patientId, own.system as string)).free.length === 1);
+      const linked = stored || (epic.length > 0 && (await linkCandidates(client, type, epic, patientId, own?.system as string)).free.length === 1);
       if (!linked && nameless) {
         skippedNoName++;
         continue;

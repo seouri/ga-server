@@ -73,9 +73,9 @@ function fillFrom(existing: R, incoming: R, s: SourceInfo): R {
   const drop = (k: string): boolean => {
     if (BOOKKEEPING.has(k) || inc[k] !== undefined || incBases.has(choiceBase(k))) return true;
     if (incoming.resourceType !== 'Condition') return false;
-    // An open problem has no abatement; an entered-in-error one has no clinical status.
-    if (k.startsWith('abatement') && inc.clinicalStatus && !['resolved', 'inactive', 'remission'].includes(code0(inc.clinicalStatus) ?? '')) return true;
-    return k === 'clinicalStatus' && code0(inc.verificationStatus) === 'entered-in-error';
+    // An open problem has no abatement; an entered-in-error one has neither clinical status nor abatement (con-3, con-4).
+    if (code0(inc.verificationStatus) === 'entered-in-error') return k === 'clinicalStatus' || k.startsWith('abatement');
+    return k.startsWith('abatement') && !!inc.clinicalStatus && !['resolved', 'inactive', 'remission'].includes(code0(inc.clinicalStatus) ?? '');
   };
   const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !drop(k)));
   return { ...kept, ...incoming } as R;

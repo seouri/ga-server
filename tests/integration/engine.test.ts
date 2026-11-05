@@ -420,9 +420,9 @@ test('an active EHI problem over a C-CDA problem with abatement drops the abatem
   expect(found.text).toBeUndefined();
 });
 
-test('an entered-in-error EHI problem drops the C-CDA clinical status', async () => {
+test('an entered-in-error EHI problem drops the C-CDA clinical status and abatement', async () => {
   const pl = { system: PROBLEM_OID, value: uid('pl') };
-  await importResources(client, [problem([pl], 'active')], ccda('2024-01-01'), pid, 'h');
+  await importResources(client, [{ ...problem([pl], 'resolved'), abatementDateTime: '2023-01-01' } as Resource], ccda('2024-01-01'), pid, 'h');
   const { code: _c, clinicalStatus: _s, ...e } = {
     ...problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'active'),
     verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'entered-in-error' }] },
@@ -431,4 +431,5 @@ test('an entered-in-error EHI problem drops the C-CDA clinical status', async ()
   const [found] = await byId('Condition', pl.system, pl.value);
   expect(found.clinicalStatus).toBeUndefined();
   expect(found.verificationStatus?.coding?.[0]?.code).toBe('entered-in-error');
+  expect(found.abatementDateTime).toBeUndefined();
 });

@@ -47,7 +47,7 @@ export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(r.DESCRIPTION && { code: { text: r.DESCRIPTION } }),
       subject: PATIENT_REF,
       ...(onsetDateTime && { onsetDateTime }),
-      ...(abatementDateTime && { abatementDateTime }),
+      ...(abatementDateTime && !deleted && { abatementDateTime }),
       ...(recordedDate && { recordedDate }),
     };
   });

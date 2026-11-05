@@ -111,3 +111,9 @@ test('an ambiguous CSN link counts as unlinked: the EHI Encounter gets class UNK
   const r = await importResources(client, resources, { kind: 'ehi', file: EHI, date: '2026-01-17T08:30:00-05:00', writer: 'importer' }, pid, 'h');
   expect(r).toMatchObject({ possibleDuplicates: 1, invalid: 0 });
 });
+
+test('resolveUnlinked passes a record with no identifiers through without a lookup', async () => {
+  const e = { resourceType: 'Encounter', id: 'y', identifier: [], status: 'finished', subject: { reference: `Patient/${pid}` } } as unknown as Encounter;
+  const { resources } = await resolveUnlinked(client, [e], pid);
+  expect((resources[0] as Encounter).class?.code).toBe('UNK');
+});

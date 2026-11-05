@@ -143,4 +143,14 @@ describe('EHI mappers', () => {
     const one = await linkResultsToExisting(client, [{ ...dr, result: [{ reference: 'Observation/a' }] }, line('a')], 'p');
     expect(one).toMatchObject({ identified: 1, unidentified: 0 });
   });
+
+  it('an entered-in-error problem gets no clinical status and no abatement', () => {
+    const base = t();
+    const rows = (table: string) =>
+      table === 'PROBLEM_LIST' ? [{ ...base.rows(table)[1], PROBLEM_STATUS_C_NAME: 'Deleted' }] : base.rows(table);
+    const [c] = (mapConditions({ rows } as unknown as EhiTables, ctx) as Condition[]).filter((x) => x.id?.startsWith('PROBLEM_LIST'));
+    expect(c.verificationStatus?.coding?.[0]?.code).toBe('entered-in-error');
+    expect(c.clinicalStatus).toBeUndefined();
+    expect(c.abatementDateTime).toBeUndefined();
+  });
 });
