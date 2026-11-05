@@ -1,4 +1,4 @@
-import { globSync, readFileSync } from 'node:fs';
+import { globSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ResourceType } from '@medplum/fhirtypes';
 import { expect, test, vi } from 'vitest';
@@ -104,3 +104,46 @@ test.skipIf(!root)('real ccda imports twice without duplicates', async () => {
   expect(patients).toBe(1);
   expect(after2).toEqual(after1);
 }, 3_600_000);
+
+const L = (c: string) => c.split(',').map((x) => `http://loinc.org|${x}`).join(',');
+const inputs: [string, string, Record<string, string>][] = [
+  ['total cholesterol', 'Observation', { code: L('2093-3') }],
+  ['HDL', 'Observation', { code: L('2085-9') }],
+  ['LDL', 'Observation', { code: L('13457-7,18262-6') }],
+  ['systolic BP', 'Observation', { code: L('8480-6') }],
+  ['A1c', 'Observation', { code: L('4548-4') }],
+  ['smoking', 'Observation', { code: L('72166-2') }],
+  ['eGFR', 'Observation', { code: L('33914-3,62238-1,98979-8') }],
+  ['BMI', 'Observation', { code: L('39156-5') }],
+];
+
+// Acceptance 10.4: presence/count only (never values), written to a gitignored file.
+test.skipIf(!root)('milestone-1 input presence on the real patient', async () => {
+  const cfg = loadConfig();
+  const client = await getClient(cfg);
+  const pid = cfg.patientId;
+  const table: Record<string, { present: boolean; count: number; allHaveSource: boolean }> = {};
+  const add = (name: string, items: { meta?: { source?: string } }[]) => {
+    table[name] = { present: items.length > 0, count: items.length, allHaveSource: items.every((i) => !!i.meta?.source) };
+  };
+
+  const p = await client.readResource('Patient', pid);
+  table['age (birthDate)'] = { present: !!p.birthDate, count: p.birthDate ? 1 : 0, allHaveSource: !!p.meta?.source };
+  table['sex (gender)'] = { present: !!p.gender, count: p.gender ? 1 : 0, allHaveSource: !!p.meta?.source };
+  for (const [name, type, q] of inputs) {
+    add(name, await client.searchResources(type as ResourceType, { ...q, patient: pid, _count: 1000 }, { cache: 'no-cache' }));
+  }
+  // BP-med status: active medication list (query must run; count may be 0).
+  const meds = [
+    ...(await client.searchResources('MedicationStatement', { patient: pid, status: 'active', _count: 1000 }, { cache: 'no-cache' })),
+    ...(await client.searchResources('MedicationRequest', { patient: pid, status: 'active', _count: 1000 }, { cache: 'no-cache' })),
+  ];
+  add('BP-med status (active meds)', meds);
+
+  writeFileSync(
+    '.superpowers/sdd/2026-11-05-ga-server-milestone-1/task-7-presence.json',
+    JSON.stringify(table, null, 1),
+  );
+  console.log(JSON.stringify(table));
+  expect(Object.entries(table).filter(([, v]) => v.present && !v.allHaveSource)).toEqual([]);
+}, 600_000);
