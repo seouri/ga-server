@@ -24,9 +24,14 @@ try {
       console.log(JSON.stringify(await importExtracted(await getClient(cfg), cfg, resources, file)));
     } else if (isEhiExport(file)) {
       // R17: the zone the export's local times are in: --tz, else GA_EHI_TZ, else this machine's zone (exportInfo).
-      const tz = process.argv[4] === '--tz' ? (process.argv[5] ?? '') : undefined;
+      const args = process.argv.slice(4);
+      let tz: string | undefined;
+      if (args.length === 1 && args[0].startsWith('--tz=')) tz = args[0].slice(5);
+      else if (args.length === 2 && args[0] === '--tz') tz = args[1];
+      else if (args.length) throw new GaError('usage: ga import <ehi-folder> [--tz <IANA zone>]');
       if (tz !== undefined) {
         try {
+          if (!tz) throw new RangeError();
           new Intl.DateTimeFormat('en', { timeZone: tz });
         } catch {
           throw new GaError(`--tz needs an IANA time zone, e.g. America/New_York: ${tz}`);

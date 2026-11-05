@@ -251,6 +251,11 @@ test.skipIf(!root)('real EHI export: dry pass valid, imports twice without dupli
   out.second = second;
   out.after2 = await byType();
   out.flagsAfter = await flagTotals();
+  // R21: linked MedicationRequests keep the C-CDA's coded medication.
+  const linkedMeds = (await client.searchResources('MedicationRequest', { subject: `Patient/${pid}`, identifier: `${ehiSys}|`, _count: '1000' }, { cache: 'no-cache' })).filter(
+    (m) => m.identifier?.some((i) => i.system === 'urn:ga-server:id:ccda'),
+  );
+  out.linkedMedicationRequests = { total: linkedMeds.length, withMedicationReference: linkedMeds.filter((m) => m.medicationReference).length };
   out.patients = (await client.searchResources('Patient', { _count: 1000 }, { cache: 'no-cache' })).filter(
     (p) => !p.meta?.tag?.some((g) => g.system === 'urn:ga-server:tag' && g.code === 'ga-test'),
   ).length;

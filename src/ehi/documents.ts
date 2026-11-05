@@ -121,8 +121,19 @@ async function store(client: MedplumClient, path: string, patientId: string, typ
 // with relatesTo "transforms". Not a Binary attachment on the note: Medplum returns attachment URLs presigned with
 // an expiry, so the engine would see every re-imported note as changed. Media files go through storeDocument too.
 // The batch includes the export's Encounters so note/message encounter references resolve (no-ops once imported).
-export async function importDocuments(client: MedplumClient, dir: string, t: EhiTables, ctx: EhiCtx, patientId: string): Promise<ImportReport> {
+// counts: files not imported, by reason (they stay in the archive): a media file of unknown type, a Rich Text file no note uses.
+export async function importDocuments(
+  client: MedplumClient,
+  dir: string,
+  t: EhiTables,
+  ctx: EhiCtx,
+  patientId: string,
+  counts = { mediaUnknownType: 0, rtfNoNote: 0 },
+): Promise<ImportReport> {
   const notes = mapNotes(t, ctx, dir);
+  const rtfDir = join(dir, 'Rich Text');
+  const used = new Set([...notes.rtf.values()].flat());
+  counts.rtfNoNote += (existsSync(rtfDir) ? readdirSync(rtfDir) : []).filter((f) => !used.has(join(rtfDir, f))).length;
   let filesCreated = 0;
   let filesSkipped = 0;
   const count = (created: boolean) => (created ? filesCreated++ : filesSkipped++);
@@ -143,6 +154,7 @@ export async function importDocuments(client: MedplumClient, dir: string, t: Ehi
     const type = MEDIA_TYPE[extname(f).toLowerCase()];
     if (!type) {
       console.error(`media skipped, unknown type: ${extname(f)}`);
+      counts.mediaUnknownType++;
       filesSkipped++;
       continue;
     }

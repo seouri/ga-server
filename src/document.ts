@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { DocumentReference } from '@medplum/fhirtypes';
+import type { DocumentReference, Identifier } from '@medplum/fhirtypes';
 
 // Stores the source file once per content hash: Binary plus a DocumentReference identified by the hash.
 export async function storeDocument(
@@ -10,6 +10,7 @@ export async function storeDocument(
   filePath: string,
   patientId: string,
   contentType: string,
+  extraIdentifiers: Identifier[] = [], // written in the same create, so the record is never without them
 ): Promise<{ docRef: DocumentReference; fileHash: string }> {
   const data = readFileSync(filePath);
   const fileHash = createHash('sha256').update(data).digest('hex');
@@ -22,7 +23,7 @@ export async function storeDocument(
     {
       resourceType: 'DocumentReference',
       status: 'current',
-      identifier: [{ system: 'urn:ga-server:id:file', value: fileHash }],
+      identifier: [{ system: 'urn:ga-server:id:file', value: fileHash }, ...extraIdentifiers],
       subject: { reference: `Patient/${patientId}` },
       content: [{ attachment: { contentType, url: `Binary/${bin.id}`, title: basename(filePath) } }],
     },

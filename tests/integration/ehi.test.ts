@@ -130,6 +130,23 @@ test('resolveUnlinked passes a record with no identifiers through without a look
 
 // The full orchestrator. Same patient as the tests above: EHI stable identifiers are global, so the fixture's records
 // already belong to this patient.
+test('R21: an EHI text-only medication never replaces a coded C-CDA medication', async () => {
+  const order = `syn-${randomUUID()}`;
+  const epic = { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.798268', value: order };
+  const med = { resourceType: 'Medication', id: 'm1', identifier: [{ system: 'urn:test:med', value: order }], code: { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '0000' }], text: 'Synthetic drug' } } as Resource;
+  const ccdaMr = { resourceType: 'MedicationRequest', id: 'r1', identifier: [{ system: 'urn:test:src', value: order }, epic], status: 'active', intent: 'order', medicationReference: { reference: 'Medication/m1' }, subject: { reference: `Patient/${pid}` } } as Resource;
+  await importResources(client, [med, ccdaMr], { kind: 'ccda', file: 'synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
+  const ehiMr = { resourceType: 'MedicationRequest', id: 'x', identifier: [{ system: 'urn:ga-server:id:ehi:synthetic-health', value: `ORDER_MED|${order}` }, epic], status: 'active', intent: 'order', medicationCodeableConcept: { text: 'SYNTHETIC DRUG' }, subject: { reference: `Patient/${pid}` } } as Resource;
+  const src: SourceInfo = { kind: 'ehi', file: EHI, date: '2026-01-17T08:30:00-05:00', writer: 'importer' };
+  expect(await importResources(client, [ehiMr], src, pid, '')).toMatchObject({ invalid: 0, possibleDuplicates: 0, created: 0 });
+  const [mr] = await client.searchResources('MedicationRequest', { subject: `Patient/${pid}`, identifier: `${epic.system}|${order}` }, { cache: 'no-cache' });
+  expect(mr.medicationReference?.reference).toMatch(/^Medication\//);
+  expect(mr.medicationCodeableConcept).toBeUndefined();
+  expect(await importResources(client, [ehiMr], src, pid, '')).toMatchObject({ created: 0, updated: 0 });
+  const m = await client.readReference(mr.medicationReference as never);
+  await client.deleteResource('Medication', m.id as string); // shared type: not in the patient compartment
+});
+
 const files = (d: string): { n: number; size: number } => {
   const fs = readdirSync(d, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
   return { n: fs.length, size: fs.reduce((s, e) => s + statSync(join(e.parentPath, e.name)).size, 0) };
@@ -138,14 +155,16 @@ const archives = () => client.searchResources('DocumentReference', { subject: `P
 
 test('importing the EHI fixture twice is a no-op', async () => {
   const first = await importEhi(client, cfg, EHI, pid);
-  expect(first).toMatchObject({ invalid: 0, skippedTables: 0, archived: true });
+  expect(first).toMatchObject({ invalid: 0, skippedTables: 0, archived: 'stored' });
   const second = await importEhi(client, cfg, EHI, pid);
-  expect(second).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0, archived: true });
+  expect(second).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0, archived: 'already-present' });
 });
 
 test('archive is stored once and unpacks to the same file count', async () => {
   const found = await archives();
   expect(found).toHaveLength(1);
+  // Created with its manifest identifier (never untagged) and the file hash.
+  expect(found[0].identifier?.map((i) => i.system).sort()).toEqual(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:file']);
   const url = found[0].content[0].attachment.url as string;
   const blob = await client.download(url);
   const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-test-'));
@@ -159,14 +178,18 @@ test('archive is stored once and unpacks to the same file count', async () => {
   }
 });
 
-test('skipped tables are reported', async () => {
+test('skipped tables and unused files are reported with reasons', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-test-'));
   try {
     cpSync(EHI, tmp, { recursive: true });
     rmSync(join(tmp, 'EHITables', 'SOCIAL_HX.tsv'));
     const q = join(tmp, 'EHITables', 'V_EHI_HQA_QUEST_ANSWER.tsv');
     writeFileSync(q, `${readFileSync(q, 'utf8').split('\r\n')[0]}\r\n`);
+    writeFileSync(join(tmp, 'Media', 'odd.xyz'), 'synthetic');
+    writeFileSync(join(tmp, 'Rich Text', 'HNO_999999_1_41.RTF'), '{\\rtf1 synthetic}');
     const r = await importEhi(client, cfg, tmp, pid);
+    expect(r.skips).toMatchObject({ mediaUnknownType: 1, rtfNoNote: 1 });
+    expect(r.archived).toBe('stored');
     expect(r.skippedTables).toBe(2);
     expect(r.skips.tables).toEqual(expect.arrayContaining([{ table: 'SOCIAL_HX', reason: 'missing' }, { table: 'V_EHI_HQA_QUEST_ANSWER', reason: 'empty' }]));
     expect(r).toMatchObject({ created: 0, invalid: 0 });

@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { createReadStream, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, relative, sep } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
-import type { GaConfig } from '../config.ts';
+import { pipeline } from 'node:stream/promises';
+import { GaError, type GaConfig } from '../config.ts';
 import { storeDocument } from '../document.ts';
 import { importResources, type ImportReport } from '../engine.ts';
 import { mapConditions } from './conditions.ts';
@@ -62,30 +63,35 @@ export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCt
 
 // R1: the archive's identity is the folder's manifest (sorted relative paths, sizes, sha256s), not the tarball, whose
 // bytes change with every tar run (timestamps), so a re-import finds it and skips tar and upload.
-export function manifestHash(dir: string): string {
-  const lines = readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => {
-      const p = join(e.parentPath, e.name);
-      const data = readFileSync(p);
-      return `${relative(dir, p).split(sep).join('/')}\t${data.length}\t${createHash('sha256').update(data).digest('hex')}`;
-    })
-    .sort();
-  return createHash('sha256').update(lines.join('\n')).digest('hex');
+export async function manifestHash(dir: string): Promise<string> {
+  const lines: string[] = [];
+  for (const e of readdirSync(dir, { recursive: true, withFileTypes: true }).filter((x) => x.isFile())) {
+    const p = join(e.parentPath, e.name);
+    const h = createHash('sha256');
+    await pipeline(createReadStream(p), h); // streamed: an export can hold large media files
+    lines.push(`${relative(dir, p).split(sep).join('/')}\t${statSync(p).size}\t${h.digest('hex')}`);
+  }
+  return createHash('sha256').update(lines.sort().join('\n')).digest('hex');
 }
 
-async function archive(client: MedplumClient, dir: string, patientId: string): Promise<void> {
-  const id = { system: ARCHIVE, value: manifestHash(dir) };
+// shortcut: the tar.gz is uploaded as one Binary (10 MB for the real export); upgrade to chunks if exports reach GBs.
+async function archive(client: MedplumClient, dir: string, patientId: string): Promise<'stored' | 'already-present'> {
+  const id = { system: ARCHIVE, value: await manifestHash(dir) };
   const query = { identifier: `${id.system}|${id.value}`, subject: `Patient/${patientId}` };
-  if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return;
+  if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return 'already-present';
   const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-'));
   try {
     const file = join(tmp, `${basename(dir)}.tar.gz`);
     // shortcut: system tar (macOS/Linux); switch to a library only if Windows support is needed.
     // COPYFILE_DISABLE: macOS tar would otherwise add ._ metadata entries that aren't in the folder.
-    execFileSync('tar', ['-czf', file, '-C', dir, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
-    const { docRef } = await storeDocument(client, file, patientId, 'application/gzip');
-    await client.updateResource({ ...docRef, identifier: [...(docRef.identifier ?? []), id] });
+    // Output ignored and only the exit code reported: tar messages name files of the export.
+    try {
+      execFileSync('tar', ['-czf', file, '-C', dir, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' }, stdio: 'ignore' });
+    } catch (e) {
+      throw new GaError(`archive failed: tar exit ${(e as { status?: number }).status ?? 'unknown'}`);
+    }
+    await storeDocument(client, file, patientId, 'application/gzip', [id]);
+    return 'stored';
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -97,13 +103,20 @@ export async function importEhi(
   dir: string,
   patientId = cfg.patientId,
   timeZone?: string,
-): Promise<ImportReport & { skippedTables: number; archived: boolean; skips: Awaited<ReturnType<typeof prepareEhi>>['skips'] & { tables: EhiTables['skipped'] } }> {
+): Promise<
+  ImportReport & {
+    skippedTables: number;
+    archived: 'stored' | 'already-present';
+    skips: Awaited<ReturnType<typeof prepareEhi>>['skips'] & { mediaUnknownType: number; rtfNoNote: number; tables: EhiTables['skipped'] };
+  }
+> {
   const ctx = await ehiContext(client, dir, patientId, timeZone);
   const t = new EhiTables(dir);
   const { resources, skips } = await prepareEhi(client, t, ctx, patientId);
   const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');
-  const docs = await importDocuments(client, dir, t, ctx, patientId);
+  const files = { mediaUnknownType: 0, rtfNoNote: 0 };
+  const docs = await importDocuments(client, dir, t, ctx, patientId, files);
   for (const k of Object.keys(report) as (keyof ImportReport)[]) report[k] += docs[k];
-  await archive(client, dir, patientId);
-  return { ...report, skippedTables: t.skipped.length, archived: true, skips: { ...skips, tables: t.skipped } };
+  const archived = await archive(client, dir, patientId);
+  return { ...report, skippedTables: t.skipped.length, archived, skips: { ...skips, ...files, tables: t.skipped } };
 }

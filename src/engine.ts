@@ -66,8 +66,15 @@ const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
 // Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
 const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
 const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
-function fillFrom(existing: R, incoming: R, s: SourceInfo): R {
-  if (s.kind !== 'ehi') return incoming;
+function fillFrom(existing: R, incomingRes: R, s: SourceInfo): R {
+  if (s.kind !== 'ehi') return incomingRes;
+  // R21: a text-only medication never replaces a coded one (a Medication reference, or a concept with codings).
+  const ex = existing as unknown as Record<string, { coding?: unknown[] } | undefined>;
+  const med = (incomingRes as unknown as Record<string, { coding?: unknown[] } | undefined>).medicationCodeableConcept;
+  const incoming = { ...incomingRes } as R;
+  if (med && !med.coding?.length && (ex.medicationReference || ex.medicationCodeableConcept?.coding?.length)) {
+    delete (incoming as unknown as Record<string, unknown>).medicationCodeableConcept;
+  }
   const inc = incoming as unknown as Record<string, unknown>;
   const incBases = new Set(Object.keys(inc).filter((k) => inc[k] !== undefined).map(choiceBase));
   const drop = (k: string): boolean => {
