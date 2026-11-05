@@ -29,8 +29,26 @@ export function contentKey(o: Observation): string | undefined {
   return code && day ? `${code}|${day}` : undefined;
 }
 
+const sorted = (_k: string, v: unknown) =>
+  v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
+
+// Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
+// Without one: hash of the content minus id, meta and references (which point at per-document converter ids).
+// Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
+// diagnostic: 32 Observation and 6 Encounter groups), so for these types the source id alone is not unique.
+const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
+
+function ccdaKey(r: Resource): string {
+  const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
+  const { id: _id, meta: _meta, ...rest } = r;
+  const hash = () => sha256(`${r.resourceType}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? undefined : sorted(k, v)))}`);
+  if (!src?.value) return `${r.resourceType}|${hash()}`;
+  const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
+  return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${hash()}` : key;
+}
+
 export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string): Identifier {
-  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: r.id };
+  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r) };
   let key: string;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;
@@ -38,9 +56,7 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string): 
     key = [fileHash, firstCode(o) ?? o.code?.text ?? '', effective(o) ?? '', v].join('|');
   } else {
     const { id: _id, meta: _meta, ...rest } = r;
-    key = `${fileHash}|${r.resourceType}|${JSON.stringify(rest, (_k, v) =>
-      v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
-    )}`;
+    key = `${fileHash}|${r.resourceType}|${JSON.stringify(rest, sorted)}`;
   }
   return { system: 'urn:ga-server:id:pdf', value: sha256(key) };
 }

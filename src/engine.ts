@@ -1,17 +1,26 @@
-import type { MedplumClient } from '@medplum/core';
+import { type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
 import { contentKey, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
-export type ImportReport = { created: number; updated: number; skipped: number; merged: number; conflicts: number; possibleDuplicates: number };
+export type ImportReport = {
+  created: number;
+  updated: number;
+  skipped: number;
+  merged: number;
+  conflicts: number;
+  possibleDuplicates: number;
+  invalid: number;
+};
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
+const VALIDATION = ['structure', 'required', 'value', 'invariant', 'invalid'];
 
 const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
@@ -99,7 +108,7 @@ export async function importResources(
   patientId: string,
   fileHash: string,
 ): Promise<ImportReport> {
-  const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0 };
+  const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
 
@@ -122,55 +131,63 @@ export async function importResources(
     const incoming = stamp(r, source, ident) as R;
     delete incoming.id;
     const type = incoming.resourceType;
-    const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
-    let target: Resource;
+    try {
+      const existing = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
+      let target: Resource;
 
-    if (existing) {
-      target = existing;
-      const d = decide(existing, incoming);
-      if (d === 'update') {
-        await unionUpdate(client, existing, incoming);
-        report.updated++;
-      } else if (d === 'conflict') {
-        if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
-        report.conflicts++;
-      } else report.skipped++;
-    } else {
-      const key = type === 'Observation' ? contentKey(incoming as Observation) : undefined;
-      const matches = key
-        ? await client.searchResources('Observation', {
-            subject: `Patient/${patientId}`,
-            code: key.split('|').slice(0, 2).join('|'),
-            date: key.split('|')[2],
-          })
-        : [];
-      const same = matches.find((m) => sameValue(m, incoming as Observation)) as R | undefined;
-      if (same) {
-        target = same;
-        const d = decide(same, incoming);
-        // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
-        if (d === 'conflict') report.skipped++;
-        else {
-          if (d === 'update') await unionUpdate(client, same, incoming);
-          else await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
-          report.merged++;
-        }
-      } else if (matches.length) {
-        const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `Observation/${o.id}` } });
-        target = await client.createResource(
-          withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
-        );
-        for (const m of matches as R[]) {
-          const tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
-          await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
-        }
-        report.possibleDuplicates++;
+      if (existing) {
+        target = existing;
+        const d = decide(existing, incoming);
+        if (d === 'update') {
+          await unionUpdate(client, existing, incoming);
+          report.updated++;
+        } else if (d === 'conflict') {
+          if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
+          report.conflicts++;
+        } else report.skipped++;
       } else {
-        target = await client.createResource(incoming as Resource);
-        report.created++;
+        const key = type === 'Observation' ? contentKey(incoming as Observation) : undefined;
+        const matches = key
+          ? await client.searchResources('Observation', {
+              subject: `Patient/${patientId}`,
+              code: key.split('|').slice(0, 2).join('|'),
+              date: key.split('|')[2],
+            })
+          : [];
+        const same = matches.find((m) => sameValue(m, incoming as Observation)) as R | undefined;
+        if (same) {
+          target = same;
+          const d = decide(same, incoming);
+          // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
+          if (d === 'conflict') report.skipped++;
+          else {
+            if (d === 'update') await unionUpdate(client, same, incoming);
+            else await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
+            report.merged++;
+          }
+        } else if (matches.length) {
+          const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `Observation/${o.id}` } });
+          target = await client.createResource(
+            withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+          );
+          for (const m of matches as R[]) {
+            const tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
+            await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
+          }
+          report.possibleDuplicates++;
+        } else {
+          target = await client.createResource(incoming as Resource);
+          report.created++;
+        }
       }
+      for (const k of sourceKeys(src)) idMap.set(k, `${type}/${target.id}`);
+    } catch (e) {
+      const issues = e instanceof OperationOutcomeError ? (e.outcome.issue ?? []) : [];
+      if (!issues.length || !issues.every((i) => VALIDATION.includes(i.code))) throw e;
+      // Element paths only: server diagnostics can echo values. References to this resource stay unresolved.
+      console.error(`invalid ${issues.map((i) => `${type}/${i.expression?.join(',') ?? '?'}`).join(' ')}`);
+      report.invalid++;
     }
-    for (const k of sourceKeys(src)) idMap.set(k, `${type}/${target.id}`);
   }
   return report;
 }

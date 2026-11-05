@@ -6,6 +6,7 @@ import type { Bundle, DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
+import { stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
@@ -20,11 +21,12 @@ beforeAll(async () => {
   pid = await createTestPatient(client);
 });
 
-// Converter ids are deterministic and identifier search is global: delete everything the fixture produced,
+// Stable identifiers are deterministic and identifier search is global: delete everything the fixture produced,
 // including Practitioner/Organization/Medication and the Binary, which $everything doesn't reach.
 afterAll(async () => {
   for (const r of await convertCcda(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
-    for (const hit of await client.searchResources(r.resourceType, { identifier: `urn:ga-server:id:ccda|${r.id}` }, { cache: 'no-cache' })) {
+    const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '');
+    for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
       if (hit.resourceType !== 'Patient') await client.deleteResource(hit.resourceType, hit.id as string);
     }
   }
@@ -50,10 +52,10 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(await obs('72166-2')).toHaveLength(1);
   const meds = await client.searchResources('MedicationStatement', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
   expect(meds).toHaveLength(1);
-  // Converter template drops the C-CDA 'active' statusCode; convertCcda fills 'unknown' (see src/ccda.ts).
-  expect(meds[0].status).toBe('unknown');
+  expect(meds[0].status).toBe('active');
   const conds = await client.searchResources('Condition', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
   expect(conds.map((c) => c.code?.coding?.[0]?.code)).toEqual(['55822004']);
+  expect(conds[0].clinicalStatus?.coding?.[0]?.code).toBe('active');
   // The converter's Patient collapsed onto the GA patient: no second Patient for the fake MRN.
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
   expect((await all()).filter((r) => r.resourceType === 'Patient').map((r) => r.id)).toEqual([pid]);
@@ -63,7 +65,7 @@ test('importing the same ccda twice changes nothing', async () => {
   await importPath(client, cfg, FIXTURE, pid);
   const before = (await all()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort();
   const report = await importPath(client, cfg, FIXTURE, pid);
-  expect(report).toMatchObject({ created: 0, updated: 0, merged: 0, conflicts: 0, possibleDuplicates: 0 });
+  expect(report).toMatchObject({ created: 0, updated: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
   expect(report.skipped).toBeGreaterThan(0);
   expect((await all()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort()).toEqual(before);
 });

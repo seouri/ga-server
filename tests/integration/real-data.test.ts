@@ -1,7 +1,7 @@
 import { globSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ResourceType } from '@medplum/fhirtypes';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { ccdaFiles, convertCcda, importPath } from '../../src/ccda.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
 
@@ -50,18 +50,57 @@ test.skipIf(!root)('real ccda imports twice without duplicates', async () => {
       throw new Error(`import failed: ${safe(e)}`);
     });
 
-  const first = await run();
+  // Engine logs `invalid <Type>/<element path>` (no values); tally them per path.
+  const invalidPaths = async (fn: () => Promise<unknown>) => {
+    const tally: Record<string, number> = {};
+    const spy = vi.spyOn(console, 'error').mockImplementation((m: unknown) => {
+      for (const p of String(m).match(/^invalid (.*)$/)?.[1].split(' ') ?? []) tally[p] = (tally[p] ?? 0) + 1;
+    });
+    try {
+      return [await fn(), tally] as const;
+    } finally {
+      spy.mockRestore();
+    }
+  };
+  const tagged = async (code: string) => {
+    const out: Record<string, number> = {};
+    for (const t of [...types].sort()) {
+      const n = await count(t, { _tag: `urn:ga-server:tag|${code}` });
+      if (n) out[t] = n;
+    }
+    return out;
+  };
+
+  const before = await counts();
+  const [first, invalid1] = await invalidPaths(run);
   const after1 = await counts();
-  const second = await run();
+  const createdByType = Object.fromEntries(Object.entries(after1).map(([t, n]) => [t, n - (before[t] ?? 0)]));
+  const [second, invalid2] = await invalidPaths(run);
   const after2 = await counts();
+  const possibleDuplicateByType = await tagged('possible-duplicate');
+  const conflictByType = await tagged('source-conflict');
   const patients = (await client.searchResources('Patient', { _count: 1000 }, { cache: 'no-cache' })).filter(
     (p) => !p.meta?.tag?.some((t) => t.system === 'urn:ga-server:tag' && t.code === 'ga-test'),
   ).length;
 
   console.log(
-    JSON.stringify({ docs: files.length, convertedIds: docsPerId.size, repeatedIds: repeated.length, repeatedByType, first, second, after1, after2, patients }),
+    JSON.stringify({
+      docs: files.length,
+      convertedIds: docsPerId.size,
+      repeatedIds: repeated.length,
+      repeatedByType,
+      first,
+      second,
+      createdByType,
+      invalid1,
+      invalid2,
+      possibleDuplicateByType,
+      conflictByType,
+      after2,
+      patients,
+    }),
   );
-  expect(second.created).toBe(0);
+  expect(second).toMatchObject({ created: 0, updated: 0, merged: 0, possibleDuplicates: 0 });
   expect(patients).toBe(1);
   expect(after2).toEqual(after1);
 }, 3_600_000);

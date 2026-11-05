@@ -14,7 +14,6 @@ const obs = (dt?: string, coded = true): Observation => ({
 });
 
 test('stableIdentifier is deterministic for ccda and pdf', () => {
-  expect(stableIdentifier(obs(), ccda, 'h')).toEqual({ system: 'urn:ga-server:id:ccda', value: 'o1' });
   const a = stableIdentifier(obs('2024-07-26'), pdf, 'h');
   expect(a).toEqual(stableIdentifier(obs('2024-07-26'), pdf, 'h'));
   expect(a.system).toBe('urn:ga-server:id:pdf');
@@ -56,4 +55,24 @@ test('stamp keeps Composition identifier singular', () => {
   expect((stamp(comp, ccda, id) as { identifier?: unknown }).identifier).toEqual(id);
   const bare = { resourceType: 'Composition', id: 'c1' } as Resource;
   expect((stamp(bare, ccda, id) as { identifier?: unknown }).identifier).toEqual(id);
+});
+
+test('ccda stableIdentifier keys on the source identifier, else a reference-free content hash', () => {
+  const med = { resourceType: 'MedicationStatement', id: 'm1', status: 'active', identifier: [{ system: 'urn:oid:1.2', value: 'e1' }] } as Resource;
+  expect(stableIdentifier(med, ccda, 'h')).toEqual({ system: 'urn:ga-server:id:ccda', value: 'MedicationStatement|urn:oid:1.2|e1' });
+  // Converter ids differ across documents; the source identifier doesn't.
+  expect(stableIdentifier({ ...med, id: 'other', status: 'stopped' } as Resource, ccda, 'h2')).toEqual(stableIdentifier(med, ccda, 'h'));
+  // Observation/Encounter source ids repeat within a document: source id + content hash.
+  const src = { ...obs(), identifier: [{ system: 'urn:oid:1.2', value: 'e1' }] };
+  expect(stableIdentifier(src, ccda, 'h').value).toMatch(/^Observation\|urn:oid:1\.2\|e1\|[0-9a-f]{64}$/);
+  expect(stableIdentifier({ ...src, id: 'other' }, ccda, 'h').value).toBe(stableIdentifier(src, ccda, 'h').value);
+  expect(stableIdentifier({ ...src, valueQuantity: { value: 9, unit: '%' } }, ccda, 'h').value).not.toBe(stableIdentifier(src, ccda, 'h').value);
+  const comp = { resourceType: 'Composition', id: 'c', identifier: { system: 'urn:oid:9', value: 'd' } } as Resource;
+  expect(stableIdentifier(comp, ccda, 'h').value).toBe('Composition|urn:oid:9|d');
+
+  const allergy = { resourceType: 'AllergyIntolerance', id: 'a1', code: { text: 'x' }, patient: { reference: 'Patient/p1' } } as Resource;
+  const h = stableIdentifier(allergy, ccda, 'h');
+  expect(h.value).toMatch(/^AllergyIntolerance\|[0-9a-f]{64}$/);
+  expect(stableIdentifier({ ...allergy, id: 'a2', meta: { versionId: '3' }, patient: { reference: 'Patient/p2' } } as Resource, ccda, 'h')).toEqual(h);
+  expect(stableIdentifier({ ...allergy, code: { text: 'y' } } as Resource, ccda, 'h')).not.toEqual(h);
 });

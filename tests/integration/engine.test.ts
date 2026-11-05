@@ -4,7 +4,7 @@ import type { Bundle, MedicationStatement, Observation, Patient, Resource } from
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
-import type { SourceInfo } from '../../src/identity.ts';
+import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -23,9 +23,14 @@ const tagged = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.syste
 // Batches without a source Patient reference the test patient directly (collapse only rewrites batch Patients).
 const subj = { reference: 'Patient/src-pt' };
 const me = () => ({ reference: `Patient/${pid}` });
+// ccda identity keys on the source identifier (R6); test resources carry one under urn:test:src.
+const src = (id: string) => [{ system: 'urn:test:src', value: id }];
+const key = (type: string, id: string) => `urn:ga-server:id:ccda|${type}|urn:test:src|${id}`;
+const ccdaIds = (r: Resource) => ((r as Observation).identifier ?? []).filter((i) => i.system === 'urn:ga-server:id:ccda').map((i) => i.value);
 const chol = (id: string, value: number, day = '2024-02-03'): Observation => ({
   resourceType: 'Observation',
   id,
+  identifier: src(id),
   status: 'final',
   code: { coding: [{ system: 'http://loinc.org', code: '2093-3' }] },
   effectiveDateTime: day,
@@ -35,6 +40,7 @@ const chol = (id: string, value: number, day = '2024-02-03'): Observation => ({
 const med = (id: string, status: MedicationStatement['status']): MedicationStatement => ({
   resourceType: 'MedicationStatement',
   id,
+  identifier: src(id),
   status,
   medicationCodeableConcept: { text: 'synthetic-med' },
   subject: me(),
@@ -65,7 +71,7 @@ test('reimport is a no-op', async () => {
   expect(first).toMatchObject({ created: 5, updated: 0 });
   const before = (await all()).length;
   const second = await importResources(client, batch, ccda('2024-01-01'), pid, 'h');
-  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0 });
+  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
   expect((await all()).length).toBe(before);
   const p = await client.readResource('Patient', pid);
   expect((p as Patient).identifier?.filter((i) => i.value === mrn)).toHaveLength(1);
@@ -75,9 +81,9 @@ test('rewrites intra-bundle references', async () => {
   const enc = uid('enc');
   const obs = { ...chol(uid('obs'), 140, '2023-02-01'), encounter: { reference: `Encounter/${enc}` } };
   // Observation first: the engine must order the Encounter before it.
-  await importResources(client, [obs, { resourceType: 'Encounter', id: enc, status: 'finished', class: { code: 'AMB' }, subject: me() }], ccda('2024-01-01'), pid, 'h');
-  const e = await client.searchOne('Encounter', { identifier: `urn:ga-server:id:ccda|${enc}` });
-  const o = await client.searchOne('Observation', { identifier: `urn:ga-server:id:ccda|${obs.id}` });
+  await importResources(client, [obs, { resourceType: 'Encounter', id: enc, identifier: src(enc), status: 'finished', class: { code: 'AMB' }, subject: me() }], ccda('2024-01-01'), pid, 'h');
+  const e = await client.searchOne('Encounter', { identifier: `urn:test:src|${enc}` });
+  const o = await client.searchOne('Observation', { identifier: `urn:test:src|${obs.id}` });
   expect(o?.encounter?.reference).toBe(`Encounter/${e?.id}`);
   expect(o?.subject?.reference).toBe(`Patient/${pid}`);
 });
@@ -102,7 +108,7 @@ test('content match with different identifier merges', async () => {
   expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ created: 0, merged: 1 });
   const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-04-01' });
   expect(found).toHaveLength(1);
-  expect(found[0].identifier?.map((i) => i.value).sort()).toEqual([a.id, b.id].sort());
+  expect(ccdaIds(found[0]).sort()).toEqual([a, b].map((o) => stableIdentifier(o, ccda('x'), 'h').value).sort());
   expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ skipped: 1, merged: 0 });
 });
 
@@ -124,7 +130,7 @@ test('newer source updates MedicationStatement status', async () => {
   const id = uid('med');
   await importResources(client, [med(id, 'active')], ccda('2024-01-01'), pid, 'h');
   expect(await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h')).toMatchObject({ updated: 1 });
-  const m = await client.searchOne('MedicationStatement', { identifier: `urn:ga-server:id:ccda|${id}` });
+  const m = await client.searchOne('MedicationStatement', { identifier: key('MedicationStatement', id) });
   expect(m?.status).toBe('stopped');
   expect((await client.readHistory('MedicationStatement', m?.id as string)).entry).toHaveLength(2);
 });
@@ -133,7 +139,7 @@ test('older source after newer does not revert', async () => {
   const id = uid('med');
   await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h');
   expect(await importResources(client, [med(id, 'active')], ccda('2024-03-01'), pid, 'h')).toMatchObject({ skipped: 1, updated: 0 });
-  const m = await client.searchOne('MedicationStatement', { identifier: `urn:ga-server:id:ccda|${id}` });
+  const m = await client.searchOne('MedicationStatement', { identifier: key('MedicationStatement', id) });
   expect(m?.status).toBe('stopped');
 });
 
@@ -146,7 +152,7 @@ test('merged observation differing in a non-key field re-imports as a no-op', as
   expect(await importResources(client, [a], ccda('2024-01-01'), pid, 'h')).toMatchObject({ skipped: 1, updated: 0, merged: 0 });
   const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-07-01' });
   expect(found).toHaveLength(1);
-  expect(found[0].identifier).toHaveLength(2);
+  expect(ccdaIds(found[0])).toHaveLength(2);
 });
 
 test('equal value already written by the agent is skipped without a conflict', async () => {
@@ -159,7 +165,7 @@ test('equal value already written by the agent is skipped without a conflict', a
   const found = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-08-01' });
   expect(found).toHaveLength(1);
   expect(tagged(found[0], 'source-conflict')).toBe(false);
-  expect(found[0].identifier).toHaveLength(1);
+  expect(ccdaIds(found[0])).toHaveLength(0);
 });
 
 test('newer importer source does not overwrite agent-written record', async () => {
@@ -168,7 +174,13 @@ test('newer importer source does not overwrite agent-written record', async () =
   await importResources(client, [med(id, 'active')], { ...ccda('2024-01-01'), writer: 'agent' }, pid, 'h');
   expect(await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h')).toMatchObject({ conflicts: 1, updated: 0 });
   expect(await importResources(client, [med(id, 'stopped')], ccda('2024-06-01'), pid, 'h')).toMatchObject({ conflicts: 1, updated: 0 });
-  const m = await client.searchOne('MedicationStatement', { identifier: `urn:ga-server:id:ccda|${id}` });
+  const m = await client.searchOne('MedicationStatement', { identifier: key('MedicationStatement', id) });
   expect(m?.status).toBe('active');
   expect(m?.meta?.tag?.filter((t) => t.system === TAG && t.code === 'source-conflict')).toHaveLength(1);
+});
+
+test('one invalid resource does not abort the batch', async () => {
+  const bad = { resourceType: 'Observation', id: uid('obs'), status: 'final', subject: me() } as Observation; // no code
+  const r = await importResources(client, [bad, chol(uid('obs'), 121, '2023-09-01')], ccda('2024-01-01'), pid, 'h');
+  expect(r).toMatchObject({ created: 1, invalid: 1 });
 });
