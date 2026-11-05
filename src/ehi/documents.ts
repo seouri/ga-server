@@ -64,7 +64,7 @@ export function mapMessages(t: EhiTables, ctx: EhiCtx): Resource[] {
 }
 
 // R5: a note's RTF is found by NOTE_ID in its file name (`HNO_<NOTE_ID>_<seg>_41.RTF`); its text becomes a text/plain
-// attachment (importDocuments adds the RTF itself as a Binary). Without RTF, HNO_PLAIN_TEXT; without either, metadata
+// attachment (importDocuments stores the RTF itself and links it). Without RTF, HNO_PLAIN_TEXT; without either, metadata
 // only, with a placeholder attachment (R4 content is 1..*).
 export function mapNotes(t: EhiTables, ctx: EhiCtx, dir: string): { resources: Resource[]; rtf: Map<string, string[]> } {
   const enc = encounterRef(t);
@@ -105,29 +105,33 @@ export function mapNotes(t: EhiTables, ctx: EhiCtx, dir: string): { resources: R
 }
 
 const MEDIA_TYPE: Record<string, string> = { '.pdf': 'application/pdf', '.tif': 'image/tiff', '.tiff': 'image/tiff', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.html': 'text/html', '.htm': 'text/html' };
-const sha1 = (b: Buffer) => createHash('sha1').update(b).digest('base64');
 
-// Notes and messages go through the engine (EHI identifiers: re-import is a no-op). A note's RTF is uploaded as a Binary
-// only when the stored note (same EHI identifier, same patient) lacks an RTF attachment with the same hash, so a
-// re-import leaves no orphan Binary. Media files go through storeDocument (stored once per content hash).
+// Stores a file once per content hash (storeDocument) and says whether it was new.
+async function store(client: MedplumClient, path: string, patientId: string, type: string): Promise<{ id: string; created: boolean }> {
+  const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
+  const existed = await client.searchOne('DocumentReference', `identifier=urn:ga-server:id:file|${hash}`, { cache: 'no-cache' });
+  const { docRef } = await storeDocument(client, path, patientId, type);
+  return { id: docRef.id as string, created: !existed };
+}
+
+// Notes and messages go through the engine (EHI identifiers: re-import is a no-op). A note's RTF file is stored like
+// media, once per content hash (no orphan Binary on re-import), as its own DocumentReference; the note points at it
+// with relatesTo "transforms". Not a Binary attachment on the note: Medplum returns attachment URLs presigned with
+// an expiry, so the engine would see every re-imported note as changed. Media files go through storeDocument too.
 // The batch includes the export's Encounters so note/message encounter references resolve (no-ops once imported).
 export async function importDocuments(client: MedplumClient, dir: string, t: EhiTables, ctx: EhiCtx, patientId: string): Promise<ImportReport> {
   const notes = mapNotes(t, ctx, dir);
+  let filesCreated = 0;
+  let filesSkipped = 0;
+  const count = (created: boolean) => (created ? filesCreated++ : filesSkipped++);
   for (const doc of notes.resources as DocumentReference[]) {
-    const files = notes.rtf.get(doc.id as string);
-    if (!files) continue;
-    const ident = doc.identifier?.[0];
-    const stored = await client.searchOne('DocumentReference', { identifier: `${ident?.system}|${ident?.value}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
-    const have = (stored?.content ?? []).map((c) => c.attachment).filter((a) => a.contentType === 'text/rtf' && a.url);
-    const rtfs: Attachment[] = [];
-    for (const f of files) {
-      const data = readFileSync(f);
-      const hash = sha1(data);
-      const old = have.find((a) => a.hash === hash);
-      const url = old?.url ?? `Binary/${(await client.createBinary({ data, contentType: 'text/rtf', filename: basename(f) })).id}`;
-      rtfs.push({ contentType: 'text/rtf', url, size: data.length, hash, title: basename(f) });
+    const relatesTo = [];
+    for (const f of notes.rtf.get(doc.id as string) ?? []) {
+      const { id, created } = await store(client, f, patientId, 'text/rtf');
+      count(created);
+      relatesTo.push({ code: 'transforms' as const, target: { reference: `DocumentReference/${id}` } });
     }
-    doc.content = [...rtfs.map((attachment) => ({ attachment })), ...doc.content];
+    if (relatesTo.length) doc.relatesTo = relatesTo;
   }
   const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...notes.resources, ...mapMessages(t, ctx)];
   const { resources } = await resolveUnlinked(client, batch, patientId);
@@ -137,15 +141,12 @@ export async function importDocuments(client: MedplumClient, dir: string, t: Ehi
     const type = MEDIA_TYPE[extname(f).toLowerCase()];
     if (!type) {
       console.error(`media skipped, unknown type: ${extname(f)}`);
-      report.skipped++;
+      filesSkipped++;
       continue;
     }
-    const path = join(mediaDir, f);
-    const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-    const existed = await client.searchOne('DocumentReference', `identifier=urn:ga-server:id:file|${hash}`, { cache: 'no-cache' });
-    await storeDocument(client, path, patientId, type);
-    if (existed) report.skipped++;
-    else report.created++;
+    count((await store(client, join(mediaDir, f), patientId, type)).created);
   }
+  report.created += filesCreated;
+  report.skipped += filesSkipped;
   return report;
 }
