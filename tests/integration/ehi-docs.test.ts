@@ -76,3 +76,19 @@ test('importDocuments stores notes, messages and media once, readable', async ()
   const [same] = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${ctx.org}|HNO_INFO|1001` }, { cache: 'no-cache' });
   expect(same.relatesTo).toEqual(notes[0].relatesTo); // the same stored RTF, no second upload
 });
+
+test('R18: an IMM_ADMIN dose on an IMMUNE dose date is stored as its possible duplicate, pointing at it', async () => {
+  const base = new EhiTables(EHI);
+  const extra = { ...base.rows('IMM_ADMIN')[1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT2' };
+  const t = { rows: (table: string) => (table === 'IMM_ADMIN' ? [...base.rows(table), extra] : base.rows(table)) } as unknown as EhiTables;
+  const c: EhiCtx = { ...ctx, org: 'synthetic-health-dup' };
+  const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, c), ...mapImmunizations(t, c)];
+  const src = { kind: 'ehi' as const, file: EHI, date: c.date, writer: 'importer' as const };
+  const run = async () => importResources(client, (await resolveUnlinked(client, batch, pid)).resources, src, pid, '');
+  expect(await run()).toMatchObject({ invalid: 0 });
+  const [dose] = await client.searchResources('Immunization', { patient: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${c.org}|IMMUNE|6100001` }, { cache: 'no-cache' });
+  const [dup] = await client.searchResources('Immunization', { patient: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${c.org}|IMM_ADMIN|other name|2026-01-15` }, { cache: 'no-cache' });
+  expect(dup.meta?.tag).toEqual(expect.arrayContaining([{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }]));
+  expect(dup.extension).toEqual(expect.arrayContaining([{ url: 'urn:ga-server:ext:possible-duplicate-of', valueReference: { reference: `Immunization/${dose.id}` } }]));
+  expect(await run()).toMatchObject({ created: 0, updated: 0, invalid: 0 });
+});

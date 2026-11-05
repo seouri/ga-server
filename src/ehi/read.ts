@@ -58,7 +58,11 @@ export function pdfText(buf: Buffer): string {
 
 // The export carries no OID or org field, so both come from the readme PDF (written by the exporting Epic site):
 // org from "... from <Org>. At the time of export", date from the PDF's /CreationDate.
-export function exportInfo(dir: string): { org: string; date: string } {
+// timeZone (R17): the zone the export's local times are in; default GA_EHI_TZ, else this machine's zone.
+export function exportInfo(
+  dir: string,
+  timeZone = process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
+): { org: string; date: string; timeZone: string } {
   const name = readdirSync(dir).find((f) => /^readme\.pdf$/i.test(f));
   if (!name) throw new GaError(`not an EHI export: no readme.PDF in ${dir}`);
   const buf = readFileSync(join(dir, name));
@@ -70,5 +74,5 @@ export function exportInfo(dir: string): { org: string; date: string } {
   const [, y, mo, da, h = '00', mi = '00', se = '00', sign, zh, zm = '00'] = d;
   // shortcut: no zone (or Z) reads as UTC; PDF spec calls it unknown, local time could be off by the UTC offset.
   const zone = sign ? `${sign}${zh}:${zm}` : 'Z';
-  return { org: org.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), date: `${y}-${mo}-${da}T${h}:${mi}:${se}${zone}` };
+  return { org: org.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), date: `${y}-${mo}-${da}T${h}:${mi}:${se}${zone}`, timeZone };
 }

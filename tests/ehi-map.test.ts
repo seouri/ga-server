@@ -17,7 +17,7 @@ import { mapMessages, mapNotes } from '../src/ehi/documents.ts';
 
 const FIX = join(import.meta.dirname, 'fixtures/ehi');
 const t = () => new EhiTables(FIX);
-const ctx: EhiCtx = { org: 'synthetic-health', date: '2026-01-17T08:30:00-05:00', epicOrgNumber: '99' };
+const ctx: EhiCtx = { org: 'synthetic-health', date: '2026-01-17T08:30:00-05:00', timeZone: 'America/New_York', epicOrgNumber: '99' };
 const SYS = 'urn:ga-server:id:ehi:synthetic-health';
 const of = <T extends Resource>(rs: Resource[], type: string) => rs.filter((r) => r.resourceType === type) as T[];
 
@@ -27,9 +27,16 @@ describe('EHI mappers', () => {
     expect(ehiDate('1/15/2026 8:05:00 AM', ctx)).toBe('2026-01-15T08:05:00-05:00');
     expect(ehiDate('12/3/2025 12:30:00 PM', ctx)).toBe('2025-12-03T12:30:00-05:00');
     expect(ehiDate('1/5/2026 12:15:00 AM', ctx)).toBe('2026-01-05T00:15:00-05:00');
-    expect(ehiDate('1/5/2026 11:59:59 PM', { ...ctx, date: '2026-01-17T08:30:00Z' })).toBe('2026-01-05T23:59:59Z');
+    expect(ehiDate('1/5/2026 11:59:59 PM', { ...ctx, timeZone: 'UTC' })).toBe('2026-01-05T23:59:59Z');
     expect(ehiDate('', ctx)).toBeUndefined();
     expect(() => ehiDate('2026-01-05', ctx)).toThrow();
+  });
+
+  it('ehiDate gives each time the offset its own date had in the export\'s zone (R17)', () => {
+    expect(ehiDate('7/15/2026 8:05:00 AM', ctx)).toBe('2026-07-15T08:05:00-04:00'); // summer: EDT
+    expect(ehiDate('1/15/2026 8:05:00 AM', ctx)).toBe('2026-01-15T08:05:00-05:00'); // winter: EST
+    expect(ehiDate('11/1/2026 1:30:00 PM', ctx)).toBe('2026-11-01T13:30:00-05:00'); // the day DST ended
+    expect(ehiDate('7/15/2026 8:05:00 AM', { ...ctx, timeZone: 'Asia/Seoul' })).toBe('2026-07-15T08:05:00+09:00');
   });
 
   it('mapLabs makes one report per order and one observation per result line', () => {
@@ -197,6 +204,20 @@ describe('EHI mappers', () => {
       occurrenceDateTime: '2020-05-01',
       lotNumber: 'LOT9',
     });
+  });
+
+  it('an IMM_ADMIN dose on an IMMUNE dose\'s date: same lot is that dose; another lot is a possible duplicate of it (R18)', () => {
+    const base = t();
+    const extra = (lot: string, date = '1/15/2026 12:00:00 AM') => ({ ...base.rows('IMM_ADMIN')[1], IMM_TYPE_FREE_TEXT: 'Test vaccine (outside name)', IMM_DATE: date, IMM_LOT_NUMBER: lot });
+    const rows = (table: string) => (table === 'IMM_ADMIN' ? [...base.rows(table), extra('LOT1'), { ...extra('LOT2'), IMM_TYPE_FREE_TEXT: 'Another name' }] : base.rows(table));
+    const counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 };
+    const rs = mapImmunizations({ rows } as unknown as EhiTables, ctx, counts) as Immunization[];
+    expect(counts).toEqual({ skippedNoName: 0, immAdminSameDose: 1, immAdminPossibleDuplicate: 1 });
+    expect(rs.map((r) => r.id)).toEqual(['IMMUNE-6100001', 'IMMUNE-6100002', 'IMM_ADMIN-outside vaccine-2020-05-01', 'IMM_ADMIN-another name-2026-01-15']);
+    const dup = rs[3];
+    expect(dup.meta).toEqual({ tag: [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }] });
+    expect(dup.extension).toEqual([{ url: 'urn:ga-server:ext:possible-duplicate-of', valueReference: { reference: 'Immunization/IMMUNE-6100001' } }]);
+    expect(rs[2].meta).toBeUndefined(); // no IMMUNE dose that day: an ordinary record
   });
 
   it('linkImmunizationsToExisting keeps the C-CDA vaccine codes and links IMM_ADMIN doses by date and name, never on a tie', async () => {

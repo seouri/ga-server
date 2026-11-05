@@ -30,7 +30,10 @@ describe('EHI reader', () => {
   });
 
   it('exportInfo reads org and date from the fixture', () => {
-    expect(exportInfo(dir)).toEqual({ org: 'synthetic-health', date: '2026-01-17T08:30:00-05:00' });
+    expect(exportInfo(dir)).toMatchObject({ org: 'synthetic-health', date: '2026-01-17T08:30:00-05:00' });
+    // R17: the zone local EHI times are in: the caller's, else GA_EHI_TZ, else this machine's.
+    expect(exportInfo(dir, 'America/Chicago').timeZone).toBe('America/Chicago');
+    expect(exportInfo(dir).timeZone).toBe(process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 
   it('exportInfo keeps the creation time and zone; no zone or a date only reads as UTC', () => {
@@ -50,6 +53,6 @@ describe('EHI reader', () => {
     const d = mkdtempSync(join(tmpdir(), 'ehi-'));
     const stream = 'BT (...request on 1/1/2026 from Syn) Tj [(thetic H) -20 (\\145a)] TJ (lth. At ) Tj (the time of export, x) Tj ET';
     writeFileSync(join(d, 'README.pdf'), `%PDF-1.4\n1 0 obj\n<</CreationDate(D:20260117083000)>>\nendobj\n2 0 obj\n<</Length ${stream.length}>>\nstream\n${stream}\nendstream\nendobj\n`);
-    expect(exportInfo(d)).toEqual({ org: 'synthetic-health', date: '2026-01-17T08:30:00Z' });
+    expect(exportInfo(d)).toMatchObject({ org: 'synthetic-health', date: '2026-01-17T08:30:00Z' });
   });
 });

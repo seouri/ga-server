@@ -5,7 +5,8 @@ import { EPIC_OID } from '../identity.ts';
 import type { EhiTables } from './read.ts';
 
 // epicOrgNumber: n in Epic's org OID root 1.2.840.114350.1.13.<n>; absent = no link identifiers.
-export type EhiCtx = { org: string; date: string; epicOrgNumber?: string };
+// timeZone: IANA zone the export's local times are in (R17).
+export type EhiCtx = { org: string; date: string; timeZone: string; epicOrgNumber?: string };
 
 // Every mapped resource points here; the importer adds a Patient with this id so collapsePatients maps it to the GA Patient.
 export const PATIENT_REF = { reference: 'Patient/ehi-patient' };

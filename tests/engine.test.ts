@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
-import type { MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
-import { decide, importResources } from '../src/engine.ts';
+import { decide, importResources, sameValue } from '../src/engine.ts';
 import { stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
@@ -140,4 +140,18 @@ test('stableIdentifier for ehi without a GA identifier throws', () => {
   expect(() => stableIdentifier(enc(), ehi, 'h', 'p')).toThrow(/EHI identifier/);
   expect(() => stableIdentifier(enc([EPIC_CSN, EHI_ID]), ehi, 'h', 'p')).toThrow(/EHI identifier/);
   expect(() => stableIdentifier(enc([{ system: EHI_ID.system }]), ehi, 'h', 'p')).toThrow(/EHI identifier/);
+});
+
+test('sameValue compares quantities, strings, first codings and booleans (R19)', () => {
+  const o = (v: Partial<Observation>): Observation => ({ resourceType: 'Observation', status: 'final', code: { text: 'x' }, ...v });
+  const cc = (system: string, code: string, text?: string) => ({ valueCodeableConcept: { coding: [{ system, code }], ...(text && { text }) } });
+  expect(sameValue(o(cc('http://snomed.info/sct', '266919005', 'Never')), o(cc('http://snomed.info/sct', '266919005')))).toBe(true);
+  expect(sameValue(o(cc('http://snomed.info/sct', '266919005')), o(cc('http://snomed.info/sct', '8517006')))).toBe(false);
+  expect(sameValue(o(cc('http://snomed.info/sct', '1')), o(cc('http://loinc.org', '1')))).toBe(false);
+  expect(sameValue(o({ valueCodeableConcept: { text: 'Never' } }), o({ valueCodeableConcept: { text: 'Never' } }))).toBe(false); // no coding: not compared
+  expect(sameValue(o({ valueBoolean: false }), o({ valueBoolean: false }))).toBe(true);
+  expect(sameValue(o({ valueBoolean: true }), o({ valueBoolean: false }))).toBe(false);
+  expect(sameValue(o({ valueString: 'a' }), o({ valueString: 'a' }))).toBe(true);
+  expect(sameValue(o({ valueQuantity: { value: 1, unit: 'kg' } }), o({ valueQuantity: { value: 1, unit: 'g' } }))).toBe(false);
+  expect(sameValue(o({}), o({}))).toBe(false);
 });

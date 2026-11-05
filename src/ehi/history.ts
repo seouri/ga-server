@@ -3,6 +3,7 @@ import type {
   CodeableConcept, FamilyMemberHistory, FamilyMemberHistoryCondition, Identifier, Immunization, Observation, Procedure, QuestionnaireResponse,
   Resource,
 } from '@medplum/fhirtypes';
+import { DUP_OF, TAG } from '../engine.ts';
 import { EPIC_OID } from '../identity.ts';
 import { ehiDate } from './dates.ts';
 import { type EhiCtx, ehiId, encounterRef, epicId, localId, PATIENT_REF } from './ids.ts';
@@ -41,8 +42,10 @@ const immBody = (f: ImmFields, ctx: EhiCtx) => {
 
 // R15: IMMUNE is the immunization record (its ids are the C-CDA's). IMM_ADMIN is a document re-listing the history at each
 // contact; its vaccine+date pairs that IMMUNE lacks become records keyed by name and date (no Epic id exists for them).
+// R18: such a pair on the date of an IMMUNE dose with the same lot number is that dose (not created, counted); with
+// another or no lot it is created as a possible duplicate of that date's IMMUNE dose(s), engine tag and extension.
 // A row without a vaccine name or date says nothing: skipped, counted.
-export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }): Resource[] {
+export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 }): Resource[] {
   const enc = encounterRef(t);
   const out: Immunization[] = [];
   const seen = new Set<string>();
@@ -84,11 +87,27 @@ export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
     const prev = latest.get(k);
     if (!prev || Number(r.CONTACT_DATE_REAL) > Number(prev.CONTACT_DATE_REAL)) latest.set(k, r);
   }
+  const immune = [...out];
+  const immuneOn = (date: string) => immune.filter((i) => i.occurrenceDateTime === date);
   for (const [k, r] of latest) {
     const [n, date] = k.split('|');
+    const same = immuneOn(date);
+    if (r.IMM_LOT_NUMBER && same.some((i) => i.lotNumber === r.IMM_LOT_NUMBER)) {
+      counts.immAdminSameDose++;
+      continue;
+    }
+    const dup = same.length > 0;
+    if (dup) counts.immAdminPossibleDuplicate++;
     const b = immBody({ name: r.IMM_TYPE_ID_NAME || r.IMM_TYPE_FREE_TEXT, date, status: r.IMM_STATUS_C_NAME, mfg: r.IMM_MANUFACTURER_C_NAME || r.IMM_MANUF_FREE_TEXT, lot: r.IMM_LOT_NUMBER, exp: r.IMM_ADMIN_EXPIRATION_DATE, site: r.IMM_SITE_C_NAME, route: r.IMM_ROUTE_C_NAME, amount: r.IMM_DOSE_AMOUNT, unit: r.IMM_DOSE_UNIT_C_NAME }, ctx);
     const { resourceType, ...rest } = b;
-    out.push({ resourceType, id: localId('IMM_ADMIN', `${n}-${date}`), identifier: [ehiId(ctx, 'IMM_ADMIN', k)], ...rest });
+    out.push({
+      resourceType,
+      id: localId('IMM_ADMIN', `${n}-${date}`),
+      ...(dup && { meta: { tag: [{ system: TAG, code: 'possible-duplicate' }] } }),
+      identifier: [ehiId(ctx, 'IMM_ADMIN', k)],
+      ...rest,
+      ...(dup && { extension: same.map((i) => ({ url: DUP_OF, valueReference: { reference: `Immunization/${i.id}` } })) }),
+    });
   }
   return out;
 }
@@ -319,7 +338,7 @@ export function mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skipp
   });
   const done: Procedure[] = [];
   for (const r of t.rows('HM_HISTORY')) {
-    const performedDateTime = ehiDate(r.HM_COMP_UTC_DTTM, { ...ctx, date: 'Z' }); // the column is UTC
+    const performedDateTime = ehiDate(r.HM_COMP_UTC_DTTM, { ...ctx, timeZone: 'UTC' }); // the column is UTC
     if (!performedDateTime || !r.HM_COMP_TYPE_C_NAME) {
       counts.skippedNoDate++;
       continue;

@@ -16,9 +16,9 @@ export type ImportReport = {
 };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
-const TAG = 'urn:ga-server:tag';
+export const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
-const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
+export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
 const COMPARTMENT: Record<string, string> = {
@@ -145,8 +145,15 @@ function topoSort(rs: Resource[]): Resource[] {
 
 const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
 
-function sameValue(a: Observation, b: Observation): boolean {
+// R19: coded values compare by their first coding (system|code); a coding-less concept never matches.
+const firstCoding = (o: Observation) => {
+  const c = o.valueCodeableConcept?.coding?.[0];
+  return c?.code ? `${c.system ?? ''}|${c.code}` : undefined;
+};
+export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueQuantity && b.valueQuantity) return a.valueQuantity.value === b.valueQuantity.value && a.valueQuantity.unit === b.valueQuantity.unit;
+  if (a.valueCodeableConcept && b.valueCodeableConcept) return !!firstCoding(a) && firstCoding(a) === firstCoding(b);
+  if (a.valueBoolean !== undefined || b.valueBoolean !== undefined) return a.valueBoolean === b.valueBoolean;
   return a.valueString !== undefined && a.valueString === b.valueString;
 }
 
