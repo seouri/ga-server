@@ -26,14 +26,15 @@ export function loadConfig(path = defaultConfigPath()): GaConfig {
   }
 }
 
+export const notRunning = (e: unknown) =>
+  JSON.stringify([e, (e as Error)?.cause]).includes('ECONNREFUSED') || (e as Error)?.message === 'fetch failed';
+
 export async function getClient(cfg: GaConfig): Promise<MedplumClient> {
   const client = new MedplumClient({ baseUrl: cfg.baseUrl });
   try {
     await client.startClientLogin(cfg.clientId, cfg.clientSecret);
   } catch (e) {
-    if (JSON.stringify([e, (e as Error)?.cause]).includes('ECONNREFUSED') || (e as Error)?.message === 'fetch failed') {
-      throw new GaError('GA is not running: run docker compose up');
-    }
+    if (notRunning(e)) throw new GaError('GA is not running: run docker compose up');
     throw e;
   }
   return client;

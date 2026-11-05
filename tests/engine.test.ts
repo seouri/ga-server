@@ -99,3 +99,26 @@ test('non-validation errors abort the import', async () => {
     await expect(importResources(fake(where, err), one, src('2024-01-01'), 'p', 'h')).rejects.toThrow();
   }
 });
+
+test('merging a source into a person-edited match keeps it protected with source-conflict', async () => {
+  const obs = (id?: string) => ({
+    resourceType: 'Observation', id, status: 'final', subject: { reference: 'Patient/p' },
+    code: { coding: [{ system: 'http://loinc.org', code: '2093-3' }] },
+    effectiveDateTime: '2024-01-01T08:00:00Z', valueQuantity: { value: 180, unit: 'mg/dL' },
+  }) as Resource;
+  // An imported record a person later edited; the incoming source is older, so decide() says skip and only the identifier is appended.
+  const edited = {
+    ...obs('srv-9'), meta: { author: { reference: 'Practitioner/person' } },
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2024-06-01' }],
+  } as Resource;
+  const writes: Resource[] = [];
+  const client = {
+    getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
+    readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
+    searchOne: async () => undefined,
+    searchResources: async () => [edited],
+    updateResource: async (r: Resource) => (writes.push(r), r),
+  } as unknown as MedplumClient;
+  expect(await importResources(client, [obs('o1')], src('2024-01-01'), 'p', 'h')).toMatchObject({ merged: 1 });
+  expect(writes.at(-1)?.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+});

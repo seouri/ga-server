@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getStatus, MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { ClientApplication, Patient } from '@medplum/fhirtypes';
-import { defaultConfigPath, GaError, type GaConfig, loadConfig } from './config.ts';
+import { defaultConfigPath, GaError, type GaConfig, loadConfig, notRunning } from './config.ts';
 
 const ADMIN = 'admin@example.com';
 const DEFAULT_PASSWORD = 'medplum_admin'; // Medplum's seeded admin password; setup rotates it away on first run
@@ -30,11 +30,11 @@ export async function setup(
       password = p;
       break;
     } catch (e) {
-      if ((e as Error)?.message === 'fetch failed') throw new GaError('GA is not running: run docker compose up');
+      if (notRunning(e)) throw new GaError('GA is not running: run docker compose up');
       if (!(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 400) throw e;
     }
   }
-  if (!login) throw new GaError(`admin login failed: the password in ${path} does not match and the default was already changed`);
+  if (!login) throw new GaError(`admin login failed: the password in ${path} does not match and the default was already changed (restore your backup of that file)`);
   if (!login.code) throw new GaError('admin login did not return a code');
   await medplum.processCode(login.code);
   const projectId = medplum.getActiveLogin()?.project.reference?.split('/')[1];

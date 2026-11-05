@@ -123,6 +123,11 @@ export async function importResources(
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
   const author = me ? `${me.resourceType}/${me.id}` : undefined;
+  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky source-conflict tag.
+  const protect = (r: Resource): Resource => {
+    const lastBy = r.meta?.author?.reference;
+    return author && lastBy && lastBy !== author && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r;
+  };
 
   const patient = await client.readResource('Patient', patientId);
   const have = new Set((patient.identifier ?? []).map(idKey));
@@ -202,7 +207,7 @@ export async function importResources(
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
             if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent')) await unionUpdate(client, same, incoming);
-            else await client.updateResource({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource);
+            else await client.updateResource(protect({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource));
             report.merged++;
           }
         } else if (matches.length) {
@@ -211,10 +216,7 @@ export async function importResources(
             withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches as R[]) {
-            let tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
-            // This write makes GA the author: keep a person's edit protected through the sticky source-conflict tag.
-            const lastBy = m.meta?.author?.reference;
-            if (author && lastBy && lastBy !== author && !hasTag(tag, 'source-conflict')) tag = withTag(tag, 'source-conflict');
+            const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
             await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
           }
           report.possibleDuplicates++;

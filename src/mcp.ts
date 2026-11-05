@@ -63,7 +63,7 @@ export async function importExtracted(
   // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates.
   const hash = createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
   const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
-  if (seen) throw new GaError(`already imported: ${basename(sourceFile)}`);
+  if (seen) throw new GaError(`already imported: ${basename(sourceFile)} (if that import failed, delete DocumentReference/${seen.id} to retry)`);
   const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
   const linked = link(`DocumentReference/${docRef.id}`);
   const date = documentDate ?? statSync(sourceFile).mtime.toISOString();
