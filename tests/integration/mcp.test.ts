@@ -83,3 +83,16 @@ test('fhir_search returns imported LDL', async () => {
   const read = await call('fhir_read', { resourceType: 'Observation', id: b.entry?.[0].resource?.id as string });
   expect(JSON.parse(read.text).valueQuantity.value).toBe(111);
 });
+
+test('ga_import rejects non-document files, unsupported types and invalid resources without writing', async () => {
+  const docs = () => client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' });
+  const before = (await docs()).length;
+  const pem = join(import.meta.dirname, '..', '..', 'package.json');
+  expect((await call('ga_import', { resources: [ldl()], sourceFile: pem })).isError).toBe(true);
+  expect((await call('ga_import', { resources: [{ resourceType: 'Patient' }], sourceFile: PDF })).isError).toBe(true);
+  expect((await call('ga_import', { resources: [], sourceFile: PDF })).isError).toBe(true);
+  const { code: _c, ...noCode } = ldl();
+  const r = await call('ga_import', { resources: [{ ...noCode, status: 'bogus' }], sourceFile: PDF });
+  expect(r.isError).toBe(true);
+  expect((await docs()).length).toBe(before);
+});
