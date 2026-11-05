@@ -13,6 +13,9 @@ const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex
 const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 
+// R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
+export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
+
 const effective = (o: Observation): string | undefined => o.effectiveDateTime ?? o.effectivePeriod?.start;
 
 function firstCode(o: Observation): string | undefined {
@@ -44,7 +47,8 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string): 
 
 export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   const out = structuredClone(r) as Resource & { identifier?: Identifier[]; extension?: { url: string; valueDateTime?: string }[] };
-  if (!out.identifier?.some((i) => i.system === id.system && i.value === id.value)) out.identifier = [...(out.identifier ?? []), id];
+  if (SINGULAR_ID.has(r.resourceType)) (out as { identifier?: unknown }).identifier = id;
+  else if (!out.identifier?.some((i) => i.system === id.system && i.value === id.value)) out.identifier = [...(out.identifier ?? []), id];
   const meta = (out.meta ??= {});
   const codes = [`writer-${s.writer}`, `src-${s.kind}`, ...(s.llm ? ['extracted-by-llm'] : [])];
   const tags = (meta.tag ??= []);

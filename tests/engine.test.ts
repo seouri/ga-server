@@ -44,3 +44,9 @@ test('agent-written equal content skips', () => {
   expect(decide(ex, stamp(ms('active'), src('2024-06-01'), ID))).toBe('skip');
   expect(decide(ex, stamp(ms('stopped'), src('2023-06-01'), ID))).toBe('skip');
 });
+
+test('re-stamped Composition with singular identifier skips', () => {
+  const comp = { resourceType: 'Composition', status: 'final', title: 't', identifier: { value: 'doc' } } as Resource;
+  expect(decide(existing(comp, src('2024-01-01')), stamp(comp, src('2024-01-01'), ID))).toBe('skip');
+  expect(decide(existing(comp, src('2024-01-01')), stamp({ ...comp, title: 'u' } as Resource, src('2024-02-01'), ID))).toBe('update');
+});

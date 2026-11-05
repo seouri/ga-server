@@ -1,7 +1,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { contentKey, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { contentKey, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -16,6 +16,7 @@ const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
+const idList = (r: R): Identifier[] => [r.identifier ?? []].flat(); // singular on SINGULAR_ID types
 const canon = (x: unknown) =>
   JSON.stringify(x, (_k, v) =>
     v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
@@ -36,8 +37,8 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource)
   const ed = srcDate(existing);
   const id = srcDate(incoming);
   if (ed && id && Date.parse(id) <= Date.parse(ed)) return 'skip';
-  const have = new Set((existing.identifier ?? []).map(idKey));
-  const subset = (incoming.identifier ?? []).every((i) => have.has(idKey(i)));
+  const have = new Set(idList(existing).map(idKey));
+  const subset = idList(incoming).every((i) => have.has(idKey(i)));
   if (subset && canon(body(existing)) === canon(body(incoming))) return 'skip';
   // Only a write that would actually happen is a conflict.
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
@@ -78,14 +79,14 @@ function sameValue(a: Observation, b: Observation): boolean {
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
 async function unionUpdate(client: MedplumClient, existing: R, incoming: R): Promise<void> {
-  const ids = [...(existing.identifier ?? [])];
-  for (const i of incoming.identifier ?? []) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
+  const ids = idList(existing);
+  for (const i of idList(incoming)) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
   const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
   const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF);
   await client.updateResource({
     ...incoming,
     id: existing.id,
-    identifier: ids,
+    identifier: SINGULAR_ID.has(incoming.resourceType) ? incoming.identifier : ids,
     meta: { ...incoming.meta, tag: [...(incoming.meta?.tag ?? []), ...kept] },
     extension: [...(incoming.extension ?? []), ...dupOf],
   } as Resource);

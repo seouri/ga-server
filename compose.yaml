@@ -35,10 +35,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # Named volumes are created root-owned; medplum-server runs as uid 1000 and must write Binaries.
+  # Reuses the redis image for chown so no extra image is pulled.
+  binary-perms:
+    image: redis:7
+    user: root
+    command: ['chown', '1000:1000', '/binary']
+    volumes:
+      - ga-binary:/binary
+
   medplum-server:
     image: medplum/medplum-server:5.2.14
     restart: unless-stopped
     depends_on:
+      binary-perms:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

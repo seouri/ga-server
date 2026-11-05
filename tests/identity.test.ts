@@ -49,3 +49,11 @@ test('stamp is idempotent and does not mutate', () => {
     { url: 'urn:ga-server:ext:source-date', valueDateTime: '2024-08-01' },
   ]);
 });
+
+test('stamp keeps Composition identifier singular', () => {
+  const id = { system: 'urn:ga-server:id:ccda', value: 'c1' };
+  const comp = { resourceType: 'Composition', id: 'c1', identifier: { system: 'urn:oid:1', value: 'doc' } } as Resource;
+  expect((stamp(comp, ccda, id) as { identifier?: unknown }).identifier).toEqual(id);
+  const bare = { resourceType: 'Composition', id: 'c1' } as Resource;
+  expect((stamp(bare, ccda, id) as { identifier?: unknown }).identifier).toEqual(id);
+});
