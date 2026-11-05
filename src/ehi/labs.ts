@@ -95,11 +95,9 @@ export async function linkResultsToExisting(
     const [existing] = hits;
     // Keep the existing report's LOINC code too: the newer EHI body replaces it on update.
     if (existing.code?.coding?.length) dr.code = { ...dr.code, coding: existing.code.coding };
-    const olds: Observation[] = [];
-    for (const ref of existing.result ?? []) {
-      const [type, id] = (ref.reference ?? '').split('/');
-      if (type === 'Observation' && id) olds.push(await client.readResource('Observation', id));
-    }
+    // One search, not reads: a report can keep a reference to a result that was never written (invalid at import).
+    const ids = (existing.result ?? []).map((r) => /^Observation\/([^/]+)$/.exec(r.reference ?? '')?.[1]).filter(Boolean);
+    const olds = ids.length ? await client.searchResources('Observation', { _id: ids.join(','), _count: '1000' }, { cache: 'no-cache' }) : [];
     for (const ref of dr.result ?? []) {
       const o = byRef.get(ref.reference ?? '');
       if (!o) continue;
