@@ -1,9 +1,16 @@
-import { globSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { globSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ResourceType } from '@medplum/fhirtypes';
+import { OperationOutcomeError } from '@medplum/core';
+import type { OperationOutcomeIssue, Resource, ResourceType } from '@medplum/fhirtypes';
 import { expect, test, vi } from 'vitest';
 import { ccdaFiles, convertCcda, importPath } from '../../src/ccda.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
+import { mapMessages, mapNotes } from '../../src/ehi/documents.ts';
+import { ehiContext, importEhi, prepareEhi } from '../../src/ehi/import.ts';
+import { EhiTables, isEhiExport } from '../../src/ehi/read.ts';
+import { collapsePatients } from '../../src/patient.ts';
 
 // Writes to the REAL patient. Prints counts only: never values, names, dates or resource bodies.
 const root = process.env.GA_REAL_DATA;
@@ -148,3 +155,126 @@ test.skipIf(!root)('milestone-1 input presence on the real patient', async () =>
   // Patient demographics are the GA Patient itself (no importer provenance), so only report them.
   expect(Object.entries(table).filter(([k, v]) => !k.startsWith('age') && !k.startsWith('sex') && v.present && !v.allHaveSource)).toEqual([]);
 }, 600_000);
+
+// Milestone 2a, Step 5: the Epic EHI export. Counts only (never values, names or dates), written to the gitignored workspace.
+// Dry pass first (mappers + read-only link pre-passes + $validate, no writes); the import runs only with 0 invalid.
+test.skipIf(!root)('real EHI export: dry pass valid, imports twice without duplicates, archived', async () => {
+  const dirs = globSync('*/', { cwd: root as string }).map((d) => join(root as string, d)).filter(isEhiExport);
+  expect(dirs).toHaveLength(1);
+  const dir = dirs[0];
+  const cfg = loadConfig();
+  const client = await getClient(cfg);
+  const pid = cfg.patientId;
+  const out: Record<string, unknown> = {};
+  const save = () => writeFileSync('.superpowers/sdd/2026-11-06-ehi-import/task-5-real.json', JSON.stringify(out, null, 1));
+
+  // Issues as type/path only: diagnostics can echo values.
+  const issuesOf = async (r: Resource): Promise<OperationOutcomeIssue[]> => {
+    try {
+      return ((await client.validateResource(r)).issue ?? []).filter((i) => i.severity === 'error' || i.severity === 'fatal');
+    } catch (e) {
+      if (e instanceof OperationOutcomeError) return e.outcome.issue ?? [];
+      throw e;
+    }
+  };
+  expect((await issuesOf({ resourceType: 'Observation', code: { text: 'x' } } as Resource)).length).toBeGreaterThan(0); // $validate does reject
+  const ctx = await ehiContext(client, dir, pid);
+  const t = new EhiTables(dir);
+  const prepared = await prepareEhi(client, t, ctx, pid);
+  const dry = [...prepared.resources, ...mapNotes(t, ctx, dir).resources, ...mapMessages(t, ctx)];
+  const { resources: collapsed } = collapsePatients(dry, pid);
+  const dryInvalid: Record<string, number> = {};
+  const mapped: Record<string, number> = {};
+  let linkedEncountersClassFromExisting = 0;
+  for (const r of collapsed) {
+    if (r.resourceType === 'Patient') continue;
+    mapped[r.resourceType] = (mapped[r.resourceType] ?? 0) + 1;
+    // resolveUnlinked leaves class off a linked Encounter: the engine fills it from the existing record (R11).
+    const classless = r.resourceType === 'Encounter' && !r.class;
+    if (classless) linkedEncountersClassFromExisting++;
+    for (const i of await issuesOf({ ...r, id: undefined, ...(classless ? { class: { code: 'UNK' } } : {}) } as Resource)) {
+      const k = `${r.resourceType}/${i.expression?.join(',') ?? i.code}`;
+      dryInvalid[k] = (dryInvalid[k] ?? 0) + 1;
+    }
+  }
+  const tables = ['PAT_ENC', 'PAT_ENC_DX', 'PROBLEM_LIST', 'ORDER_PROC', 'ORDER_RESULTS', 'ORDER_MED', 'IMMUNE', 'IMM_ADMIN', 'FAMILY_HX',
+    'IP_FLWSHT_MEAS', 'IP_FLWSHT_REC', 'V_EHI_FLO_MEAS_VALUE', 'SOCIAL_HX', 'HM_HISTORICAL_STATUS', 'HM_HISTORY', 'V_EHI_HQA_QUEST_ANSWER',
+    'HNO_INFO', 'MYC_MESG'];
+  Object.assign(out, {
+    epicOrgNumberFound: !!ctx.epicOrgNumber,
+    sourceRows: Object.fromEntries(tables.map((x) => [x, t.rows(x).length])),
+    dry: { mapped, skips: prepared.skips, skippedTables: t.skipped, linkedEncountersClassFromExisting, invalid: dryInvalid },
+  });
+  save();
+  expect(dryInvalid).toEqual({}); // STOP before any write
+
+  const types = Object.keys(mapped).sort();
+  const ehiSys = `urn:ga-server:id:ehi:${ctx.org}`;
+  // Per type, records carrying this export's identifier; of those, also a C-CDA identifier (merged/linked), and flagged.
+  const byType = async () => {
+    const res: Record<string, { ehi: number; alsoCcda: number; possibleDuplicate: number; sourceConflict: number }> = {};
+    for (const type of types) {
+      const c = { ehi: 0, alsoCcda: 0, possibleDuplicate: 0, sourceConflict: 0 };
+      const q = { identifier: `${ehiSys}|`, _count: '1000' };
+      for await (const page of client.searchResourcePages(type as ResourceType, q, { cache: 'no-cache' })) {
+        for (const r of page as (Resource & { identifier?: { system?: string }[] })[]) {
+          c.ehi++;
+          if ([r.identifier ?? []].flat().some((i) => i.system === 'urn:ga-server:id:ccda')) c.alsoCcda++;
+          if (r.meta?.tag?.some((g) => g.code === 'possible-duplicate')) c.possibleDuplicate++;
+          if (r.meta?.tag?.some((g) => g.code === 'source-conflict')) c.sourceConflict++;
+        }
+      }
+      res[type] = c;
+    }
+    return res;
+  };
+  const flagTotals = async () => {
+    const res: Record<string, number> = {};
+    for (const code of ['possible-duplicate', 'source-conflict']) {
+      res[code] = 0;
+      for (const type of types) res[code] += (await client.search(type as ResourceType, { _tag: `urn:ga-server:tag|${code}`, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
+    }
+    return res;
+  };
+  const run = () =>
+    importEhi(client, cfg, dir).catch((e) => {
+      throw new Error(`import failed: ${safe(e)}`);
+    });
+
+  out.flagsBefore = await flagTotals();
+  const first = await run();
+  out.first = first;
+  save();
+  expect(first.invalid).toBe(0); // STOP before a second write pass
+  out.after1 = await byType();
+  const second = await run();
+  out.second = second;
+  out.after2 = await byType();
+  out.flagsAfter = await flagTotals();
+  out.patients = (await client.searchResources('Patient', { _count: 1000 }, { cache: 'no-cache' })).filter(
+    (p) => !p.meta?.tag?.some((g) => g.system === 'urn:ga-server:tag' && g.code === 'ga-test'),
+  ).length;
+
+  // Archive: unpack and compare file count and total size with the folder.
+  const files = (d: string) => {
+    const fs = readdirSync(d, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+    return { files: fs.length, bytes: fs.reduce((n, e) => n + statSync(join(e.parentPath, e.name)).size, 0) };
+  };
+  const archives = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: 'urn:ga-server:id:ehi-archive|' }, { cache: 'no-cache' });
+  const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-real-'));
+  try {
+    const blob = await client.download(archives[0]?.content[0].attachment.url as string);
+    writeFileSync(join(tmp, 'a.tar.gz'), Buffer.from(await blob.arrayBuffer()));
+    mkdirSync(join(tmp, 'x'));
+    execFileSync('tar', ['-xzf', join(tmp, 'a.tar.gz'), '-C', join(tmp, 'x')]);
+    out.archive = { documents: archives.length, unpacked: files(join(tmp, 'x')), folder: files(dir) };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  save();
+  console.log(JSON.stringify(out));
+  expect(second).toMatchObject({ created: 0, updated: 0 });
+  expect(out.patients).toBe(1);
+  expect(out.after2).toEqual(out.after1);
+  expect((out.archive as { unpacked: unknown }).unpacked).toEqual((out.archive as { folder: unknown }).folder);
+}, 3_600_000);

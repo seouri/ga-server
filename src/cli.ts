@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { importPath } from './ccda.ts';
 import { GaError, getClient, loadConfig } from './config.ts';
+import { importEhi } from './ehi/import.ts';
+import { isEhiExport } from './ehi/read.ts';
 import { extractWithApi } from './llm.ts';
 import { importExtracted, runMcp } from './mcp.ts';
 import { setup } from './setup.ts';
@@ -20,6 +22,18 @@ try {
       // Extract first so a missing key/bad file fails before any Medplum work; only the report is printed.
       const resources = await extractWithApi(file, key);
       console.log(JSON.stringify(await importExtracted(await getClient(cfg), cfg, resources, file)));
+    } else if (isEhiExport(file)) {
+      // R17: the zone the export's local times are in: --tz, else GA_EHI_TZ, else this machine's zone (exportInfo).
+      const tz = process.argv[4] === '--tz' ? (process.argv[5] ?? '') : undefined;
+      if (tz !== undefined) {
+        try {
+          new Intl.DateTimeFormat('en', { timeZone: tz });
+        } catch {
+          throw new GaError(`--tz needs an IANA time zone, e.g. America/New_York: ${tz}`);
+        }
+      }
+      const cfg = loadConfig();
+      console.log(JSON.stringify(await importEhi(await getClient(cfg), cfg, file, cfg.patientId, tz)));
     } else {
       const cfg = loadConfig();
       console.log(JSON.stringify(await importPath(await getClient(cfg), cfg, process.argv[3])));
@@ -28,7 +42,7 @@ try {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
   } else {
-    throw new GaError('usage: ga setup | ga import <path> | ga mcp');
+    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp');
   }
 } catch (e) {
   if (e instanceof GaError) {

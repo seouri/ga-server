@@ -17,6 +17,7 @@ npm link                 # optional: puts `ga` on your PATH (examples below use 
 
 ```sh
 ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op
+ga import <ehi-folder> [--tz America/New_York]  # Epic EHI export; archived whole; re-importing is a no-op
 ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPIC_API_KEY); once per file
 ```
 
