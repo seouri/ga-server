@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -12,6 +13,8 @@ import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 const PDF = join(import.meta.dirname, '..', 'fixtures', 'labs-synthetic.pdf');
 const CLI = join(import.meta.dirname, '..', '..', 'src', 'cli.ts');
 const fileHash = createHash('sha256').update(readFileSync(PDF)).digest('hex');
+// A second, never-imported PDF (distinct bytes), outside the repo.
+const PDF2 = join(tmpdir(), `ga-test-${randomUUID()}.pdf`);
 let cfg: GaConfig;
 let client: MedplumClient;
 let pid: string;
@@ -35,6 +38,7 @@ beforeAll(async () => {
   cfg = loadConfig();
   client = await getClient(cfg);
   pid = await createTestPatient(client);
+  writeFileSync(PDF2, Buffer.concat([readFileSync(PDF), Buffer.from(`\n%${randomUUID()}\n`)]));
   mcp = new Client({ name: 'test', version: '0' });
   await mcp.connect(
     new StdioClientTransport({ command: 'node', args: [CLI, 'mcp'], env: { ...process.env, GA_PATIENT_ID: pid } as Record<string, string> }),
@@ -43,8 +47,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mcp?.close();
-  for (const d of await client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' })) {
-    if (d.subject?.reference !== `Patient/${pid}`) continue;
+  rmSync(PDF2, { force: true });
+  for (const d of await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' })) {
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
     if (bin) await client.deleteResource('Binary', bin);
     await client.deleteResource('DocumentReference', d.id as string);
@@ -63,16 +67,44 @@ test('ga_import stores document and links observations', async () => {
   expect(o.meta?.tag?.map((t) => t.code)).toEqual(expect.arrayContaining(['writer-agent', 'src-pdf', 'extracted-by-llm']));
 });
 
-test('ga_import twice is a no-op', async () => {
-  const r = await call('ga_import', { resources: [ldl()], sourceFile: PDF, documentDate: '2024-03-02' });
-  expect(JSON.parse(r.text)).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+test('ga_import of an already imported file is refused without writing', async () => {
+  const r = await call('ga_import', { resources: [{ ...ldl(), valueQuantity: { value: 112, unit: 'mg/dL' } }], sourceFile: PDF, documentDate: '2024-03-02' });
+  expect(r).toEqual({ isError: true, text: 'already imported: labs-synthetic.pdf' });
   expect(await count()).toBe(1);
+});
+
+test('ga_import rejects a bad or future documentDate', async () => {
+  for (const documentDate of ['yesterday', '2024-02-30', '2024-03-02T10:00', '2999-01-01']) {
+    const r = await call('ga_import', { resources: [ldl()], sourceFile: PDF2, documentDate });
+    expect(r.text).toMatch(/^documentDate must be/);
+  }
+});
+
+test('ga_import drops agent meta and GA bookkeeping; Encounter and DiagnosticReport import without note', async () => {
+  const inject = {
+    meta: { tag: [{ system: 'urn:ga-server:tag', code: 'writer-importer' }] },
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2999-01-01' }],
+    identifier: [{ system: 'urn:ga-server:id:ccda', value: 'forged' }],
+  };
+  const resources = [
+    { resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' }, ...inject },
+    { resourceType: 'DiagnosticReport', status: 'final', code: { text: 'synthetic panel' } },
+  ];
+  const r = await call('ga_import', { resources, sourceFile: PDF2, documentDate: '2024-03-02' });
+  expect(r.isError).toBe(false);
+  expect(JSON.parse(r.text)).toMatchObject({ created: 2, invalid: 0 });
+  const [e] = await client.searchResources('Encounter', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+  const codes = e.meta?.tag?.map((t) => t.code);
+  expect(codes).toContain('writer-agent');
+  expect(codes).not.toContain('writer-importer');
+  expect(e.extension?.filter((x) => x.url === 'urn:ga-server:ext:source-date').map((x) => x.valueDateTime)).toEqual(['2024-03-02']);
+  expect(e.identifier?.some((i) => i.value === 'forged')).toBe(false);
 });
 
 test('ga_import rejects bad input atomically', async () => {
   const before = await count();
-  expect((await call('ga_import', { resources: [ldl()], sourceFile: '/nonexistent.pdf' })).isError).toBe(true);
-  expect((await call('ga_import', { resources: [ldl(), { status: 'final' }], sourceFile: PDF })).isError).toBe(true);
+  expect((await call('ga_import', { resources: [ldl()], sourceFile: '/nonexistent.pdf' })).text).toMatch(/^sourceFile not found/);
+  expect((await call('ga_import', { resources: [ldl(), { status: 'final' }], sourceFile: PDF })).text).toMatch(/^every resource needs/);
   expect(await count()).toBe(before);
 });
 
@@ -80,6 +112,9 @@ test('fhir_search returns imported LDL', async () => {
   const r = await call('fhir_search', { resourceType: 'Observation', params: { subject: `Patient/${pid}`, code: 'http://loinc.org|13457-7' } });
   const b = JSON.parse(r.text) as Bundle;
   expect(b.entry).toHaveLength(1);
+  const res = b.entry?.[0].resource as Observation;
+  expect(res.text).toBeUndefined();
+  expect(Object.keys(res.meta ?? {}).sort()).toEqual(['source', 'tag']);
   const read = await call('fhir_read', { resourceType: 'Observation', id: b.entry?.[0].resource?.id as string });
   expect(JSON.parse(read.text).valueQuantity.value).toBe(111);
 });
@@ -88,11 +123,11 @@ test('ga_import rejects non-document files, unsupported types and invalid resour
   const docs = () => client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' });
   const before = (await docs()).length;
   const pem = join(import.meta.dirname, '..', '..', 'package.json');
-  expect((await call('ga_import', { resources: [ldl()], sourceFile: pem })).isError).toBe(true);
-  expect((await call('ga_import', { resources: [{ resourceType: 'Patient' }], sourceFile: PDF })).isError).toBe(true);
-  expect((await call('ga_import', { resources: [], sourceFile: PDF })).isError).toBe(true);
+  expect((await call('ga_import', { resources: [ldl()], sourceFile: pem })).text).toMatch(/^sourceFile must be/);
+  expect((await call('ga_import', { resources: [{ resourceType: 'Patient' }], sourceFile: PDF })).text).toMatch(/^unsupported resourceType/);
+  expect((await call('ga_import', { resources: [], sourceFile: PDF })).text).toMatch(/^no resources/);
   const { code: _c, ...noCode } = ldl();
   const r = await call('ga_import', { resources: [{ ...noCode, status: 'bogus' }], sourceFile: PDF });
-  expect(r.isError).toBe(true);
+  expect(r.text).toMatch(/^invalid Observation/);
   expect((await docs()).length).toBe(before);
 });

@@ -17,10 +17,17 @@ npm link                 # optional: puts `ga` on your PATH (examples below use 
 
 ```sh
 ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op
-ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPIC_API_KEY)
+ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPIC_API_KEY); once per file
 ```
 
 `--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `skills/ga-extract/SKILL.md` and `AGENTS.md`).
+
+## Review flags and limits
+
+- `possible-duplicate`: the same test on the same day with a different value, unit or time. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
+- `source-conflict`: a newer import differs from a record a person or agent changed; GA kept the existing record and never overwrites it. Same search with `source-conflict`.
+- A PDF/image is imported once; importing the same file again is refused.
+- Stale medications: a medication dropped from a newer C-CDA list is not marked stopped. An `active` MedicationStatement whose source date is older than the newest C-CDA import is unconfirmed.
 
 ## Connect an agent
 
