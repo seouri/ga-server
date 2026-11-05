@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "ga-server": { "command": "node", "args": ["src/cli.ts", "mcp"] }
+  }
+}
