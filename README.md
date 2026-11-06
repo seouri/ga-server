@@ -17,9 +17,12 @@ npm link                 # optional: puts `ga` on your PATH (examples below use 
 
 ```sh
 ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op
-ga import <ehi-folder> [--tz America/New_York]  # Epic EHI export; archived whole; re-importing is a no-op
+ga import /path/to/ehi-folder --tz America/New_York  # Epic EHI export; --tz = zone of the export's local times
+
 ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPIC_API_KEY); once per file
 ```
+
+An Epic EHI export brings encounters, problems, labs, medications, immunizations, vitals, social and family history, questionnaires, health maintenance, clinical notes (DocumentReference) and MyChart messages (Communication). The whole export is also archived as one DocumentReference. Re-importing the same export is a no-op. Without `--tz`, `GA_EHI_TZ` or this machine's zone is used.
 
 `--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-extract/SKILL.md`, also `/ga-extract <file>` in Claude Code, and `AGENTS.md`).
 
@@ -32,7 +35,7 @@ ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPI
 
 ## Connect an agent
 
-The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`, and `risk_score` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
+The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`, `vaccine_gaps` (adult vaccination status against the CDC 2025 schedule) and `risk_score` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
 
 - Claude Code: open this repo; `.mcp.json` registers `ga-server`.
 - Codex / Hermes: register a stdio MCP server with command `node /absolute/path/to/ga-server/src/cli.ts mcp`. Point the agent at `AGENTS.md` for the PDF extraction rules.

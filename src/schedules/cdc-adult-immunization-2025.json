@@ -10,7 +10,7 @@
     "Shared clinical decision-making recommendations (HPV 27-45 years, MenB 16-23 years, HepB age 60+ with diabetes, pneumococcal after PCV13+PPSV23 at 65+)",
     "Haemophilus influenzae type b (Hib) and Mpox: indication-based only",
     "Contraindications and precautions (Appendix)",
-    "Minimum intervals and repeat-if-too-soon rules: doses are counted by date, not validated against minimum intervals",
+    "Minimum intervals and repeat-if-too-soon rules: only doses less than 28 days apart count once (copies of one dose); other doses are counted by date, not validated against the schedule's minimum intervals",
     "Serologic immunity is accepted only from qualitative results (positive/reactive/immune); numeric titers are not interpreted"
   ],
   "vaccines": [

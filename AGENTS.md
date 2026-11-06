@@ -1,12 +1,24 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `risk_score`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `risk_score`, `vaccine_gaps`.
 
 - Cardiovascular risk: gather inputs from GA and call `risk_score` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
 
 - Claude Code: `.mcp.json` registers it; Claude Code launches project MCP servers with the project directory as cwd, and `ga mcp` finds its config via `GA_CONFIG` or the package root regardless of cwd. If your agent starts it elsewhere, use the absolute path to `src/cli.ts`.
 - Codex/Hermes: register `node /absolute/path/to/ga-server/src/cli.ts mcp` as a stdio MCP server.
+
+## Epic EHI data
+
+`ga import <ehi-folder> [--tz <IANA zone>]` (CLI only; MCP cannot import it) loads an Epic EHI export. Identifiers use `urn:ga-server:id:ehi:<org>`; re-import is a no-op. Where it lives:
+
+- Notes: `DocumentReference` with an inline `text/plain` attachment; the original RTF is a separate DocumentReference linked by `relatesTo` (`transforms`).
+- MyChart messages: `Communication` (`payload` text, `sent`, `sender`/`recipient` display, `inResponseTo` for the thread).
+- Family history: `FamilyMemberHistory`. Social history, vitals: `Observation`. Questionnaires: `QuestionnaireResponse`.
+- Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
+- The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
+- Current medications = `active` MedicationStatement plus `active` MedicationRequest.
+- Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Show Epic health maintenance as a second opinion, labelled as of the export date.
 
 ## PDF extraction (mirrors .claude/skills/ga-extract/SKILL.md)
 
