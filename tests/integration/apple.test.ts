@@ -50,7 +50,8 @@ test('re-import is a no-op', async () => {
   expect(r.created).toBe(0);
   expect(r.updated).toBe(0);
   expect(r.archived).toBe('already-present');
-  expect(r.unchanged).toBe(firstCreated);
+  expect(r.unchanged).toBe(firstCreated - 1); // the allergy always goes to the engine, which skips it
+  expect(r.skipped).toBeGreaterThanOrEqual(1);
 });
 
 test('renamed source creates nothing', async () => {
@@ -79,4 +80,21 @@ test('existing pages by lastUpdated windows when a window is too big', async () 
   const all = await existing(client, pid);
   expect(all.size).toBeGreaterThan(3);
   expect(await existing(client, pid, 2)).toEqual(all);
+});
+
+test('newer export updates a changed allergy', async () => {
+  const f = join(dir, 'clinical-records', 'AllergyIntolerance-B.json');
+  const a = JSON.parse(readFileSync(f, 'utf8'));
+  a.clinicalStatus = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'resolved' }] };
+  writeFileSync(f, JSON.stringify(a));
+  put(xml().replace('2026-11-06 13:39:52', '2026-11-07 13:39:52'));
+  await importAppleHealth(client, cfg, dir, pid);
+  const [stored] = (await client.searchResources('AllergyIntolerance', { patient: `Patient/${pid}` }, { cache: 'no-cache' })) as AllergyIntolerance[];
+  expect(stored.clinicalStatus?.coding?.[0].code).toBe('resolved');
+});
+
+test('cli rejects zip paths', () => {
+  const r = spawnSync('node', [join(import.meta.dirname, '..', '..', 'src', 'cli.ts'), 'import', '/nonexistent/export.zip'], { encoding: 'utf8' });
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('unzip export.zip first');
 });

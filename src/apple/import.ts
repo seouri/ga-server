@@ -10,20 +10,20 @@ import { type AhClinical, readExport } from './read.ts';
 import { Readings, short } from './readings.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
-// Apple resource types and the search param naming the patient.
-const TYPES: [string, string][] = [['Observation', 'subject'], ['DocumentReference', 'subject'], ['AllergyIntolerance', 'patient']];
+// Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id) and the search param naming the patient.
+const TYPES: [string, string][] = [['Observation', 'subject'], ['DocumentReference', 'subject']];
 
 const canon = (v: unknown): unknown =>
   Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canon(x)])) : v;
 const projection = (r: Record<string, unknown>) =>
-  JSON.stringify(canon({ code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }));
+  JSON.stringify(canon({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }));
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
 // Medplum refuses search offsets past 10000 ("Search offset exceeds maximum", measured), and a real export is far larger,
 // so a type is fetched in _lastUpdated windows, halved until each holds at most `max` resources.
 const MAX_OFFSET = 10000;
 
-async function window(client: MedplumClient, type: string, q: Record<string, string>, lo: number, hi: number, max: number, out: Map<string, string>): Promise<number> {
+async function fetchWindow(client: MedplumClient, type: string, q: Record<string, string>, lo: number, hi: number, max: number, out: Map<string, string>): Promise<number> {
   // URLSearchParams: _lastUpdated twice (an object would join the values with a comma)
   const w = (extra: Record<string, string>) => new URLSearchParams({ ...q, ...extra, _lastUpdated: `ge${new Date(lo).toISOString()}` }).toString() + `&_lastUpdated=lt${new Date(hi).toISOString()}`;
   const total = (await client.search(type as 'Observation', w({ _summary: 'count' }), { cache: 'no-cache' })).total ?? 0;
@@ -31,11 +31,11 @@ async function window(client: MedplumClient, type: string, q: Record<string, str
   if (total > max) {
     if (hi - lo <= 1) throw new GaError(`more than ${max} existing ${type} records share one timestamp; cannot page`);
     const mid = Math.floor((lo + hi) / 2);
-    return (await window(client, type, q, lo, mid, max, out)) + (await window(client, type, q, mid, hi, max, out));
+    return (await fetchWindow(client, type, q, lo, mid, max, out)) + (await fetchWindow(client, type, q, mid, hi, max, out));
   }
   let n = 0;
   for await (const page of client.searchResourcePages(type as 'Observation', w({
-    _count: '1000', _elements: 'identifier,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod',
+    _count: '1000', _elements: 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod',
   }), { cache: 'no-cache' })) {
     for (const r of page) { n++; out.set(firstId(r as never), projection(r as never)); }
   }
@@ -49,7 +49,7 @@ export async function existing(client: MedplumClient, patientId: string, max = M
   const out = new Map<string, string>();
   for (const [type, param] of TYPES) {
     const q = { [param]: `Patient/${patientId}`, _tag: TAGGED };
-    const n = await window(client, type, q, 0, Date.now() + 86400e3, max, out);
+    const n = await fetchWindow(client, type, q, 0, Date.now() + 86400e3, max, out);
     const total = (await client.search(type as 'Observation', { ...q, _summary: 'count' }, { cache: 'no-cache' })).total;
     if (total !== n) throw new GaError(`paging returned ${n} of ${total} existing ${type} records; refusing to import`);
   }
@@ -82,7 +82,7 @@ export async function importAppleHealth(
   const have = await existing(client, patientId);
   let unchanged = 0;
   const rest = all.filter((r) => {
-    if (r.resourceType === 'Patient') return true;
+    if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
     const same = have.get(firstId(r as never)) === projection(r as never);
     if (same) unchanged++;
     return !same;
