@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { GaError, getClient, loadConfig } from './config.ts';
 import { detectKind, importAny } from './import.ts';
+import { enrollLink } from './gateway/passkey.ts';
+import { gatewayDir } from './gateway/store.ts';
 import { extractWithApi } from './llm.ts';
 import { importExtracted, runMcp } from './mcp.ts';
 import { setup } from './setup.ts';
@@ -46,8 +48,12 @@ try {
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
+  } else if (process.argv[2] === 'passkey' && process.argv[3] === 'link' && process.argv.length === 4) {
+    const url = process.env.GA_PUBLIC_URL?.replace(/\/+$/, '');
+    if (!url) throw new GaError('ga passkey link needs the GA_PUBLIC_URL environment variable (the public https address)');
+    console.log(enrollLink(gatewayDir(), url));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga passkey link | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {
