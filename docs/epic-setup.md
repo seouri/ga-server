@@ -101,7 +101,7 @@ GA_PATIENT_ID=<test patient id> ga connect https://fhir.epic.com/interconnect-fh
 
 Log in as Epic's sandbox patient `fhircamila` / `epicepic1` and choose the longest access (1 year). Then `ga disconnect fhir-epic-com`, delete the test patient, and remove the sandbox entry from `.ga/smart/sources.json` so the daily sync doesn't report it.
 
-Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redirect works; Epic issues a refresh token without `openid`; access duration up to 1 year; Epic grants no `patient/*.read` wildcard, so GA names each type; the dry run fetched 308 records across 13 types. Types Epic refused (403: not among the selected APIs, e.g. FamilyMemberHistory, MedicationStatement) or rejected (400: CarePlan, Media, Specimen need parameters GA doesn't send) are skipped and listed.
+Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redirect works; Epic issues a refresh token without `openid`; access duration up to 1 year; Epic grants no `patient/*.read` wildcard, so GA names each type; the dry run fetched 308 records across 13 types. Types Epic refused (403: not among the selected APIs; FamilyMemberHistory is not even offered for this app, so family history keeps coming from EHI exports) or rejected (400: CarePlan, Media, Specimen need parameters GA doesn't send) are skipped and listed.
 
 ## https callback
 
