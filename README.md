@@ -4,7 +4,7 @@ A local Medplum FHIR server for one person's health records, with an MCP server 
 
 ## Setup (new Mac)
 
-Prerequisites: Docker Desktop, Node 26 (runs the `.ts` sources directly).
+Prerequisites: [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/), [Node 26](https://nodejs.org/en/download) (runs the `.ts` sources directly).
 
 ```sh
 npm install              # first: the ga-sync service runs this repo's code
