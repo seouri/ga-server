@@ -54,8 +54,18 @@ try {
     const url = process.env.GA_PUBLIC_URL?.replace(/\/+$/, '');
     if (!url) throw new GaError('ga passkey link needs the GA_PUBLIC_URL environment variable (the public https address)');
     console.log(enrollLink(gatewayDir(), url));
+  } else if (process.argv[2] === 'apps' && (process.argv.length === 3 || (process.argv[3] === 'disconnect' && process.argv.length === 5))) {
+    const { listClients, createProvider, disconnectClient } = await import('./gateway/oauth.ts'); // loaded on demand: oidc-provider is heavy
+    if (process.argv.length === 3) console.log(JSON.stringify(listClients(gatewayDir())));
+    else {
+      const dir = gatewayDir();
+      const id = process.argv[4];
+      if (!listClients(dir).some((c) => c.clientId === id)) throw new GaError(`no connected app ${id} (see ga apps)`);
+      await disconnectClient(createProvider({ publicUrl: process.env.GA_PUBLIC_URL?.replace(/\/+$/, '') || 'http://localhost', dir }), dir, id);
+      console.log(`disconnected ${id}`);
+    }
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

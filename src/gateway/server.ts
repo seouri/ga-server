@@ -13,7 +13,7 @@ import { smartDir } from '../smart/store.ts';
 import { renderInactive } from '../share/page.ts';
 import { HEADERS, type ShareDeps, TooLarge, clientIp, failLimiter, readBody, send, shareHandler } from '../share/server.ts';
 import { shareDeps } from '../share/cli.ts';
-import { appName, createProvider } from './oauth.ts';
+import { appName, createProvider, disconnectClient } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { remoteTools } from './remote-log.ts';
@@ -111,7 +111,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     }
     // Stateless: no session, so no GET stream and nothing to DELETE.
     if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' }, { Allow: 'POST' });
-    const server = deps.tools({ publicUrl: pub!, clientName: appName(client.redirectUris[0]), dir: deps.dir });
+    const server = deps.tools({ publicUrl: pub!, clientName: appName(client.redirectUris[0]), dir: deps.dir, disconnect: (id) => disconnectClient(provider, deps.dir, id) });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       transport.close().catch(() => {});
@@ -265,7 +265,6 @@ export function createGateway(deps: GatewayDeps): http.Server {
   const server = http.createServer((req, res) => {
     const t = setTimeout(() => req.complete || req.socket.destroy(), BODY_MS).unref();
     deadlines.set(req, t);
-    res.once('close', () => clearTimeout(t));
     handle(req, res).catch(() => {
       if (!res.headersSent) send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8');
       else res.destroy();

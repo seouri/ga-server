@@ -25,9 +25,10 @@ const CHATGPT = { 'openai/fileParams': ['file'] };
 type File = { download_url: string; file_name: string };
 
 const fns = { importExtracted, importAny, fetch: globalThis.fetch as (u: URL, i: RequestInit) => Promise<Response>, fileHosts: undefined as string[] | undefined };
-export function registerImportTools(server: McpServer, deps: ToolDeps, dir = deps.remote?.dir ?? gatewayDir(), f: Partial<typeof fns> = {}): void {
+export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partial<typeof fns> = {}): void {
   const { client, cfg, patientId, remote } = deps;
   if (!remote) throw new GaError('import tools need a remote server');
+  const dir = remote.dir ?? gatewayDir();
   const { importExtracted: extract, importAny: importPath, fetch: get, fileHosts } = { ...fns, ...f };
   const hosts = fileHosts ?? FILE_HOSTS;
 

@@ -15,6 +15,7 @@ import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { chatInstructions } from './instructions.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
+import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
 import { registerShareTools } from './tools/shares.ts';
 
@@ -128,7 +129,7 @@ export type ToolDeps = {
   cfg: GaConfig;
   patientId: string;
   // dir: the gateway's state directory (uploads); default gatewayDir().
-  remote?: { publicUrl: string; clientName: string; dir?: string; log: (tool: string) => Promise<void> };
+  remote?: { publicUrl: string; clientName: string; dir?: string; disconnect?: (clientId: string) => Promise<void>; log: (tool: string) => Promise<void> };
 };
 
 const CAP = 150_000; // claude.ai's tool-result limit is about this size
@@ -235,8 +236,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     registerShareTools(server, deps);
     registerHospitalTools(server, deps);
     registerImportTools(server, deps);
+    registerAppTools(server, deps);
   }
-  // Task 11 adds here, when remote is set: registerAppTools.
   return server;
 }
 

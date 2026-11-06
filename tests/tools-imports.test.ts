@@ -37,7 +37,7 @@ async function setup(o: { fileHosts?: string[] } = {}) {
   };
   const server = new McpServer({ name: 't', version: '0' });
   const deps = { client: {} as MedplumClient, cfg: { patientId: 'real' } as never, patientId: 'p', remote: { publicUrl: PUBLIC, clientName: 'c', dir, log: async () => {} } };
-  registerImportTools(server, deps, dir, fake as never);
+  registerImportTools(server, deps, fake as never);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const c = new Client({ name: 't', version: '0' });
   await Promise.all([server.connect(a), c.connect(b)]);

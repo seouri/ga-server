@@ -86,7 +86,7 @@ test('a valid token runs the tools for the client app', async () => {
   const r = await initialize(token);
   expect(r.status).toBe(200);
   await r.text();
-  expect(calls).toEqual([{ publicUrl: PUBLIC, clientName: 'claude.ai', dir }]);
+  expect(calls).toEqual([{ publicUrl: PUBLIC, clientName: 'claude.ai', dir, disconnect: expect.any(Function) }]);
   expect((await fetch(`${base}/mcp`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(405);
 });
 
