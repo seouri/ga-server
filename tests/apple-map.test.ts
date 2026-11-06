@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Readings } from '../src/apple/readings.ts';
-import type { AhRecord } from '../src/apple/read.ts';
+import type { AhClinical, AhRecord } from '../src/apple/read.ts';
+import { mapClinical, mapEcgs } from '../src/apple/clinical.ts';
 import { APPLE } from '../src/identity.ts';
 
 const q = (t: string) => `HKQuantityTypeIdentifier${t}`;
@@ -116,5 +118,34 @@ describe('Apple daily', () => {
   });
   it('counts a missing value as badValue', () => {
     expect(daily([hk('StepCount', '', 'count', 'W', '2026-03-01T09:00:00-05:00')]).skips).toMatchObject({ badValue: 1, unexpectedUnit: 0 });
+  });
+});
+
+describe('Apple clinical records and ECG', () => {
+  const dir = new URL('./fixtures/apple', import.meta.url).pathname;
+  const ref = (type: string, file: string, fhirVersion: string, sourceURL = ''): AhClinical => ({ type, sourceURL, fhirVersion, resourceFilePath: `/clinical-records/${file}` });
+  const refs = [
+    ref('Patient', 'Patient-A.json', '4.0.1'),
+    ref('AllergyIntolerance', 'AllergyIntolerance-B.json', '4.0.1', 'https://fhir.example.org/R4/AllergyIntolerance/a1'),
+    ref('Observation', 'Observation-C.json', '1.0.2'),
+  ];
+  it('maps patient, allergy, counts unsupported', () => {
+    const { resources: [p, a], skips } = mapClinical(dir, refs);
+    expect(p).toEqual({ resourceType: 'Patient', id: 'apple-patient', identifier: expect.any(Array) });
+    expect((p as any).identifier).toHaveLength(2);
+    expect(a.id).toBeUndefined();
+    expect((a as any).patient).toEqual({ reference: 'Patient/apple-patient', display: 'Test Person' });
+    expect((a as any).recorder).toEqual({ display: 'Dr. Example' });
+    expect((a as any).identifier[0]).toEqual({ system: APPLE, value: 'https://fhir.example.org/R4/AllergyIntolerance/a1' });
+    expect(skips).toEqual({ clinicalTypeUnsupported: 1 });
+  });
+  it('maps ECG without PHI', () => {
+    const [d, o] = mapEcgs(dir) as any[];
+    expect(o.valueString).toBe('Sinus Rhythm');
+    expect(o.effectiveDateTime).toBe('2024-02-11T14:48:35-05:00');
+    expect(o.derivedFrom[0].reference).toBe(`DocumentReference/${d.id}`);
+    expect(Buffer.from(d.content[0].attachment.data, 'base64').toString()).toBe(readFileSync(`${dir}/electrocardiograms/ecg_2024-02-11.csv`, 'utf8'));
+    expect(d.identifier[0].system).toBe(APPLE);
+    expect(JSON.stringify(o)).not.toMatch(/Test Person|Jan 1, 1970/);
   });
 });
