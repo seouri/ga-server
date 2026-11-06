@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   generateAuthenticationOptions,
@@ -8,7 +8,7 @@ import {
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
-import { ensureDir, readJson, writeJson } from './store.ts';
+import { readJson, writeJson } from './store.ts';
 
 type Passkey = { id: string; publicKey: string; counter: number; transports?: string[] };
 const DAY = 24 * 3600_000;
@@ -83,7 +83,7 @@ export async function verifyAuthentication(dir: string, publicUrl: string, respo
 function cookieKey(dir: string): Buffer {
   const f = join(dir, 'cookie.key');
   if (!existsSync(f)) {
-    ensureDir(dir);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
     try {
       writeFileSync(f, randomBytes(32), { mode: 0o600, flag: 'wx' });
     } catch (e) {
