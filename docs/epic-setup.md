@@ -120,4 +120,19 @@ Open it with **Open Data Use Questionnaire** on the app page. Epic shows some an
 
 ### Questionnaire from 12/27/2018
 
-Answer this tab too: hospitals on older Epic versions show it, and an unanswered one warns patients at login. Give the answers that match the table above for each overlapping question. (Record its exact questions and answers here when you fill it in.)
+Answer this tab too: hospitals on older Epic versions show it, and an unanswered one warns patients at login. Keep it consistent with the 2021 answers above.
+
+| Question | Answer |
+|---|---|
+| Which option best describes the company offering the app to users/patients? | **An individual or independent developer.** |
+| Do you have a business associate agreement with each covered entity your app will connect to? | **No.** |
+| How is this app funded? | **This app is produced by volunteers or is available in the open source community.** (only this one) |
+| Where can this app store user data? | **Locally on the user's device.** and **The app can perform core services without storing data on servers, and the app stores user data on servers in the US only if the user opts in.** (only these two: GA keeps records on your Mac; turning on questions or PDF reading sends record text to your AI provider) |
+| Other than the user, who has access to user data? | **People and groups users authorize.** and **Apps that users authorize.** |
+| Will the user specifically approve and be notified of each access, or is their authorization general and information is shared without notification? | **Users authorize access and sharing of their information generally and are not notified.** (you approve each share link once; its accesses are logged, not notified) |
+| Do you allow users to obtain a record of the data that have been collected about them? | **We allow users to obtain a complete record of the data that have been collected about them.** |
+| Does this app allow users to delete the data that have been stored about them? | **This app allows users to delete all of the data that we have stored about them.** |
+| Do you retain user data after a user deletes the app and closes their account? | **No.** |
+| Other than providing direct service to the user, how do you use data about the user? | **We don't use data about users beyond providing direct services.** (only this one) |
+| For how long does this app store user data? | **This app stores user data indefinitely.** |
+| Does this app allow users to obtain a record of who has accessed data about them? | **This app allows users to obtain a partial record of who has accessed data about them.** (same as 2021: `ga share log` covers share links, not your own agents' reads) |
