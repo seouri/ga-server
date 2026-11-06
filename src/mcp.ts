@@ -90,6 +90,16 @@ const slim = (r: Resource) => {
   return { ...rest, meta: { source: meta?.source, tag: meta?.tag } };
 };
 
+// Output only (stored data unchanged): a text/plain attachment (EHI notes) shows its decoded text in place of base64 data.
+export const readable = (x: unknown): unknown => {
+  if (Array.isArray(x)) return x.map(readable);
+  if (!x || typeof x !== 'object') return x;
+  const o = Object.fromEntries(Object.entries(x).map(([k, v]) => [k, readable(v)]));
+  if (typeof o.data !== 'string' || !/^text\/plain\b/i.test(String(o.contentType ?? ''))) return o;
+  const { data, ...rest } = o;
+  return { ...rest, text: Buffer.from(data as string, 'base64').toString('utf8') };
+};
+
 const TYPE_RE = /^[A-Z][A-Za-z]+$/;
 const text = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v) }] });
 const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
@@ -114,7 +124,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
       try {
         const b = await client.search(resourceType as 'Observation', { ...params, _count: String(Math.min(Number(params._count) || 20, 1000)) }, { cache: 'no-cache' });
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
-        return text(b);
+        return text(readable(b));
       } catch (e) {
         return fail(e);
       }
@@ -125,7 +135,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
     { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() } },
     async ({ resourceType, id }) => {
       try {
-        return text(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' }));
+        return text(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })));
       } catch (e) {
         return fail(e);
       }

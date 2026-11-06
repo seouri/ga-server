@@ -157,3 +157,17 @@ test('ga_import rejects non-document files, unsupported types and invalid resour
   expect(r.text).toMatch(/^invalid Observation/);
   expect((await docs()).length).toBe(before);
 });
+
+test('fhir_search and fhir_read show a text/plain attachment as decoded text; stored data stays base64 (I3)', async () => {
+  const data = Buffer.from('Synthetic note text', 'utf8').toString('base64');
+  const doc = await client.createResource({
+    resourceType: 'DocumentReference', status: 'current', subject: { reference: `Patient/${pid}` },
+    content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data } }],
+  });
+  const read = JSON.parse((await call('fhir_read', { resourceType: 'DocumentReference', id: doc.id as string })).text);
+  expect(read.content[0].attachment).toEqual({ contentType: 'text/plain; charset=utf-8', text: 'Synthetic note text' });
+  const b = JSON.parse((await call('fhir_search', { resourceType: 'DocumentReference', params: { _id: doc.id as string } })).text) as Bundle;
+  expect((b.entry?.[0].resource as { content: { attachment: unknown }[] }).content[0].attachment).toEqual({ contentType: 'text/plain; charset=utf-8', text: 'Synthetic note text' });
+  const stored = await client.readResource('DocumentReference', doc.id as string, { cache: 'no-cache' });
+  expect(stored.content[0].attachment.data).toBe(data);
+});
