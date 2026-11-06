@@ -101,5 +101,20 @@ describe('Apple daily', () => {
     const a = daily(rs).resources, b = daily(rs).resources;
     expect(a.map((o) => o.identifier![0].value)).toEqual(b.map((o) => o.identifier![0].value));
     expect(a).toHaveLength(2);
+    expect(new Set(a.map((o) => o.identifier![0].value)).size).toBe(2);
+  });
+  it('splits one InBed spanning a nap and a night without double counting', () => {
+    const { resources } = daily([
+      hk('x', '', undefined, 'P', '2026-03-01T00:00:00-05:00'), // ignored type
+      sl('InBed', 'P', '2026-03-01T13:00:00-05:00', '2026-03-02T07:00:00-05:00'),
+      sl('AsleepCore', 'W', '2026-03-01T13:00:00-05:00', '2026-03-01T14:00:00-05:00'),
+      sl('AsleepCore', 'W', '2026-03-01T23:00:00-05:00', '2026-03-02T06:00:00-05:00'),
+    ]);
+    const beds = resources.map((o) => comp(o, 'In bed'));
+    expect(beds.reduce((a, b) => a! + b!, 0)).toBe(18 * 60);
+    expect(beds.every((b) => b! < 18 * 60)).toBe(true);
+  });
+  it('counts a missing value as badValue', () => {
+    expect(daily([hk('StepCount', '', 'count', 'W', '2026-03-01T09:00:00-05:00')]).skips).toMatchObject({ badValue: 1, unexpectedUnit: 0 });
   });
 });

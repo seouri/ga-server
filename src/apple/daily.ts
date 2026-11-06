@@ -42,7 +42,7 @@ export class Daily {
   private asleep: Iv[] = [];
   private inBed: Iv[] = [];
   private rings: Observation[] = [];
-  private skips = { activityEmptyDays: 0, unexpectedUnit: 0 };
+  private skips = { activityEmptyDays: 0, unexpectedUnit: 0, badValue: 0 };
 
   private obs(key: string, code: Observation['code'], day: string, off: string): Observation {
     return {
@@ -66,7 +66,7 @@ export class Daily {
     const rate = RATES[t], tot = TOTALS[t];
     if (!rate && !tot) return false;
     const v = Number(rec.value);
-    if (rec.value === undefined || rec.value === '' || !Number.isFinite(v)) { this.skips.unexpectedUnit++; return true; }
+    if (rec.value === undefined || rec.value === '' || !Number.isFinite(v)) { this.skips.badValue++; return true; }
     const k = `${t}|${day}`;
     if (rate) {
       if (rec.unit !== rate.unit) { this.skips.unexpectedUnit++; return true; }
@@ -104,10 +104,12 @@ export class Daily {
       if (clusters.length && i.s - end < GAP) clusters[clusters.length - 1].push(i); else clusters.push([i]);
       end = Math.max(end, i.e);
     }
-    for (const c of clusters) {
+    const ends = clusters.map((c) => Math.max(...c.map((i) => i.e)));
+    for (const [n, c] of clusters.entries()) {
       const first = c[0], last = c.reduce((a, b) => (b.e > a.e ? b : a));
       const wake = last.eStr.slice(0, 10);
       const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake, '');
+      o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${first.sStr}`) }]; // wake day can repeat (naps)
       o.effectivePeriod = { start: first.sStr, end: last.eStr };
       o.valueQuantity = q(r(minutes(c), 1), 'min');
       const bySrc = new Map<string, number>();
@@ -120,7 +122,9 @@ export class Daily {
         if (mins) comps.push({ code: { text }, valueQuantity: q(r(mins, 1), 'min') });
       }
       const cs = Math.min(...c.map((i) => i.s)), ce = last.e;
-      const bed = this.inBed.filter((i) => i.s < ce && i.e > cs);
+      // clip InBed to this cluster's share: out to the midpoint of the gap to each neighbouring cluster, so an InBed spanning a night keeps its full length but is never counted twice
+      const lo = n ? (ends[n - 1] + cs) / 2 : -Infinity, hi = n < clusters.length - 1 ? (ce + clusters[n + 1][0].s) / 2 : Infinity;
+      const bed = this.inBed.filter((i) => i.s < hi && i.e > lo && i.s < ce && i.e > cs).map((i) => ({ s: Math.max(i.s, lo), e: Math.min(i.e, hi) }));
       if (bed.length) comps.push({ code: { text: 'In bed' }, valueQuantity: q(r(minutes(bed), 1), 'min') });
       if (comps.length) o.component = comps;
       out.push(o);
@@ -128,7 +132,7 @@ export class Daily {
     return out;
   }
 
-  result(): { resources: Observation[]; skips: { activityEmptyDays: number; unexpectedUnit: number } } {
+  result(): { resources: Observation[]; skips: { activityEmptyDays: number; unexpectedUnit: number; badValue: number } } {
     const out: Observation[] = [];
     for (const a of this.rates.values()) {
       const d = RATES[a.kind];
