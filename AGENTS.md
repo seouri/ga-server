@@ -20,6 +20,18 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fh
 - Current medications = `active` MedicationStatement plus `active` MedicationRequest. An `active` MedicationRequest is only as current as its source date (`urn:ga-server:ext:source-date`): one older than the newest Epic import (C-CDA or EHI) is unconfirmed.
 - Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Show Epic health maintenance as a second opinion, labelled as of the export date.
 
+## Apple Health data
+
+`ga import <unzipped apple_health_export folder>` (CLI only; no extra args, unzip `export.zip` first). Identifiers use `urn:ga-server:id:apple-health`; tag `src-apple-health`; re-import is a no-op, a newer export updates changed records (its last day is partial).
+
+- Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each.
+- Records coded "daily mean" or "daily total" are summaries, not readings. Steps and distance take the largest single source per day.
+- Sleep is one Observation per night (stage components).
+- A home reading and a clinic reading on the same day are both real; don't merge or flag them.
+- Health Records inside the export are hospital copies: trust the hospital source over the Apple copy.
+- The ECG is a text `DocumentReference` (CSV) plus an Observation with its classification.
+- The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:apple-health-archive`).
+
 ## PDF extraction (mirrors .claude/skills/ga-extract/SKILL.md)
 
 Extract health records from a local PDF or image into GA through the `ga-server` MCP tools. GA never sends data anywhere: you read the file yourself.

@@ -1,12 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { basename, dirname, join, relative, sep } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
-import { pipeline } from 'node:stream/promises';
-import { defaultConfigPath, GaError, type GaConfig } from '../config.ts';
-import { storeDocument } from '../document.ts';
+import { archiveFolder } from '../archive.ts';
+import type { GaConfig } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
 import { mapConditions } from './conditions.ts';
 import { importDocuments } from './documents.ts';
@@ -61,45 +56,6 @@ export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCt
   return { resources, skips };
 }
 
-// R1: the archive's identity is the folder's manifest (sorted relative paths, sizes, sha256s), not the tarball, whose
-// bytes change with every tar run (timestamps), so a re-import finds it and skips tar and upload.
-async function manifestHash(dir: string): Promise<string> {
-  const lines: string[] = [];
-  for (const e of readdirSync(dir, { recursive: true, withFileTypes: true }).filter((x) => x.isFile())) {
-    const p = join(e.parentPath, e.name);
-    const h = createHash('sha256');
-    await pipeline(createReadStream(p), h); // streamed: an export can hold large media files
-    lines.push(`${relative(dir, p).split(sep).join('/')}\t${statSync(p).size}\t${h.digest('hex')}`);
-  }
-  return createHash('sha256').update(lines.sort().join('\n')).digest('hex');
-}
-
-// shortcut: the tar.gz is uploaded as one Binary (10 MB for the real export); upgrade to chunks if exports reach GBs.
-async function archive(client: MedplumClient, dir: string, patientId: string): Promise<'stored' | 'already-present'> {
-  const id = { system: ARCHIVE, value: await manifestHash(dir) };
-  const query = { identifier: `${id.system}|${id.value}`, subject: `Patient/${patientId}` };
-  if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return 'already-present';
-  // The tarball holds the whole export: a user-owned dir next to GA's config, not the shared system temp dir.
-  const parent = join(dirname(defaultConfigPath()), 'tmp');
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
-  const tmp = mkdtempSync(join(parent, 'ehi-'));
-  try {
-    const file = join(tmp, `${basename(dir)}.tar.gz`);
-    // shortcut: system tar (macOS/Linux); switch to a library only if Windows support is needed.
-    // COPYFILE_DISABLE: macOS tar would otherwise add ._ metadata entries that aren't in the folder.
-    // Output ignored and only the exit code reported: tar messages name files of the export.
-    try {
-      execFileSync('tar', ['-czf', file, '-C', dir, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' }, stdio: 'ignore' });
-    } catch (e) {
-      throw new GaError(`archive failed: tar exit ${(e as { status?: number }).status ?? 'unknown'}`);
-    }
-    await storeDocument(client, file, patientId, 'application/gzip', [id]);
-    return 'stored';
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-}
-
 export async function importEhi(
   client: MedplumClient,
   cfg: GaConfig,
@@ -115,7 +71,7 @@ export async function importEhi(
 > {
   const ctx = await ehiContext(client, dir, patientId, timeZone);
   // First, so the original is kept even if a later step fails (idempotent: found by its manifest on a re-run).
-  const archived = await archive(client, dir, patientId);
+  const archived = await archiveFolder(client, dir, patientId, ARCHIVE);
   const t = new EhiTables(dir);
   const { resources, skips } = await prepareEhi(client, t, ctx, patientId);
   const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');

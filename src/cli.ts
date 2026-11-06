@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { importPath } from './ccda.ts';
 import { GaError, getClient, loadConfig } from './config.ts';
+import { importAppleHealth } from './apple/import.ts';
+import { isAppleHealthExport } from './apple/read.ts';
 import { importEhi } from './ehi/import.ts';
 import { isEhiExport } from './ehi/read.ts';
 import { extractWithApi } from './llm.ts';
@@ -39,7 +41,12 @@ try {
       }
       const cfg = loadConfig();
       console.log(JSON.stringify(await importEhi(await getClient(cfg), cfg, file, cfg.patientId, tz)));
+    } else if (isAppleHealthExport(file)) {
+      if (process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
+      const cfg = loadConfig();
+      console.log(JSON.stringify(await importAppleHealth(await getClient(cfg), cfg, file)));
     } else {
+      if (/\.zip$/i.test(file)) throw new GaError('unzip export.zip first, then: ga import <folder>');
       const cfg = loadConfig();
       console.log(JSON.stringify(await importPath(await getClient(cfg), cfg, process.argv[3])));
     }

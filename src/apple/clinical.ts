@@ -58,7 +58,7 @@ export function mapEcgs(dir: string): { resources: Resource[]; skips: { ecgUnpar
     const recorded = appleDate(h['Recorded Date']);
     const id = `apple-ecg-${n}`;
     out.push({
-      resourceType: 'DocumentReference', id, status: 'current', type: { text: 'Apple Watch ECG' }, date: recorded,
+      resourceType: 'DocumentReference', id, status: 'current', subject: SUBJECT, type: { text: 'Apple Watch ECG' }, date: recorded,
       content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(text).toString('base64'), title: basename(f) } }],
       identifier: [{ system: APPLE, value: sha(`ecg|${text}`) }],
     });
