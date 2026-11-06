@@ -8,9 +8,10 @@ import type { Group, Share } from './store.ts';
 
 export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[] };
 
-// Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own.
+// Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
 const NEVER = new Set([
   'Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person',
+  'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
 ]);
 // FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
 export const COMPARTMENT_TYPES = [
@@ -46,7 +47,7 @@ const DATE_PATHS = [
   'period.start', 'date', 'authoredOn', 'sent', 'authored', 'recordedDate', 'onsetDateTime', 'dateAsserted',
 ];
 // Only these are followed from in-scope records, one hop; they are never searchable on their own.
-const SUPPORT_REF = /^(Medication|Practitioner|Organization|Location|Binary)\/([^/]+)/;
+const SUPPORT_REF = /^(Medication|Practitioner|Organization|Location|Binary)\/([A-Za-z0-9\-.]{1,64})(?:\/|$)/;
 // Attachment urls: Medplum may answer with a presigned /storage/<binary id>/... URL instead of Binary/<id>.
 const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
 
@@ -111,8 +112,10 @@ function supportRefs(r: Resource, out: Set<string>): void {
 }
 
 // Pure part of loadScoped: compartment records in, the share's records and the support refs they need out.
+// Membership is checked on Medplum's meta.compartment too, not trusted to the _compartment query alone.
 export function selectScoped(compartment: Resource[], share: Share): { resources: Resource[]; refs: string[] } {
-  const resources = compartment.filter((r) => inScope(r, share));
+  const mine = `Patient/${share.patientId}`;
+  const resources = compartment.filter((r) => !!r.meta?.compartment?.some((c) => c.reference === mine) && inScope(r, share));
   const refs = new Set<string>();
   for (const r of resources) supportRefs(r, refs);
   return { resources, refs: [...refs] };
@@ -141,7 +144,8 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
         // Binary is not searchable in Medplum; a deleted one is just left out.
         for (const id of chunk) {
           const b = await client.readResource('Binary', id, opts).catch(() => undefined);
-          if (b) support.push(b);
+          const ctx = b?.securityContext?.reference;
+          if (b && !(ctx?.startsWith('Patient/') && ctx !== `Patient/${share.patientId}`)) support.push(b);
         }
       } else support.push(...(await client.searchResources(type as ResourceType, { _id: chunk.join(','), _count: '1000' }, opts)));
     }
@@ -153,11 +157,12 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
 export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof loadScoped {
   const cache = new Map<string, { at: number; p: Promise<Scoped> }>();
   return (client, share) => {
-    const hit = cache.get(share.id);
+    const key = `${share.id}:${share.tokenHash}`;
+    const hit = cache.get(key);
     if (hit && Date.now() - hit.at < ttlMs) return hit.p;
     const p = load(client, share);
-    cache.set(share.id, { at: Date.now(), p });
-    p.catch(() => cache.get(share.id)?.p === p && cache.delete(share.id));
+    cache.set(key, { at: Date.now(), p });
+    p.catch(() => cache.get(key)?.p === p && cache.delete(key));
     return p;
   };
 }

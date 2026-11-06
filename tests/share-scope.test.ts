@@ -54,6 +54,13 @@ test.each([
   r({ resourceType: 'Claim' }),
   r({ resourceType: 'ExplanationOfBenefit' }),
   r({ resourceType: 'Person' }),
+  r({ resourceType: 'Group' }),
+  r({ resourceType: 'ClaimResponse' }),
+  r({ resourceType: 'Invoice' }),
+  r({ resourceType: 'ChargeItem' }),
+  r({ resourceType: 'CoverageEligibilityRequest' }),
+  r({ resourceType: 'CoverageEligibilityResponse' }),
+  r({ resourceType: 'EnrollmentRequest' }),
   archive('urn:ga-server:id:ehi-archive'),
   archive('urn:ga-server:id:apple-health-archive'),
 ])('never shared, even with all: %#', (res) => {
@@ -97,25 +104,36 @@ test('trimPatient keeps only name, birthDate and gender', () => {
   expect(trimPatient(p)).toEqual({ resourceType: 'Patient', id: 'p', name: [{ family: 'Test' }], birthDate: '1980-01-01', gender: 'other' });
 });
 
+const inP = { meta: { compartment: [{ reference: 'Patient/p' }] } };
 test('selectScoped follows support references only from in-scope records', () => {
   const ms = r({
-    resourceType: 'MedicationStatement', status: 'active',
+    resourceType: 'MedicationStatement', status: 'active', ...inP,
     medicationReference: { reference: 'Medication/m1' },
     informationSource: { reference: 'Practitioner/pr1' },
+    recorder: { reference: 'Practitioner/bad id&_id=x' },
     subject: { reference: 'Patient/p' },
     derivedFrom: [{ reference: 'Observation/o9' }],
   });
-  const lab = obs('laboratory', { performer: [{ reference: 'Practitioner/pr2' }, { reference: 'Organization/o2' }] });
-  const note = r({ resourceType: 'DocumentReference', content: [{ attachment: { url: 'Binary/00000000-0000-0000-0000-000000000001' } }] });
-  const out = selectScoped([r({ resourceType: 'Patient', id: 'p', telecom: [{ value: '1' }] }), ms, lab, note], share({ groups: ['medications'] }));
+  const lab = obs('laboratory', { ...inP, performer: [{ reference: 'Practitioner/pr2' }, { reference: 'Organization/o2' }] });
+  const note = r({ resourceType: 'DocumentReference', ...inP, content: [{ attachment: { url: 'Binary/00000000-0000-0000-0000-000000000001' } }] });
+  const out = selectScoped([r({ resourceType: 'Patient', id: 'p', telecom: [{ value: '1' }], ...inP }), ms, lab, note], share({ groups: ['medications'] }));
   expect(out.resources).toEqual([ms]);
   expect(out.refs.sort()).toEqual(['Medication/m1', 'Practitioner/pr1']);
-  const all = selectScoped([r({ resourceType: 'Patient', id: 'p' }), note], share());
+  const all = selectScoped([note], share());
   expect(all.refs).toEqual(['Binary/00000000-0000-0000-0000-000000000001']);
 });
 
+test("selectScoped drops records not in the share patient's compartment", () => {
+  const other = obs('laboratory', { meta: { compartment: [{ reference: 'Patient/q' }] }, performer: [{ reference: 'Practitioner/px' }] });
+  const none = obs('laboratory');
+  const mine = obs('laboratory', inP);
+  const out = selectScoped([other, none, mine], share());
+  expect(out.resources).toEqual([mine]);
+  expect(out.refs).toEqual([]);
+});
+
 test('never-shared types are not even fetched', () => {
-  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Binary', 'Medication']) {
+  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest', 'Binary', 'Medication']) {
     expect(COMPARTMENT_TYPES).not.toContain(t);
   }
   for (const t of ['Observation', 'MedicationStatement', 'DocumentReference', 'Communication', 'Condition']) expect(COMPARTMENT_TYPES).toContain(t);
@@ -139,7 +157,9 @@ test('scopedCache shares one load per share until the TTL passes, and drops fail
   expect(load).toHaveBeenCalledTimes(2);
   await cached(c, share({ id: 's2' }));
   expect(load).toHaveBeenCalledTimes(3);
+  await cached(c, share({ tokenHash: 'other' }));
+  expect(load).toHaveBeenCalledTimes(4);
   vi.advanceTimersByTime(1001);
   await cached(c, share());
-  expect(load).toHaveBeenCalledTimes(4);
+  expect(load).toHaveBeenCalledTimes(5);
 });
