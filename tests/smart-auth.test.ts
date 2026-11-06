@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPair, exportJWK } from 'jose';
-import { accessToken, connect, sourceKey } from '../src/smart/auth.ts';
+import { accessToken, connect, SCOPE, sourceKey } from '../src/smart/auth.ts';
 import type { Tokens } from '../src/smart/auth.ts';
 import { ensureKeys, loadSecret, readSources, saveSecret } from '../src/smart/store.ts';
 import { startMock } from './smart/mock-server.ts';
@@ -72,7 +72,9 @@ describe('connect', () => {
   it('requests read-only scopes without openid, so an id_token-capable server issues none', async () => {
     const { m, src } = await setup({ idToken: 'unadvertised' });
     expect(src.patient).toBe('synthetic-patient-1');
-    expect(m.stats.scopes).toEqual(['offline_access launch/patient patient/*.read']);
+    expect(m.stats.scopes).toEqual([SCOPE]);
+    expect(SCOPE).toMatch(/^offline_access launch\/patient patient\/AllergyIntolerance\.read .*patient\/Observation\.read/);
+    expect(SCOPE).not.toMatch(/openid|fhirUser|\*|write/);
   });
 
   it('is refused when the registered key differs', async () => {

@@ -11,7 +11,12 @@ import type { SourceRec } from './store.ts';
 export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
 
 // No openid/fhirUser: GA never uses the id_token, and openid-client validates one on every refresh (a malformed one breaks sync).
-const SCOPE = 'offline_access launch/patient patient/*.read';
+// Epic grants no wildcard (patient/*.read came back as only "launch/patient offline_access"), so each type is named;
+// keep in step with the API list in docs/epic-setup.md.
+const READ_TYPES = ['AllergyIntolerance', 'Binary', 'CarePlan', 'CareTeam', 'Condition', 'Device', 'DiagnosticReport', 'DocumentReference',
+  'Encounter', 'Goal', 'Immunization', 'Location', 'Medication', 'MedicationRequest', 'Observation', 'Organization', 'Patient',
+  'Practitioner', 'PractitionerRole', 'Procedure', 'Provenance', 'ServiceRequest'];
+export const SCOPE = ['offline_access', 'launch/patient', ...READ_TYPES.map((t) => `patient/${t}.read`)].join(' ');
 
 export const sourceKey = (fhirBase: string): string => new URL(fhirBase).hostname.toLowerCase().replaceAll('.', '-');
 

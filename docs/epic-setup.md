@@ -75,7 +75,7 @@ GA asks each hospital which of these it supports and fetches only those, so extr
 | Field | Value |
 |---|---|
 | SMART on FHIR Version | **R4** |
-| SMART Scope Version | **SMART v1** (GA requests `patient/*.read`, v1 syntax) |
+| SMART Scope Version | **SMART v1** (GA requests `patient/<Type>.read` for each API listed above, v1 syntax; Epic does not grant `patient/*.read`) |
 | FHIR ID Generation Scheme | **Use Unconstrained FHIR IDs**. Never change it later: GA links portal records by Epic's IDs, so new IDs would duplicate every record |
 | Summary | `Personal health record: keeps a read-only copy of my own records on my own computer.` |
 | Description | `GA is a self-hosted personal health record for one patient. It reads the patient's own records with read-only SMART on FHIR access, stores them only on the patient's computer, and never writes back to the EHR or shares data with third parties.` |
@@ -93,7 +93,15 @@ GA asks each hospital which of these it supports and fetches only those, so extr
 
 Other customers receiving the app cannot use it: only your Mac holds GA's private key.
 
-Still unverified (record the answers here): whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
+**Sandbox test.** Run it against a throwaway test patient so the sandbox's fictional records never touch yours (`GA_PATIENT_ID` is for tests only):
+
+```sh
+GA_PATIENT_ID=<test patient id> ga connect https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4 --client-id <Non-Production Client ID> --name "Epic sandbox"
+```
+
+Log in as Epic's sandbox patient `fhircamila` / `epicepic1` and choose the longest access (1 year). Then `ga disconnect fhir-epic-com`, delete the test patient, and remove the sandbox entry from `.ga/smart/sources.json` so the daily sync doesn't report it.
+
+Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redirect works; Epic issues a refresh token without `openid`; access duration up to 1 year; Epic grants no `patient/*.read` wildcard, so GA names each type; the dry run fetched 308 records across 13 types. Types Epic refused (403: not among the selected APIs, e.g. FamilyMemberHistory, MedicationStatement) or rejected (400: CarePlan, Media, Specimen need parameters GA doesn't send) are skipped and listed.
 
 ## Data Use Questionnaire
 
