@@ -1,13 +1,12 @@
-// Ask: Claude answers a recipient's question from the share's records only. Every tool reads the Scoped lists,
+// Ask: an LLM (any OpenAI-compatible Chat Completions API) answers a recipient's question from the share's records only. Every tool reads the Scoped lists,
 // never Medplum, so nothing in the question or record text can widen the scope. Never logs question or answer text.
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import type { Resource } from '@medplum/fhirtypes';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cardiovascularRisk10yr } from '../cardiovascular-risk.ts';
 import { GaError } from '../config.ts';
 import { currency, currencyContext, type Ctx } from '../current.ts';
-import type { Sdk } from '../llm.ts';
 import { readable, slim } from '../mcp.ts';
 import { dateOf, inScope } from './scope.ts';
 import type { Scoped } from './scope.ts';
@@ -15,6 +14,9 @@ import type { Share } from './store.ts';
 
 export const SORRY = 'Sorry, that question needs more than I can look up here.';
 const MAX_TOOL_TURNS = 8;
+
+// The slice of the OpenAI SDK ask uses; tests pass a scripted fake.
+export type Llm = { chat: { completions: { create: (p: any) => Promise<any> } } };
 
 // Steps 1-9 of the /ga skill, adapted to the share's tools (step 0, portal status, needs Endpoints, which are never shared).
 // Transformed line by line so the skill stays the single source of truth for everything else.
@@ -73,7 +75,7 @@ const TOOLS = {
     name: 'search_records',
     description:
       "Search the shared records, newest first. type: FHIR resource type (e.g. Observation, MedicationStatement, Condition). text: matched case-insensitively against the code's text and display names and medication names. since/until: YYYY-MM-DD. limit: default 20, max 200.",
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: { type: { type: 'string' }, text: { type: 'string' }, since: { type: 'string' }, until: { type: 'string' }, limit: { type: 'integer' } },
     },
@@ -81,19 +83,19 @@ const TOOLS = {
   read_record: {
     name: 'read_record',
     description: 'Read one shared record (or a Medication, Practitioner, Organization, Location or Binary it references, or the Patient) by type and id.',
-    input_schema: { type: 'object', properties: { type: { type: 'string' }, id: { type: 'string' } }, required: ['type', 'id'] },
+    parameters: { type: 'object', properties: { type: { type: 'string' }, id: { type: 'string' } }, required: ['type', 'id'] },
   },
   vaccine_gaps: {
     name: 'vaccine_gaps',
     description:
       'Adult vaccination status against the shipped CDC adult immunization schedule, from the shared Immunizations and immunity labs. Use this instead of judging the schedule yourself. Returns per vaccine: status, records used and reason; unmatched and possible-duplicate records; the schedule edition.',
-    input_schema: { type: 'object', properties: {} },
+    parameters: { type: 'object', properties: {} },
   },
   cardiovascular_risk_10yr: {
     name: 'cardiovascular_risk_10yr',
     description:
       '10-year cardiovascular risk from inputs you read from the records: AHA PREVENT base model (ASCVD and total CVD) and the 2013 Pooled Cohort Equations. Use this instead of computing risk yourself. Cholesterol in mg/dL; returns probabilities (0-1) and notes on out-of-range inputs.',
-    input_schema: {
+    parameters: {
       type: 'object',
       properties: {
         age: { type: 'number' }, sex: { type: 'string', enum: ['male', 'female'] }, totalC: { type: 'number' }, hdlC: { type: 'number' },
@@ -109,7 +111,7 @@ const TOOLS = {
 export const offersVaccines = (share: Share): boolean =>
   (share.groups === 'all' || (share.groups.includes('immunizations') && share.groups.includes('labs'))) && !share.since && !share.until;
 
-export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; vaccines?: () => Promise<unknown> }): Promise<string> {
+export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; model: string; vaccines?: () => Promise<unknown> }): Promise<string> {
   const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
   const vaccines = offersVaccines(share);
   // Defence in depth: Scoped is already filtered, re-check anyway.
@@ -154,43 +156,45 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; 
     'Answer in plain text (no markdown).',
     `Patient: ${JSON.stringify(s.patient)}`,
   ].join('\n\n');
-  const tools = [TOOLS.search_records, TOOLS.read_record, ...(vaccines ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr];
-  const messages: Any[] = [{ role: 'user', content: q }];
+  const tools = [TOOLS.search_records, TOOLS.read_record, ...(vaccines ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr].map((f) => ({ type: 'function', function: f }));
+  const messages: Any[] = [{ role: 'system', content: system }, { role: 'user', content: q }];
   let used = 0;
 
   for (let turn = 0; ; turn++) {
-    let res: Anthropic.Message;
+    let msg: Any, finish: string | undefined;
     try {
-      res = await deps.sdk.messages.create({ model: 'claude-opus-5-5', max_tokens: 4000, system, tools, tool_choice: { type: 'auto' }, messages: [...messages] });
+      const res = await deps.llm.chat.completions.create({ model: deps.model, max_completion_tokens: 4000, tools, messages: [...messages] });
+      ({ message: msg, finish_reason: finish } = res.choices?.[0] ?? {});
     } catch (e) {
-      // Status and error type only: bodies can echo record content.
-      if (e instanceof Anthropic.APIError) throw new GaError(`Claude API error: ${e.status ?? 'connection'} ${(e.error as { error?: { type?: string } } | undefined)?.error?.type ?? ''}`.trim());
+      // Status and error code only: bodies can echo record content.
+      if (e instanceof OpenAI.APIError) throw new GaError(`LLM API error: ${e.status ?? 'connection'} ${e.code ?? e.type ?? ''}`.trim());
       throw e;
     }
-    const uses = res.content.filter((b) => b.type === 'tool_use');
-    if (!uses.length) {
-      const text = res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n').trim();
+    // Some servers send tool calls with finish_reason 'stop': branch on the calls themselves.
+    const calls: Any[] = (msg?.tool_calls ?? []).filter((c: Any) => c?.type === 'function');
+    if (!calls.length) {
+      const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
       if (!text) return SORRY;
-      return res.stop_reason === 'max_tokens' ? `${text}\n(answer cut short)` : text;
+      return finish === 'length' ? `${text}\n(answer cut short)` : text;
     }
     if (turn >= MAX_TOOL_TURNS) return SORRY;
-    const results = [];
-    for (const u of uses) {
-      if (used >= MAX_TOTAL) {
-        results.push({ type: 'tool_result', tool_use_id: u.id, content: BUDGET_USED });
-        continue;
+    messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: calls });
+    for (const c of calls) {
+      let content: string;
+      if (used >= MAX_TOTAL) content = BUDGET_USED;
+      else {
+        let v: unknown;
+        try {
+          // Arguments are model output: malformed JSON becomes an error result, not a crash.
+          v = await run(c.function.name, (JSON.parse(c.function.arguments || '{}') ?? {}) as Any);
+        } catch (e) {
+          v = `error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        const json = JSON.stringify(v) ?? 'null';
+        content = json.length > MAX_RESULT ? `${json.slice(0, MAX_RESULT)} [truncated]` : json;
+        used += content.length;
       }
-      let v: unknown;
-      try {
-        v = await run(u.name, (u.input ?? {}) as Any);
-      } catch (e) {
-        v = `error: ${e instanceof Error ? e.message : String(e)}`;
-      }
-      const json = JSON.stringify(v) ?? 'null';
-      const content = json.length > MAX_RESULT ? `${json.slice(0, MAX_RESULT)} [truncated]` : json;
-      used += content.length;
-      results.push({ type: 'tool_result', tool_use_id: u.id, content });
+      messages.push({ role: 'tool', tool_call_id: c.id, content });
     }
-    messages.push({ role: 'assistant', content: res.content }, { role: 'user', content: results });
   }
 }

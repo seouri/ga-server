@@ -145,6 +145,8 @@ services:
     working_dir: /ga
     ports:
       - '127.0.0.1:8110:8110'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway' # a local LLM server (Ollama) on Linux; Docker Desktop has it built in
     volumes:
       - .:/ga:ro
       - ./.ga:/ga/.ga
@@ -152,7 +154,9 @@ services:
       GA_CONFIG: /ga/.ga/config.json
       GA_BASE_URL: 'http://medplum-server:8103/'
       GA_SHARE_HOST: 0.0.0.0
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GA_LLM_BASE_URL: ${GA_LLM_BASE_URL:-}
+      GA_LLM_API_KEY: ${GA_LLM_API_KEY:-}
+      GA_LLM_MODEL: ${GA_LLM_MODEL:-}
     command: ['node', 'src/cli.ts', 'share', 'serve']
 
 volumes:

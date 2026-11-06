@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import type { MedplumClient } from '@medplum/core';
 import QRCode from 'qrcode';
 import { GaError, getClient, loadConfig } from '../config.ts';
@@ -161,22 +161,23 @@ export const binaryFetcher = (client: MedplumClient) => async (ref: string): Pro
 
 async function serve(): Promise<void> {
   const client = await getClient(loadConfig());
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const sdk = apiKey ? new Anthropic({ apiKey }) : undefined;
+  // Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
+  const model = process.env.GA_LLM_MODEL;
+  const llm = model ? new OpenAI({ baseURL: process.env.GA_LLM_BASE_URL || undefined, apiKey: process.env.GA_LLM_API_KEY || 'none' }) : undefined;
   const cached = scopedCache(loadScoped);
   const server = createServer({
     dir: shareDir(),
     load: (share) => cached(client, share),
     log: (share, e) => logAccess(client, share, e),
     fetchBinary: binaryFetcher(client),
-    ...(sdk && {
-      ask: (q, s, share) => ask(q, s, share, { sdk, ...(offersVaccines(share) && { vaccines: () => vaccineGaps(client, share.patientId) }) }),
+    ...(llm && model && {
+      ask: (q, s, share) => ask(q, s, share, { llm, model, ...(offersVaccines(share) && { vaccines: () => vaccineGaps(client, share.patientId) }) }),
     }),
   });
   // Loopback unless told otherwise: the container sets 0.0.0.0 and publishes the port on 127.0.0.1 only.
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
-  console.log(`ga-share listening on ${host}:${PORT}${sdk ? '' : ' (questions off: no ANTHROPIC_API_KEY)'}`);
+  console.log(`ga-share listening on ${host}:${PORT}${llm ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
 }
 
 // Returns false when argv is not a share command.

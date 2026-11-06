@@ -34,7 +34,19 @@ Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/.
 
 **Links work only while the GA Mac is awake and online.** For a patient portal upload, an email attachment or anyone who needs it offline, use `ga share export` and send the files instead.
 
-**Questions.** Recipients can ask Claude about what the link shows, answered from the shared records only. Put `ANTHROPIC_API_KEY=...` in `.env` (gitignored) and `docker compose up -d ga-share`; without it the page says questions are not set up. Cost cap: each link allows `--questions` questions a day (default 20), and each answer is bounded in turns and tokens. Questions are kept in the access log; answers are not.
+**Questions.** Recipients can ask an AI model about what the link shows, answered from the shared records only. Any provider with an OpenAI-compatible Chat Completions API works, as long as the model supports tool calling. Put three lines in `.env` (gitignored), then run `docker compose up -d ga-share`:
+
+| Provider | `GA_LLM_BASE_URL` | `GA_LLM_API_KEY` | `GA_LLM_MODEL` (example) |
+|---|---|---|---|
+| Ollama on this computer (free; records never leave it) | `http://host.docker.internal:11434/v1` | leave empty | `qwen3` |
+| OpenAI | leave empty | your key | `gpt-5` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` | your key | `gemini-2.5-pro` |
+| Anthropic | `https://api.anthropic.com/v1/` | your key | `claude-opus-5-5` |
+| OpenRouter | `https://openrouter.ai/api/v1` | your key | any listed model |
+
+Without `GA_LLM_MODEL` the page says questions are not set up; `docker compose logs ga-share` shows which model is in use. Shared records go to the provider you pick, so choose one whose terms you accept for health data (free tiers of some cloud APIs may use prompts for training). Small local models are weaker at tool calling and may answer "Sorry" more often. For Ollama, `ollama pull qwen3` first; on Linux also start it with `OLLAMA_HOST=0.0.0.0` so the container can reach it.
+
+Cost cap: each link allows `--questions` questions a day (default 20), and each answer is bounded in turns and tokens. Questions are kept in the access log; answers are not.
 
 **Log.** Every view, download and question is a local AuditEvent in GA's FHIR server (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
 

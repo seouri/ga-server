@@ -138,7 +138,7 @@ Open it with **Open Data Use Questionnaire** on the app page. Epic shows some an
 | Where does this app store user data? | **This app can store user data locally on the user's device.** and **This app offers users an option to store data in locations outside of the user's control.** (questions and PDF reading send record text to your AI provider, if you turn them on) |
 | For how long does this app store user data? | **This app stores your data indefinitely.** |
 | Does this app allow users to delete all of the data that have been stored about them? | **Yes, this app allows users to delete all of the data that have been stored about them.** |
-| Other than the user, who has access to user data? | **People and groups users authorize.** (share links) and **Apps that users authorize.** (your AI agents over MCP, and Claude answering share-link questions) |
+| Other than the user, who has access to user data? | **People and groups users authorize.** (share links) and **Apps that users authorize.** (your AI agents over MCP, and the AI model you choose to answer share-link questions) |
 | For each entity that can access user data, will the user approve sharing data with that specific entity? | **Yes, users specifically approve for each entity.** (one approval per share link, not per access) |
 | Will the user be notified by default of each access to user's data? | **No.** (GA logs share access; it does not notify) |
 | Does the app developer allow users to obtain a complete record of the data that have been collected about them? | **Yes, the app developer allows users to obtain a complete record of the data that have been stored about them.** |
