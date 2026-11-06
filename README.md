@@ -85,6 +85,42 @@ Not synced: MyChart messages and some note types (they keep coming from EHI expo
 
 **Troubleshooting `ga connect`.** The browser must reach http://localhost:8765/callback on this machine; GA listens on 127.0.0.1:8765 only. If a firewall blocks it, another process holds port 8765, or the browser resolves localhost to [::1] where something else listens, connect times out or errors but fails safely (the code is useless without GA's PKCE verifier and state). Fix: free port 8765 (lsof -i :8765), allow loopback, retry ga connect.
 
+## Sharing
+
+`ga share` makes a private link to a read-only view of part of your record, for a doctor or family. They open it in any browser; no app or account. The link is the key: anyone who has it can see what it shares until it expires or you revoke it.
+
+| `--for` | Shows (`--scope`) | Expires (`--expires`) | Layout | Questions a day (`--questions`) |
+|---|---|---|---|---|
+| `doctor` (default) | labs, medications, problems, allergies, immunizations, vitals | 7 days | A (one page) | 20 |
+| `family` | all | never | B (tabs) | 20 |
+
+Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log and the full EHI and Apple Health archives are never shared.
+
+```sh
+ga share --for doctor --label "Dr. Kim"                 # link + QR code, scope and expiry
+ga share --for family --label Mom --scope labs,vitals,medications --since 2y
+ga shares                                               # id, label, audience, scope, expiry, status, last access, accesses
+ga shares show <id>                                     # the link and QR again
+ga revoke <id>                                          # works at once, no restart
+ga share log [<id>]                                     # who opened what, when, from which IP; questions asked
+ga share export <id> [--out dir]                        # <label>-summary.pdf and <label>-records.json (FHIR), mode 0600
+```
+
+**Turning on links.** `docker compose up -d` starts `ga-share`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:
+
+1. In the Tailscale admin console, allow Funnel for your tailnet (Access controls: the `funnel` node attribute; Tailscale offers to add it the first time).
+2. On the GA Mac: `tailscale funnel --bg 8110` (the macOS app's CLI is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`). `ga share` checks `tailscale funnel status` and prints this command if Funnel is off; it never turns Funnel on itself. `tailscale funnel reset` turns it off (and clears any other `tailscale serve` setup).
+
+Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/...`), so every recipient sees it; rename the machine in Tailscale if you mind. `GA_SHARE_URL` overrides the base URL.
+
+**Links work only while the GA Mac is awake and online.** For a patient portal upload, an email attachment or anyone who needs it offline, use `ga share export` and send the files instead.
+
+**Questions.** Recipients can ask Claude about what the link shows, answered from the shared records only. Put `ANTHROPIC_API_KEY=...` in `.env` (gitignored) and `docker compose up -d ga-share`; without it the page says questions are not set up. Cost cap: each link allows `--questions` questions a day (default 20), and each answer is bounded in turns and tokens. Questions are kept in the access log; answers are not.
+
+**Log.** Every view, download and question is a local AuditEvent in Medplum (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
+
+**Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once, so tell us.
+
 ## Review flags and limits
 
 - `possible-duplicate`: the same test on the same day with a different value, unit or time. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
@@ -207,7 +243,7 @@ Add `disable-model-invocation: true` to the frontmatter if a skill should run on
 
 ## Where data lives
 
-Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Portal keys, client ID, source list and encrypted tokens: `.ga/smart/`. Ports bind to `127.0.0.1` only; nothing is exposed to the network.
+Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Portal keys, client ID, source list and encrypted tokens: `.ga/smart/`. Shares and their encrypted link tokens: `.ga/share/`. Ports bind to `127.0.0.1` only; nothing is exposed to the network unless you turn on Tailscale Funnel for share links (see Sharing).
 
 ## Admin app
 

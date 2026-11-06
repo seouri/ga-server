@@ -8,6 +8,7 @@ import { isEhiExport } from './ehi/read.ts';
 import { extractWithApi } from './llm.ts';
 import { importExtracted, runMcp } from './mcp.ts';
 import { setup } from './setup.ts';
+import { shareCommand } from './share/cli.ts';
 import { smartCommand } from './smart/cli.ts';
 
 try {
@@ -54,8 +55,8 @@ try {
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
-  } else if (!(await smartCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source>');
+  } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
+    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

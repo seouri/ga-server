@@ -24,7 +24,7 @@ export function instructions(vaccines: boolean): string {
   const md = readFileSync(new URL('../../.claude/skills/ga/SKILL.md', import.meta.url), 'utf8');
   const bold = (l: string): string => /^\d+\. \*\*[^*]+\*\*/.exec(l)?.[0] ?? '';
   return md
-    .slice(md.search(/^1\. /m))
+    .slice(md.search(/^1\. /m), md.search(/^10\. /m) >= 0 ? md.search(/^10\. /m) : undefined) // steps 1-9: step 10 (sharing) is for the owner only
     .split('\n')
     .map((l) => {
       if (l.includes('Endpoint'))

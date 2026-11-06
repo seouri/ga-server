@@ -60,6 +60,13 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 9. Review flags: resources tagged `possible-duplicate` (`_tag=urn:ga-server:tag|possible-duplicate`) may be the same result twice; `source-conflict` means a newer source differs from a record a person or agent wrote, which GA kept.
 10. Medication status: a medication dropped from a newer list is not marked stopped. Apply the medication currency rule in "Hospital portals (SMART)": `last-seen` where present, otherwise an `active` MedicationStatement whose source date (`urn:ga-server:ext:source-date` extension) is older than the newest Epic import is unconfirmed.
 
+## Sharing
+
+- `ga share` / `ga shares` / `ga revoke` / `ga share log` / `ga share export` are CLI only; MCP has no share tool. The `/ga` skill (step 10) builds the command and runs it only after the user confirms.
+- Never shared: `Endpoint`, `Provenance`, `AuditEvent`, the EHI and Apple Health archive DocumentReferences, billing and contact records, anything outside the share's patient compartment. The Patient goes out trimmed to name, birth date and gender.
+- The access log is local `AuditEvent`s tagged `urn:ga-server:share|<share id>` (views, downloads, questions); `ga share log` reads it. Share settings: `.ga/share/shares.json`.
+- The `ga-share` compose service runs `ga share serve` on `127.0.0.1:8110`; Tailscale Funnel exposes it. Never run `tailscale funnel` for the user.
+
 ## Skills
 
 Repeatable reports live in `.claude/skills/<name>/SKILL.md` (Claude Code runs them as `/<name>`). Other agents: when the user asks for one, read that file and follow it.
