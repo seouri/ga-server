@@ -6,6 +6,7 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
+import { TAG } from './engine.ts';
 
 type Match = { cvx: string[]; names: string[] };
 type Rule = {
@@ -128,7 +129,6 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
   return { edition: schedule.edition, results, unmatched };
 }
 
-const TAG = 'urn:ga-server:tag';
 const CVX = ['http://hl7.org/fhir/sid/cvx', 'urn:oid:2.16.840.1.113883.12.292'];
 const src = (r: { meta?: { source?: string } }) => (r.meta?.source ? basename(r.meta.source) : '');
 

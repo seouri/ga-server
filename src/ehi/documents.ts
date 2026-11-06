@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
@@ -110,10 +109,8 @@ const MEDIA_TYPE: Record<string, string> = { '.pdf': 'application/pdf', '.tif': 
 
 // Stores a file once per content hash (storeDocument) and says whether it was new.
 async function store(client: MedplumClient, path: string, patientId: string, type: string): Promise<{ id: string; created: boolean }> {
-  const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-  const existed = await client.searchOne('DocumentReference', `identifier=urn:ga-server:id:file|${hash}`, { cache: 'no-cache' });
-  const { docRef } = await storeDocument(client, path, patientId, type);
-  return { id: docRef.id as string, created: !existed };
+  const { docRef, created } = await storeDocument(client, path, patientId, type);
+  return { id: docRef.id as string, created };
 }
 
 // Notes and messages go through the engine (EHI identifiers: re-import is a no-op). A note's RTF file is stored like

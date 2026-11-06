@@ -43,7 +43,7 @@ function pdfString(s: string): string {
 
 // Text of a PDF: Tj/TJ strings of each (possibly Flate) content stream. Fragments are joined with no
 // separator (the PDF puts its own spaces in the strings), so a name split across fragments stays whole.
-export function pdfText(buf: Buffer): string {
+function pdfText(buf: Buffer): string {
   const out: string[] = [];
   for (const m of buf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
     let s = m[1];
