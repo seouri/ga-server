@@ -138,10 +138,11 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
-  // Every page: a patient can hold more than one page of Observations.
+  // Every page: a patient can hold more than one page of Observations. _sort=_lastUpdated (ascending, _count >= 20) makes Medplum
+  // page by _cursor instead of _offset, which it caps at 10000.
   const all = async (type: 'Immunization' | 'Observation', q: Record<string, string>) => {
     const out: unknown[] = [];
-    for await (const page of client.searchResourcePages(type, { ...q, _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
+    for await (const page of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
     return out;
   };
   const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Resource } from '@medplum/fhirtypes';
-import { SORRY, ask, instructions } from '../src/share/ask.ts';
+import { BUDGET_USED, SORRY, ask, instructions } from '../src/share/ask.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Share } from '../src/share/store.ts';
 
@@ -182,4 +182,17 @@ test('max_tokens appends "(answer cut short)"; empty final text is the sorry tex
   expect(await ask('q', scoped([]), share(), { sdk: reply({ stop_reason: 'max_tokens', content: [{ type: 'text', text: 'partial' }] }) })).toBe('partial\n(answer cut short)');
   expect(await ask('q', scoped([]), share(), { sdk: reply({ stop_reason: 'end_turn', content: [] }) })).toBe(SORRY);
   expect(await ask('q', scoped([]), share(), { sdk: reply({ stop_reason: 'end_turn', content: [{ type: 'text', text: '  ' }] }) })).toBe(SORRY);
+});
+
+test('tool budget: after 200,000 result characters per question, further tool calls get the budget notice', async () => {
+  const huge = { ...med, id: 'h1', medicationCodeableConcept: { text: 'y'.repeat(60_000) } } as Resource;
+  const read = { name: 'read_record', input: { type: 'MedicationStatement', id: 'h1' } };
+  const { sdk, reqs } = fake([[read, read, read], [read, read], [{ name: 'search_records', input: {} }]]);
+  expect(await ask('q', scoped([huge]), share(), { sdk })).toBe('final answer');
+  const contents = (req: any): string[] => req.messages.at(-1).content.map((b: any) => b.content);
+  expect(contents(reqs[1]).every((c) => c.length > 50_000)).toBe(true); // 3 x ~50k
+  const [fourth, fifth] = contents(reqs[2]);
+  expect(fourth.length).toBeGreaterThan(50_000); // 150k used before it: still under budget
+  expect(fifth).toBe(BUDGET_USED);
+  expect(contents(reqs[3])).toEqual([BUDGET_USED]);
 });

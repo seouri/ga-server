@@ -17,9 +17,10 @@ const extDate = (r: Resource, url: string): number | undefined => {
   return Number.isNaN(t) ? undefined : t;
 };
 
-export function currencyContext(resources: Resource[], endpoints: Endpoint[]): Ctx {
+// newestImport: when given (a share's whole-record value), it replaces the scan of `resources`, which may be a narrow slice.
+export function currencyContext(resources: Resource[], endpoints: Endpoint[], newestImport = -Infinity): Ctx {
   const lastSuccess = new Map<string, number>();
-  let newestImport = -Infinity;
+  const scan = newestImport === -Infinity;
   for (const e of endpoints) {
     const t = extDate(e, LAST_SUCCESS);
     if (t === undefined) continue;
@@ -27,7 +28,7 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[]): C
     if (key) lastSuccess.set(key, t);
     newestImport = Math.max(newestImport, t);
   }
-  for (const r of resources) {
+  for (const r of scan ? resources : []) {
     if (!r.meta?.tag?.some((t) => t.system === TAG && t.code && EPIC_TAGS.has(t.code))) continue;
     newestImport = Math.max(newestImport, extDate(r, SRC_DATE) ?? -Infinity);
   }

@@ -1,12 +1,13 @@
 // What a share may show: the security core. Every share route and Ask tool reads only loadScoped's result.
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
-import { isActive } from '../current.ts';
+import { currencyContext, isActive } from '../current.ts';
 import { TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
-export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[] };
+// newestImport: newest Epic import over the whole record (not just the share), for the medication currency rule.
+export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[]; newestImport?: number };
 
 // Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
 const NEVER = new Set([
@@ -25,7 +26,9 @@ export const COMPARTMENT_TYPES = [
   'Person', 'Procedure', 'Provenance', 'QuestionnaireResponse', 'RelatedPerson', 'RequestGroup', 'ResearchSubject', 'RiskAssessment',
   'Schedule', 'ServiceRequest', 'Specimen', 'SupplyDelivery', 'SupplyRequest', 'Task', 'VisionPrescription',
 ].filter((t) => !NEVER.has(t)) as ResourceType[];
-const ARCHIVES = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive']);
+// Archives and imported source files (C-CDA, EHI media, PDFs): untrimmed demographics, MRN, insurance and out-of-scope data.
+// Only the records extracted from them are shared; their Binary is never followed because they never enter `resources`.
+const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:file']);
 const BY_TYPE: Record<string, Group> = {
   DiagnosticReport: 'labs',
   MedicationStatement: 'medications',
@@ -57,7 +60,13 @@ const hasCategory = (r: Resource, code: string): boolean =>
 
 export function groupOf(r: Resource): Group | undefined {
   if (r.meta?.tag?.some((t) => t.system === TAG && t.code === 'src-apple-health')) return 'apple';
-  if (r.resourceType === 'Observation') return hasCategory(r, 'laboratory') ? 'labs' : hasCategory(r, 'vital-signs') ? 'vitals' : undefined;
+  if (r.resourceType === 'Observation') {
+    if (hasCategory(r, 'laboratory')) return 'labs';
+    if (hasCategory(r, 'vital-signs')) return 'vitals';
+    // GA's PDF extraction emits lab results without a category.
+    const uncategorized = !(r as { category?: unknown[] }).category?.length;
+    return uncategorized && r.meta?.tag?.some((t) => t.system === TAG && (t.code === 'extracted-by-llm' || t.code === 'src-pdf')) ? 'labs' : undefined;
+  }
   return BY_TYPE[r.resourceType];
 }
 
@@ -69,11 +78,13 @@ export function dateOf(r: Resource): string | undefined {
   return undefined;
 }
 
-export const isStanding = (r: Resource): boolean => isActive(r);
+const STANDING_CLINICAL = new Set(['recurrence', 'relapse']);
+export const isStanding = (r: Resource): boolean =>
+  isActive(r) || (r.resourceType === 'Condition' && !!(r as { clinicalStatus?: { coding?: { code?: string }[] } }).clinicalStatus?.coding?.some((c) => !!c.code && STANDING_CLINICAL.has(c.code)));
 
 const neverShared = (r: Resource): boolean =>
   NEVER.has(r.resourceType) ||
-  (r.resourceType === 'DocumentReference' && !!r.identifier?.some((i) => i.system && ARCHIVES.has(i.system)));
+  (r.resourceType === 'DocumentReference' && !!r.identifier?.some((i) => i.system && NEVER_DOCS.has(i.system)));
 
 export function inScope(r: Resource, share: Share): boolean {
   if (neverShared(r)) return false;
@@ -113,12 +124,13 @@ function supportRefs(r: Resource, out: Set<string>): void {
 
 // Pure part of loadScoped: compartment records in, the share's records and the support refs they need out.
 // Membership is checked on Medplum's meta.compartment too, not trusted to the _compartment query alone.
-export function selectScoped(compartment: Resource[], share: Share): { resources: Resource[]; refs: string[] } {
+export function selectScoped(compartment: Resource[], share: Share): { resources: Resource[]; refs: string[]; newestImport: number } {
   const mine = `Patient/${share.patientId}`;
-  const resources = compartment.filter((r) => !!r.meta?.compartment?.some((c) => c.reference === mine) && inScope(r, share));
+  const own = compartment.filter((r) => !!r.meta?.compartment?.some((c) => c.reference === mine));
+  const resources = own.filter((r) => inScope(r, share));
   const refs = new Set<string>();
   for (const r of resources) supportRefs(r, refs);
-  return { resources, refs: [...refs] };
+  return { resources, refs: [...refs], newestImport: currencyContext(own, []).newestImport };
 }
 
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {
@@ -130,7 +142,7 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
     const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000' };
     for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
-  const { resources, refs } = selectScoped(compartment, share);
+  const { resources, refs, newestImport } = selectScoped(compartment, share);
   const ids = new Map<string, string[]>();
   for (const ref of refs) {
     const [type, id] = ref.split('/');
@@ -151,7 +163,7 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
     }
   }
   const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, opts);
-  return { patient: trimPatient(p), resources, support, endpoints: eps.filter(forPatient(share.patientId)) };
+  return { patient: trimPatient(p), resources, support, endpoints: eps.filter(forPatient(share.patientId)), newestImport };
 }
 
 export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof loadScoped {

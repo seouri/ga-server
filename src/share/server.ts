@@ -191,6 +191,7 @@ export function createServer(deps: ServerDeps): http.Server {
       base: pageBase,
       tab: tab && TABS.has(tab) ? (tab as 'summary') : undefined,
       page: Number(url.searchParams.get('page')) || 1,
+      group: url.searchParams.get('group') ?? undefined,
       askEnabled: !!deps.ask,
     }));
   }

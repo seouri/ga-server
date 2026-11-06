@@ -259,3 +259,13 @@ test('logAccess writes a tagged AuditEvent; readLog reads it back', async () => 
   await readLog(client);
   expect(searches[1][1]._tag).toBe('urn:ga-server:share|');
 });
+
+test('All records: the group query parameter filters the list', async () => {
+  await start();
+  const { token } = share();
+  const html = await (await get(`/s/${token}?tab=records&group=notes`)).text();
+  expect(html).toContain(`href="/s/${token}?tab=records&amp;group=medications"`);
+  expect(html).toContain(`/s/${token}/doc/d1`);
+  expect(html).not.toContain('Testolol 5 mg');
+  expect(await (await get(`/s/${token}?tab=records&group=nope`)).text()).toContain('Testolol 5 mg');
+});

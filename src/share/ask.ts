@@ -44,6 +44,8 @@ type Any = Record<string, any>;
 const names = (c?: Any): string[] => [c?.text, ...(c?.coding ?? []).map((x: Any) => x?.display)].filter((x): x is string => typeof x === 'string');
 
 const MAX_RESULT = 50_000;
+const MAX_TOTAL = 200_000; // tool-result characters per question, across all turns
+export const BUDGET_USED = 'tool budget for this question used up; answer with what you have';
 const SNIPPET = 500;
 // Attachments and Binary: search shows a text snippet and never base64; read shows full text but never base64.
 const trimContent = (x: unknown, full: boolean): unknown => {
@@ -108,7 +110,7 @@ export const offersVaccines = (share: Share): boolean =>
   (share.groups === 'all' || (share.groups.includes('immunizations') && share.groups.includes('labs'))) && !share.since && !share.until;
 
 export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; vaccines?: () => Promise<unknown> }): Promise<string> {
-  const ctx = currencyContext(s.resources, s.endpoints);
+  const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
   // Defence in depth: Scoped is already filtered, re-check anyway.
   const records = s.resources.filter((r) => inScope(r, share));
   const lookup = [...records, s.patient, ...s.support];
@@ -153,6 +155,7 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; 
   ].join('\n\n');
   const tools = [TOOLS.search_records, TOOLS.read_record, ...(offersVaccines(share) ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr];
   const messages: Any[] = [{ role: 'user', content: q }];
+  let used = 0;
 
   for (let turn = 0; ; turn++) {
     let res: Anthropic.Message;
@@ -172,6 +175,10 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; 
     if (turn >= MAX_TOOL_TURNS) return SORRY;
     const results = [];
     for (const u of uses) {
+      if (used >= MAX_TOTAL) {
+        results.push({ type: 'tool_result', tool_use_id: u.id, content: BUDGET_USED });
+        continue;
+      }
       let v: unknown;
       try {
         v = await run(u.name, (u.input ?? {}) as Any);
@@ -179,7 +186,9 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { sdk: Sdk; 
         v = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
       const json = JSON.stringify(v) ?? 'null';
-      results.push({ type: 'tool_result', tool_use_id: u.id, content: json.length > MAX_RESULT ? `${json.slice(0, MAX_RESULT)} [truncated]` : json });
+      const content = json.length > MAX_RESULT ? `${json.slice(0, MAX_RESULT)} [truncated]` : json;
+      used += content.length;
+      results.push({ type: 'tool_result', tool_use_id: u.id, content });
     }
     messages.push({ role: 'assistant', content: res.content }, { role: 'user', content: results });
   }

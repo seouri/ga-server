@@ -96,3 +96,24 @@ test('notes merge, values format, code-less and non-completed are dropped, bundl
   expect(p.identifier).toBeUndefined();
   expect(p.address).toBeUndefined();
 });
+
+test('medications-only share: an old med is unconfirmed when the newest import is a lab outside the share', () => {
+  const med = r({ resourceType: 'MedicationStatement', id: 'old', status: 'active', medicationCodeableConcept: { text: 'statin' },
+    meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] }, extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2023-01-01T00:00:00Z' }] });
+  expect(summarize(scoped([med])).medications[0].note).toBeUndefined();
+  const s = summarize(scoped([med], { newestImport: Date.parse('2025-01-01T00:00:00Z') }));
+  expect(s.medications[0].note).toBe('unconfirmed (not on the latest hospital list)');
+});
+
+test('bundle drops Medplum storage and Binary urls from DocumentReference attachments, keeps the rest', () => {
+  const doc = r({ resourceType: 'DocumentReference', id: 'd', content: [
+    { attachment: { contentType: 'application/pdf', title: 'a.pdf', url: 'http://localhost:8103/storage/00000000-0000-0000-0000-000000000001/a.pdf?Signature=x' } },
+    { attachment: { contentType: 'text/rtf', url: 'Binary/00000000-0000-0000-0000-000000000002' } },
+    { attachment: { contentType: 'text/plain', data: 'eA==', title: 'note' } },
+  ] });
+  const out = toBundle(scoped([doc])).entry![1].resource as any;
+  expect(out.content.map((c: any) => c.attachment)).toEqual([
+    { contentType: 'application/pdf', title: 'a.pdf' }, { contentType: 'text/rtf' }, { contentType: 'text/plain', data: 'eA==', title: 'note' },
+  ]);
+  expect((doc as any).content[0].attachment.url).toContain('/storage/');
+});

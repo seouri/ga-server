@@ -176,8 +176,10 @@ async function serve(): Promise<void> {
       ask: (q, s, share) => ask(q, s, share, { sdk, ...(offersVaccines(share) && { vaccines: () => vaccineGaps(client, share.patientId) }) }),
     }),
   });
-  await new Promise<void>((ok) => server.listen(PORT, '0.0.0.0', ok));
-  console.log(`ga-share listening on 0.0.0.0:${PORT}${sdk ? '' : ' (questions off: no ANTHROPIC_API_KEY)'}`);
+  // Loopback unless told otherwise: the container sets 0.0.0.0 and publishes the port on 127.0.0.1 only.
+  const host = process.env.GA_SHARE_HOST || '127.0.0.1';
+  await new Promise<void>((ok) => server.listen(PORT, host, ok));
+  console.log(`ga-share listening on ${host}:${PORT}${sdk ? '' : ' (questions off: no ANTHROPIC_API_KEY)'}`);
 }
 
 // Returns false when argv is not a share command.

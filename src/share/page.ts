@@ -6,7 +6,7 @@ import type { Item, Row, Summary } from './summary.ts';
 export const esc = (s: unknown): string =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-type Opts = { base: string; tab?: 'summary' | 'records' | 'ask' | 'download'; page?: number; askEnabled: boolean; answer?: { q: string; a: string }; notice?: string };
+type Opts = { base: string; tab?: 'summary' | 'records' | 'ask' | 'download'; page?: number; group?: string; askEnabled: boolean; answer?: { q: string; a: string }; notice?: string };
 
 const PAGE = 200;
 const CSS = `:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--mut:#5f6368;--line:#d9dce1;--card:#f5f6f8;--acc:#0b5cad}
@@ -54,13 +54,19 @@ function askHtml(o: Opts): string {
 }
 
 function recordsHtml(rows: Row[], o: Opts): string {
-  const all = rows.flatMap((r) => r.items).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  // Unknown or absent group: all groups.
+  const group = rows.some((r) => r.group === o.group) ? o.group : undefined;
+  const all = rows.filter((r) => !group || r.group === group).flatMap((r) => r.items).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
   const pages = Math.max(1, Math.ceil(all.length / PAGE));
   const page = Math.min(pages, Math.max(1, Math.floor(Number(o.page)) || 1));
   const slice = all.slice((page - 1) * PAGE, page * PAGE);
-  const link = (n: number, t: string): string => `<a href="${esc(o.base)}?tab=records&amp;page=${n}">${t}</a>`;
+  const g = group ? `&amp;group=${esc(encodeURIComponent(group))}` : '';
+  const link = (n: number, t: string): string => `<a href="${esc(o.base)}?tab=records${g}&amp;page=${n}">${t}</a>`;
   const nav = [page > 1 && link(page - 1, 'Previous'), page < pages && link(page + 1, `Next ${PAGE}`)].filter(Boolean).join(' ');
-  return `<h2>All records</h2><p class="mut">${all.length} records, showing ${all.length ? (page - 1) * PAGE + 1 : 0}-${(page - 1) * PAGE + slice.length}</p>${table(slice, o.base)}${nav ? `<p>${nav}</p>` : ''}`;
+  const filter = (k: string | undefined, n: string): string =>
+    `<a href="${esc(o.base)}?tab=records${k ? `&amp;group=${esc(encodeURIComponent(k))}` : ''}"${k === group ? ' class="on"' : ''}>${esc(n)}</a>`;
+  const filters = rows.length > 1 ? `<nav class="tabs">${filter(undefined, 'All')}${rows.map((r) => r.group).sort().map((k) => filter(k, k)).join('')}</nav>` : '';
+  return `<h2>All records</h2>${filters}<p class="mut">${all.length} records, showing ${all.length ? (page - 1) * PAGE + 1 : 0}-${(page - 1) * PAGE + slice.length}</p>${table(slice, o.base)}${nav ? `<p>${nav}</p>` : ''}`;
 }
 
 export function renderPage(share: Share, summary: Summary, rows: Row[], opts: Opts): string {

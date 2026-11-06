@@ -63,3 +63,27 @@ test('ask disabled, inactive, qr', async () => {
   expect(i).not.toContain('Pat');
   expect(await renderQr('http://x/s/tok')).toContain('<svg');
 });
+
+test('All records: group filter links, filtered view, unknown group clamps to all', () => {
+  const rows: Row[] = [
+    { group: 'labs', items: [{ label: 'labitem', date: '2026-01-01', ref: 'Observation/1' }] },
+    { group: 'visits', items: [{ label: 'visititem', date: '2026-01-02', ref: 'Encounter/1' }] },
+  ];
+  const all = renderPage(share('B'), sum([]), rows, { ...o, tab: 'records' });
+  expect(all).toContain('href="/s/tok?tab=records&amp;group=labs"');
+  expect(all).toContain('href="/s/tok?tab=records&amp;group=visits"');
+  expect(all).toContain('labitem');
+  expect(all).toContain('visititem');
+  const labs = renderPage(share('B'), sum([]), rows, { ...o, tab: 'records', group: 'labs' });
+  expect(labs).toContain('labitem');
+  expect(labs).not.toContain('visititem');
+  const bad = renderPage(share('B'), sum([]), rows, { ...o, tab: 'records', group: '"><x' });
+  expect(bad).toContain('visititem');
+  expect(bad).not.toContain('"><x');
+});
+
+test('All records: paging links keep the group', () => {
+  const items = Array.from({ length: 250 }, (_, i): Item => ({ label: `rec${i}`, date: '2026-01-01', ref: `Observation/${i}` }));
+  const h = renderPage(share('B'), sum([]), [{ group: 'labs', items }, { group: 'visits', items: [] }], { ...o, tab: 'records', group: 'labs' });
+  expect(h).toContain('/s/tok?tab=records&amp;group=labs&amp;page=2');
+});

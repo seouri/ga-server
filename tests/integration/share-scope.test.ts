@@ -3,7 +3,8 @@ import type { MedplumClient } from '@medplum/core';
 import type { AuditEvent, Binary, Bundle, DocumentReference, Endpoint, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
-import { loadScoped } from '../../src/share/scope.ts';
+import { storeDocument } from '../../src/document.ts';
+import { BINARY_URL, loadScoped } from '../../src/share/scope.ts';
 import type { Group, Share } from '../../src/share/store.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
@@ -29,6 +30,8 @@ let pidB: string;
 let med: Medication;
 let bin: Binary;
 let binB: Binary;
+let srcBinId: string | undefined;
+let srcDoc: DocumentReference;
 const endpoints: Endpoint[] = [];
 const bRecords: Resource[] = [];
 
@@ -47,6 +50,9 @@ beforeAll(async () => {
     identifier: [{ system: 'urn:ga-server:id:ehi-archive', value: 'test-archive' }],
     content: [{ attachment: { contentType: 'text/plain', data: 'eA==' } }],
   });
+  // An imported source file (as ga_import stores it): never shared, nor its Binary.
+  srcDoc = (await storeDocument(client, new URL('../fixtures/labs-synthetic.pdf', import.meta.url).pathname, pid, 'application/pdf')).docRef;
+  srcBinId = BINARY_URL.exec(srcDoc.content[0].attachment.url ?? '')?.[1];
   bin = await client.createBinary({ data: 'test note', contentType: 'text/plain' });
   binB = await client.createBinary({ data: 'test note b', contentType: 'text/plain', securityContext: { reference: `Patient/${pidB}` } });
   // A's note also points at B's Binary: it must be dropped by its securityContext.
@@ -77,13 +83,14 @@ afterAll(async () => {
   for (const e of endpoints) await client.deleteResource('Endpoint', e.id as string);
   if (med?.id) await client.deleteResource('Medication', med.id);
   for (const b of [bin, binB]) if (b?.id) await client.deleteResource('Binary', b.id);
+  if (srcBinId) await client.deleteResource('Binary', srcBinId);
 });
 
 test('medications share returns the statement and its Medication, nothing else', async () => {
   // The excluded records really are compartment matches: inScope drops them, not the fetch.
   const raw = await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' });
   const types = (raw.entry ?? []).filter((e) => e.search?.mode === 'match').map((e) => e.resource?.resourceType).sort();
-  expect(types).toEqual(['AuditEvent', 'DocumentReference', 'DocumentReference', 'MedicationStatement', 'Observation', 'Patient']);
+  expect(types).toEqual(['AuditEvent', 'DocumentReference', 'DocumentReference', 'DocumentReference', 'MedicationStatement', 'Observation', 'Patient']);
 
   const s = await loadScoped(client, share(['medications']));
   expect(s.resources.map((r: Resource) => r.resourceType)).toEqual(['MedicationStatement']);
@@ -109,4 +116,13 @@ test("patient B's records never appear in A's share", async () => {
   expect(got.has(`Binary/${binB.id}`)).toBe(false);
   expect(got.has(`Patient/${pidB}`)).toBe(false);
   for (const r of s.resources) expect(r.meta?.compartment?.map((c) => c.reference)).toContain(`Patient/${pid}`);
+});
+
+test('an imported source file and its Binary never appear, even for all', async () => {
+  expect(srcBinId).toBeTruthy();
+  const s = await loadScoped(client, share('all'));
+  const got = new Set(ids([...s.resources, ...s.support]));
+  expect(got.has(`DocumentReference/${srcDoc.id}`)).toBe(false);
+  expect(got.has(`Binary/${srcBinId}`)).toBe(false);
+  expect(s.resources.filter((r) => r.resourceType === 'DocumentReference')).toHaveLength(1); // only the note
 });

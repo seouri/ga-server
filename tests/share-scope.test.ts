@@ -33,6 +33,12 @@ test.each<[Resource, Group | undefined]>([
   [r({ resourceType: 'FamilyMemberHistory' }), 'family'],
   [r({ resourceType: 'Communication' }), 'messages'],
   [obs('social-history'), undefined],
+  [r({ resourceType: 'Observation', code: { text: 'x' }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'extracted-by-llm' }] } }), 'labs'],
+  [r({ resourceType: 'Observation', code: { text: 'x' }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }] } }), 'labs'],
+  [r({ resourceType: 'Observation', code: { text: 'x' }, category: [], meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }] } }), 'labs'],
+  [obs('social-history', { meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }] } }), undefined],
+  [r({ resourceType: 'Observation', code: { text: 'x' }, meta: { tag: [{ system: 'other', code: 'src-pdf' }] } }), undefined],
+  [r({ resourceType: 'Observation', code: { text: 'x' } }), undefined],
   [r({ resourceType: 'QuestionnaireResponse' }), undefined],
 ])('groupOf %#', (res, g) => expect(groupOf(res)).toBe(g));
 
@@ -63,6 +69,7 @@ test.each([
   r({ resourceType: 'EnrollmentRequest' }),
   archive('urn:ga-server:id:ehi-archive'),
   archive('urn:ga-server:id:apple-health-archive'),
+  archive('urn:ga-server:id:file'),
 ])('never shared, even with all: %#', (res) => {
   expect(inScope(res, share())).toBe(false);
   expect(inScope(res, share({ groups: ['notes'] }))).toBe(false);
@@ -70,6 +77,13 @@ test.each([
 
 test('a plain note is shared under notes', () => {
   expect(inScope(r({ resourceType: 'DocumentReference', date: '2025-02-01' }), share({ groups: ['notes'] }))).toBe(true);
+});
+
+test('recurrence and relapse conditions are standing regardless of date', () => {
+  const since = share({ since: '2025-01-01' });
+  expect(inScope(cond('recurrence', '2018-01-01'), since)).toBe(true);
+  expect(inScope(cond('relapse', '2018-01-01'), since)).toBe(true);
+  expect(inScope(cond('remission', '2018-01-01'), since)).toBe(false);
 });
 
 test('date range', () => {
@@ -162,4 +176,23 @@ test('scopedCache shares one load per share until the TTL passes, and drops fail
   vi.advanceTimersByTime(1001);
   await cached(c, share());
   expect(load).toHaveBeenCalledTimes(5);
+});
+
+test('selectScoped: a source-file DocumentReference is dropped and its Binary never followed; an inline note stays', () => {
+  const src = r({ resourceType: 'DocumentReference', ...inP, identifier: [{ system: 'urn:ga-server:id:file', value: 'abc' }],
+    content: [{ attachment: { contentType: 'application/pdf', url: 'Binary/00000000-0000-0000-0000-000000000002' } }] });
+  const note = r({ resourceType: 'DocumentReference', ...inP, date: '2025-02-01', content: [{ attachment: { contentType: 'text/plain', data: 'eA==' } }] });
+  const out = selectScoped([src, note], share());
+  expect(out.resources).toEqual([note]);
+  expect(out.refs).toEqual([]);
+});
+
+test('selectScoped: newestImport covers the whole compartment, not just the share', () => {
+  const ehi = (date: string, extra: object = {}) => r({ ...inP, meta: { ...inP.meta, tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] },
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }], ...extra });
+  const med = ehi('2023-01-01T00:00:00Z', { resourceType: 'MedicationStatement', status: 'active' });
+  const lab = ehi('2025-01-01T00:00:00Z', { resourceType: 'Observation', category: [{ coding: [{ code: 'laboratory' }] }] });
+  const out = selectScoped([med, lab], share({ groups: ['medications'] }));
+  expect(out.resources).toEqual([med]);
+  expect(out.newestImport).toBe(Date.parse('2025-01-01T00:00:00Z'));
 });

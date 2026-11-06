@@ -94,7 +94,7 @@ Not synced: MyChart messages and some note types (they keep coming from EHI expo
 | `doctor` (default) | labs, medications, problems, allergies, immunizations, vitals | 7 days | A (one page) | 20 |
 | `family` | all | never | B (tabs) | 20 |
 
-Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log and the full EHI and Apple Health archives are never shared.
+Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log, the full EHI and Apple Health archives, and imported source files (the original PDFs, C-CDA and EHI files) are never shared; only the records extracted from them are.
 
 ```sh
 ga share --for doctor --label "Dr. Kim"                 # link + QR code, scope and expiry
@@ -108,7 +108,7 @@ ga share export <id> [--out dir]                        # <label>-summary.pdf an
 
 **Turning on links.** `docker compose up -d` starts `ga-share`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:
 
-1. In the Tailscale admin console, allow Funnel for your tailnet (Access controls: the `funnel` node attribute; Tailscale offers to add it the first time).
+1. In the Tailscale admin console, turn on MagicDNS and HTTPS certificates (DNS page) and allow Funnel for your tailnet (Access controls: the `funnel` node attribute; Tailscale offers to add it the first time).
 2. On the GA Mac: `tailscale funnel --bg 8110` (the macOS app's CLI is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`). `ga share` checks `tailscale funnel status` and prints this command if Funnel is off; it never turns Funnel on itself. `tailscale funnel reset` turns it off (and clears any other `tailscale serve` setup).
 
 Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/...`), so every recipient sees it; rename the machine in Tailscale if you mind. `GA_SHARE_URL` overrides the base URL.
@@ -119,7 +119,7 @@ Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/.
 
 **Log.** Every view, download and question is a local AuditEvent in Medplum (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
 
-**Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once, so tell us.
+**Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once; see the `[check]` note on `X-Forwarded-For` in `src/share/server.ts`.
 
 ## Review flags and limits
 

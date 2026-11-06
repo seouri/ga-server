@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
 import { currency, currencyContext } from '../current.ts';
 import { TAG } from '../identity.ts';
-import { dateOf, groupOf, trimPatient } from './scope.ts';
+import { BINARY_URL, dateOf, groupOf, trimPatient } from './scope.ts';
 import type { Scoped } from './scope.ts';
 
 export type Item = { label: string; value?: string; date?: string; source?: string; note?: string; ref: string };
@@ -30,7 +30,7 @@ const formatValue = (r: Resource): string | undefined => {
 const hasTag = (r: Resource, code: string): boolean => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 const ref = (r: Resource): string => `${r.resourceType}/${r.id}`;
 
-export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources, s.endpoints)): Item {
+export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources, s.endpoints, s.newestImport)): Item {
   const o = r as Any;
   const med = o.medicationReference?.reference && s.support.find((x) => ref(x) === o.medicationReference.reference);
   const label = cc(o.code) ?? cc(o.medicationCodeableConcept) ?? cc(o.vaccineCode) ?? cc((med as Any)?.code) ?? o.medicationReference?.display
@@ -47,7 +47,7 @@ export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources
 const newestFirst = (a: Item, b: Item): number => (b.date ?? '').localeCompare(a.date ?? '');
 
 export function summarize(s: Scoped): Summary {
-  const ctx = currencyContext(s.resources, s.endpoints);
+  const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
   const item = (r: Resource): Item => toItem(r, s, ctx);
   const of = (pred: (r: Resource) => boolean): Resource[] => s.resources.filter(pred);
   const active = (r: Resource): boolean => currency(r, ctx) !== undefined;
@@ -90,7 +90,7 @@ export function summarize(s: Scoped): Summary {
 }
 
 export function recordRows(s: Scoped): Row[] {
-  const ctx = currencyContext(s.resources, s.endpoints);
+  const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
   const groups = new Map<string, Item[]>();
   for (const r of s.resources) {
     const g = groupOf(r);
@@ -102,8 +102,21 @@ export function recordRows(s: Scoped): Row[] {
   return [...groups].map(([group, items]) => ({ group, items: items.sort(newestFirst) }));
 }
 
+// Medplum answers attachment urls with presigned storage URLs (or Binary refs): useless outside, and a bearer link while valid.
+const dropStorageUrls = (r: Resource): Resource => {
+  if (r.resourceType !== 'DocumentReference' || !r.content?.some((c) => c.attachment?.url && BINARY_URL.test(c.attachment.url))) return r;
+  return { ...r, content: r.content.map((c) => {
+    if (!c.attachment?.url || !BINARY_URL.test(c.attachment.url)) return c;
+    const { url: _, ...attachment } = c.attachment;
+    return { ...c, attachment };
+  }) };
+};
+
 export function toBundle(s: Scoped): Bundle {
-  const clean = (r: Resource): Resource => (r.meta?.source ? { ...r, meta: { ...r.meta, source: basename(r.meta.source) } } : r);
+  const clean = (r0: Resource): Resource => {
+    const r = dropStorageUrls(r0);
+    return r.meta?.source ? { ...r, meta: { ...r.meta, source: basename(r.meta.source) } } : r;
+  };
   return {
     resourceType: 'Bundle',
     type: 'collection',

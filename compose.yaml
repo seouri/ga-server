@@ -151,6 +151,7 @@ services:
     environment:
       GA_CONFIG: /ga/.ga/config.json
       GA_BASE_URL: 'http://medplum-server:8103/'
+      GA_SHARE_HOST: 0.0.0.0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     command: ['node', 'src/cli.ts', 'share', 'serve']
 

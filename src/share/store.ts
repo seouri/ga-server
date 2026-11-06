@@ -47,7 +47,7 @@ export const shareDir = (cfgPath: string = defaultConfigPath()): string => join(
 
 const file = (dir: string): string => join(dir, 'shares.json');
 const read = (dir: string): Share[] => (existsSync(file(dir)) ? (JSON.parse(readFileSync(file(dir), 'utf8')) as Share[]) : []);
-const write = (dir: string, s: Share[]): void => writeAtomic(file(dir), JSON.stringify(s, null, 2));
+const write = (dir: string, s: Share[]): void => writeAtomic(file(dir), JSON.stringify(s, null, 2), 0o600);
 
 function parseDate(s: string): Date | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -138,6 +138,6 @@ export function takeQuestion(dir: string, id: string, now: Date = new Date()): b
   const n = all[id]?.day === day ? all[id].n : 0;
   if (n >= s.questionsPerDay) return false;
   all[id] = { day, n: n + 1 };
-  writeAtomic(askedFile(dir), JSON.stringify(all, null, 2));
+  writeAtomic(askedFile(dir), JSON.stringify(all, null, 2), 0o600);
   return true;
 }

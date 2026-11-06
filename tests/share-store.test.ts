@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -79,4 +79,11 @@ describe('questions and token', () => {
     const { share, token } = createShare(dir, { ...base, audience: 'family' }, now);
     expect(tokenOf(dir, share.id)).toBe(token);
   });
+});
+
+it('shares.json and asked.json are owner-only (0600)', () => {
+  const { share } = createShare(dir, { ...base, audience: 'doctor' }, now);
+  takeQuestion(dir, share.id, now);
+  expect(statSync(join(dir, 'shares.json')).mode & 0o777).toBe(0o600);
+  expect(statSync(join(dir, 'asked.json')).mode & 0o777).toBe(0o600);
 });
