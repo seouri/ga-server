@@ -7,9 +7,9 @@ import { GaError } from './config.ts';
 const MEDIA: Record<string, string> = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 const TOOL = 'submit_resources';
 
-// Single source of truth: the agent skill text, minus its frontmatter.
+// Single source of truth: the same extraction rules /ga-import gives the agent.
 const instructions = () =>
-  readFileSync(new URL('../.claude/skills/ga-extract/SKILL.md', import.meta.url), 'utf8').replace(/^---[\s\S]*?---\n/, '');
+  readFileSync(new URL('../.claude/skills/ga-import/extract.md', import.meta.url), 'utf8');
 
 type Sdk = { messages: { stream: (p: any) => { finalMessage: () => Promise<Anthropic.Message> } } };
 

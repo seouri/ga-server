@@ -1,9 +1,3 @@
----
-name: ga-extract
-description: Extract labs, conditions and medications from a local PDF or image and import them into GA with ga_import. Use when asked to add a lab report or medical document to GA.
-argument-hint: "<path to PDF or image>"
----
-
 Extract health records from a local PDF or image into GA through the `ga-server` MCP tools. GA never sends data anywhere: you read the file yourself.
 
 1. Read the PDF or image locally (the path must exist on this machine).

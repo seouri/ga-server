@@ -33,7 +33,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fh
 - The ECG is a text `DocumentReference` (CSV) plus an Observation with its classification.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:apple-health-archive`).
 
-## PDF extraction (mirrors .claude/skills/ga-extract/SKILL.md)
+## PDF extraction (mirrors .claude/skills/ga-import/extract.md)
 
 Extract health records from a local PDF or image into GA through the `ga-server` MCP tools. GA never sends data anywhere: you read the file yourself.
 
@@ -57,5 +57,5 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 Repeatable reports live in `.claude/skills/<name>/SKILL.md` (Claude Code runs them as `/<name>`). Other agents: when the user asks for one, read that file and follow it.
 
 - `ga`: answer a health question strictly from GA with citations ("/ga <question>"). Follow `.claude/skills/ga/SKILL.md`.
-- `ga-extract`: import a PDF or image ("/ga-extract <file>"); same rules as the PDF extraction section above.
+- `ga-import`: import a file or folder ("/ga-import <path>"): PDFs and images by the PDF extraction rules above, anything else via `ga import`.
 - `ga-lipids`: lipid panel trend chart ("ga lipids", "chart my cholesterol"). Run `node .claude/skills/ga-lipids/build.ts [since YYYY]` from the repo root and relay its summary.

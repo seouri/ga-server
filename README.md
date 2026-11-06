@@ -27,7 +27,7 @@ An Epic EHI export brings encounters, problems, labs, medications, immunizations
 
 An Apple Health export brings per-reading vitals, daily summaries (heart rate, steps, distance, activity rings), nightly sleep, ECGs, and the Health Records inside it (allergies, patient identifiers). The folder is archived as one DocumentReference; re-importing is a no-op, and a newer export updates the changed days.
 
-`--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-extract/SKILL.md`, also `/ga-extract <file>` in Claude Code, and `AGENTS.md`).
+`--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-import/extract.md`, also `/ga-import <file>` in Claude Code, and `AGENTS.md`).
 
 ## Review flags and limits
 
@@ -53,7 +53,23 @@ claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cl
 
 The server tells Claude that GA is your health record, so plain questions work. Claude reads with `fhir_search`/`fhir_read` and cites the records it used.
 
-**Slash commands** (shipped in `.claude/skills/`): `/ga <question>` answers strictly from GA with citations; `/ga-extract <file>` imports a PDF or photo; `/ga-lipids [since YYYY]` charts your lipid panels.
+**Slash commands** (shipped in `.claude/skills/`; anyone who clones the repo gets them):
+
+| Command | What it does |
+|---|---|
+| `/ga <question>` | Answers strictly from GA, citing each record's date, value and source file. Says so when GA has nothing. |
+| `/ga-import <path>` | Imports a file or folder, like `ga import`. Claude reads a PDF or photo itself; C-CDA, Epic EHI and Apple Health exports go through the CLI. |
+| `/ga-lipids [since YYYY]` | Charts total cholesterol, LDL, HDL and triglycerides over time as a local HTML page. |
+
+```
+> /ga Is starting Atorvastatin 40 mg the right decision?
+> /ga Did I miss any vaccinations for my age?
+> /ga How are my diabetes-related labs?
+> /ga How have my weight and resting heart rate changed since 2022, and how does that line up with my A1c?
+> /ga-import ~/Downloads/vaccination-record.pdf
+> /ga-import ~/Downloads/apple_health_export
+> /ga-lipids since 2019
+```
 
 **Ask about your health**
 
