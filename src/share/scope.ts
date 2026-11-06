@@ -49,7 +49,7 @@ const DATE_PATHS = [
 // Only these are followed from in-scope records, one hop; they are never searchable on their own.
 const SUPPORT_REF = /^(Medication|Practitioner|Organization|Location|Binary)\/([A-Za-z0-9\-.]{1,64})(?:\/|$)/;
 // Attachment urls: Medplum may answer with a presigned /storage/<binary id>/... URL instead of Binary/<id>.
-const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
+export const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
 
 type Any = Record<string, unknown>;
 const hasCategory = (r: Resource, code: string): boolean =>

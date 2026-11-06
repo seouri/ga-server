@@ -25,7 +25,7 @@ const doc = (title: string, body: string): string =>
 
 const day = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : new Date(iso).toLocaleDateString('en-CA')); // local zone, like expiry itself
 
-function scopeWords(s: Share): string {
+export function scopeWords(s: Share): string {
   const g = s.groups === 'all' ? 'all records' : s.groups.join(', ');
   return [g, s.since && `since ${s.since}`, s.until && `until ${s.until}`].filter(Boolean).join(' ');
 }
