@@ -39,16 +39,17 @@ GA can fetch your records from Epic patient portals (MyChart) by itself, over SM
 
 ```sh
 ga keys                                                          # creates .ga/smart/ key (mode 0600), prints the public JWKS
-cp .ga/smart/public.jwks.json .ga/smart/production.jwks.json     # same public key, second name for Epic's production URL
-gh gist create --public -d "GA public key" .ga/smart/public.jwks.json .ga/smart/production.jwks.json
+cp .ga/smart/public.jwks.json .ga/smart/non-production.jwks.json   # same public key,
+cp .ga/smart/public.jwks.json .ga/smart/production.jwks.json       # one name per Epic environment
+gh gist create --public -d "GA public key" .ga/smart/non-production.jwks.json .ga/smart/production.jwks.json
 ```
 
-No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box and name it `public.jwks.json`; choose **Add file**, paste again and name it `production.jwks.json`; then choose **Create public gist**.
+No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box and name it `non-production.jwks.json`; choose **Add file**, paste again and name it `production.jwks.json`; then choose **Create public gist**.
 
 The gist's page is `https://gist.github.com/<user>/<gist id>` (`gh` prints it). Your two JWK Set URLs are then:
 
 ```text
-https://gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json
+https://gist.githubusercontent.com/<user>/<gist id>/raw/non-production.jwks.json
 https://gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json
 ```
 
@@ -69,7 +70,7 @@ Check them: `curl -s <URL>` prints the same JSON as `ga keys` for both. `ga keys
 | Requires Persistent Access | **on** |
 | Uses Rolling Refresh Tokens | **on** (GA saves each new refresh token) |
 | Can Have Indefinite Access | leave as is (greyed out for new apps; access then lasts as long as the duration you pick at the MyChart login, so pick the longest) |
-| Non-Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json` |
+| Non-Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/non-production.jwks.json` |
 | Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json` (Epic requires a different URL from non-production) |
 | Sandbox Client Secret | leave empty (GA signs with its key instead of a secret) |
 
