@@ -10,7 +10,9 @@ import { getClient, loadConfig } from '../../src/config.ts';
 import { mapMessages, mapNotes } from '../../src/ehi/documents.ts';
 import { ehiContext, importEhi, prepareEhi } from '../../src/ehi/import.ts';
 import { EhiTables, isEhiExport } from '../../src/ehi/read.ts';
+import { importAppleHealth } from '../../src/apple/import.ts';
 import { collapsePatients } from '../../src/patient.ts';
+import { createTestPatient } from './helpers.ts';
 
 // Writes to the REAL patient. Prints counts only: never values, names, dates or resource bodies.
 const root = process.env.GA_REAL_DATA;
@@ -282,4 +284,97 @@ test.skipIf(!root)('real EHI export: dry pass valid, imports twice without dupli
   expect(out.patients).toBe(1);
   expect(out.after2).toEqual(out.after1);
   expect((out.archive as { unpacked: unknown }).unpacked).toEqual((out.archive as { folder: unknown }).folder);
+}, 3_600_000);
+
+// Milestone 2b, Task 7: Apple Health export on a TEST patient. Counts, timings and step totals only (never names).
+const apple = process.env.GA_REAL_DATA_APPLE;
+const APPLE_TAG = 'urn:ga-server:tag|src-apple-health';
+
+test.skipIf(!apple)('real Apple Health export: test patient, imports twice, archived', async () => {
+  const dir = apple as string;
+  const cfg = loadConfig();
+  const client = await getClient(cfg);
+  const pid = await createTestPatient(client);
+  const types = ['Observation', 'DocumentReference', 'AllergyIntolerance', 'DiagnosticReport', 'Condition', 'Immunization', 'MedicationStatement', 'Procedure'] as const;
+  const out: Record<string, unknown> = {};
+  const run = () =>
+    importAppleHealth(client, cfg, dir, pid).catch((e) => {
+      throw new Error(`import failed: ${safe(e)}`);
+    });
+  try {
+    const first = await run();
+    out.first = first;
+    writeFileSync('.superpowers/sdd/2026-11-05-apple-health-import/task-7-real.json', JSON.stringify(out, null, 1));
+    const perType: Record<string, number> = {};
+    for (const t of types) perType[t] = (await client.search(t, { patient: `Patient/${pid}`, _tag: APPLE_TAG, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
+    out.perType = perType;
+    // Observations per code (text or LOINC) and daily steps (code text only: no source names).
+    const perCode: Record<string, number> = {};
+    const steps = new Map<string, number>();
+    // Medplum caps offsets at 10000: walk _lastUpdated windows, halving until each holds <= 5000.
+    const walk = async (lo: number, hi: number): Promise<void> => {
+      const q = (x: Record<string, string>) => new URLSearchParams({ patient: `Patient/${pid}`, _tag: APPLE_TAG, ...x, _lastUpdated: `ge${new Date(lo).toISOString()}` }).toString() + `&_lastUpdated=lt${new Date(hi).toISOString()}`;
+      const total = (await client.search('Observation', q({ _summary: 'count' }), { cache: 'no-cache' })).total ?? 0;
+      if (total === 0) return;
+      if (total > 5000 && hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
+        await walk(lo, mid);
+        await walk(mid, hi);
+        return;
+      }
+      for await (const page of client.searchResourcePages('Observation', q({ _count: '1000', _elements: 'code,valueQuantity,effectiveDateTime,effectivePeriod' }), { cache: 'no-cache' })) {
+        for (const o of page) {
+          const k = o.code?.text ?? o.code?.coding?.[0]?.display ?? o.code?.coding?.[0]?.code ?? '?';
+          perCode[k] = (perCode[k] ?? 0) + 1;
+          if (k === 'Steps, daily total (Apple Health)') steps.set((o.effectiveDateTime ?? o.effectivePeriod?.start ?? '').slice(0, 10), o.valueQuantity?.value ?? NaN);
+        }
+      }
+    };
+    await walk(0, Date.now() + 86400e3);
+    out.perCode = perCode;
+    out.lastSteps = [...steps].sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 5);
+    const second = await run();
+    out.second = second;
+
+    // Archive: Binary size and unpacked file count/bytes vs folder.
+    const files = (d: string) => {
+      const fs = readdirSync(d, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+      return { files: fs.length, bytes: fs.reduce((n, e) => n + statSync(join(e.parentPath, e.name)).size, 0) };
+    };
+    const archives = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: 'urn:ga-server:id:apple-health-archive|' }, { cache: 'no-cache' });
+    const tmp = mkdtempSync(join(tmpdir(), 'ga-apple-real-'));
+    try {
+      const blob = await client.download(archives[0]?.content[0].attachment.url as string);
+      writeFileSync(join(tmp, 'a.tar.gz'), Buffer.from(await blob.arrayBuffer()));
+      mkdirSync(join(tmp, 'x'));
+      execFileSync('tar', ['-xzf', join(tmp, 'a.tar.gz'), '-C', join(tmp, 'x')]);
+      out.archive = { documents: archives.length, binaryBytes: blob.size, unpacked: files(join(tmp, 'x')), folder: files(dir) };
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+    console.log(JSON.stringify(out));
+    writeFileSync('.superpowers/sdd/2026-11-05-apple-health-import/task-7-real.json', JSON.stringify(out, null, 1));
+    expect(first.possibleDuplicates).toBe(0);
+    expect(first.seconds).toBeLessThan(1800);
+    expect(second).toMatchObject({ created: 0, updated: 0 });
+    expect(second.seconds).toBeLessThan(180);
+    const a = out.archive as { binaryBytes: number; unpacked: unknown; folder: unknown };
+    expect(a.binaryBytes).toBeGreaterThan(100e6);
+    expect(a.unpacked).toEqual(a.folder);
+  } finally {
+    // $everything is capped per call: delete by tag in pages until none remain, then the patient.
+    for (const t of [...types, 'Binary'] as const) {
+      if (t === 'Binary') continue;
+      for (;;) {
+        const rs = await client.searchResources(t, { patient: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' });
+        if (!rs.length) break;
+        for (const r of rs) await client.deleteResource(t, r.id as string);
+      }
+    }
+    let left = 0;
+    for (const t of types) left += (await client.search(t, { patient: `Patient/${pid}`, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
+    console.log(JSON.stringify({ remainingForTestPatient: left }));
+    await client.deleteResource('Patient', pid);
+    expect(left).toBe(0);
+  }
 }, 3_600_000);
