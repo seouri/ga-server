@@ -162,8 +162,7 @@ export async function accessToken(dir: string, src: SourceRec, clientId: string)
     if (!cur.refresh_token) throw new GaError('no_refresh_token');
     const config = await discover(dir, src.fhirBase, clientId);
     const r = await oidc.refreshTokenGrant(config, cur.refresh_token).catch((e: unknown) => {
-      const err = oauthError(e, 'token refresh');
-      throw (e as { error?: unknown }).error === 'invalid_grant' ? new GaError('invalid_grant') : err;
+      throw (e as { error?: unknown }).error === 'invalid_grant' ? new GaError('invalid_grant') : oauthError(e, 'token refresh');
     });
     const next = toTokens(r, cur);
     saveSecret(dir, src.key, next); // persist the rotated refresh token before anyone uses the access token

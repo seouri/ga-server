@@ -68,6 +68,17 @@ describe('connect', () => {
     expect(m.stats.rejected).toEqual([]);
   });
 
+  it('accepts an id_token whose issuer the SMART configuration advertises', async () => {
+    const { src } = await setup({ idToken: 'advertised' });
+    expect(src.patient).toBe('synthetic-patient-1');
+  });
+
+  // Known limit: without `issuer` in smart-configuration GA assumes the FHIR base, so a server that
+  // also returns an id_token from another issuer is refused. Documents the behaviour; not a goal.
+  it('refuses an id_token when the SMART configuration omits issuer', async () => {
+    await expect(setup({ idToken: 'unadvertised' })).rejects.toThrow(/"iss"/);
+  });
+
   it('is refused when the registered key differs', async () => {
     await ensureKeys(dir);
     const other = await generateKeyPair('RS384');

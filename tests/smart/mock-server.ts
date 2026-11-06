@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createLocalJWKSet, jwtVerify } from 'jose';
+import { SignJWT, createLocalJWKSet, generateKeyPair, jwtVerify } from 'jose';
 import type { JSONWebKeySet } from 'jose';
 
 export type Handler = (req: IncomingMessage, res: ServerResponse, url: URL) => void | Promise<void>;
@@ -15,6 +15,8 @@ export type MockOpts = {
   noRefresh?: boolean; // fallback A: never issue a refresh token
   rotate?: boolean; // default true; false = refresh response omits refresh_token and the old one stays valid
   expiresIn?: number;
+  // Return an RS256 id_token from the code exchange (iss = <origin>/oauth2), with `issuer` advertised in the config or not.
+  idToken?: 'advertised' | 'unadvertised';
 };
 
 export type MockSmart = {
@@ -77,11 +79,23 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
     close: () => new Promise((r) => server.close(() => r())),
   };
 
-  const issue = (res: ServerResponse, withPatient: boolean, newRefresh: boolean): void => {
+  const idKey = (await generateKeyPair('RS256')).privateKey;
+  const issuer = `${origin}/oauth2`;
+  const issue = async (res: ServerResponse, withPatient: boolean, newRefresh: boolean): Promise<void> => {
     const at = `at-${randomUUID()}`;
     access.add(at);
     const body: Record<string, unknown> = { access_token: at, token_type: 'Bearer', expires_in: opts.expiresIn ?? 3600, scope: 'patient/*.read offline_access' };
     if (withPatient) body.patient = patient;
+    if (withPatient && opts.idToken) {
+      body.id_token = await new SignJWT({ fhirUser: `${m.fhirBase}/Patient/${patient}` })
+        .setProtectedHeader({ alg: 'RS256' })
+        .setIssuer(issuer)
+        .setAudience(opts.clientId)
+        .setSubject(patient)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(idKey);
+    }
     if (newRefresh && !opts.noRefresh) {
       latest = `rt-${randomUUID()}`;
       validRefresh.add(latest);
@@ -104,6 +118,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
       scopes_supported: ['openid', 'fhirUser', 'launch/patient', 'offline_access', 'patient/*.read'],
       response_types_supported: ['code'],
       code_challenge_methods_supported: ['S256'],
+      ...(opts.idToken === 'advertised' ? { issuer } : {}),
       capabilities: ['launch-standalone', 'client-confidential-asymmetric', 'permission-offline', 'permission-patient', 'context-standalone-patient'],
     }),
   );
