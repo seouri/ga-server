@@ -68,15 +68,11 @@ describe('connect', () => {
     expect(m.stats.rejected).toEqual([]);
   });
 
-  it('accepts an id_token whose issuer the SMART configuration advertises', async () => {
-    const { src } = await setup({ idToken: 'advertised' });
+  // GA never requests openid/fhirUser, so no id_token is issued or validated (a malformed one would break every refresh).
+  it('requests read-only scopes without openid, so an id_token-capable server issues none', async () => {
+    const { m, src } = await setup({ idToken: 'unadvertised' });
     expect(src.patient).toBe('synthetic-patient-1');
-  });
-
-  // Known limit: without `issuer` in smart-configuration GA assumes the FHIR base, so a server that
-  // also returns an id_token from another issuer is refused. Documents the behaviour; not a goal.
-  it('refuses an id_token when the SMART configuration omits issuer', async () => {
-    await expect(setup({ idToken: 'unadvertised' })).rejects.toThrow(/"iss"/);
+    expect(m.stats.scopes).toEqual(['offline_access launch/patient patient/*.read']);
   });
 
   it('is refused when the registered key differs', async () => {

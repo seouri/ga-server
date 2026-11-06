@@ -24,7 +24,7 @@ const OPTIONS = {
   status: {},
   disconnect: {},
 } as const;
-const DAY_MS = 24 * 3_600_000;
+const HOUR_MS = 3_600_000;
 const NO_SOURCES = 'no sources connected';
 
 // Medplum client and patient. GA_PATIENT_ID is for tests only, as in mcp.ts.
@@ -60,16 +60,21 @@ function browser(url: string): void {
 async function daemon(): Promise<never> {
   for (;;) {
     const at = new Date().toISOString();
+    let failed = false;
     try {
       // Log in before checking sources, so "no sources connected" also proves the container reaches Medplum.
       const { client, patientId } = await ga();
       const dir = smartDir();
       if (!readSources(dir).length) console.log(`${at} ${NO_SOURCES}`);
-      for (const r of await syncAll(client, dir, patientId)) print(r, (s) => console.log(`${at} ${s}`));
+      for (const r of await syncAll(client, dir, patientId)) {
+        print(r, (s) => console.log(`${at} ${s}`));
+        failed ||= r.status === 'error'; // network or server: retry soon; off (login needed) waits a day
+      }
     } catch (e) {
+      failed = true;
       console.error(`${at} sync failed: ${e instanceof GaError ? e.message : 'sync_error'}`);
     }
-    await new Promise((r) => setTimeout(r, DAY_MS));
+    await new Promise((r) => setTimeout(r, failed ? HOUR_MS : 24 * HOUR_MS));
   }
 }
 
@@ -160,9 +165,10 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     usage(positionals.length === 1);
     const [src] = pick(readSources(dir), positionals[0]);
     const { client, patientId } = await ga();
-    deleteSecret(dir, src.key);
-    // The source stays listed (its enabled types kept for a reconnect); with no tokens, sync skips it.
+    // Status first: if this write fails the tokens remain and the source still works. The source stays listed
+    // (enabled types kept for a reconnect); with no tokens, sync skips it.
     await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
+    deleteSecret(dir, src.key);
     console.log(`${src.key}: disconnected; records already fetched stay. Reconnect: ga connect ${src.fhirBase}`);
   }
   return true;

@@ -29,7 +29,7 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 **Privacy and security**
 - No PHI in the repo or logs. Fixtures are synthetic. Logs, status and reports hold counts, type names and error codes only. Never log tokens, names or resource content.
 - Nothing leaves the machine except requests to the configured hospital FHIR and OAuth endpoints.
-- Read-only scopes only: `openid fhirUser offline_access launch/patient patient/*.read`. For a server advertising `permission-v2`, `patient/*.rs` is acceptable.
+- Read-only scopes only: `offline_access launch/patient patient/*.read` (amended in implementation: openid/fhirUser dropped — id_token unused and its validation broke refresh). For a server advertising `permission-v2`, `patient/*.rs` is acceptable.
 - The callback listener binds `127.0.0.1` only, on port `8765`, path `/callback`; redirect URI `http://localhost:8765/callback`. It checks `state` and uses PKCE S256.
 
 **Files**

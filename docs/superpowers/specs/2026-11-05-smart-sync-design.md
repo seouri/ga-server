@@ -130,7 +130,7 @@ Builds on `2026-11-05-ga-server-design.md` (milestone 1), `2026-11-06-ehi-import
 ### Security [call]
 
 - **Tokens:** stored encrypted with AES-256-GCM (Node `crypto`). The key file sits in `.ga/` with mode 0600. Same trust boundary as the Medplum admin password already kept in `.ga/config.json`. OS keychain storage was considered and rejected: it doesn't carry over to a server.
-- **Scopes:** read-only patient scopes plus `offline_access`, `openid` and `fhirUser`. Never request write scopes.
+- **Scopes:** read-only patient scopes plus `offline_access` (amended in implementation: openid/fhirUser dropped — id_token unused and its validation broke refresh). Never request write scopes.
 - **Callback listener:** binds 127.0.0.1 only. It's open only during `ga connect`, and checks `state` and PKCE.
 - **Logs:** never contain tokens, names or resource content.
 

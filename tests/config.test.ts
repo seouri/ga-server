@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -8,6 +8,13 @@ afterEach(() => vi.unstubAllEnvs());
 
 test('config missing gives clear error', () => {
   expect(() => loadConfig('/nonexistent/config.json')).toThrow('run ga setup first');
+});
+
+test.skipIf(process.getuid?.() === 0)('an unreadable config names UID/GID (the ga-sync container user)', () => {
+  const f = join(mkdtempSync(join(tmpdir(), 'ga-cfg-')), 'config.json');
+  writeFileSync(f, '{}');
+  chmodSync(f, 0o000);
+  expect(() => loadConfig(f)).toThrow('cannot read .ga/config.json: set UID/GID');
 });
 
 test('GA_BASE_URL overrides baseUrl (the ga-sync container reaches Medplum by service name)', () => {

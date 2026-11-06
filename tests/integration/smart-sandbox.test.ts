@@ -68,11 +68,19 @@ describe.skipIf(!process.env.GA_SMART_SANDBOX)('SMART sandbox (launch.smarthealt
     expect(first.status).toBe('active');
     expect(first.report?.created).toBeGreaterThan(0);
 
-    // Second sync on the same access token. Not after a real refresh: the sandbox's refresh response carries an id_token
-    // without an `aud` claim, which openid-client rejects (token_error). Refresh rotation is covered against the mock.
+    // Force expiry: the second sync must do a real refresh, persist the new tokens, and change nothing.
+    const before = loadSecret<Tokens>(dir, key)!;
+    expect(before.refresh_token).toBeTruthy();
+    saveSecret(dir, key, { ...before, expires_at: Date.now() - 1000 });
     const second = await syncSource(client, dir, src, pid);
+    expect(second.error).toBeUndefined();
     expect(second.status).toBe('active');
     expect(second.report).toMatchObject({ created: 0, updated: 0 });
+    const after = loadSecret<Tokens>(dir, key)!;
+    expect(after.access_token).not.toBe(before.access_token);
+    expect(after.expires_at).toBeGreaterThan(Date.now());
+    expect(after.refresh_token).toBeTruthy();
+    console.log(`sandbox refresh: rotated=${after.refresh_token !== before.refresh_token}`);
 
     // Forced expiry with a revoked refresh token: the source turns off.
     saveSecret(dir, key, { ...loadSecret<Tokens>(dir, key)!, expires_at: Date.now() - 1000, refresh_token: 'revoked' });

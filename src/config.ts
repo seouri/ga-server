@@ -22,7 +22,9 @@ export function loadConfig(path = defaultConfigPath()): GaConfig {
   let cfg: GaConfig;
   try {
     cfg = JSON.parse(readFileSync(path, 'utf8')) as GaConfig;
-  } catch {
+  } catch (e) {
+    // EACCES: the ga-sync container runs as a uid that cannot read the host's 0600 config.
+    if ((e as NodeJS.ErrnoException).code === 'EACCES') throw new GaError('cannot read .ga/config.json: set UID/GID');
     throw new GaError('run ga setup first');
   }
   // The ga-sync container reaches Medplum by service name, not localhost.

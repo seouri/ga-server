@@ -47,7 +47,7 @@ ga keys      # creates GA's signing key (.ga/smart/, mode 0600) and prints the p
 6. Public key: paste the `ga keys` output, the JWKS or the PEM, whichever the form accepts. If it only takes a JWK Set URL, host `.ga/smart/public.jwks.json` at any public static URL: it is a public key, never health data.
 7. Mark the app **ready for production** and note its **client ID**. Epic distributes it to organizations; that can take a while.
 
-Unverified until a real registration goes through (record the answers here): the exact form fields, whether Epic accepts the `localhost` redirect for production, and whether each organization must activate the app first.
+Unverified until a real registration goes through (record the answers here): the exact form fields, whether Epic accepts the `localhost` redirect for production, whether each organization must activate the app first, and whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
 
 **Fallback A (no refresh tokens).** If Epic issues no refresh token or caps access at about an hour, GA fetches only during `ga connect`: log in again whenever you want fresh data. Between logins the source shows `off`.
 

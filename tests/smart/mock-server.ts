@@ -16,7 +16,7 @@ export type MockOpts = {
   noRefresh?: boolean; // fallback A: never issue a refresh token
   rotate?: boolean; // default true; false = refresh response omits refresh_token and the old one stays valid
   expiresIn?: number;
-  // Return an RS256 id_token from the code exchange (iss = <origin>/oauth2), with `issuer` advertised in the config or not.
+  // Return an RS256 id_token from the code exchange when `openid` was requested (iss = <origin>/oauth2), with `issuer` advertised or not.
   idToken?: 'advertised' | 'unadvertised';
 };
 
@@ -25,7 +25,7 @@ export type MockSmart = {
   fhirBase: string;
   tokenEndpoint: string;
   opts: MockOpts;
-  stats: { assertions: number; refreshes: number; reuse: number; rejected: string[] };
+  stats: { assertions: number; refreshes: number; reuse: number; rejected: string[]; scopes: string[] }; // scopes: each authorize request's scope
   currentRefresh: () => string | undefined;
   revokeAll: () => void;
   authorized: (req: IncomingMessage) => boolean; // bearer check for FHIR routes
@@ -48,7 +48,7 @@ const readBody = async (req: IncomingMessage): Promise<string> => {
 
 export async function startMock(opts: MockOpts): Promise<MockSmart> {
   const routes = new Map<string, Handler>();
-  const codes = new Map<string, { challenge: string; redirect: string }>();
+  const codes = new Map<string, { challenge: string; redirect: string; openid: boolean }>();
   const validRefresh = new Set<string>();
   const usedRefresh = new Set<string>();
   const access = new Set<string>();
@@ -72,7 +72,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
     fhirBase: `${origin}/fhir`,
     tokenEndpoint: `${origin}/oauth2/token`,
     opts,
-    stats: { assertions: 0, refreshes: 0, reuse: 0, rejected: [] },
+    stats: { assertions: 0, refreshes: 0, reuse: 0, rejected: [], scopes: [] },
     currentRefresh: () => latest,
     revokeAll: () => {
       validRefresh.clear();
@@ -90,12 +90,12 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
 
   const idKey = (await generateKeyPair('RS256')).privateKey;
   const issuer = `${origin}/oauth2`;
-  const issue = async (res: ServerResponse, withPatient: boolean, newRefresh: boolean): Promise<void> => {
+  const issue = async (res: ServerResponse, withPatient: boolean, newRefresh: boolean, openid = false): Promise<void> => {
     const at = `at-${randomUUID()}`;
     access.add(at);
     const body: Record<string, unknown> = { access_token: at, token_type: 'Bearer', expires_in: opts.expiresIn ?? 3600, scope: 'patient/*.read offline_access' };
     if (withPatient) body.patient = patient;
-    if (withPatient && opts.idToken) {
+    if (withPatient && openid && opts.idToken) {
       body.id_token = await new SignJWT({ fhirUser: `${m.fhirBase}/Patient/${patient}` })
         .setProtectedHeader({ alg: 'RS256' })
         .setIssuer(issuer)
@@ -143,7 +143,8 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
       /^http:\/\/localhost:\d+\/callback$/.test(redirect);
     if (!ok) return json(res, 400, { error: 'invalid_request' });
     const code = `code-${randomUUID()}`;
-    codes.set(code, { challenge: p.get('code_challenge') ?? '', redirect });
+    m.stats.scopes.push(p.get('scope') ?? '');
+    codes.set(code, { challenge: p.get('code_challenge') ?? '', redirect, openid: (p.get('scope') ?? '').split(' ').includes('openid') });
     const to = new URL(redirect);
     to.searchParams.set('code', code);
     to.searchParams.set('state', p.get('state') ?? '');
@@ -175,7 +176,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
       codes.delete(p.get('code') ?? '');
       const verifier = createHash('sha256').update(p.get('code_verifier') ?? '').digest('base64url');
       if (!c || c.challenge !== verifier || c.redirect !== p.get('redirect_uri')) return reject(res, 'invalid_grant', 'code');
-      return issue(res, true, true);
+      return issue(res, true, true, c.openid);
     }
     if (p.get('grant_type') === 'refresh_token') {
       const rt = p.get('refresh_token') ?? '';

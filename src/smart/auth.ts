@@ -10,7 +10,8 @@ import type { SourceRec } from './store.ts';
 
 export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
 
-const SCOPE = 'openid fhirUser offline_access launch/patient patient/*.read';
+// No openid/fhirUser: GA never uses the id_token, and openid-client validates one on every refresh (a malformed one breaks sync).
+const SCOPE = 'offline_access launch/patient patient/*.read';
 
 export const sourceKey = (fhirBase: string): string => new URL(fhirBase).hostname.toLowerCase().replaceAll('.', '-');
 
