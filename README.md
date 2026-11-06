@@ -209,7 +209,7 @@ Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/.
 
 **Log.** Every view, download and question is a local AuditEvent in GA's FHIR server (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
 
-**Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once; see the `[check]` note on `X-Forwarded-For` in `src/share/server.ts`.
+**Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If links work on the GA Mac but not from a phone on mobile data, a firewall on the Mac (macOS Firewall, Little Snitch, a VPN or security app) is blocking Tailscale's incoming Funnel traffic: allow Tailscale. Test from outside your tailnet; the GA Mac itself can't reach its own Funnel address through the public relay. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once; see the `[check]` note on `X-Forwarded-For` in `src/share/server.ts`.
 
 ## Review flags and limits
 
