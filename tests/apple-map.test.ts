@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Readings } from '../src/apple/readings.ts';
 import type { AhClinical, AhRecord } from '../src/apple/read.ts';
@@ -137,15 +139,36 @@ describe('Apple clinical records and ECG', () => {
     expect((a as any).patient).toEqual({ reference: 'Patient/apple-patient', display: 'Test Person' });
     expect((a as any).recorder).toEqual({ display: 'Dr. Example' });
     expect((a as any).identifier[0]).toEqual({ system: APPLE, value: 'https://fhir.example.org/R4/AllergyIntolerance/a1' });
-    expect(skips).toEqual({ clinicalTypeUnsupported: 1 });
+    expect(skips).toEqual({ clinicalTypeUnsupported: 1, clinicalUnreadable: 0 });
   });
   it('maps ECG without PHI', () => {
-    const [d, o] = mapEcgs(dir) as any[];
+    const [d, o] = mapEcgs(dir).resources as any[];
     expect(o.valueString).toBe('Sinus Rhythm');
     expect(o.effectiveDateTime).toBe('2024-02-11T14:48:35-05:00');
     expect(o.derivedFrom[0].reference).toBe(`DocumentReference/${d.id}`);
     expect(Buffer.from(d.content[0].attachment.data, 'base64').toString()).toBe(readFileSync(`${dir}/electrocardiograms/ecg_2024-02-11.csv`, 'utf8'));
     expect(d.identifier[0].system).toBe(APPLE);
     expect(JSON.stringify(o)).not.toMatch(/Test Person|Jan 1, 1970/);
+  });
+  it('counts unreadable files, merges patients, drops display-less refs', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ah-'));
+    mkdirSync(join(tmp, 'clinical-records'));
+    const w = (f: string, o: unknown) => writeFileSync(join(tmp, 'clinical-records', f), typeof o === 'string' ? o : JSON.stringify(o));
+    w('p1.json', { resourceType: 'Patient', identifier: [{ system: 's', value: '1' }] });
+    w('p2.json', { resourceType: 'Patient', identifier: [{ system: 's', value: '1' }, { system: 's', value: '2' }] });
+    w('bad.json', '{nope');
+    w('al.json', { resourceType: 'AllergyIntolerance', recorder: { reference: 'Practitioner/x' }, patient: { reference: 'Patient/p' } });
+    const { resources, skips } = mapClinical(tmp, [ref('Patient', 'p1.json', '4.0.1'), ref('Patient', 'p2.json', '4.0.1'), ref('X', 'bad.json', '4.0.1'), ref('X', 'missing.json', '4.0.1'), ref('AllergyIntolerance', 'al.json', '4.0.1', 'u')]);
+    expect(resources.filter((r) => r.resourceType === 'Patient')).toEqual([{ resourceType: 'Patient', id: 'apple-patient', identifier: [{ system: 's', value: '1' }, { system: 's', value: '2' }] }]);
+    expect(skips.clinicalUnreadable).toBe(2);
+    expect('recorder' in (resources[1] as any)).toBe(false);
+    expect(mapClinical(tmp, []).resources).toEqual([]);
+  });
+  it('counts malformed ECG, tolerates missing folder', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ah-'));
+    expect(mapEcgs(tmp)).toEqual({ resources: [], skips: { ecgUnparsed: 0 } });
+    mkdirSync(join(tmp, 'electrocardiograms'));
+    writeFileSync(join(tmp, 'electrocardiograms', 'x.csv'), 'Name,A\nClassification,Sinus Rhythm\n\n1\n');
+    expect(mapEcgs(tmp)).toEqual({ resources: [], skips: { ecgUnparsed: 1 } });
   });
 });

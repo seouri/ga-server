@@ -1,44 +1,50 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { Resource } from '@medplum/fhirtypes';
+import type { Identifier, Resource } from '@medplum/fhirtypes';
 import { APPLE } from '../identity.ts';
 import { appleDate, type AhClinical } from './read.ts';
 import { sha, SUBJECT } from './readings.ts';
 
-// Replace every Reference with its display only (hospital ids mean nothing in GA).
+// Replace every Reference with its display only (hospital ids mean nothing in GA); no display -> dropped.
 function stripRefs(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(stripRefs);
+  if (Array.isArray(v)) return v.map(stripRefs).filter((x) => x !== undefined);
   if (v && typeof v === 'object') {
     const o = v as Record<string, unknown>;
-    if (typeof o.reference === 'string') return o.display === undefined ? {} : { display: o.display };
-    return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, stripRefs(x)]));
+    if (typeof o.reference === 'string') return o.display === undefined ? undefined : { display: o.display };
+    return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, stripRefs(x)]).filter(([, x]) => x !== undefined));
   }
   return v;
 }
 
-export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; skips: { clinicalTypeUnsupported: number } } {
+export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; skips: { clinicalTypeUnsupported: number; clinicalUnreadable: number } } {
   const resources: Resource[] = [];
+  const ids = new Map<string, Identifier>(); // one Patient with the union of identifiers
   let clinicalTypeUnsupported = 0;
+  let clinicalUnreadable = 0;
+  let patients = 0;
   for (const ref of refs) {
-    const r = JSON.parse(readFileSync(join(dir, ref.resourceFilePath), 'utf8'));
-    if (r.resourceType === 'Patient') {
-      resources.push({ resourceType: 'Patient', id: 'apple-patient', identifier: r.identifier });
-    } else if (r.resourceType === 'AllergyIntolerance' && ref.fhirVersion.startsWith('4.')) {
+    let r: any;
+    try { r = JSON.parse(readFileSync(join(dir, ref.resourceFilePath), 'utf8')); } catch { clinicalUnreadable++; continue; }
+    if (r?.resourceType === 'Patient') {
+      patients++;
+      for (const i of r.identifier ?? []) ids.set(`${i.system}|${i.value}`, i);
+    } else if (r?.resourceType === 'AllergyIntolerance' && ref.fhirVersion.startsWith('4.')) {
       const { id: _id, patient, ...rest } = r;
       const a = stripRefs(rest) as Record<string, any>;
       resources.push({ ...a, resourceType: 'AllergyIntolerance', patient: { ...SUBJECT, ...(patient?.display && { display: patient.display }) }, identifier: [{ system: APPLE, value: ref.sourceURL }, ...(a.identifier ?? [])] });
     } else clinicalTypeUnsupported++;
   }
-  return { resources, skips: { clinicalTypeUnsupported } };
+  if (patients) resources.unshift({ resourceType: 'Patient', id: 'apple-patient', identifier: [...ids.values()] });
+  return { resources, skips: { clinicalTypeUnsupported, clinicalUnreadable } };
 }
 
-const KEYS = new Set(['Recorded Date', 'Classification', 'Symptoms', 'Sample Rate', 'Lead', 'Unit']);
+const KEYS = new Set(['Recorded Date', 'Classification', 'Symptoms']);
 
-export function mapEcgs(dir: string): Resource[] {
+export function mapEcgs(dir: string): { resources: Resource[]; skips: { ecgUnparsed: number } } {
   const folder = join(dir, 'electrocardiograms');
-  let files: string[];
-  try { files = readdirSync(folder).filter((f) => f.endsWith('.csv')).sort(); } catch { return []; }
+  const files = existsSync(folder) ? readdirSync(folder).filter((f) => f.endsWith('.csv')).sort() : [];
   const out: Resource[] = [];
+  let ecgUnparsed = 0;
   files.forEach((f, n) => {
     const text = readFileSync(join(folder, f), 'utf8');
     const h: Record<string, string> = {};
@@ -48,7 +54,7 @@ export function mapEcgs(dir: string): Resource[] {
       const k = line.slice(0, i);
       if (i > 0 && KEYS.has(k)) h[k] = line.slice(i + 1).trim().replace(/^"(.*)"$/, '$1');
     }
-    if (!h['Recorded Date'] || !h.Classification) return; // not an ECG export we understand
+    if (!h['Recorded Date'] || !h.Classification) { ecgUnparsed++; return; }
     const recorded = appleDate(h['Recorded Date']);
     const id = `apple-ecg-${n}`;
     out.push({
@@ -64,5 +70,5 @@ export function mapEcgs(dir: string): Resource[] {
       ...(h.Symptoms && { note: [{ text: h.Symptoms }] }),
     });
   });
-  return out;
+  return { resources: out, skips: { ecgUnparsed } };
 }
