@@ -104,6 +104,17 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
   - update just that extension, adding it if missing;
   - don't count it in `updated`; add `report.seen` (a new counter, `ImportReport.seen: number`) instead.
 - **Not in scope:** Apple, EHI, C-CDA and PDF behaviour is unchanged (none set `dateOf`, `fillOnly` or `seenAt`).
+- **Review amendments (binding):**
+  - **`body()` (engine.ts ~line 58) also strips `urn:ga-server:ext:last-seen`.** Otherwise every re-sync counts as `updated`.
+  - **Fill-only trigger, permanent.** Use fill-only when `fillOnly(incoming)` is true and the existing record carries any identifier from another GA source system (`urn:ga-server:id:ehi:`, `urn:ga-server:id:ccda`, `urn:ga-server:id:pdf`, `urn:ga-server:id:apple-health`). The trigger is not "lacks the smart identifier": that would expire after the first sync.
+  - **`fillFrom` also runs for `kind: 'smart'`.** It returns early only for kinds other than `ehi` and `smart`. A newer-dated portal copy therefore never replaces a coded value with a weaker one.
+  - **Seen-only and fill-only writes go through `protect()`.** A `conflict` decision gets no `last-seen` stamp.
+  - **`ImportReport.seen` is optional (`seen?: number`)**, so `src/ccda.ts:195` and existing `toEqual` tests are unchanged.
+  - **`ImportReport.byType?: Record<string, { created: number; linked: number; updated: number; flagged: number; seen: number }>`** is filled when `SourceInfo.kind === 'smart'`. Task 5's dry run reads it.
+- **Extra tests:**
+  - **Fill-only test:** import the smart Condition **twice**, with different `date`s and no `lastUpdated`. Expect the coded `code` and `note` to survive both runs.
+  - **Newer-date test:** a newer-dated **text-only** code must keep the coded EHI code.
+  - **Re-import test:** use a different `date` per run and a resource without `lastUpdated`.
 
 - [ ] **Step 1: Failing unit tests (`tests/identity.test.ts`).**
   - `stableIdentifier` for `kind: 'smart'` returns `{system: 'urn:ga-server:id:smart:fhir-example-org', value: 'Observation/1'}`.
@@ -141,7 +152,7 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
   export function saveSecret(dir: string, name: string, data: unknown): void; // AES-256-GCM, file mode 0600, atomic (write tmp + rename)
   export function loadSecret<T>(dir: string, name: string): T | undefined;   // undefined if absent; GaError('token store unreadable') if tampered
   export function deleteSecret(dir: string, name: string): void;
-  export async function ensureKeys(dir: string): Promise<{ publicJwks: { keys: object[] }; created: boolean }>; // RS384 via jose generateKeyPair + exportJWK, kid = JWK thumbprint
+  export async function ensureKeys(dir: string): Promise<{ publicJwks: { keys: object[] }; publicPem: string; created: boolean }>; // RS384 via jose generateKeyPair('RS384', { extractable: true }) + exportJWK/exportSPKI, kid = JWK thumbprint
   export async function signingKey(dir: string): Promise<{ key: CryptoKey; kid: string }>;
   export type SourceRec = { key: string; name: string; fhirBase: string; patient?: string; enabledTypes?: string[] };
   export function readSources(dir: string): SourceRec[];
@@ -182,8 +193,8 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 - Produces:
   ```ts
   export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
-  export async function discover(fhirBase: string): Promise<import('openid-client').Configuration>; // reads <fhirBase>/.well-known/smart-configuration; client auth PrivateKeyJwt with signingKey
-  export async function connect(dir: string, fhirBase: string, clientId: string, open: (url: string) => void | Promise<void>): Promise<SourceRec>;
+  export async function discover(dir: string, fhirBase: string, clientId: string): Promise<import('openid-client').Configuration>; // reads <fhirBase>/.well-known/smart-configuration; client auth PrivateKeyJwt with signingKey
+  export async function connect(dir: string, fhirBase: string, clientId: string, open: (url: string) => void | Promise<void>, opts?: { name?: string; port?: number }): Promise<SourceRec>;
   //   PKCE S256 + state; serves 127.0.0.1:8765/callback once; exchanges code; saves tokens under source key; upserts sources.json; returns the record
   export async function accessToken(dir: string, src: SourceRec, clientId: string): Promise<string>;
   //   returns a valid access token; refreshes when <60s left; saves the rotated refresh token BEFORE returning; throws GaError('invalid_grant') when refresh is refused
@@ -195,6 +206,16 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
   - Pass the `aud` = fhirBase authorize parameter (SMART requires it).
   - Allow insecure HTTP only when the host is `127.0.0.1` or `localhost` (`allowInsecureRequests` for tests).
 - The callback port is 8765. Tests pass an `open` that fetches the URL itself (follows the redirect into the listener), so no browser is needed.
+- **Review amendments (binding):**
+  - **Client assertion:** `PrivateKeyJwt({ key, kid }, { [modifyAssertion]: (h, p) => { p.aud = <token_endpoint> } })`. The `kid` goes in the key argument. `aud` must be the token endpoint URL (Epic's issuer differs). Confirm against the installed openid-client/oauth4webapi source.
+  - **The mock `/token` verifies** the RS384 signature, the `kid` header, `aud === token endpoint`, `iss === sub === clientId` and a unique `jti`.
+  - **Callback and redirect:** the listener binds 127.0.0.1, while `redirect_uri` and the `currentUrl` passed to `authorizationCodeGrant` use `http://localhost:<port>/callback`, so they match the registration. The port is an option, so tests can use port 0 or a random port.
+  - **Missing fields:** when a refresh response lacks `refresh_token` or `patient`, keep the stored values.
+  - **Concurrent refresh:**
+    - Wrap refresh and save in an exclusive lock: `.ga/smart/<key>.lock` created with `O_EXCL`, retried briefly, and removed in `finally`; a lock older than 2 minutes is stale.
+    - After acquiring the lock, re-read the tokens, because another process may already have refreshed.
+    - Test: two concurrent `accessToken` calls cause one refresh and leave a valid token.
+  - **Fallback A, no refresh token:** `accessToken` throws `GaError('no_refresh_token')` once the access token expires, and sync marks the source `off` with that code.
 
 - [ ] **Step 1: Failing tests** against the mock server.
   - `connect` stores tokens. The encrypted file exists, and `sources.json` holds `{key, fhirBase, patient}`.
@@ -242,6 +263,11 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 - Observation is searched once per category. A 4xx for a category is recorded in `skipped` and the sync continues.
 - Follow `link[relation=next]` to the end.
 - Fetch DocumentReference attachments whose `url` is a `Binary/` reference.
+- **Review amendments (binding):**
+  - **Condition** is searched per category too: `problem-list-item`, `encounter-diagnosis`, `health-concern`. A category the server rejects is recorded in `skipped`.
+  - **De-duplicate** fetched resources by `Type/id` (category searches overlap, and Patient is read and searched).
+  - **Medications:** read each `Medication` referenced by `medicationReference` into the batch, so the RxNorm coding isn't lost (the engine links Medication as SHARED).
+  - **Fixtures** include a MedicationRequest with `medicationReference` and an Observation carrying two categories.
 
 **Mapping (`mapForGa`):**
 - Prepend the identifier `{system: 'urn:ga-server:id:smart:<key>', value: 'Type/id'}` and keep existing identifiers.
@@ -252,7 +278,7 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
   - `text/rtf` becomes text via the existing `rtfToText` (`src/ehi/rtf.ts`, or wherever `rtfToText` lives).
   - Plain text is kept as is.
   - All of these are stored as an inline `text/plain; charset=utf-8` attachment, with the original content type recorded on `attachment.title` as `"<title> (original: <type>)"`.
-  - PDFs and images stay as inline data when under 5 MB, otherwise they're dropped with the count recorded.
+  - PDFs and images are stored as Binaries. `mapForGa` returns them as pending uploads, Task 5 creates them with `client.createBinary` (as in `src/document.ts`), and the attachment `url` becomes `Binary/<id>`. They are never inlined: Medplum's max JSON size is 1 MB.
 - `meta` is removed except `lastUpdated`, which Task 5's `dateOf` reads. Store it on a non-FHIR side map rather than in the resource if the engine would otherwise write it; the implementer picks.
 
 - [ ] **Step 1: Failing tests** against the mock with fixtures.
@@ -305,6 +331,12 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 - Nothing is written, including the Endpoint.
 
 **Enabling types:** no `enabledTypes` (first connect) means the source is **not synced for real** until types are enabled. `ga sync` prints "dry run only: enable types after reviewing counts" (Task 6 adds `--enable`).
+- **Review amendments (binding):**
+  - **Dry-run counts:** per-type counts come from `ImportReport.byType` (created, linked, updated, flagged, seen). The wrapper only prevents writes, and it also stubs `createBinary`. The dry-run test checks that the Patient's `meta.versionId` is unchanged.
+  - **Endpoint validity:** the Endpoint resource sets `connectionType` `{system: 'http://terminology.hl7.org/CodeSystem/endpoint-connection-type', code: 'hl7-fhir-rest'}` and `payloadType: [{text: 'FHIR R4'}]`, both required in R4.
+  - **One timestamp:** `smart-last-success` uses the same `now` as `seenAt`.
+  - **Binaries:** pending Binaries from `mapForGa` are created before `importResources`, then attachment URLs are set.
+  - **Two-run link test:** the link test runs two syncs, and the EHI coded code and note survive both.
 
 - [ ] **Step 1: Failing integration tests.** Use the mock server and a test patient; the test patient's identifier set and cleanup are as usual.
   - Dry run: `perType` counts match the fixtures and nothing is written (the test patient's compartment count is unchanged).
@@ -342,6 +374,13 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 | `ga disconnect <source>` | Deletes the tokens; marks the Endpoint `off` with error `disconnected` |
 
 - Usage errors are `GaError`.
+- **Review amendments (binding):**
+  - **`ga keys`** prints the public JWKS JSON **and** the SPKI PEM. The README says to upload whichever Epic's registration form accepts. If Epic only takes a JWK Set URL, host `public.jwks.json` at any public static URL: it's a public key, never health data.
+  - **`ga connect`** runs a dry run when `enabledTypes` is unset. Otherwise it runs a real sync. Under fallback A, `ga connect` is the only time data is fetched.
+  - **`GA_PATIENT_ID`:** the CLI honours `GA_PATIENT_ID` (tests only, as in `mcp.ts`). CLI integration tests use `createTestPatient`, never the real patient.
+  - **`ga status`** reads `sources.json` first and prints `no sources connected` without contacting Medplum.
+  - **`ga-sync` container user:** the service sets `user:` to the host user's uid:gid (`${UID:-1000}:${GID:-1000}`), and the README notes it, so files under `.ga/` stay writable from the host.
+  - **Live sandbox test:** an env-gated test (`GA_SMART_SANDBOX=1`) runs connect, two syncs and forced expiry against `https://launch.smarthealthit.org`. It's skipped when unset, or when the sandbox doesn't support asymmetric client auth; record that in the test.
 - **Endpoint directory lookup by name:** not built. **Ruling:** the user pastes the FHIR base URL; the README explains where to find it (Epic's open.epic.com endpoint list). Reason: the directory format is unverified, and two hospitals don't need a search.
 
 **`compose.yaml` `ga-sync` service:**
@@ -381,6 +420,15 @@ Status lives in Medplum as one `Endpoint` resource per source. A dry-run mode (a
 ---
 
 ### Task 7: Hand-off checklist for the user (no code)
+
+Spec deviations, recorded:
+- The pre-enable gate is a **dry run through a read-only client wrapper against the real patient**, not a test patient holding a copy of the data. It is equivalent, because no writes happen, and far cheaper.
+- **Search by hospital name is dropped:** the user pastes the FHIR base URL.
+- **The Epic registration answers** (spec: "do this first") can't be checked without the user's account. Every unknown has a coded fallback:
+  - key format: JWKS or PEM, or hosting `public.jwks.json`;
+  - no refresh token: fallback A;
+  - localhost redirect refused: fallback A, via a manual redirect page. Ruled out by the user: no hosted login page.
+- The user confirms the registration at the end.
 
 Real hospital connection needs the user's Epic developer registration and MyChart login, so it can't run unattended. At the end of the work:
 - Report what the user runs, in order: register at fhir.epic.com (README walkthrough), `ga keys`, `ga connect <url>` per hospital, review dry-run counts, `ga sync --enable <types>`, `ga status`.
