@@ -203,6 +203,9 @@ describe('sync lock', () => {
     // A lock left by a dead process on this host is stale.
     writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: 2 ** 22 + 1, host: hostname(), started: Date.now() }));
     expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toMatchObject({ status: 'active' });
+    // Our own pid from before this process started: a restarted container that reused the pid.
+    writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: process.pid, host: hostname(), started: Date.now() - (process.uptime() + 60) * 1000 }));
+    expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toMatchObject({ status: 'active' });
     // A live lock from another host (the ga-sync container) is not, until 2 h old.
     writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: 2 ** 22 + 1, host: 'other-host', started: Date.now() }));
     expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toEqual({ source: src.key, status: 'active', error: 'busy' });

@@ -165,6 +165,8 @@ async function takeSyncLock(dir: string, key: string, waitMs: number): Promise<s
     }
     const stale =
       (held.host === hostname() && typeof held.pid === 'number' && !alive(held.pid)) ||
+      // our own pid but written before we started: a restarted container that reused the pid (SIGTERM skips finally)
+      (held.host === hostname() && held.pid === process.pid && (held.started ?? started) < Date.now() - process.uptime() * 1000) ||
       Date.now() - (held.started ?? started) > LOCK_STALE_MS;
     if (stale) rmSync(f, { force: true });
     else if (Date.now() >= end) return undefined;

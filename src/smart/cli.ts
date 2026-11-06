@@ -44,7 +44,7 @@ function print(r: SyncResult, log: (s: string) => void = console.log): void {
   const c = r.report;
   const dry = r.dryRun ? ' (dry run: nothing written)' : '';
   const counts = c ? ` created ${c.created}, updated ${c.updated}, possible duplicates ${c.possibleDuplicates}, invalid ${c.invalid}${dry}` : '';
-  const hint = r.status === 'off' ? ': run ga connect <fhir-base-url>' : '';
+  const hint = r.status === 'off' && r.error !== 'busy' ? ': run ga connect <fhir-base-url>' : '';
   log(`${r.source}: ${r.status}${counts}${r.error ? ` error ${r.error}${hint}` : ''}`);
   const types = [...new Set([...Object.keys(r.fetched ?? {}), ...Object.keys(c?.byType ?? {})])].filter((t) => t !== 'Patient').sort();
   for (const t of types) {
@@ -79,7 +79,7 @@ async function daemon(): Promise<never> {
       if (!readSources(dir).length) console.log(`${at} ${NO_SOURCES}`);
       for (const r of await syncAll(client, dir, patientId)) {
         print(r, (s) => console.log(`${at} ${s}`));
-        failed ||= r.status === 'error'; // network or server: retry soon; off (login needed) waits a day
+        failed ||= r.status === 'error' || r.error === 'busy'; // network, server or a held lock: retry soon; off (login needed) waits a day
       }
     } catch (e) {
       failed = true;
