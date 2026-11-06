@@ -8,7 +8,7 @@ import { GaError, defaultConfigPath } from '../config.ts';
 export const smartDir = (cfgPath: string = defaultConfigPath()): string => join(dirname(cfgPath), 'smart');
 
 // Same-dir temp file then rename, so a crash never leaves a half-written file.
-function writeAtomic(file: string, data: string | Buffer, mode?: number): void {
+export function writeAtomic(file: string, data: string | Buffer, mode?: number): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
