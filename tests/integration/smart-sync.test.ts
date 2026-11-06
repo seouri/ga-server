@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Condition, DocumentReference, Extension, Resource } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { LAST_SEEN } from '../../src/identity.ts';
 import { ensureKeys, saveSecret, writeApp, writeSources } from '../../src/smart/store.ts';
@@ -105,10 +105,18 @@ describe('syncSource', () => {
     fresh(src.key);
   });
 
-  it('without enabled types only dry-runs: per-type counts, nothing written', async () => {
+  it('without enabled types only dry-runs: per-type counts, nothing written, listed as pending', async () => {
+    writeSources(dir, [src]);
     const before = await client.readResource('Patient', pid, { cache: 'no-cache' });
+    // Medplum can't search Binary: watch every write method on the real client instead.
+    const writes = (['createResource', 'updateResource', 'patchResource', 'createBinary', 'deleteResource', 'post', 'put', 'patch', 'delete', 'executeBatch'] as const)
+      .map((k) => vi.spyOn(client, k));
     const r = await syncSource(client, dir, src, pid);
-    expect(r).toMatchObject({ source: src.key, status: 'active' });
+    for (const w of writes) {
+      expect(w).not.toHaveBeenCalled();
+      w.mockRestore();
+    }
+    expect(r).toMatchObject({ source: src.key, status: 'pending' });
     dryCounts = r.perType ?? {};
     expect(Object.fromEntries(Object.entries(dryCounts).map(([t, c]) => [t, c.created]))).toEqual({
       Condition: 2, DocumentReference: 3, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5,
@@ -117,7 +125,9 @@ describe('syncSource', () => {
     expect(await compartment(pid)).toEqual([]);
     expect((await client.readResource('Patient', pid, { cache: 'no-cache' })).meta?.versionId).toBe(before.meta?.versionId);
     expect(await endpoints(src.key)).toHaveLength(0);
+    expect(await client.searchResources('Medication', { identifier: `urn:ga-server:id:smart:${src.key}|Medication/med1` }, { cache: 'no-cache' })).toHaveLength(0);
     expect(await readStatus(client, pid)).toEqual([]);
+    expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'Synthetic Hospital', status: 'pending', stale: true, enabledTypes: [] }]);
   });
 
   it('first enabled sync creates what the dry run counted and marks the Endpoint active', async () => {
@@ -208,23 +218,39 @@ describe('syncAll', () => {
   it('a revoked source goes off with invalid_grant and the next source still syncs', async () => {
     const pid = await newPatient();
     const revoked: SourceRec = { key: newKey('revoked'), name: 'Revoked Hospital', fhirBase: m.fhirBase, patient: P, enabledTypes: ['Observation'] };
+    const noRefresh: SourceRec = { key: newKey('norefresh'), name: 'No Refresh Hospital', fhirBase: m.fhirBase, patient: P, enabledTypes: ['Observation'] };
     const good: SourceRec = { key: newKey('good'), name: 'Good Hospital', fhirBase: m.fhirBase, patient: P, enabledTypes: ['Observation'] };
     // Expired access token and a refresh token the server no longer knows: the refresh answers invalid_grant.
     saveSecret(dir, revoked.key, { access_token: 'at-expired', refresh_token: 'rt-revoked', expires_at: Date.now() - 1000, patient: P });
+    saveSecret(dir, noRefresh.key, { access_token: 'at-expired', expires_at: Date.now() - 1000, patient: P });
     fresh(good.key);
-    writeSources(dir, [revoked, good]);
+    writeSources(dir, [revoked, noRefresh, good]);
     const rs = await syncAll(client, dir, pid);
     expect(rs.map((r) => [r.source, r.status, r.error])).toEqual([
       [revoked.key, 'off', 'invalid_grant'],
+      [noRefresh.key, 'off', 'no_refresh_token'],
       [good.key, 'active', undefined],
     ]);
     const [ep] = await endpoints(revoked.key);
     expect(ep.status).toBe('off');
     expect(ext(ep, 'urn:ga-server:ext:smart-last-error')?.valueCode).toBe('invalid_grant');
     expect(ext(ep, 'urn:ga-server:ext:smart-last-success')).toBeUndefined();
+    const [nr] = await endpoints(noRefresh.key);
+    expect(nr.status).toBe('off');
+    expect(ext(nr, 'urn:ga-server:ext:smart-last-error')?.valueCode).toBe('no_refresh_token');
     const st = await readStatus(client, pid);
     expect(st.find((s) => s.source === revoked.key)).toMatchObject({ status: 'off', stale: true });
     expect(st.find((s) => s.source === good.key)).toMatchObject({ status: 'active', stale: false, enabledTypes: ['Observation'] });
+  });
+
+  it('a first-connect source that fails returns its failure, writes nothing and reads as pending', async () => {
+    const pid = await newPatient();
+    const src: SourceRec = { key: newKey('firstfail'), name: 'New Hospital', fhirBase: m.fhirBase, patient: P };
+    saveSecret(dir, src.key, { access_token: 'at-expired', refresh_token: 'rt-revoked', expires_at: Date.now() - 1000, patient: P });
+    writeSources(dir, [src]);
+    expect(await syncAll(client, dir, pid)).toEqual([{ source: src.key, status: 'off', error: 'invalid_grant' }]);
+    expect(await endpoints(src.key)).toHaveLength(0);
+    expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'New Hospital', status: 'pending', stale: true, enabledTypes: [] }]);
   });
 });
 

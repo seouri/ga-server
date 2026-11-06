@@ -10,7 +10,7 @@ import { loadSecret, readApp, readSources, type SourceRec } from './store.ts';
 
 export type SyncResult = {
   source: string;
-  status: 'active' | 'error' | 'off';
+  status: 'active' | 'error' | 'off' | 'pending'; // pending: no enabled types yet, so only a dry run ran
   report?: ImportReport;
   perType?: Record<string, { created: number; flagged: number }>;
   error?: string;
@@ -29,9 +29,12 @@ const PENDING = 'urn:ga-server:pending-binary:';
 const STALE_MS = 48 * 3_600_000;
 
 export const isStale = (status: string, lastSuccess: string | undefined, now: Date): boolean =>
-  status === 'off' || status === 'error' || !lastSuccess || now.getTime() - Date.parse(lastSuccess) > STALE_MS;
+  status === 'off' || status === 'error' || !lastSuccess || !(now.getTime() - Date.parse(lastSuccess) <= STALE_MS); // NaN: stale
 
-// Every write is a no-op returning a plausible result; reads go to the real client (bound: MedplumClient has #private fields).
+// The reads importResources and uploadBinaries use; bound to the real client (MedplumClient has #private fields).
+const DRY_READS = new Set(['searchOne', 'searchResources', 'search', 'readResource', 'get', 'getProfile', 'fhirUrl', 'getBaseUrl']);
+
+// Allowlist: the known writes are no-ops returning a plausible result, listed reads pass through, any other method throws.
 function dryRunClient(client: MedplumClient): MedplumClient {
   const stubs: Record<string, (...a: unknown[]) => Promise<unknown>> = {
     createResource: async (r) => ({ ...(r as Resource), id: randomUUID() }),
@@ -44,7 +47,11 @@ function dryRunClient(client: MedplumClient): MedplumClient {
     get: (t, p, _r) => {
       if (typeof p === 'string' && Object.hasOwn(stubs, p)) return stubs[p];
       const v = Reflect.get(t, p, t);
-      return typeof v === 'function' ? v.bind(t) : v;
+      if (typeof v !== 'function') return v;
+      if (typeof p === 'string' && DRY_READS.has(p)) return v.bind(t);
+      return () => {
+        throw new GaError(`dry run: ${String(p)} not allowed`);
+      };
     },
   });
 }
@@ -84,7 +91,7 @@ async function writeEndpoint(
   dir: string,
   src: SourceRec,
   patientId: string,
-  status: SyncResult['status'],
+  status: 'active' | 'error' | 'off',
   at: string,
   error?: string,
 ): Promise<void> {
@@ -128,7 +135,8 @@ export async function syncSource(
   opts: { dryRun?: boolean; now?: Date } = {},
 ): Promise<SyncResult> {
   const at = (opts.now ?? new Date()).toISOString(); // one timestamp: source date, last-seen and last-success
-  const dryRun = !!opts.dryRun || !src.enabledTypes; // no enabled types yet: counts only, until the user enables them
+  const pending = !src.enabledTypes; // no enabled types yet: counts only, nothing in GA, until the user enables them
+  const dryRun = !!opts.dryRun || pending;
   let stage = 'token_error';
   try {
     const clientId = readApp(dir).clientId;
@@ -149,14 +157,22 @@ export async function syncSource(
       patientId,
       '',
     );
-    if (!dryRun) await writeEndpoint(client, dir, src, patientId, 'active', at);
-    return { source: src.key, status: 'active', report, perType: report.byType, skipped: fetched.skipped };
+    const ok: SyncResult = { source: src.key, status: pending ? 'pending' : 'active', report, perType: report.byType, skipped: fetched.skipped };
+    if (dryRun) return ok;
+    try {
+      await writeEndpoint(client, dir, src, patientId, 'active', at);
+    } catch {
+      console.error(`smart sync ${src.key}: status_write_error`);
+      return { ...ok, error: 'status_write_error' }; // the import itself succeeded
+    }
+    return ok;
   } catch (e) {
     // Error codes only: messages from servers or the engine may carry content.
     const code = e instanceof GaError && /^[a-z_]+$/.test(e.message) ? e.message : stage;
-    const status = code === 'invalid_grant' ? 'off' : 'error';
+    // No usable refresh token: only reconnecting helps.
+    const status = code === 'invalid_grant' || code === 'no_refresh_token' ? 'off' : 'error';
     console.error(`smart sync ${src.key}: ${code}`);
-    if (!dryRun) await writeEndpoint(client, dir, src, patientId, status, at, code);
+    if (!dryRun) await writeEndpoint(client, dir, src, patientId, status, at, code); // a throw here: syncAll records status_write_error
     return { source: src.key, status, error: code };
   }
 }
@@ -177,10 +193,11 @@ export async function syncAll(client: MedplumClient, dir: string, patientId: str
 export async function readStatus(
   client: MedplumClient,
   patientId: string,
+  dir?: string, // given: configured sources with no Endpoint yet (never synced for real) are listed as pending
 ): Promise<{ source: string; name: string; status: string; lastSuccess?: string; stale: boolean; enabledTypes: string[] }[]> {
   const now = new Date();
   const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' });
-  return eps
+  const listed = eps
     .filter((e) => e.extension?.find((x) => x.url === PATIENT)?.valueReference?.reference === `Patient/${patientId}`)
     .map((e) => {
       const get = (url: string) => e.extension?.find((x) => x.url === url);
@@ -195,4 +212,9 @@ export async function readStatus(
         enabledTypes: types ? types.split(',') : [],
       };
     });
+  const have = new Set(listed.map((s) => s.source));
+  const pending = (dir ? readSources(dir) : [])
+    .filter((s) => !have.has(s.key))
+    .map((s) => ({ source: s.key, name: s.name, status: 'pending', stale: true, enabledTypes: s.enabledTypes ?? [] }));
+  return [...listed, ...pending];
 }
