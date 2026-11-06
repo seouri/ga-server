@@ -20,7 +20,7 @@ export type Llm = { chat: { completions: { create: (p: any) => Promise<any> } } 
 
 // Steps 1-9 of the /ga skill, adapted to the share's tools (step 0, portal status, needs Endpoints, which are never shared).
 // Transformed line by line so the skill stays the single source of truth for everything else.
-const APPLE =
+export const APPLE =
   'Records coded "daily mean" or "daily total" are summaries, not readings; steps and distance take the largest single source per day; sleep is one Observation per night (stage components); a home reading and a clinic reading on the same day are both real; Health Records inside an Apple export are hospital copies, so trust the hospital source over the Apple copy.';
 export function instructions(vaccines: boolean): string {
   const md = readFileSync(new URL('../../.claude/skills/ga/SKILL.md', import.meta.url), 'utf8');
