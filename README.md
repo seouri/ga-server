@@ -103,9 +103,30 @@ ServiceRequest
 
 GA asks each hospital which of these it supports and fetches only those, so extra ones are harmless and missing ones are just skipped.
 
-**c. Save**, then move the app to **Test** and **Ready** (the bar at the top) and note its **Client ID** (a UUID; Epic shows a separate **Non-Production Client ID** for the sandbox). Epic distributes a ready app to organizations; that can take a while.
+**c. Save.** Epic then shows the **Client ID** (production) and the **Non-Production Client ID** (sandbox), and more fields:
 
-Unverified until a real registration goes through (record the answers here): Epic's form warns that **production needs at least one `https` Endpoint URI**, so the `http://localhost` redirect may work only in the sandbox; whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
+| Field | Value |
+|---|---|
+| SMART on FHIR Version | **R4** |
+| SMART Scope Version | **SMART v1** (GA requests `patient/*.read`, v1 syntax) |
+| FHIR ID Generation Scheme | **Use Unconstrained FHIR IDs**. Never change it later: GA links portal records by Epic's IDs, so new IDs would duplicate every record |
+| Summary | `Personal health record: keeps a read-only copy of my own records on my own computer.` |
+| Description | `GA is a self-hosted personal health record for one patient. It reads the patient's own records with read-only SMART on FHIR access, stores them only on the patient's computer, and never writes back to the EHR or shares data with third parties.` |
+| Intended Purposes | **Individuals' Access to their EHI** |
+| Intended Users | **Individual/Caregiver** |
+| Thumbnail, Screenshots | optional |
+| Terms and Conditions Secure URL | `https://github.com/<user>/ga-server/blob/main/TERMS.md` (this repo's [TERMS.md](TERMS.md); the repo must be public) |
+| Additional Disclosure Information URL | leave empty |
+| Data Use Questionnaire | answer both recommended questionnaires as TERMS.md says: data stays on the patient's own computer; no selling, advertising, analytics or third parties; the only outbound traffic is to the patient's own hospitals and, if the patient turns it on, the patient's own AI provider; deleting GA's data deletes it |
+
+**d. Sandbox first, production last.** Click **Save & Ready for Sandbox** and test against Epic's sandbox with the **Non-Production Client ID**. Marking it ready for production freezes the app (Epic: "the app cannot be edited") and, with USCDI v3, Epic sends it to every qualifying Epic customer. So before **Save & Ready for Production**, all of these must be done:
+
+- **An `https` Endpoint URI.** Production rejects an app whose only redirect is `http://localhost:8765/callback`; GA does not have an https callback yet (planned: a Tailscale Funnel address such as `https://<machine>.<tailnet>.ts.net/callback`, added as a second Endpoint URI).
+- The required fields above (Summary, Intended Purposes, Intended Users, Terms URL), both questionnaires, and the open.epic terms-of-use checkbox.
+
+Other customers receiving the app cannot use it: only your Mac holds GA's private key.
+
+Still unverified (record the answers here): whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
 
 **Fallback A (no refresh tokens).** If Epic issues no refresh token or caps access at about an hour, GA fetches only during `ga connect`: log in again whenever you want fresh data. Between logins the source shows `off`.
 
@@ -117,7 +138,7 @@ Find the hospital's FHIR R4 base URL in Epic's endpoint list (https://open.epic.
 ga connect https://fhir.example-hospital.org/api/FHIR/R4 --client-id <client ID> --name "Hospital A"
 ```
 
-`--client-id` is needed only the first time. Your browser opens the MyChart login; choose the longest access duration offered. GA then runs a **dry run**: it fetches everything, prints per type how many records it fetched and how many would be created, linked to a record GA already holds, updated or flagged, and writes no records (only a status entry, so your agent knows the source is not enabled yet). Records from C-CDA or EHI imports are linked only where Epic shares an ID with the portal: if a type GA already holds from Epic shows `created`, those are likely duplicates of what you have, so leave that type disabled. Enable the types that link or are new to GA:
+`--client-id` is needed only the first time: the **Client ID** for real hospitals, the **Non-Production Client ID** for Epic's sandbox. Your browser opens the MyChart login; choose the longest access duration offered. GA then runs a **dry run**: it fetches everything, prints per type how many records it fetched and how many would be created, linked to a record GA already holds, updated or flagged, and writes no records (only a status entry, so your agent knows the source is not enabled yet). Records from C-CDA or EHI imports are linked only where Epic shares an ID with the portal: if a type GA already holds from Epic shows `created`, those are likely duplicates of what you have, so leave that type disabled. Enable the types that link or are new to GA:
 
 ```sh
 ga sync --enable Condition,Observation,MedicationRequest fhir-example-hospital-org
