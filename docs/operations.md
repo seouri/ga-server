@@ -25,7 +25,7 @@ docker run --rm -v ga-server_ga-binary:/b:ro -v ~/ga-backup:/out postgres:16 tar
 cp -Rp .ga ~/ga-backup/dot-ga
 ```
 
-The `ga-backup` compose service does this every night into `./backups` (or `GA_BACKUP_DIR`), one dated folder per run, newest 7 kept; the restore below works with those files (`dot-ga.tgz` unpacks to `.ga`).
+The `ga-backup` compose service does this every night into `./backups` (or `GA_BACKUP_DIR`), one dated folder per run, newest 7 kept; on Linux run `mkdir -p backups` first (Docker would create it root-owned). To restore from one of those folders, set `B=backups/<date_time>` and use `$B/ga-postgres.dump`, `$B/ga-binary.tgz` (in place of `~/ga-backup/...`), and for `.ga` run `mkdir .ga && tar xzf $B/dot-ga.tgz -C .ga` instead of the `cp` line below.
 
 ## Restore
 
