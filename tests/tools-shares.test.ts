@@ -69,3 +69,11 @@ describe('share tools', () => {
     expect((await call('share_revoke', { id: 'nope' })).isError).toBe(true);
   });
 });
+
+describe('preview scope defaults', () => {
+  it('shows what will be created: doctor groups, or all for family', async () => {
+    const { call } = await setup();
+    expect((await call('share_create', { audience: 'doctor', label: 'D' })).json.scope).toBe('labs, medications, problems, allergies, immunizations, vitals');
+    expect((await call('share_create', { audience: 'family', label: 'F' })).json.scope).toBe('all records');
+  });
+});

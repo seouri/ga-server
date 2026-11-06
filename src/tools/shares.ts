@@ -7,9 +7,8 @@ import { GaError } from '../config.ts';
 import { preview, takeConfirmed } from '../confirm.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { readLog } from '../share/audit.ts';
-import { expiryWords, parseGroups, status } from '../share/cli.ts';
 import { scopeWords } from '../share/page.ts';
-import { createShare, listShares, parseExpiry, parseSince, revokeShare, shareDir } from '../share/store.ts';
+import { createShare, defaultGroups, expiryWords, listShares, parseExpiry, parseGroups, parseSince, revokeShare, shareDir, status } from '../share/store.ts';
 
 const CREATE = {
   audience: z.enum(['doctor', 'family']),
@@ -53,7 +52,7 @@ export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shar
         const expires = rest.expires ?? (rest.audience === 'doctor' ? '7d' : 'never');
         if (rest.expires !== undefined) parseExpiry(rest.expires, now); // reject a bad value in the preview
         if (!confirm) {
-          const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? 'all' } as never), since, until, expires };
+          const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? defaultGroups(rest.audience) }), since, until, expires };
           return text({ ...view, ...preview('share', structuredClone(rest)) });
         }
         if (!isDeepStrictEqual(takeConfirmed<typeof rest>('share', confirm), rest)) throw new GaError('arguments changed since the preview; ask for a new preview');

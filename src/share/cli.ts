@@ -15,7 +15,7 @@ import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
 import { createServer, downloadName } from './server.ts';
-import { GROUPS, createShare, listShares, parseSince, revokeShare, shareDir, tokenOf } from './store.ts';
+import { createShare, expiryWords, listShares, parseGroups, parseSince, revokeShare, shareDir, status, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
 const PORT = 8110;
@@ -65,8 +65,6 @@ async function funnelHint(): Promise<void> {
   if (!/Funnel on/.test(out) || !/proxy http:\/\/(127\.0\.0\.1|localhost):8110\b/.test(out)) console.log('Links work after you run: tailscale funnel --bg 8110');
 }
 
-export const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
-export const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
 
 async function printLink(s: Share, token: string): Promise<void> {
   const url = `${s.baseUrl}/s/${token}`;
@@ -76,14 +74,6 @@ async function printLink(s: Share, token: string): Promise<void> {
 }
 
 const patientId = (): string => process.env.GA_PATIENT_ID || loadConfig().patientId; // GA_PATIENT_ID: tests only, as in smart/cli.ts
-
-export function parseGroups(v: string): Group[] | 'all' {
-  if (v === 'all') return 'all';
-  const gs = v.split(',').map((g) => g.trim()).filter(Boolean);
-  for (const g of gs) if (!GROUPS.includes(g as Group)) throw new GaError(`unknown group ${g}: use all or some of ${GROUPS.join(', ')}`);
-  if (!gs.length) throw new GaError(`--scope needs all or some of ${GROUPS.join(', ')}`);
-  return gs as Group[];
-}
 
 async function create(argv: string[]): Promise<void> {
   const { values, positionals } = args(argv, CREATE);

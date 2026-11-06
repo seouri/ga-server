@@ -28,6 +28,7 @@ export type Share = {
 type ShareOpts = Pick<Share, 'audience' | 'label' | 'patientId' | 'baseUrl'> & Partial<Pick<Share, 'groups' | 'since' | 'until' | 'expires' | 'layout' | 'questionsPerDay'>>;
 
 const DOCTOR_GROUPS: Group[] = ['labs', 'medications', 'problems', 'allergies', 'immunizations', 'vitals'];
+export const defaultGroups = (audience: Share['audience']): Group[] | 'all' => (audience === 'doctor' ? DOCTOR_GROUPS : 'all');
 const DAY = 86400000;
 const hash = (t: string): string => createHash('sha256').update(t).digest('hex');
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -77,7 +78,7 @@ export function createShare(dir: string, opts: ShareOpts, now: Date = new Date()
     id,
     label: opts.label,
     audience: opts.audience,
-    groups: opts.groups ?? (doctor ? DOCTOR_GROUPS : 'all'),
+    groups: opts.groups ?? defaultGroups(opts.audience),
     ...(opts.since && { since: opts.since }),
     ...(opts.until && { until: opts.until }),
     ...(expires && { expires }),
@@ -128,4 +129,15 @@ export function takeQuestion(dir: string, id: string, now: Date = new Date()): b
   all[id] = { day, n: n + 1 };
   writeAtomic(askedFile(dir), JSON.stringify(all, null, 2), 0o600);
   return true;
+}
+
+export const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
+export const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
+
+export function parseGroups(v: string): Group[] | 'all' {
+  if (v === 'all') return 'all';
+  const gs = v.split(',').map((g) => g.trim()).filter(Boolean);
+  for (const g of gs) if (!GROUPS.includes(g as Group)) throw new GaError(`unknown group ${g}: use all or some of ${GROUPS.join(', ')}`);
+  if (!gs.length) throw new GaError(`--scope needs all or some of ${GROUPS.join(', ')}`);
+  return gs as Group[];
 }
