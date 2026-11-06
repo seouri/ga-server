@@ -1,12 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, join, relative, sep } from 'node:path';
+import { createReadStream, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
 import { pipeline } from 'node:stream/promises';
-import { GaError, type GaConfig } from '../config.ts';
+import { defaultConfigPath, GaError, type GaConfig } from '../config.ts';
 import { storeDocument } from '../document.ts';
 import { importResources, type ImportReport } from '../engine.ts';
 import { mapConditions } from './conditions.ts';
@@ -28,7 +27,7 @@ export async function ehiContext(client: MedplumClient, dir: string, patientId: 
 export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCtx, patientId: string) {
   const labs = { skippedNoName: 0 };
   const imm = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 };
-  const family = { skippedNoRelative: 0 };
+  const family = { skippedNoRelative: 0, skippedNoCondition: 0 };
   const vitals = { skippedEmpty: 0 };
   const hm = { skippedNoDate: 0 };
   const quest = { skippedEmpty: 0 };
@@ -54,6 +53,7 @@ export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCt
     immAdminMatched: imms.matched,
     immAdminUnmatched: imms.unmatched,
     familyNoRelative: family.skippedNoRelative,
+    familyNoCondition: family.skippedNoCondition,
     vitalsEmpty: vitals.skippedEmpty,
     healthMaintenanceNoDate: hm.skippedNoDate,
     questionnairesEmpty: quest.skippedEmpty,
@@ -79,7 +79,10 @@ async function archive(client: MedplumClient, dir: string, patientId: string): P
   const id = { system: ARCHIVE, value: await manifestHash(dir) };
   const query = { identifier: `${id.system}|${id.value}`, subject: `Patient/${patientId}` };
   if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return 'already-present';
-  const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-'));
+  // The tarball holds the whole export: a user-owned dir next to GA's config, not the shared system temp dir.
+  const parent = join(dirname(defaultConfigPath()), 'tmp');
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const tmp = mkdtempSync(join(parent, 'ehi-'));
   try {
     const file = join(tmp, `${basename(dir)}.tar.gz`);
     // shortcut: system tar (macOS/Linux); switch to a library only if Windows support is needed.
@@ -111,12 +114,13 @@ export async function importEhi(
   }
 > {
   const ctx = await ehiContext(client, dir, patientId, timeZone);
+  // First, so the original is kept even if a later step fails (idempotent: found by its manifest on a re-run).
+  const archived = await archive(client, dir, patientId);
   const t = new EhiTables(dir);
   const { resources, skips } = await prepareEhi(client, t, ctx, patientId);
   const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');
   const files = { mediaUnknownType: 0, rtfNoNote: 0 };
   const docs = await importDocuments(client, dir, t, ctx, patientId, files);
   for (const k of Object.keys(report) as (keyof ImportReport)[]) report[k] += docs[k];
-  const archived = await archive(client, dir, patientId);
   return { ...report, skippedTables: t.skipped.length, archived, skips: { ...skips, ...files, tables: t.skipped } };
 }

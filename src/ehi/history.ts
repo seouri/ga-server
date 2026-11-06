@@ -171,7 +171,7 @@ const ROLE_SYS = 'http://terminology.hl7.org/CodeSystem/v3-RoleCode';
 
 // FAMILY_HX is re-recorded at visits (snapshots by CSN): each relative (FAM_MED_REL_ID) is taken from their latest
 // snapshot (highest CSN). R4 FamilyMemberHistory has no encounter element. "Neg HX" lists conditions absent from the family: kept as a note, never as conditions.
-export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNoRelative: 0 }): Resource[] {
+export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNoRelative: 0, skippedNoCondition: 0 }): Resource[] {
   const byRel = new Map<string, Row[]>();
   for (const r of t.rows('FAMILY_HX')) {
     const k = r.FAM_MED_REL_ID || r.RELATION_C_NAME;
@@ -192,7 +192,10 @@ export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
         ...(NUM.test(r.AGE_OF_ONSET ?? '') && { onsetAge: { value: Number(r.AGE_OF_ONSET), unit: 'a', system: UCUM, code: 'a' } }),
         ...(r.COMMENTS && { note: [{ text: r.COMMENTS }] }),
       }));
-    if (!names.length) continue; // a relative with no condition says nothing
+    if (!names.length) {
+      counts.skippedNoCondition++; // a relative with no condition says nothing
+      continue;
+    }
     // No relation name but a relative id: a family member of unknown relation (relationship is 1..1, never empty).
     const role = neg || !relation ? 'FAMMEMB' : ROLE[norm(relation)];
     out.push({

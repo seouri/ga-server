@@ -457,11 +457,13 @@ describe('EHI mappers', () => {
   it('family history never has an empty relationship: a known relative without a relation name is a family member', () => {
     const base = t();
     const rows = (table: string) =>
-      table === 'FAMILY_HX' ? [{ ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '9' }, { ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '' }] : base.rows(table);
-    const counts = { skippedNoRelative: 0 };
+      table === 'FAMILY_HX'
+        ? [{ ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '9' }, { ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '' }, { ...base.rows(table)[1], FAM_MED_REL_ID: '10', MEDICAL_HX_C_NAME: '', MEDICAL_OTHER: '' }]
+        : base.rows(table);
+    const counts = { skippedNoRelative: 0, skippedNoCondition: 0 };
     const fh = mapFamilyHistory({ rows } as unknown as EhiTables, ctx, counts) as FamilyMemberHistory[];
     expect(fh.map((f) => f.relationship)).toEqual([{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-RoleCode', code: 'FAMMEMB' }] }]);
-    expect(counts.skippedNoRelative).toBe(1);
+    expect(counts).toEqual({ skippedNoRelative: 1, skippedNoCondition: 1 }); // relative 10 has no condition: counted
   });
 
   it('HM completions are keyed by type and time; LINE breaks only a tie', () => {

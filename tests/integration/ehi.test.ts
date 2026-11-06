@@ -255,3 +255,16 @@ test('skipped tables and unused files are reported with reasons', async () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('the archive is stored before any record, so a failed import still keeps the original (M3)', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'ga-ehi-test-'));
+  try {
+    cpSync(EHI, tmp, { recursive: true });
+    const f = join(tmp, 'EHITables', 'PAT_ENC.tsv');
+    writeFileSync(f, readFileSync(f, 'utf8').replace('1/15/2026 12:00:00 AM', 'not a date'));
+    await expect(importEhi(client, cfg, tmp, pid)).rejects.toThrow('unexpected EHI date format');
+    expect(await archives()).toHaveLength(3);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
