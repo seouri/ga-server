@@ -125,7 +125,7 @@ describe('Apple daily', () => {
 
 describe('Apple clinical records and ECG', () => {
   const dir = new URL('./fixtures/apple', import.meta.url).pathname;
-  const ref = (type: string, file: string, fhirVersion: string, sourceURL = ''): AhClinical => ({ type, sourceURL, fhirVersion, resourceFilePath: `/clinical-records/${file}` });
+  const ref = (_type: string, file: string, fhirVersion: string, sourceURL = ''): AhClinical => ({ sourceURL, fhirVersion, resourceFilePath: `/clinical-records/${file}` });
   const refs = [
     ref('Patient', 'Patient-A.json', '4.0.1'),
     ref('AllergyIntolerance', 'AllergyIntolerance-B.json', '4.0.1', 'https://fhir.example.org/R4/AllergyIntolerance/a1'),

@@ -3,7 +3,6 @@ import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import { GaError, type GaConfig } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
-import { APPLE } from '../identity.ts';
 import { mapClinical, mapEcgs } from './clinical.ts';
 import { Daily } from './daily.ts';
 import { type AhClinical, readExport } from './read.ts';

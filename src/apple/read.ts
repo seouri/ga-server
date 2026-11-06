@@ -4,8 +4,8 @@ import { createInterface } from 'node:readline';
 import { GaError } from '../config.ts';
 
 export type AhRecord = { type: string; unit?: string; value?: string; sourceName: string; startDate: string; endDate: string };
-export type AhSummary = { date: string; activeEnergyBurned?: number; activeEnergyBurnedUnit?: string; appleExerciseTime?: number; appleStandHours?: number; activeEnergyBurnedGoal?: number; appleExerciseTimeGoal?: number; appleStandHoursGoal?: number };
-export type AhClinical = { type: string; sourceURL: string; fhirVersion: string; resourceFilePath: string };
+export type AhSummary = { date: string; activeEnergyBurned?: number; activeEnergyBurnedUnit?: string; appleExerciseTime?: number; appleStandHours?: number; activeEnergyBurnedGoal?: number };
+export type AhClinical = { sourceURL: string; fhirVersion: string; resourceFilePath: string };
 
 export function isAppleHealthExport(dir: string): boolean {
   const file = join(dir, 'export.xml');
@@ -62,11 +62,11 @@ export async function readExport(
         date: a.dateComponents,
         activeEnergyBurned: num(a.activeEnergyBurned), activeEnergyBurnedUnit: a.activeEnergyBurnedUnit,
         appleExerciseTime: num(a.appleExerciseTime), appleStandHours: num(a.appleStandHours),
-        activeEnergyBurnedGoal: num(a.activeEnergyBurnedGoal), appleExerciseTimeGoal: num(a.appleExerciseTimeGoal), appleStandHoursGoal: num(a.appleStandHoursGoal),
+        activeEnergyBurnedGoal: num(a.activeEnergyBurnedGoal),
       });
     } else if (name === 'ClinicalRecord') {
       const a = attrs(line);
-      on.clinical({ type: a.type, sourceURL: a.sourceURL, fhirVersion: a.fhirVersion, resourceFilePath: a.resourceFilePath });
+      on.clinical({ sourceURL: a.sourceURL, fhirVersion: a.fhirVersion, resourceFilePath: a.resourceFilePath });
     }
   }
   if (!exportDate) throw new GaError(`not an Apple Health export: ${dir}`);

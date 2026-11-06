@@ -30,7 +30,7 @@ describe('apple read', () => {
     expect(n('BloodPressureSystolic')).toBe(1);
     expect(r.nested).toBe(3);
     expect(r.summaries.map((s) => s.date)).toEqual(['2026-03-01', '2020-11-05']);
-    expect(r.summaries[0]).toMatchObject({ activeEnergyBurned: 450.5, appleExerciseTime: 42, appleStandHoursGoal: 12 });
+    expect(r.summaries[0]).toMatchObject({ activeEnergyBurned: 450.5, appleExerciseTime: 42 });
     expect(r.clinical).toHaveLength(3);
     expect(r.clinical[0].resourceFilePath).toBe('/clinical-records/Patient-A.json');
     expect(r.records.find((x) => x.sourceName.startsWith('Scale'))?.sourceName).toBe('Scale & Co');

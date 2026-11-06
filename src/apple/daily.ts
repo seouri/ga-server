@@ -7,6 +7,7 @@ const r = (n: number, d: number) => Number(n.toFixed(d));
 const q = (value: number, code: string) => ({ value, unit: code, system: UCUM, code });
 const MI = 1.609344;
 const id = (v: number) => v;
+const comp = (text: string, v: number, u: string): ObservationComponent => ({ code: { text }, valueQuantity: q(v, u) });
 
 const RATES: Record<string, { text: string; ucum: string; unit: string }> = {
   HeartRate: { text: 'Heart rate, daily mean (Apple Health)', ucum: '/min', unit: 'count/min' },
@@ -87,11 +88,10 @@ export class Daily {
     const kcal = s.activeEnergyBurned ?? 0, ex = s.appleExerciseTime ?? 0, st = s.appleStandHours ?? 0;
     if (kcal === 0 && ex === 0 && st === 0 && (s.activeEnergyBurnedGoal ?? 0) === 0) { this.skips.activityEmptyDays++; return; }
     if (s.activeEnergyBurnedUnit !== 'Cal' && s.activeEnergyBurnedUnit !== 'kcal') { this.skips.unexpectedUnit++; return; }
-    const c = (text: string, v: number, u: string): ObservationComponent => ({ code: { text }, valueQuantity: q(v, u) });
     const o = this.obs('activity', { text: 'Activity rings, daily (Apple Health)' }, s.date, '');
     delete o.effectivePeriod; // ActivitySummary carries no offset
     o.effectiveDateTime = s.date;
-    o.component = [c('Active energy burned', kcal, 'kcal'), c('Exercise minutes', ex, 'min'), c('Stand hours', st, 'h')];
+    o.component = [comp('Active energy burned', kcal, 'kcal'), comp('Exercise minutes', ex, 'min'), comp('Stand hours', st, 'h')];
     this.rings.push(o);
   }
 
@@ -138,8 +138,7 @@ export class Daily {
       const d = RATES[a.kind];
       const o = this.obs(a.kind, { text: d.text }, a.day, a.off);
       o.valueQuantity = q(r(a.sum / a.n, 1), d.ucum);
-      const c = (text: string, v: number, u: string): ObservationComponent => ({ code: { text }, valueQuantity: q(v, u) });
-      o.component = [c('Minimum', a.min, d.ucum), c('Maximum', a.max, d.ucum), c('Sample count', a.n, '1')];
+      o.component = [comp('Minimum', a.min, d.ucum), comp('Maximum', a.max, d.ucum), comp('Sample count', a.n, '1')];
       out.push(o);
     }
     for (const a of this.totals.values()) {

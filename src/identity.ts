@@ -58,15 +58,11 @@ function ccdaKey(r: Resource, patientId: string): string {
 export const EPIC_OID = 'urn:oid:1.2.840.114350.';
 
 export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = ''): Identifier {
-  if (s.kind === 'ehi') {
-    // EHI mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>) first.
+  if (s.kind === 'ehi' || s.kind === 'apple-health') {
+    // EHI and Apple mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>, or APPLE) first.
     const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-    if (!id?.system?.startsWith('urn:ga-server:id:ehi:') || !id.value) throw new GaError(`${r.resourceType} has no EHI identifier`);
-    return { system: id.system, value: id.value };
-  }
-  if (s.kind === 'apple-health') {
-    const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-    if (id?.system !== APPLE || !id.value) throw new GaError(`${r.resourceType} has no Apple Health identifier`);
+    const ok = s.kind === 'ehi' ? id?.system?.startsWith('urn:ga-server:id:ehi:') : id?.system === APPLE;
+    if (!ok || !id?.value) throw new GaError(`${r.resourceType} has no ${s.kind === 'ehi' ? 'EHI' : 'Apple Health'} identifier`);
     return { system: id.system, value: id.value };
   }
   if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };
