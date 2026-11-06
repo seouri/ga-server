@@ -478,4 +478,36 @@ test('apple exact match keeps the hospital body', async () => {
   expect(rows).toHaveLength(1);
   expect(rows[0].note?.[0].text).toBe('clinic');
   expect(rows[0].identifier?.map((i) => i.system)).toEqual(expect.arrayContaining([EHI_SYS, APPLE]));
+  // Re-import: found by its Apple identifier on the hospital record; nothing is written.
+  expect(await importResources(client, [a], apple('2026-11-05'), pid, 'a')).toMatchObject({ created: 0, updated: 0, conflicts: 0, merged: 0, skipped: 1 });
+  const again = (await all()).find((r) => r.id === rows[0].id) as Observation;
+  expect(again.note?.[0].text).toBe('clinic');
+  expect(tagged(again, 'src-ehi')).toBe(true);
+});
+
+const rowAt = async (at: string) => ((await all()).filter((r) => r.resourceType === 'Observation' && (r as Observation).effectiveDateTime === at)) as Observation[];
+
+test('hospital exact match after apple wins, and a newer apple export changes nothing', async () => {
+  const at = '2026-03-05T09:00:00-05:00';
+  const a = phone(at, 80);
+  await importResources(client, [a], apple('2026-11-05'), pid, 'a');
+  expect(await importResources(client, [{ ...hospital(at, 80), note: [{ text: 'clinic' }] }], ehiSrc('2026-12-01'), pid, 'h')).toMatchObject({ merged: 1, created: 0 });
+  let rows = await rowAt(at);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].note?.[0].text).toBe('clinic');
+  expect(await importResources(client, [a], apple('2027-01-01'), pid, 'a')).toMatchObject({ created: 0, updated: 0, conflicts: 0 });
+  rows = await rowAt(at);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].note?.[0].text).toBe('clinic');
+  expect(tagged(rows[0], 'src-ehi')).toBe(true);
+});
+
+test('older hospital export exact match still beats an apple-only record', async () => {
+  const at = '2026-03-06T09:00:00-05:00';
+  await importResources(client, [phone(at, 80)], apple('2026-11-05'), pid, 'a');
+  await importResources(client, [{ ...hospital(at, 80), note: [{ text: 'clinic' }] }], ehiSrc('2026-01-01'), pid, 'h');
+  const rows = await rowAt(at);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].note?.[0].text).toBe('clinic');
+  expect(tagged(rows[0], 'src-ehi')).toBe(true);
 });

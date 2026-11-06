@@ -46,6 +46,8 @@ const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.syste
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
 const idList = (r: R): Identifier[] => [r.identifier ?? []].flat(); // singular on SINGULAR_ID types
+const isApple = (r: R) => idList(r).some((i) => i.system === APPLE);
+const hasNonApple = (r: R) => idList(r).some((i) => i.system !== APPLE);
 const canon = (x: unknown) =>
   JSON.stringify(x, (_k, v) =>
     v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
@@ -320,15 +322,18 @@ export async function importResources(
         )
       : [];
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
-    const isApple = (r: Resource) => idList(r as R).some((i) => i.system === APPLE);
-    const matches = (source.kind === 'apple-health' ? [] : ([...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[]).filter((m) => !isApple(m)));
+    const fromApple = source.kind === 'apple-health';
+    const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[];
+    const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
     try {
       let target: Resource;
       if (existing) {
         target = existing;
         const filled = fillFrom(existing, incoming, source);
         const d = decide(existing, filled, author);
-        if (d === 'update') {
+        // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
+        if (fromApple && hasNonApple(existing)) report.skipped++;
+        else if (d === 'update') {
           await unionUpdate(client, existing, filled);
           report.updated++;
         } else if (d === 'conflict') {
@@ -348,10 +353,12 @@ export async function importResources(
           const filled = fillFrom(same, incoming, source);
           const d = decide(same, filled, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
-          if (d === 'conflict' && !(source.kind === 'apple-health' && !isApple(same))) report.skipped++;
+          const appleOntoOther = fromApple && !isApple(same);
+          const otherOntoApple = !fromApple && isApple(same) && !hasNonApple(same); // hospital body beats an Apple-only one
+          if (d === 'conflict') report.skipped++;
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
-            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent') && !(source.kind === 'apple-health' && !isApple(same))) await unionUpdate(client, same, filled);
+            if (otherOntoApple || (d === 'update' && !appleOntoOther && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent'))) await unionUpdate(client, same, filled);
             else await client.updateResource(protect({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource));
             report.merged++;
           }
