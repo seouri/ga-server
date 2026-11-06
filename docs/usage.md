@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md).
 
-## Using GA in Claude Code
+## Claude Code
 
 **Start Claude Code in this repo** (`cd ga-server && claude`) and approve `ga-server` when asked (check with `/mcp`). That's all: the repo's `.mcp.json` registers GA's MCP server, and its slash commands come with it.
 
@@ -35,7 +35,6 @@ The server tells Claude that GA is your health record, so plain questions work. 
 **Ask about your health**
 
 ```
-> Is starting Atorvastatin 40 mg the right decision?
 > How is my liver function over time? Any concerns?
 > What were my last three LDL results, and where did each come from?
 > List my active medications and problems.

@@ -36,7 +36,7 @@ docker compose up -d --wait
 docker compose stop medplum-server ga-sync ga-share
 docker compose exec -T postgres sh -c 'dropdb -U medplum medplum && createdb -U medplum medplum'
 docker compose exec -T postgres pg_restore -U medplum -d medplum --no-owner < ~/ga-backup/ga-postgres.dump
-docker run --rm -v ga-server_ga-binary:/b -v ~/ga-backup:/in postgres:16 sh -c 'cd /b && tar xzf /in/ga-binary.tgz && chown -R 1000:1000 /b'
+docker run --rm -v ga-server_ga-binary:/b -v ~/ga-backup:/in postgres:16 tar xzf /in/ga-binary.tgz -C /b
 docker compose up -d --wait
 ```
 
