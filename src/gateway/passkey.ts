@@ -27,8 +27,12 @@ export function enrollLink(dir: string, publicUrl: string, now = Date.now()): st
   return `${publicUrl}/enroll/${token}`;
 }
 
+// Non-consuming, so a link-preview bot opening the URL does not burn the token.
+export const enrollTokenValid = (dir: string, token: string, now = Date.now()): boolean =>
+  (readJson<Record<string, number>>(dir, 'enroll.json', {})[hash(token)] ?? 0) > now;
+
 export function takeEnrollToken(dir: string, token: string, now = Date.now()): boolean {
-  const live = readJson<Record<string, number>>(dir, 'enroll.json', {});
+  const live = readJson<Record<string, number>>(dir, 'enroll.json', {}); // shortcut: read-modify-write can race the CLI, one owner makes it rare
   const h = hash(token);
   const ok = (live[h] ?? 0) > now;
   if (h in live) {
@@ -43,20 +47,27 @@ export const registrationOptions = (dir: string, publicUrl: string) =>
     rpName: 'GA',
     rpID: rp(publicUrl).rpID,
     userName: 'owner',
-    excludeCredentials: keys(dir).map((k) => ({ id: k.id, transports: k.transports as never })),
+    authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+    excludeCredentials: keys(dir).map((k) => ({ id: k.id, transports: k.transports })),
   });
 
-export async function verifyRegistration(dir: string, publicUrl: string, response: RegistrationResponseJSON, expectedChallenge: string): Promise<boolean> {
+// Stores a passkey only with a live enrollment token, consumed after the library verifies.
+export async function verifyRegistration(dir: string, publicUrl: string, token: string, response: RegistrationResponseJSON, expectedChallenge: string): Promise<boolean> {
+  if (!enrollTokenValid(dir, token)) return false;
   const { rpID, origin } = rp(publicUrl);
-  const v = await verifyRegistrationResponse({ response, expectedChallenge, expectedOrigin: origin, expectedRPID: rpID });
-  if (!v.verified) return false;
-  const { id, publicKey, counter, transports } = v.registrationInfo.credential;
-  writeJson(dir, 'passkeys.json', [...keys(dir).filter((k) => k.id !== id), { id, publicKey: Buffer.from(publicKey).toString('base64url'), counter, transports }]);
-  return true;
+  try {
+    const v = await verifyRegistrationResponse({ response, expectedChallenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true });
+    if (!v.verified || !takeEnrollToken(dir, token)) return false;
+    const { id, publicKey, counter, transports } = v.registrationInfo.credential;
+    writeJson(dir, 'passkeys.json', [...keys(dir).filter((k) => k.id !== id), { id, publicKey: Buffer.from(publicKey).toString('base64url'), counter, transports }]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const authenticationOptions = (dir: string, publicUrl: string) =>
-  generateAuthenticationOptions({ rpID: rp(publicUrl).rpID, allowCredentials: keys(dir).map((k) => ({ id: k.id, transports: k.transports as never })) });
+  generateAuthenticationOptions({ rpID: rp(publicUrl).rpID, userVerification: 'required', allowCredentials: keys(dir).map((k) => ({ id: k.id, transports: k.transports })) });
 
 export async function verifyAuthentication(dir: string, publicUrl: string, response: AuthenticationResponseJSON, expectedChallenge: string): Promise<boolean> {
   const all = keys(dir);
@@ -69,11 +80,12 @@ export async function verifyAuthentication(dir: string, publicUrl: string, respo
       expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      credential: { id: k.id, publicKey: Buffer.from(k.publicKey, 'base64url'), counter: k.counter, transports: k.transports as never },
+      credential: { id: k.id, publicKey: Buffer.from(k.publicKey, 'base64url'), counter: k.counter, transports: k.transports },
     });
     if (!v.verified) return false;
-    k.counter = v.authenticationInfo.newCounter;
-    writeJson(dir, 'passkeys.json', all);
+    const fresh = keys(dir);
+    for (const p of fresh) if (p.id === k.id) p.counter = v.authenticationInfo.newCounter;
+    writeJson(dir, 'passkeys.json', fresh);
     return true;
   } catch {
     return false;

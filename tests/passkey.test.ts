@@ -1,8 +1,8 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { enrollLink, isOwner, ownerCookie, takeEnrollToken, verifyAuthentication } from '../src/gateway/passkey.ts';
+import { enrollLink, enrollTokenValid, isOwner, ownerCookie, takeEnrollToken, verifyAuthentication, verifyRegistration } from '../src/gateway/passkey.ts';
 
 const dir = () => mkdtempSync(join(tmpdir(), 'gw-'));
 const url = 'https://ga.example.ts.net';
@@ -20,6 +20,20 @@ describe('enrollment token', () => {
     const t = tokenOf(enrollLink(d, url, 1000));
     expect(takeEnrollToken(d, t, 1000 + 24 * 3600_000)).toBe(false);
     expect(takeEnrollToken(d, 'nope')).toBe(false);
+  });
+});
+
+describe('verifyRegistration token gate', () => {
+  it('rejects bad, expired and used tokens and stores nothing', async () => {
+    const d = dir();
+    const t = tokenOf(enrollLink(d, url));
+    expect(await verifyRegistration(d, url, 'bad', { id: 'x' } as never, 'c')).toBe(false);
+    expect(await verifyRegistration(d, url, t, { id: 'x' } as never, 'c')).toBe(false); // library rejects junk; token not burned
+    expect(enrollTokenValid(d, t)).toBe(true);
+    expect(enrollTokenValid(d, t, Date.now() + 24 * 3600_000)).toBe(false);
+    takeEnrollToken(d, t);
+    expect(await verifyRegistration(d, url, t, { id: 'x' } as never, 'c')).toBe(false);
+    expect(existsSync(join(d, 'passkeys.json'))).toBe(false);
   });
 });
 
