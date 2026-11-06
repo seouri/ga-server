@@ -33,6 +33,12 @@ Everything runs on your Mac. It talks only to your own hospitals (to fetch your 
 Prerequisites: [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/), [Node 26](https://nodejs.org/en/download) (runs the `.ts` sources directly).
 
 ```sh
+./setup.sh
+```
+
+It checks that Docker is installed and running and that Node 26 and npm are installed (printing the download link for anything missing), then runs the four steps below, waiting for the FHIR server to come up before `setup`. It is safe to re-run. The same steps by hand:
+
+```sh
 npm install              # first: the ga-sync service runs this repo's code
 docker compose up -d     # FHIR server, Postgres, binary storage, C-CDA converter, daily portal sync, share links
 node src/cli.ts setup    # creates the patient and .ga/config.json, rotates the FHIR server's admin password
