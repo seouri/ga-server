@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { Extension, Identifier, Narrative, Resource } from '@medplum/fhirtypes';
+import type { Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
+import { pairImmunizations } from './ehi/history.ts';
+import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { riskScore } from './risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 
@@ -69,7 +71,20 @@ export async function importExtracted(
   const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
   const linked = link(`DocumentReference/${docRef.id}`);
   const date = documentDate ?? statSync(sourceFile).mtime.toISOString();
-  return importResources(client, linked, { kind: 'pdf', file: sourceFile, date, writer: 'agent', llm: true }, patientId, fileHash);
+  const source: SourceInfo = { kind: 'pdf', file: sourceFile, date, writer: 'agent', llm: true };
+  // Immunizations have no content-key dedup in the engine: a dose GA already holds only gains this document as a source
+  // (its identifier); the existing record's body stays as recorded.
+  const imms = linked.filter((r): r is Immunization => r.resourceType === 'Immunization');
+  const existing = imms.length ? await client.searchResources('Immunization', { patient: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' }) : [];
+  const pairs = pairImmunizations(existing, imms);
+  // The identifier can't be there yet: it embeds this file's hash, and a file is imported once (checked above).
+  for (const [n, m] of pairs.entries()) {
+    if (m) await client.updateResource<Immunization>({ ...m, identifier: [...(m.identifier ?? []), stableIdentifier(imms[n], source, fileHash, patientId)] });
+  }
+  const paired = new Set(imms.filter((_, n) => pairs[n]));
+  const report = await importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash);
+  report.merged += paired.size;
+  return report;
 }
 
 // Trust boundary: agent output must not pre-set GA bookkeeping (tags, source date, GA identifiers).

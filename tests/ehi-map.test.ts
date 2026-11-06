@@ -13,7 +13,7 @@ import { type EhiCtx, PATIENT_REF } from '../src/ehi/ids.ts';
 import { linkResultsToExisting, mapLabs } from '../src/ehi/labs.ts';
 import type { MedplumClient } from '@medplum/core';
 import { EhiTables } from '../src/ehi/read.ts';
-import { linkImmunizationsToExisting, mapFamilyHistory, mapHealthMaintenance, mapImmunizations, mapQuestionnaires, mapSocial, mapVitals } from '../src/ehi/history.ts';
+import { linkImmunizationsToExisting, mapFamilyHistory, pairImmunizations, mapHealthMaintenance, mapImmunizations, mapQuestionnaires, mapSocial, mapVitals } from '../src/ehi/history.ts';
 import { mapMeds } from '../src/ehi/meds.ts';
 import { mapMessages, mapNotes } from '../src/ehi/documents.ts';
 
@@ -473,4 +473,27 @@ describe('EHI mappers', () => {
     const keys = mapHealthMaintenance({ rows } as unknown as EhiTables, ctx).filter((r) => r.resourceType === 'Procedure').map((r) => (r as Procedure).identifier?.[0].value);
     expect(keys).toEqual(['HM_HISTORY|Immunization|2026-01-15T20:30:00Z|1', 'HM_HISTORY|Immunization|2026-01-15T20:30:00Z|7', 'HM_HISTORY|LOS Code|2026-01-15T20:30:00Z']);
   });
+});
+
+it('pairImmunizations: same day by lot, else by name; copies of one dose count once; never a tie or a double claim', () => {
+  const epic = { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.768076', value: '1' };
+  const imm = (id: string, date: string, text: string, lot?: string, identifier?: { system: string; value: string }[]): Immunization =>
+    ({ resourceType: 'Immunization', id, status: 'completed', patient: { reference: 'Patient/p' }, occurrenceDateTime: date, vaccineCode: { text }, ...(lot ? { lotNumber: lot } : {}), ...(identifier ? { identifier } : {}) });
+  const existing = [
+    imm('b', '2022-10-07', 'INFLUENZA A', 'L9'),
+    imm('a', '2022-10-07', 'INFLUENZA B', 'l9', [epic]), // a copy of the same dose (same lot): the Epic one wins
+    imm('c', '2001-09-01', 'Td, unspecified'),
+    imm('d', '2001-09-01', 'TD VACCINE (ADULT)'),
+    imm('e', '2010-01-01', 'MMR'),
+    imm('f', '2010-01-01', 'MMR'),
+  ];
+  const out = pairImmunizations(existing, [
+    imm('x1', '2022-10-07', 'FLU-IIV3', 'L9'),
+    imm('x2', '2001-09-01', 'TD, UNSPECIFIED'),
+    imm('x3', '2010-01-01', 'MMR'), // two existing MMR that day: a tie
+    imm('x4', '2030-01-01', 'NEW'),
+  ]);
+  expect(out.map((m) => m?.id)).toEqual(['a', 'c', undefined, undefined]);
+  // two incoming lines claiming the same existing dose: neither is paired
+  expect(pairImmunizations(existing, [imm('y1', '2001-09-01', 'Td, unspecified'), imm('y2', '2001-09-01', 'TD unspecified')]).map((m) => m?.id)).toEqual([undefined, undefined]);
 });

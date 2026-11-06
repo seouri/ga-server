@@ -15,6 +15,7 @@ const CLI = join(import.meta.dirname, '..', '..', 'src', 'cli.ts');
 const fileHash = createHash('sha256').update(readFileSync(PDF)).digest('hex');
 // A second, never-imported PDF (distinct bytes), outside the repo.
 const PDF2 = join(tmpdir(), `ga-test-${randomUUID()}.pdf`);
+const PDF3 = join(tmpdir(), `ga-test-${randomUUID()}.pdf`);
 let cfg: GaConfig;
 let client: MedplumClient;
 let pid: string;
@@ -39,6 +40,7 @@ beforeAll(async () => {
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   writeFileSync(PDF2, Buffer.concat([readFileSync(PDF), Buffer.from(`\n%${randomUUID()}\n`)]));
+  writeFileSync(PDF3, Buffer.concat([readFileSync(PDF), Buffer.from(`\n%${randomUUID()}\n`)]));
   mcp = new Client({ name: 'test', version: '0' });
   await mcp.connect(
     new StdioClientTransport({ command: 'node', args: [CLI, 'mcp'], env: { ...process.env, GA_PATIENT_ID: pid } as Record<string, string> }),
@@ -48,6 +50,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await mcp?.close();
   rmSync(PDF2, { force: true });
+  rmSync(PDF3, { force: true });
   for (const d of await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' })) {
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
     if (bin) await client.deleteResource('Binary', bin);
@@ -170,4 +173,24 @@ test('fhir_search and fhir_read show a text/plain attachment as decoded text; st
   expect((b.entry?.[0].resource as { content: { attachment: unknown }[] }).content[0].attachment).toEqual({ contentType: 'text/plain; charset=utf-8', text: 'Synthetic note text' });
   const stored = await client.readResource('DocumentReference', doc.id as string, { cache: 'no-cache' });
   expect(stored.content[0].attachment.data).toBe(data);
+});
+
+test('ga_import of a vaccination certificate adds itself as a source of doses GA already holds, and creates only new ones', async () => {
+  const imm = (date: string, text: string, lot?: string) =>
+    ({ resourceType: 'Immunization', status: 'completed', vaccineCode: { text }, occurrenceDateTime: date, ...(lot ? { lotNumber: lot } : {}) }) as const;
+  const CVX = 'urn:oid:2.16.840.1.113883.12.292';
+  const held = await client.createResource({ ...imm('2022-10-07', 'INFLUENZA VACCINE', 'LOT1'), patient: { reference: `Patient/${pid}` }, vaccineCode: { text: 'INFLUENZA VACCINE', coding: [{ system: CVX, code: '171' }] } });
+  const imms = () => client.searchResources('Immunization', { patient: `Patient/${pid}` }, { cache: 'no-cache' });
+  const before = (await imms()).length;
+  const r = await call('ga_import', {
+    resources: [imm('2022-10-07', 'FLU-CCIIV4, P-FREE', 'lot1'), imm('2023-01-01', 'NEW VACCINE')],
+    sourceFile: PDF3,
+    documentDate: '2026-11-05',
+  });
+  expect(r.isError).toBe(false);
+  expect(JSON.parse(r.text)).toMatchObject({ created: 1, merged: 1 });
+  const after = await client.readResource('Immunization', held.id as string, { cache: 'no-cache' });
+  expect(after.vaccineCode).toEqual(held.vaccineCode); // existing body kept
+  expect(after.identifier?.some((i) => i.system === 'urn:ga-server:id:pdf')).toBe(true);
+  expect((await imms()).length).toBe(before + 1); // only the new dose was created
 });

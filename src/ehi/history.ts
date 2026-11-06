@@ -116,6 +116,21 @@ const epicIds = (r: { identifier?: Identifier[] }) => (r.identifier ?? []).filte
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
 const immNames = (i: Immunization) => [i.vaccineCode?.text, ...(i.vaccineCode?.coding ?? []).map((c) => c.display)].map(norm).filter(Boolean);
 
+// For documents (ga_import): pairs each incoming dose with the one existing dose it records, on the same day — same lot
+// when the incoming dose has one, else same vaccine name. Existing copies of one dose (same day, same lot) count as one:
+// the copy with Epic ids, then the lowest id, is chosen. Unique both ways; anything else stays unpaired.
+export function pairImmunizations(existing: Immunization[], incoming: Immunization[]): (Immunization | undefined)[] {
+  const pick = incoming.map((i) => {
+    const sameDay = existing.filter((x) => x.occurrenceDateTime?.slice(0, 10) === i.occurrenceDateTime?.slice(0, 10));
+    const lot = i.lotNumber?.trim().toLowerCase();
+    const byLot = lot ? sameDay.filter((x) => x.lotNumber?.trim().toLowerCase() === lot) : [];
+    if (byLot.length) return [...byLot].sort((a, b) => Number(!epicIds(a).length) - Number(!epicIds(b).length) || String(a.id).localeCompare(String(b.id)))[0];
+    const byName = sameDay.filter((x) => immNames(x).includes(norm(i.vaccineCode?.text)));
+    return byName.length === 1 ? byName[0] : undefined;
+  });
+  return pick.map((m) => (m && pick.filter((x) => x === m).length === 1 ? m : undefined));
+}
+
 // Before import. An EHI immunization with an Epic id keeps the existing record's vaccine codes (C-CDA CVX/NDC; the export
 // has none), so the engine's update doesn't drop them. One without (IMM_ADMIN) is linked to an existing patient
 // Immunization on the same date with the same vaccine name, when that pairing is unique both ways: it takes that
