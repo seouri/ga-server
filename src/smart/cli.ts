@@ -115,8 +115,8 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     console.log(JSON.stringify(publicJwks, null, 2));
     console.log(publicPem.trim());
     console.log(
-      `Public key only (also in ${join(dir, 'public.jwks.json')}). Paste the JWKS or the PEM, whichever the app registration form accepts. ` +
-        'If it only takes a JWK Set URL, host public.jwks.json at any public static URL: it is a public key, never health data.',
+      `Public key only (also in ${join(dir, 'public.jwks.json')}). Epic needs it at a public JWK Set URL: ` +
+        `gh gist create --public ${join(dir, 'public.jwks.json')} (see README, Hospital portals). It is a public key, never health data.`,
     );
   } else if (cmd === 'connect') {
     usage(positionals.length === 1);

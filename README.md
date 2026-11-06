@@ -35,19 +35,72 @@ GA can fetch your records from Epic patient portals (MyChart) by itself, over SM
 
 ### 1. Register the app with Epic (once)
 
+**a. Make GA's key and publish its public half.** Epic's form takes only a *JWK Set URL*, so the public key must sit at a public HTTPS address. It is a public key, never health data; a public GitHub Gist works:
+
 ```sh
-ga keys      # creates GA's signing key (.ga/smart/, mode 0600) and prints the public JWKS and PEM
+ga keys                                                         # creates .ga/smart/ key (mode 0600), prints the public JWKS
+gh gist create --public -d "GA public key" .ga/smart/public.jwks.json
 ```
 
-1. Create a free account at https://fhir.epic.com and choose Build Apps, then Create.
-2. Application audience: **Patients**. Make it a **confidential client** (asymmetric key, `private_key_jwt`).
-3. Incoming APIs: the **USCDI R4** read and search APIs (AllergyIntolerance, Condition, DiagnosticReport, DocumentReference, Binary, Encounter, Immunization, MedicationRequest, Observation, Patient, Procedure, and the rest you want). Read only; GA never writes.
-4. Turn on **refresh tokens** (persistent access), so GA can fetch without you logging in each time.
-5. Redirect URI: `http://localhost:8765/callback`.
-6. Public key: paste the `ga keys` output, the JWKS or the PEM, whichever the form accepts. If it only takes a JWK Set URL, host `.ga/smart/public.jwks.json` at any public static URL: it is a public key, never health data.
-7. Mark the app **ready for production** and note its **client ID**. Epic distributes it to organizations; that can take a while.
+`gh` prints `https://gist.github.com/<user>/<gist id>`. Your JWK Set URL is then:
 
-Unverified until a real registration goes through (record the answers here): the exact form fields, whether Epic accepts the `localhost` redirect for production, whether each organization must activate the app first, and whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
+```text
+https://gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json
+```
+
+Check it: `curl -s <that URL>` prints the same JSON as `ga keys`. `ga keys` never replaces an existing key, so the URL stays valid.
+
+**b. Create the app.** Sign in at https://fhir.epic.com, choose **Build Apps**, then **Create**, and fill the form:
+
+| Field | Value |
+|---|---|
+| Application Name | `GA` |
+| Application Audience | **Patients** |
+| Automatic Client Distribution | **USCDI v3** (Epic offers the app to every Epic organization on its own; with **None** each hospital must enable it by hand) |
+| Public Documentation URL | leave empty |
+| Incoming APIs | see below |
+| Endpoint URI | `http` + `localhost:8765/callback` |
+| Can Register Dynamic Clients | off |
+| Is Confidential Client | **on** |
+| Requires Persistent Access | **on** |
+| Uses Rolling Refresh Tokens | **on** (GA saves each new refresh token) |
+| Can Have Indefinite Access | **on** (otherwise access ends and you log in again) |
+| Non-Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json` |
+| Production JWK Set URL | the same |
+| Sandbox Client Secret | leave empty (GA signs with its key instead of a secret) |
+
+**Incoming APIs.** Select only **R4** APIs whose name has `.Read` or `.Search`; never `.Create`, `.Update`, `(Premium Billing)`, `(DSTU2)` or `(STU3)`. Type each name below into **Search available service list** and move every matching `.Read (R4)` and `.Search (… ) (R4)` entry to **Selected** with `>>`:
+
+```text
+AllergyIntolerance
+Binary
+CarePlan
+CareTeam
+Condition
+Device
+DiagnosticReport
+DocumentReference
+Encounter
+Goal
+Immunization
+Location
+Medication
+MedicationRequest
+Observation
+Organization
+Patient
+Practitioner
+PractitionerRole
+Procedure
+Provenance
+ServiceRequest
+```
+
+GA asks each hospital which of these it supports and fetches only those, so extra ones are harmless and missing ones are just skipped.
+
+**c. Save**, then move the app to **Test** and **Ready** (the bar at the top) and note its **Client ID** (a UUID; Epic shows a separate **Non-Production Client ID** for the sandbox). Epic distributes a ready app to organizations; that can take a while.
+
+Unverified until a real registration goes through (record the answers here): Epic's form warns that **production needs at least one `https` Endpoint URI**, so the `http://localhost` redirect may work only in the sandbox; whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
 
 **Fallback A (no refresh tokens).** If Epic issues no refresh token or caps access at about an hour, GA fetches only during `ga connect`: log in again whenever you want fresh data. Between logins the source shows `off`.
 
