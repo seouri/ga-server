@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { GaError, getClient, loadConfig } from '../config.ts';
 import { COMPARTMENT } from '../engine.ts';
-import { connect } from './auth.ts';
+import { connect, startLogin, waitForLogin } from './auth.ts';
 import { deleteSecret, ensureKeys, readApp, readSources, smartDir, writeApp, writeSources } from './store.ts';
 import type { SourceRec } from './store.ts';
 import { readStatus, syncAll, syncSource, writeEndpoint } from './sync.ts';
@@ -128,7 +128,16 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     if (redirect && !/^https:\/\/[^/?#]+\/[^?#]*$/.test(redirect)) throw new GaError('--redirect-uri must be an https URL, e.g. https://<machine>.<tailnet>.ts.net/callback');
     if (id || redirect) writeApp(dir, { ...readApp(dir), ...(id && { clientId: id }), ...(redirect && { redirectUri: redirect }) });
     const redirectUri = redirect ?? readApp(dir).redirectUri;
-    const src = await connect(dir, positionals[0], clientId, browser, { name: values.name as string | undefined, redirectUri });
+    const name = values.name as string | undefined;
+    let src: SourceRec;
+    if (redirectUri) {
+      // https redirect: the gateway receives the callback and finishes the login.
+      const { url, state } = await startLogin(dir, positionals[0], clientId, redirectUri, name);
+      browser(url);
+      src = await waitForLogin(dir, state);
+    } else {
+      src = await connect(dir, positionals[0], clientId, browser, { name });
+    }
     // No enabled types yet: syncSource only dry-runs.
     const r = await syncSource(client, dir, src, patientId);
     print(r);

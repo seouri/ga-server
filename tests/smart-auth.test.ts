@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateKeyPair, exportJWK } from 'jose';
-import { accessToken, connect, SCOPE, sourceKey } from '../src/smart/auth.ts';
+import { accessToken, connect, finishLogin, resultName, startLogin, SCOPE, sourceKey, waitForLogin } from '../src/smart/auth.ts';
 import type { Tokens } from '../src/smart/auth.ts';
 import { ensureKeys, loadSecret, readSources, saveSecret } from '../src/smart/store.ts';
 import { startMock } from './smart/mock-server.ts';
@@ -201,5 +201,48 @@ describe('accessToken', () => {
     utimesSync(lock, old, old);
     expire(src.key);
     await expect(accessToken(dir, src, clientId)).resolves.toMatch(/^at-/);
+  });
+});
+
+describe('startLogin / finishLogin', () => {
+  const redirectUri = 'https://ga.example.ts.net/callback';
+  async function start() {
+    const { publicJwks } = await ensureKeys(dir);
+    mock = await startMock({ clientId, jwks: publicJwks, redirectUri });
+    const { url, state } = await startLogin(dir, mock.fhirBase, clientId, redirectUri, 'Test Hospital');
+    const cb = new URL((await fetch(url, { redirect: 'manual' })).headers.get('location')!);
+    return { state, search: cb.search };
+  }
+  const tokenFiles = (): string[] => (existsSync(join(dir, 'tokens')) ? readdirSync(join(dir, 'tokens')).filter((f) => f.startsWith('127')) : []);
+
+  it('finishes a login started elsewhere and stores tokens', async () => {
+    const { search } = await start();
+    const src = await finishLogin(dir, search);
+    expect(src).toMatchObject({ key: '127-0-0-1', name: 'Test Hospital', patient: 'synthetic-patient-1' });
+    expect(loadSecret<Tokens>(dir, src.key)!.refresh_token).toBeTruthy();
+    expect(readSources(dir)).toEqual([src]);
+  });
+
+  it('is single use and rejects a forged state', async () => {
+    const { search } = await start();
+    await finishLogin(dir, search);
+    await expect(finishLogin(dir, search)).rejects.toThrow('unknown_state');
+    await expect(finishLogin(dir, '?code=x&state=forged')).rejects.toThrow('unknown_state');
+  });
+
+  it('rejects an expired login and stores no tokens', async () => {
+    const { search } = await start();
+    await expect(finishLogin(dir, search, new Date(Date.now() + 11 * 60_000))).rejects.toThrow('login_expired');
+    expect(tokenFiles()).toEqual([]);
+    await expect(finishLogin(dir, search)).rejects.toThrow('unknown_state');
+  });
+
+  it('waitForLogin returns the result written by the gateway, or times out naming the gateway', async () => {
+    const src = { key: 'k', name: 'n', fhirBase: 'https://x', patient: 'p' };
+    saveSecret(dir, resultName('s1'), { source: src });
+    expect(await waitForLogin(dir, 's1', 1000)).toEqual(src);
+    saveSecret(dir, resultName('s2'), { error: 'boom' });
+    await expect(waitForLogin(dir, 's2', 1000)).rejects.toThrow('boom');
+    await expect(waitForLogin(dir, 's3', 10)).rejects.toThrow('docker compose up -d ga-gateway');
   });
 });
