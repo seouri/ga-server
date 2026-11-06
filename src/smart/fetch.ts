@@ -1,9 +1,11 @@
 // Fetch every patient-scoped resource a SMART FHIR R4 server offers, and map it for GA's import engine (no writes).
+import { createHash } from 'node:crypto';
 import type { Attachment, Bundle, CapabilityStatement, DocumentReference, Identifier, Resource } from '@medplum/fhirtypes';
 import { GaError } from '../config.ts';
 import { rtfToText } from '../ehi/rtf.ts';
 import { COMPARTMENT } from '../engine.ts';
 import { SINGULAR_ID } from '../identity.ts';
+import { walkReferences } from '../patient.ts';
 import type { SourceRec } from './store.ts';
 
 export const OBS_CATEGORIES = ['laboratory', 'vital-signs', 'social-history', 'survey', 'exam', 'imaging', 'procedure', 'activity', 'therapy'];
@@ -16,6 +18,17 @@ export type PendingBinary = { ref: string; contentType: string; data: Buffer };
 
 type R = Resource & { identifier?: Identifier[] | Identifier };
 const keyOf = (r: Resource): string => `${r.resourceType}/${r.id}`;
+// Upper-case host, default port etc. normalised, so the outside-base check compares like with like.
+const normBase = (u: string): string => new URL(u).href.replace(/\/+$/, '');
+
+// Node's SyntaxError quotes the input: never let a note body reach an error message.
+async function parse<T>(body: Response | string, what: string): Promise<T> {
+  try {
+    return JSON.parse(typeof body === 'string' ? body : await body.text()) as T;
+  } catch {
+    throw new GaError(`${what}: invalid JSON`);
+  }
+}
 
 export async function fetchAll(
   fhirBase: string,
@@ -23,8 +36,13 @@ export async function fetchAll(
   patient: string,
   types?: string[],
 ): Promise<{ resources: Resource[]; byType: Record<string, number>; skipped: Record<string, string> }> {
-  const base = fhirBase.replace(/\/+$/, '');
+  const base = normBase(fhirBase);
   const skipped: Record<string, string> = {};
+  const failures: Record<string, number> = {};
+  const fail = (what: string, status: number) => {
+    failures[what] = (failures[what] ?? 0) + 1;
+    skipped[what] = `${failures[what]} failed, last HTTP ${status}`;
+  };
   const got = new Map<string, Resource>(); // by Type/id: category searches overlap
   const add = (r: Resource) => r.id && !got.has(keyOf(r)) && got.set(keyOf(r), r);
 
@@ -47,7 +65,7 @@ export async function fetchAll(
         await r.body?.cancel();
         return `HTTP ${r.status}`;
       }
-      const b = (await r.json()) as Bundle;
+      const b = await parse<Bundle>(r, what);
       for (const e of b.entry ?? []) if (e.resource && e.search?.mode !== 'outcome' && e.resource.resourceType !== 'OperationOutcome') out.push(e.resource);
       url = b.link?.find((l) => l.relation === 'next')?.url;
     }
@@ -56,7 +74,7 @@ export async function fetchAll(
 
   const meta = await get(`${base}/metadata`, 'metadata');
   if (!meta.ok) throw new GaError(`metadata: HTTP ${meta.status}`);
-  const cap = (await meta.json()) as CapabilityStatement;
+  const cap = await parse<CapabilityStatement>(meta, 'metadata');
   const offered = (cap.rest ?? [])
     .flatMap((x) => x.resource ?? [])
     .filter((x) => Object.hasOwn(COMPARTMENT, x.type) && x.interaction?.some((i) => i.code === 'search-type'))
@@ -65,7 +83,7 @@ export async function fetchAll(
 
   const pr = await get(`${base}/Patient/${encodeURIComponent(patient)}`, 'Patient');
   if (!pr.ok) throw new GaError(`Patient: HTTP ${pr.status}`);
-  add((await pr.json()) as Resource);
+  add(await parse<Resource>(pr, 'Patient'));
 
   for (const type of new Set(offered)) {
     const q = `${base}/${type}?patient=${encodeURIComponent(patient)}`;
@@ -83,10 +101,10 @@ export async function fetchAll(
     const m = ref && /^Medication\/[^/]+$/.exec(ref.startsWith(`${base}/`) ? ref.slice(base.length + 1) : ref)?.[0];
     if (!m || got.has(m)) continue;
     const res = await get(`${base}/${m}`, 'Medication');
-    if (res.ok) add((await res.json()) as Resource);
+    if (res.ok) add(await parse<Resource>(res, 'Medication'));
     else {
       await res.body?.cancel();
-      skipped.Medication = `HTTP ${res.status}`;
+      fail('Medication', res.status);
     }
   }
 
@@ -98,13 +116,13 @@ export async function fetchAll(
       const res = await get(a.url, 'Binary', a.contentType ?? '*/*');
       if (!res.ok) {
         await res.body?.cancel();
-        skipped.Binary = `HTTP ${res.status}`;
+        fail('Binary', res.status);
         continue;
       }
       const type = res.headers.get('content-type') ?? '';
       const buf = Buffer.from(await res.arrayBuffer());
       // Some servers answer with a FHIR Binary resource whatever the Accept header says.
-      const fhir = /json/.test(type) ? (JSON.parse(buf.toString('utf8')) as { resourceType?: string; data?: string; contentType?: string }) : undefined;
+      const fhir = /json/.test(type) ? await parse<{ resourceType?: string; data?: string; contentType?: string }>(buf.toString('utf8'), 'Binary') : undefined;
       if (fhir?.resourceType === 'Binary') {
         a.data = fhir.data;
         a.contentType ??= fhir.contentType;
@@ -168,11 +186,12 @@ function fixRefs(v: unknown, keep: (ref: string) => string | undefined): unknown
 // Resources from fetchAll, ready for importResources (kind 'smart'). Ids stay the server ids so batch references
 // resolve; meta keeps only lastUpdated (the per-resource source date). PDFs and images come back as `binaries`.
 export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[]; binaries: PendingBinary[] } {
-  const base = src.fhirBase.replace(/\/+$/, '');
+  const base = normBase(src.fhirBase);
   const system = `urn:ga-server:id:smart:${src.key}`;
   const inBatch = new Set(rs.map(keyOf));
   const keep = (ref: string): string | undefined => {
     if (ref.startsWith('#')) return ref;
+    if (/^https?:/i.test(ref)) ref = new URL(ref).href;
     const local = (ref.startsWith(`${base}/`) ? ref.slice(base.length + 1) : ref).replace(/\/_history\/.*$/, '');
     return inBatch.has(local) ? local : undefined;
   };
@@ -187,12 +206,15 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
       : type === 'text/rtf' || type === 'application/rtf' ? rtfToText(buf.toString('latin1'))
       : type === 'text/plain' ? buf.toString('utf8') // shortcut: assumes UTF-8; upgrade if a server sends another charset
       : undefined;
-    const { data: _d, url: _u, size: _s, hash: _h, ...rest } = a;
+    const { data: _d, url: _u, ...rest } = a;
+    // hash (base64 SHA-1, as FHIR defines it) and size of the stored bytes: Task 5 reuses an existing Binary when the hash matches.
+    const sum = (b: Buffer) => ({ size: b.length, hash: createHash('sha1').update(b).digest('base64') });
     if (text === undefined) {
       binaries.push({ ref, contentType: a.contentType ?? 'application/octet-stream', data: buf });
-      return { ...rest, url: ref };
+      return { ...rest, url: ref, ...sum(buf) };
     }
-    return { ...rest, contentType: 'text/plain; charset=utf-8', data: Buffer.from(text, 'utf8').toString('base64'), title: `${a.title ?? 'Document'} (original: ${type})` };
+    const out = Buffer.from(text, 'utf8');
+    return { ...rest, contentType: 'text/plain; charset=utf-8', data: out.toString('base64'), ...sum(out), title: `${a.title ?? 'Document'} (original: ${type})` };
   };
 
   const resources = rs.map((orig) => {
@@ -209,5 +231,62 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
     }
     return r as Resource;
   });
-  return { resources, binaries };
+  return { resources: breakCycles(resources), binaries };
+}
+
+// Parent types: their references down to children (Encounter.diagnosis.condition, reasonReference) are the ones given up
+// when a cycle forms, so child -> parent references (Condition.encounter, Observation.encounter) survive.
+const PARENT = new Set(['Encounter', 'EpisodeOfCare']);
+
+// The engine refuses a batch with a reference cycle (topoSort), so break each one: references are already Type/id here.
+// Pass 1 keeps child -> parent edges, dropping DFS back-edges among them; pass 2 adds parent -> child edges one by one,
+// each only if it closes no cycle. A broken reference becomes display-only (or goes) as for one outside the batch.
+function breakCycles(rs: Resource[]): Resource[] {
+  const byKey = new Map(rs.map((r) => [keyOf(r), r]));
+  const out = new Map<string, Set<string>>(rs.map((r) => [keyOf(r), new Set<string>()])); // kept edges
+  const broken = new Map<string, Set<string>>();
+  const later: [string, string][] = [];
+  const brk = (from: string, to: string) => broken.set(from, (broken.get(from) ?? new Set()).add(to));
+  const edges = (r: Resource): string[] => {
+    const to = new Set<string>();
+    walkReferences(r, (ref) => void (byKey.has(ref) && ref !== keyOf(r) && to.add(ref)));
+    return [...to];
+  };
+  const pending = new Map<string, string[]>();
+  for (const r of rs) {
+    const e = edges(r);
+    if (PARENT.has(r.resourceType)) e.forEach((to) => later.push([keyOf(r), to]));
+    else pending.set(keyOf(r), e);
+  }
+  const state = new Map<string, 'visiting' | 'done'>();
+  const visit = (k: string) => {
+    state.set(k, 'visiting');
+    for (const to of pending.get(k) ?? []) {
+      if (state.get(to) === 'visiting') brk(k, to);
+      else {
+        out.get(k)?.add(to);
+        if (!state.has(to)) visit(to);
+      }
+    }
+    state.set(k, 'done');
+  };
+  for (const k of pending.keys()) if (!state.has(k)) visit(k);
+  const reaches = (from: string, target: string): boolean => {
+    const seen = new Set([from]);
+    const stack = [from];
+    while (stack.length) {
+      const k = stack.pop() as string;
+      if (k === target) return true;
+      for (const n of out.get(k) ?? []) if (!seen.has(n)) seen.add(n) && stack.push(n);
+    }
+    return false;
+  };
+  for (const [from, to] of later) {
+    if (reaches(to, from)) brk(from, to);
+    else out.get(from)?.add(to);
+  }
+  return rs.map((r) => {
+    const b = broken.get(keyOf(r));
+    return b ? (fixRefs(r, (ref) => (b.has(ref) ? undefined : ref)) as Resource) : r;
+  });
 }

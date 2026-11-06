@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DocumentReference, Encounter, MedicationRequest, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { fetchAll, mapForGa } from '../src/smart/fetch.ts';
 import { sourceKey } from '../src/smart/auth.ts';
+import { walkReferences } from '../src/patient.ts';
 import { serveFixtures, startMock } from './smart/mock-server.ts';
 import type { MockSmart } from './smart/mock-server.ts';
 
@@ -42,12 +44,24 @@ describe('fetchAll', () => {
   });
 
   it('intersects with the enabled types and always includes the Patient', async () => {
-    const { resources } = await fetchAll(m.fhirBase, token, P, ['Condition']);
+    const { resources } = await fetchAll(m.fhirBase.replace('http://127.0.0.1', 'HTTP://127.0.0.1'), token, P, ['Condition']);
     expect(keys(resources)).toEqual(['Condition/cond-dx', 'Condition/cond-pl', `Patient/${P}`]);
   });
 
   it('fails on a bad token', async () => {
     await expect(fetchAll(m.fhirBase, 'at-bogus', P)).rejects.toThrow('HTTP 401');
+  });
+
+  it('reports a non-JSON body without echoing it', async () => {
+    const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+    serveFixtures(m2);
+    m2.route('/fhir/Encounter', (_q, res) => {
+      res.writeHead(200, { 'content-type': 'application/fhir+json' });
+      res.end('<html>synthetic secret note text</html>');
+    });
+    const err = await fetchAll(m2.fhirBase, m2.grant(), P, ['Encounter']).catch((e: Error) => e);
+    await m2.close();
+    expect((err as Error).message).toBe('Encounter: invalid JSON');
   });
 
   it('never sends the token to a next link on another origin', async () => {
@@ -93,11 +107,33 @@ describe('mapForGa', () => {
     expect(find<Observation>(resources, 'Observation/lab1').performer).toEqual([{ display: 'Synthetic Lab' }]);
     expect(JSON.stringify(resources)).not.toMatch(/"reference":"(Practitioner|Organization)\//);
 
+    // Cycles: Condition.encounter (child -> parent) stays; Encounter.diagnosis back to it becomes display-only.
+    expect(find<Resource & { encounter: unknown }>(resources, 'Condition/cond-dx').encounter).toEqual({ reference: 'Encounter/enc1' });
+    expect(enc.diagnosis).toEqual([{ condition: { display: 'Synthetic visit diagnosis' }, rank: 1 }]);
+    expect(enc.reasonReference).toEqual([{ reference: 'Condition/cond-pl', display: 'Synthetic problem' }]); // no cycle: kept
+    // No cycle left (the engine's topoSort walk).
+    const byKey = new Map(resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
+    const state = new Map<Resource, string>();
+    const visit = (r: Resource) => {
+      if (state.get(r) === 'done') return;
+      expect(state.get(r)).not.toBe('visiting');
+      state.set(r, 'visiting');
+      walkReferences(r, (ref) => {
+        const dep = byKey.get(ref);
+        if (dep && dep !== r) visit(dep);
+        return undefined;
+      });
+      state.set(r, 'done');
+    };
+    resources.forEach(visit);
+
     // Notes: inline plain text, original type on the title.
     const html = find<DocumentReference>(resources, 'DocumentReference/doc-html').content[0].attachment;
     expect(html.contentType).toBe('text/plain; charset=utf-8');
     expect(html.title).toBe('Progress Note (original: text/html)');
     expect(html.url).toBeUndefined();
+    expect(html.size).toBe(Buffer.from(html.data ?? '', 'base64').length);
+    expect(html.hash).toBe(createHash('sha1').update(Buffer.from(html.data ?? '', 'base64')).digest('base64'));
     const htmlText = Buffer.from(html.data ?? '', 'base64').toString('utf8');
     expect(htmlText).toContain('Synthetic follow-up note & plan.');
     expect(htmlText).toContain('Patient tolerates the synthetic regimen <well>.');
@@ -114,6 +150,8 @@ describe('mapForGa', () => {
     expect(binaries[0].contentType).toBe('application/pdf');
     expect(binaries[0].data.subarray(0, 8).toString()).toBe('%PDF-1.4');
     expect(pdf.title).toBe('Scanned Letter');
+    expect(pdf.hash).toBe(createHash('sha1').update(binaries[0].data).digest('base64'));
+    expect(pdf.size).toBe(binaries[0].data.length);
 
     // Input untouched.
     expect(find<DocumentReference>(fetched, 'DocumentReference/doc-pdf').content[0].attachment.data).toBeDefined();

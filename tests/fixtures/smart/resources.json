@@ -13,6 +13,8 @@
       "subject": { "reference": "Patient/synthetic-patient-1" },
       "participant": [{ "individual": { "reference": "Practitioner/pr1", "display": "Synthetic Clinician, MD" } }],
       "serviceProvider": { "reference": "Organization/org1" },
+      "diagnosis": [{ "condition": { "reference": "Condition/cond-dx", "display": "Synthetic visit diagnosis" }, "rank": 1 }],
+      "reasonReference": [{ "reference": "Condition/cond-pl", "display": "Synthetic problem" }],
       "period": { "start": "2026-09-01T09:00:00Z", "end": "2026-09-01T09:30:00Z" } } },
     { "resource": { "resourceType": "Condition", "id": "cond-pl", "meta": { "lastUpdated": "2026-09-01T10:00:00Z" },
       "identifier": [{ "system": "urn:oid:1.2.840.114350.1.13.0.1.7.2.768076", "value": "SYN-PL-1" }],
