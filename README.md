@@ -42,7 +42,9 @@ ga keys                                                         # creates .ga/sm
 gh gist create --public -d "GA public key" .ga/smart/public.jwks.json
 ```
 
-`gh` prints `https://gist.github.com/<user>/<gist id>`. Your JWK Set URL is then:
+No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box, name the file `public.jwks.json`, and choose **Create public gist**.
+
+The gist's page is `https://gist.github.com/<user>/<gist id>` (`gh` prints it). Your JWK Set URL is then:
 
 ```text
 https://gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json
