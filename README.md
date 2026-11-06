@@ -103,7 +103,7 @@ ga shares                                               # id, label, audience, s
 ga shares show <id>                                     # the link and QR again
 ga revoke <id>                                          # works at once, no restart
 ga share log [<id>]                                     # who opened what, when, from which IP; questions asked
-ga share export <id> [--out dir]                        # <label>-summary.pdf and <label>-records.json (FHIR), mode 0600
+ga share export <id> [--out dir]                        # <Name>_health-summary_<date_time>.pdf and <Name>_health-records-FHIR_<date_time>.json, mode 0600
 ```
 
 **Turning on links.** `docker compose up -d` starts `ga-share`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:

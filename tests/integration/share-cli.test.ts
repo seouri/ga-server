@@ -75,13 +75,15 @@ test('share, list, export, revoke', async () => {
     const x = await cli('share', 'export', id, '--out', out);
     expect(x.stderr).not.toMatch(/error/i);
     expect(x.code).toBe(0);
-    expect(readdirSync(out).sort()).toEqual(['T-records.json', 'T-summary.pdf']);
-    expect(readFileSync(join(out, 'T-summary.pdf')).subarray(0, 4).toString()).toBe('%PDF');
-    const b = JSON.parse(readFileSync(join(out, 'T-records.json'), 'utf8'));
+    const [json, pdf] = readdirSync(out).sort();
+    expect(pdf).toMatch(/^patient_health-summary_\d{4}-\d{2}-\d{2}_\d{4}\.pdf$/); // test patient has no name
+    expect(json).toMatch(/^patient_health-records-FHIR_\d{4}-\d{2}-\d{2}_\d{4}\.json$/);
+    expect(readFileSync(join(out, pdf)).subarray(0, 4).toString()).toBe('%PDF');
+    const b = JSON.parse(readFileSync(join(out, json), 'utf8'));
     expect(b.resourceType).toBe('Bundle');
     expect(b.entry.some((e: { resource: Observation }) => e.resource.code?.text === 'test lab')).toBe(true);
-    expect(statSync(join(out, 'T-summary.pdf')).mode & 0o777).toBe(0o600);
-    expect(statSync(join(out, 'T-records.json')).mode & 0o777).toBe(0o600);
+    expect(statSync(join(out, pdf)).mode & 0o777).toBe(0o600);
+    expect(statSync(join(out, json)).mode & 0o777).toBe(0o600);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

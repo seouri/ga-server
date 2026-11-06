@@ -40,6 +40,15 @@ const send = (res: Res, status: number, body: string | Buffer, type = HTML, extr
 const notFound = (res: Res): void => send(res, 404, renderInactive());
 export const safeName = (s: string, fallback = 'document'): string => s.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '').slice(0, 100) || fallback;
 const attach = (name: string): Record<string, string> => ({ 'Content-Disposition': `attachment; filename="${safeName(name)}"` });
+// e.g. Jane_Doe_health-summary_2026-11-06_0930.pdf: whose records and when, in the machine's zone.
+export function downloadName(s: Scoped, kind: 'health-summary.pdf' | 'health-records-FHIR.json', at: Date): string {
+  const n = s.patient.name?.[0];
+  const who = safeName(n?.text ?? [...(n?.given ?? []), n?.family].filter(Boolean).join(' '), 'patient');
+  const pad = (x: number): string => String(x).padStart(2, '0');
+  const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}_${pad(at.getHours())}${pad(at.getMinutes())}`;
+  const [base, ext] = kind.split('.');
+  return `${who}_${base}_${stamp}.${ext}`;
+}
 
 class TooLarge extends Error {}
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -63,8 +72,8 @@ const drained = (res: Res): Promise<void> => new Promise((ok) => {
   res.on('close', done);
 });
 
-async function streamBundle(res: Res, s: Scoped): Promise<void> {
-  res.writeHead(200, { 'Content-Type': 'application/fhir+json', ...attach('records.json') });
+async function streamBundle(res: Res, s: Scoped, name: string): Promise<void> {
+  res.writeHead(200, { 'Content-Type': 'application/fhir+json', ...attach(name) });
   res.write('{"resourceType":"Bundle","type":"collection","entry":[');
   const entries = toBundle(s).entry ?? [];
   for (let i = 0; i < entries.length; i++) {
@@ -172,12 +181,12 @@ export function createServer(deps: ServerDeps): http.Server {
     const s = await deps.load(share);
     if (route === '/download/records.json') {
       log({ kind: 'download', detail: 'records.json' });
-      return streamBundle(res, s);
+      return streamBundle(res, s, downloadName(s, 'health-records-FHIR.json', now()));
     }
     if (route === '/download/summary.pdf') {
       const pdf = await toPdf(summarize(s), recordRows(s), { label: share.label, created: share.created, scope: scopeWords(share) });
       log({ kind: 'download', detail: 'summary.pdf' });
-      return send(res, 200, pdf, 'application/pdf', attach('summary.pdf'));
+      return send(res, 200, pdf, 'application/pdf', attach(downloadName(s, 'health-summary.pdf', now())));
     }
     if (route.startsWith('/doc/')) {
       let id: string;

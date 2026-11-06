@@ -7,7 +7,7 @@ import type { Resource } from '@medplum/fhirtypes';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { logAccess, readLog } from '../src/share/audit.ts';
 import type { Scoped } from '../src/share/scope.ts';
-import { createServer, failLimiter } from '../src/share/server.ts';
+import { createServer, downloadName, failLimiter } from '../src/share/server.ts';
 import { createShare, revokeShare, type Share } from '../src/share/store.ts';
 
 const HEADERS = {
@@ -139,7 +139,7 @@ test('downloads: records.json is the scoped Bundle, summary.pdf is a PDF', async
   const r = await get(`/s/${token}/download/records.json`);
   expect(r.status).toBe(200);
   expectHeaders(r);
-  expect(r.headers.get('content-disposition')).toContain('attachment');
+  expect(r.headers.get('content-disposition')).toMatch(/^attachment; filename="Test_Person_health-records-FHIR_\d{4}-\d{2}-\d{2}_\d{4}\.json"$/);
   const b = await r.json();
   expect(b.resourceType).toBe('Bundle');
   expect(b.entry.map((e: any) => `${e.resource.resourceType}/${e.resource.id}`).sort()).toEqual(
@@ -147,8 +147,17 @@ test('downloads: records.json is the scoped Bundle, summary.pdf is a PDF', async
   const pdf = await get(`/s/${token}/download/summary.pdf`);
   expect(pdf.status).toBe(200);
   expect(pdf.headers.get('content-type')).toBe('application/pdf');
+  expect(pdf.headers.get('content-disposition')).toMatch(/filename="Test_Person_health-summary_\d{4}-\d{2}-\d{2}_\d{4}\.pdf"$/);
   expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString()).toBe('%PDF-');
   expect(logs.map((l) => [l.e.kind, l.e.detail])).toEqual([['download', 'records.json'], ['download', 'summary.pdf']]);
+});
+
+test('downloadName: patient name, kind and local timestamp; unsafe characters replaced', () => {
+  const at = new Date(2026, 10, 6, 9, 5);
+  expect(downloadName(scoped, 'health-summary.pdf', at)).toBe('Test_Person_health-summary_2026-11-06_0905.pdf');
+  const odd = { ...scoped, patient: { ...scoped.patient, name: [{ given: ['A/../b'], family: 'C"D' }] } };
+  expect(downloadName(odd, 'health-records-FHIR.json', at)).toBe('A_.._b_C_D_health-records-FHIR_2026-11-06_0905.json');
+  expect(downloadName({ ...scoped, patient: { ...scoped.patient, name: undefined } }, 'health-summary.pdf', at)).toBe('patient_health-summary_2026-11-06_0905.pdf');
 });
 
 test('/qr renders the share link', async () => {

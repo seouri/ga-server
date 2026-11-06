@@ -14,7 +14,7 @@ import { logAccess, readLog } from './audit.ts';
 import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
-import { createServer, safeName } from './server.ts';
+import { createServer, downloadName } from './server.ts';
 import { GROUPS, createShare, listShares, parseSince, revokeShare, shareDir, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
@@ -144,7 +144,8 @@ async function exportShare(argv: string[]): Promise<void> {
   const s = find(positionals[0]);
   const scoped = await loadScoped(await getClient(loadConfig()), s);
   const out = (values.out as string | undefined) ?? process.cwd();
-  const [pdfFile, jsonFile] = ['summary.pdf', 'records.json'].map((f) => join(out, `${safeName(s.label, 'share')}-${f}`));
+  const at = new Date();
+  const [pdfFile, jsonFile] = (['health-summary.pdf', 'health-records-FHIR.json'] as const).map((f) => join(out, downloadName(scoped, f, at)));
   writeAtomic(pdfFile, await toPdf(summarize(scoped), recordRows(scoped), { label: s.label, created: s.created, scope: scopeWords(s) }), 0o600);
   writeAtomic(jsonFile, JSON.stringify(toBundle(scoped)), 0o600);
   console.log(`wrote ${pdfFile} and ${jsonFile}`);
