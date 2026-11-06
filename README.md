@@ -1,8 +1,8 @@
 # GA server
 
-GA (Guardian Angel) keeps all of one person's health records in a local FHIR server (Medplum) and lets Claude Code, or any MCP agent, read them, import into them and share them. Hospital portals, Epic exports, Apple Health and lab PDFs land in one deduplicated record on your own machine.
+GA (Guardian Angel) keeps all of one person's health records in a local FHIR server and lets Claude Code, or any MCP agent, read them, import into them and share them. Hospital portals, Epic exports, Apple Health and lab PDFs land in one deduplicated record on your own machine.
 
-**Ask in Claude Code** (details in [Using GA in Claude Code](#using-ga-in-claude-code)):
+**The simplest way to use it: start Claude Code in this repo** (`cd ga-server && claude`, approve the `ga-server` MCP server once) and ask (more in [Using GA in Claude Code](#using-ga-in-claude-code)):
 
 ```
 > /ga Is starting Atorvastatin 40 mg the right decision?
@@ -19,14 +19,14 @@ flowchart LR
   you([You]) --> agent["Claude Code or any MCP agent<br/>/ga, /ga-import, /ga-lipids"]
   agent -- "stdio MCP: fhir_search, fhir_read,<br/>ga_import, vaccine_gaps, risk" --> mcp["ga mcp"]
   agent -- "runs CLI: ga import, ga share" --> cli["ga CLI"]
-  mcp --> fhir[("Medplum FHIR<br/>Docker, local Postgres")]
+  mcp --> fhir[("FHIR server<br/>Docker, local Postgres")]
   cli -- "dedup engine" --> fhir
   files["C-CDA, Epic EHI,<br/>Apple Health, PDFs"] --> cli
   epic["Epic portals<br/>(SMART on FHIR, read-only)"] -- "daily" --> sync["ga-sync"] --> fhir
   fhir --> share["ga-share<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family"])
 ```
 
-Everything runs on your Mac. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent you chat with, and share-link questions if you turn them on). The agent never talks to Medplum directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
+Everything runs on your Mac. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent you chat with, and share-link questions if you turn them on). The agent never talks to the FHIR server directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
 
 ## Setup (new Mac)
 
@@ -34,14 +34,16 @@ Prerequisites: [Docker Desktop](https://docs.docker.com/desktop/setup/install/ma
 
 ```sh
 npm install              # first: the ga-sync service runs this repo's code
-docker compose up -d     # Medplum, Postgres, binary storage, C-CDA converter, daily portal sync
-node src/cli.ts setup    # creates the patient and .ga/config.json, rotates the Medplum admin password
+docker compose up -d     # FHIR server, Postgres, binary storage, C-CDA converter, daily portal sync, share links
+node src/cli.ts setup    # creates the patient and .ga/config.json, rotates the FHIR server's admin password
 npm link                 # optional: puts `ga` on your PATH (examples below use it)
 ```
 
 ## Using GA in Claude Code
 
-Start Claude Code in this repo and approve `ga-server` (check with `/mcp`). To use GA from any folder, register it once for your user:
+**Start Claude Code in this repo** (`cd ga-server && claude`) and approve `ga-server` when asked (check with `/mcp`). That's all: the repo's `.mcp.json` registers GA's MCP server, and its slash commands come with it.
+
+To use GA from any folder instead, register it once for your user:
 
 ```sh
 claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cli.ts mcp
@@ -205,7 +207,7 @@ Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/.
 
 **Questions.** Recipients can ask Claude about what the link shows, answered from the shared records only. Put `ANTHROPIC_API_KEY=...` in `.env` (gitignored) and `docker compose up -d ga-share`; without it the page says questions are not set up. Cost cap: each link allows `--questions` questions a day (default 20), and each answer is bounded in turns and tokens. Questions are kept in the access log; answers are not.
 
-**Log.** Every view, download and question is a local AuditEvent in Medplum (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
+**Log.** Every view, download and question is a local AuditEvent in GA's FHIR server (tag `urn:ga-server:share|<id>`), never shared. Share settings are in `.ga/share/shares.json`; link tokens are encrypted beside them.
 
 **Troubleshooting.** `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8110/` should print `404` (only `/s/<token>` routes exist); if it fails, `docker compose logs ga-share`. If `ga share log` shows the same IP for every visitor, Funnel is not passing the client IP in `X-Forwarded-For`: the failed-link rate limit then applies to everyone at once; see the `[check]` note on `X-Forwarded-For` in `src/share/server.ts`.
 
@@ -262,7 +264,7 @@ Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga
 
 ## Admin app
 
-The Medplum app runs at http://localhost:3000. Log in as `admin@example.com` with the `adminPassword` from `.ga/config.json`: `ga setup` replaces Medplum's seeded default with a random password and stores it there (mode 0600). Re-running setup reuses it. **Back up `.ga/config.json`**: it holds the only copy of the admin password and client secret, and losing it locks you out of the admin account.
+The FHIR server's admin app runs at http://localhost:3000. Log in as `admin@example.com` with the `adminPassword` from `.ga/config.json`: `ga setup` replaces the seeded default with a random password and stores it there (mode 0600). Re-running setup reuses it. **Back up `.ga/config.json`**: it holds the only copy of the admin password and client secret, and losing it locks you out of the admin account.
 
 ## Security
 
