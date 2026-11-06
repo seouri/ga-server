@@ -106,3 +106,13 @@ export function readSources(dir: string): SourceRec[] {
 export function writeSources(dir: string, s: SourceRec[]): void {
   writeAtomic(join(dir, 'sources.json'), JSON.stringify(s, null, 2));
 }
+
+// Registered client id: not secret.
+export function readApp(dir: string): { clientId?: string } {
+  const f = join(dir, 'app.json');
+  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as { clientId?: string }) : {};
+}
+
+export function writeApp(dir: string, app: { clientId?: string }): void {
+  writeAtomic(join(dir, 'app.json'), JSON.stringify(app, null, 2));
+}
