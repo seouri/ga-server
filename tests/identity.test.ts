@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Observation, Resource } from '@medplum/fhirtypes';
-import { contentKey, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import { APPLE, contentKey, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const ccda: SourceInfo = { kind: 'ccda', file: 'a.xml', date: '2024-07-26T00:00:00Z', writer: 'importer' };
 const pdf: SourceInfo = { kind: 'pdf', file: 'b.pdf', date: '2024-08-01', writer: 'agent', llm: true };
@@ -82,4 +82,11 @@ test('ccda content hash is patient-scoped for patient resources only', () => {
   expect(stableIdentifier(allergy, ccda, 'h', 'p1').value).not.toBe(stableIdentifier(allergy, ccda, 'h', 'p2').value);
   const medication = { resourceType: 'Medication', code: { text: 'x' } } as Resource;
   expect(stableIdentifier(medication, ccda, 'h', 'p1').value).toBe(stableIdentifier(medication, ccda, 'h', 'p2').value);
+});
+
+test('stableIdentifier for apple-health returns the first Apple identifier', () => {
+  const apple: SourceInfo = { kind: 'apple-health', file: 'e.xml', date: '2026-11-05T00:00:00Z', writer: 'importer' };
+  const o = { ...obs('2026-03-01'), identifier: [{ system: APPLE, value: 'abc' }] };
+  expect(stableIdentifier(o, apple, '')).toEqual({ system: APPLE, value: 'abc' });
+  expect(() => stableIdentifier(obs('2026-03-01'), apple, '')).toThrow(/no Apple Health identifier/);
 });

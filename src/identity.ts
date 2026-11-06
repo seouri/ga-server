@@ -3,7 +3,7 @@ import type { Identifier, Observation, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
 
 export type SourceInfo = {
-  kind: 'ccda' | 'pdf' | 'ehi';
+  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health';
   file: string;
   date: string;
   writer: 'importer' | 'agent';
@@ -11,6 +11,7 @@ export type SourceInfo = {
 };
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+export const APPLE = 'urn:ga-server:id:apple-health';
 const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 
@@ -61,6 +62,11 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, p
     // EHI mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>) first.
     const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
     if (!id?.system?.startsWith('urn:ga-server:id:ehi:') || !id.value) throw new GaError(`${r.resourceType} has no EHI identifier`);
+    return { system: id.system, value: id.value };
+  }
+  if (s.kind === 'apple-health') {
+    const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
+    if (id?.system !== APPLE || !id.value) throw new GaError(`${r.resourceType} has no Apple Health identifier`);
     return { system: id.system, value: id.value };
   }
   if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };

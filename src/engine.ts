@@ -1,7 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { contentHash, contentKey, EPIC_OID, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, contentHash, contentKey, EPIC_OID, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -319,7 +319,9 @@ export async function importResources(
           new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
         )
       : [];
-    const matches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[];
+    // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
+    const isApple = (r: Resource) => idList(r as R).some((i) => i.system === APPLE);
+    const matches = (source.kind === 'apple-health' ? [] : ([...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[]).filter((m) => !isApple(m)));
     try {
       let target: Resource;
       if (existing) {
@@ -346,10 +348,10 @@ export async function importResources(
           const filled = fillFrom(same, incoming, source);
           const d = decide(same, filled, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
-          if (d === 'conflict') report.skipped++;
+          if (d === 'conflict' && !(source.kind === 'apple-health' && !isApple(same))) report.skipped++;
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
-            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent')) await unionUpdate(client, same, filled);
+            if (d === 'update' && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent') && !(source.kind === 'apple-health' && !isApple(same))) await unionUpdate(client, same, filled);
             else await client.updateResource(protect({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource));
             report.merged++;
           }

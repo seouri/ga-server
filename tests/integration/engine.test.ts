@@ -4,7 +4,7 @@ import type { Bundle, MedicationStatement, Observation, Patient, Resource } from
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
-import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
+import { APPLE, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -432,4 +432,50 @@ test('an entered-in-error EHI problem drops the C-CDA clinical status and abatem
   expect(found.clinicalStatus).toBeUndefined();
   expect(found.verificationStatus?.coding?.[0]?.code).toBe('entered-in-error');
   expect(found.abatementDateTime).toBeUndefined();
+});
+
+const apple = (date: string): SourceInfo => ({ kind: 'apple-health', file: 'synthetic-apple.xml', date, writer: 'importer' });
+const weight = (sys: string, id: string, at: string, kg: number): Observation => ({
+  resourceType: 'Observation',
+  identifier: [{ system: sys, value: id }],
+  status: 'final',
+  code: { coding: [{ system: 'http://loinc.org', code: '29463-7' }] },
+  effectiveDateTime: at,
+  valueQuantity: { value: kg, unit: 'kg' },
+  subject: me(),
+});
+const hospital = (at: string, kg: number) => weight(EHI_SYS, uid('h'), at, kg);
+const phone = (at: string, kg: number) => weight(APPLE, uid('a'), at, kg);
+const flagged = async () => (await all()).filter((r) => tagged(r, 'possible-duplicate') && (r as Observation).code?.coding?.[0]?.code === '29463-7');
+
+test('apple reading on a hospital day is not a possible duplicate', async () => {
+  const day = '2026-03-01';
+  await importResources(client, [hospital(`${day}T09:00:00-05:00`, 80)], ehiSrc('2026-01-01'), pid, 'h');
+  expect(await importResources(client, [phone(`${day}T07:00:00-05:00`, 79)], apple('2026-11-05'), pid, 'a')).toMatchObject({ possibleDuplicates: 0, created: 1 });
+  expect(await flagged()).toHaveLength(0);
+});
+
+test('hospital reading after apple on the same day is not a possible duplicate', async () => {
+  const day = '2026-03-02';
+  await importResources(client, [phone(`${day}T07:00:00-05:00`, 79)], apple('2026-11-05'), pid, 'a');
+  expect(await importResources(client, [hospital(`${day}T09:00:00-05:00`, 80)], ehiSrc('2026-12-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 0, created: 1 });
+  expect(await flagged()).toHaveLength(0);
+});
+
+test('two apple readings same day are both kept', async () => {
+  const day = '2026-03-03';
+  const r = await importResources(client, [phone(`${day}T07:00:00-05:00`, 79), phone(`${day}T21:00:00-05:00`, 79.4)], apple('2026-11-05'), pid, 'a');
+  expect(r).toMatchObject({ created: 2, possibleDuplicates: 0 });
+});
+
+test('apple exact match keeps the hospital body', async () => {
+  const at = '2026-03-04T09:00:00-05:00';
+  const h = { ...hospital(at, 80), note: [{ text: 'clinic' }] };
+  await importResources(client, [h], ehiSrc('2026-01-01'), pid, 'h');
+  const a = phone(at, 80);
+  expect(await importResources(client, [a], apple('2026-11-05'), pid, 'a')).toMatchObject({ merged: 1, created: 0 });
+  const rows = (await all()).filter((r) => r.resourceType === 'Observation' && (r as Observation).effectiveDateTime === at) as Observation[];
+  expect(rows).toHaveLength(1);
+  expect(rows[0].note?.[0].text).toBe('clinic');
+  expect(rows[0].identifier?.map((i) => i.system)).toEqual(expect.arrayContaining([EHI_SYS, APPLE]));
 });
