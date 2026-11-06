@@ -1,10 +1,6 @@
 #!/usr/bin/env node
-import { importPath } from './ccda.ts';
 import { GaError, getClient, loadConfig } from './config.ts';
-import { importAppleHealth } from './apple/import.ts';
-import { isAppleHealthExport } from './apple/read.ts';
-import { importEhi } from './ehi/import.ts';
-import { isEhiExport } from './ehi/read.ts';
+import { detectKind, importAny } from './import.ts';
 import { extractWithApi } from './llm.ts';
 import { importExtracted, runMcp } from './mcp.ts';
 import { setup } from './setup.ts';
@@ -26,31 +22,26 @@ try {
       // Extract first so a missing key/bad file fails before any Medplum work; only the report is printed.
       const resources = await extractWithApi(file, key);
       console.log(JSON.stringify(await importExtracted(await getClient(cfg), cfg, resources, file)));
-    } else if (isEhiExport(file)) {
-      // R17: the zone the export's local times are in: --tz, else GA_EHI_TZ, else this machine's zone (exportInfo).
-      const args = process.argv.slice(4);
-      let tz: string | undefined;
-      if (args.length === 1 && args[0].startsWith('--tz=')) tz = args[0].slice(5);
-      else if (args.length === 2 && args[0] === '--tz') tz = args[1];
-      else if (args.length) throw new GaError('usage: ga import <ehi-folder> [--tz <IANA zone>]');
-      if (tz !== undefined) {
-        try {
-          if (!tz) throw new RangeError();
-          new Intl.DateTimeFormat('en', { timeZone: tz });
-        } catch {
-          throw new GaError(`--tz needs an IANA time zone, e.g. America/New_York: ${tz}`);
-        }
-      }
-      const cfg = loadConfig();
-      console.log(JSON.stringify(await importEhi(await getClient(cfg), cfg, file, cfg.patientId, tz)));
-    } else if (isAppleHealthExport(file)) {
-      if (process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
-      const cfg = loadConfig();
-      console.log(JSON.stringify(await importAppleHealth(await getClient(cfg), cfg, file)));
     } else {
-      if (/\.zip$/i.test(file)) throw new GaError('unzip export.zip first, then: ga import <folder>');
+      const kind = detectKind(file);
+      let tz: string | undefined;
+      if (kind === 'ehi') {
+        // R17: the zone the export's local times are in: --tz, else GA_EHI_TZ, else this machine's zone (exportInfo).
+        const args = process.argv.slice(4);
+        if (args.length === 1 && args[0].startsWith('--tz=')) tz = args[0].slice(5);
+        else if (args.length === 2 && args[0] === '--tz') tz = args[1];
+        else if (args.length) throw new GaError('usage: ga import <ehi-folder> [--tz <IANA zone>]');
+        if (tz !== undefined) {
+          try {
+            if (!tz) throw new RangeError();
+            new Intl.DateTimeFormat('en', { timeZone: tz });
+          } catch {
+            throw new GaError(`--tz needs an IANA time zone, e.g. America/New_York: ${tz}`);
+          }
+        }
+      } else if (kind === 'apple' && process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
       const cfg = loadConfig();
-      console.log(JSON.stringify(await importPath(await getClient(cfg), cfg, process.argv[3])));
+      console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz })));
     }
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
