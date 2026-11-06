@@ -1,0 +1,166 @@
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { generateKeyPair, exportJWK } from 'jose';
+import { accessToken, connect, sourceKey } from '../src/smart/auth.ts';
+import type { Tokens } from '../src/smart/auth.ts';
+import { ensureKeys, loadSecret, readSources, saveSecret } from '../src/smart/store.ts';
+import { startMock } from './smart/mock-server.ts';
+import type { MockOpts, MockSmart } from './smart/mock-server.ts';
+
+const clientId = 'synthetic-client';
+let dir: string;
+let mock: MockSmart | undefined;
+
+// Plays the browser: follow the auto-approving authorize redirect into the callback listener.
+const browser = async (url: string): Promise<void> => {
+  await fetch(url);
+};
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'ga-smart-auth-'));
+});
+afterEach(async () => {
+  await mock?.close();
+  mock = undefined;
+  rmSync(dir, { recursive: true, force: true });
+});
+
+async function setup(o: Partial<MockOpts> = {}) {
+  const { publicJwks } = await ensureKeys(dir);
+  mock = await startMock({ clientId, jwks: publicJwks, ...o });
+  const src = await connect(dir, mock.fhirBase, clientId, browser, { name: 'Test Hospital', port: 0 });
+  return { m: mock, src };
+}
+
+const expire = (key: string): void => {
+  const t = loadSecret<Tokens>(dir, key)!;
+  saveSecret(dir, key, { ...t, expires_at: Date.now() - 1000 });
+};
+
+describe('sourceKey', () => {
+  it('is the lower-cased host with dots as dashes', () => {
+    expect(sourceKey('https://FHIR.Example.org/api/FHIR/R4')).toBe('fhir-example-org');
+  });
+});
+
+describe('connect', () => {
+  it('stores encrypted tokens and upserts sources.json', async () => {
+    const { m, src } = await setup();
+    expect(src).toMatchObject({ key: '127-0-0-1', name: 'Test Hospital', fhirBase: m.fhirBase, patient: 'synthetic-patient-1' });
+    const f = join(dir, 'tokens', `${src.key}.enc`);
+    expect(existsSync(f)).toBe(true);
+    expect(statSync(f).mode & 0o777).toBe(0o600);
+    expect(readSources(dir)).toEqual([src]);
+    const t = loadSecret<Tokens>(dir, src.key)!;
+    expect(t.refresh_token).toBe(m.currentRefresh());
+    expect(t.patient).toBe('synthetic-patient-1');
+    expect(t.expires_at).toBeGreaterThan(Date.now());
+    // reconnect keeps one record
+    await connect(dir, m.fhirBase, clientId, browser, { port: 0 });
+    expect(readSources(dir)).toHaveLength(1);
+  });
+
+  it('signs the client assertion with the registered RS384 key (mock verifies)', async () => {
+    const { m } = await setup();
+    expect(m.stats.assertions).toBe(1);
+    expect(m.stats.rejected).toEqual([]);
+  });
+
+  it('is refused when the registered key differs', async () => {
+    await ensureKeys(dir);
+    const other = await generateKeyPair('RS384');
+    const jwk = { ...(await exportJWK(other.publicKey)), kid: 'other', alg: 'RS384' };
+    mock = await startMock({ clientId, jwks: { keys: [jwk] } });
+    await expect(connect(dir, mock.fhirBase, clientId, browser, { port: 0 })).rejects.toThrow(/invalid_client/);
+    expect(mock.stats.rejected[0]).toMatch(/^assertion/);
+  });
+
+  it('rejects a callback whose state does not match', async () => {
+    const { publicJwks } = await ensureKeys(dir);
+    mock = await startMock({ clientId, jwks: publicJwks });
+    const tamper = async (url: string): Promise<void> => {
+      const r = await fetch(url, { redirect: 'manual' });
+      const cb = new URL(r.headers.get('location')!);
+      cb.searchParams.set('state', 'forged');
+      await fetch(cb);
+    };
+    await expect(connect(dir, mock.fhirBase, clientId, tamper, { port: 0 })).rejects.toThrow(/state/);
+    expect(mock.stats.assertions).toBe(0);
+    expect(readSources(dir)).toEqual([]);
+  });
+});
+
+describe('accessToken', () => {
+  it('returns the stored token while it is fresh', async () => {
+    const { m, src } = await setup();
+    expect(await accessToken(dir, src, clientId)).toBe(loadSecret<Tokens>(dir, src.key)!.access_token);
+    expect(m.stats.refreshes).toBe(0);
+  });
+
+  it('refreshes after expiry and persists the rotated refresh token', async () => {
+    const { m, src } = await setup();
+    const before = loadSecret<Tokens>(dir, src.key)!;
+    expire(src.key);
+    const at = await accessToken(dir, src, clientId);
+    const after = loadSecret<Tokens>(dir, src.key)!;
+    expect(at).not.toBe(before.access_token);
+    expect(after.access_token).toBe(at);
+    expect(after.refresh_token).not.toBe(before.refresh_token);
+    expect(after.refresh_token).toBe(m.currentRefresh());
+    expect(after.patient).toBe('synthetic-patient-1'); // refresh response had no patient
+    expect(existsSync(join(dir, `${src.key}.lock`))).toBe(false);
+    expire(src.key);
+    await accessToken(dir, src, clientId);
+    expect(m.stats.refreshes).toBe(2);
+    expect(m.stats.reuse).toBe(0);
+  });
+
+  it('keeps the stored refresh token when the response omits one', async () => {
+    const { m, src } = await setup({ rotate: false });
+    const rt = loadSecret<Tokens>(dir, src.key)!.refresh_token;
+    expire(src.key);
+    await accessToken(dir, src, clientId);
+    expect(loadSecret<Tokens>(dir, src.key)!.refresh_token).toBe(rt);
+    expect(m.stats.refreshes).toBe(1);
+  });
+
+  it('two concurrent calls refresh once and both get a valid token', async () => {
+    const { m, src } = await setup();
+    expire(src.key);
+    const [a, b] = await Promise.all([accessToken(dir, src, clientId), accessToken(dir, src, clientId)]);
+    expect(a).toBe(b);
+    expect(m.stats.refreshes).toBe(1);
+    expect(m.stats.reuse).toBe(0);
+    expect(m.authorized({ headers: { authorization: `Bearer ${a}` } } as never)).toBe(true);
+  });
+
+  it('throws invalid_grant after the server revokes tokens', async () => {
+    const { m, src } = await setup();
+    m.revokeAll();
+    expire(src.key);
+    const err = await accessToken(dir, src, clientId).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/invalid_grant/);
+    expect((err as Error).message).not.toMatch(/rt-|at-/);
+  });
+
+  it('throws no_refresh_token once the access token expires and none was issued', async () => {
+    const { src } = await setup({ noRefresh: true });
+    expect(loadSecret<Tokens>(dir, src.key)!.refresh_token).toBeUndefined();
+    expire(src.key);
+    await expect(accessToken(dir, src, clientId)).rejects.toThrow(/no_refresh_token/);
+  });
+
+  it('breaks a stale lock', async () => {
+    const { src } = await setup();
+    const { writeFileSync, utimesSync } = await import('node:fs');
+    const lock = join(dir, `${src.key}.lock`);
+    writeFileSync(lock, '');
+    const old = new Date(Date.now() - 3 * 60_000);
+    utimesSync(lock, old, old);
+    expire(src.key);
+    await expect(accessToken(dir, src, clientId)).resolves.toMatch(/^at-/);
+  });
+});
