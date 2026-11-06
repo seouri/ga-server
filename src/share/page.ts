@@ -23,7 +23,7 @@ button{font:inherit;padding:10px 14px;border-radius:8px;border:1px solid var(--l
 const doc = (title: string, body: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
 
-const day = (iso: string): string => iso.slice(0, 10);
+const day = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : new Date(iso).toLocaleDateString('en-CA')); // local zone, like expiry itself
 
 function scopeWords(s: Share): string {
   const g = s.groups === 'all' ? 'all records' : s.groups.join(', ');
@@ -32,7 +32,7 @@ function scopeWords(s: Share): string {
 
 function itemRow(i: Item, base: string): string {
   const m = /^DocumentReference\/(.+)$/.exec(i.ref);
-  const label = m ? `<a href="${esc(base)}/doc/${encodeURIComponent(m[1]!)}">${esc(i.label)}</a>` : esc(i.label);
+  const label = m ? `<a href="${esc(base)}/doc/${esc(encodeURIComponent(m[1]!))}">${esc(i.label)}</a>` : esc(i.label);
   const meta = [i.date, i.source].filter(Boolean).join(' · ');
   return `<tr><td>${label}${i.note ? `<div class="note">${esc(i.note)}</div>` : ''}</td><td>${esc(i.value)}</td><td>${esc(meta)}</td></tr>`;
 }
@@ -55,11 +55,12 @@ function askHtml(o: Opts): string {
 
 function recordsHtml(rows: Row[], o: Opts): string {
   const all = rows.flatMap((r) => r.items).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
-  const page = Math.max(1, Math.floor(o.page ?? 1));
+  const pages = Math.max(1, Math.ceil(all.length / PAGE));
+  const page = Math.min(pages, Math.max(1, Math.floor(Number(o.page)) || 1));
   const slice = all.slice((page - 1) * PAGE, page * PAGE);
-  const next = page * PAGE < all.length ? `<p><a href="?tab=records&amp;page=${page + 1}">Next ${PAGE}</a></p>` : '';
-  const prev = page > 1 ? `<a href="?tab=records&amp;page=${page - 1}">Previous</a> ` : '';
-  return `<h2>All records</h2><p class="mut">${all.length} records, showing ${all.length ? (page - 1) * PAGE + 1 : 0}-${(page - 1) * PAGE + slice.length}</p>${table(slice, o.base)}<p>${prev}</p>${next}`;
+  const link = (n: number, t: string): string => `<a href="${esc(o.base)}?tab=records&amp;page=${n}">${t}</a>`;
+  const nav = [page > 1 && link(page - 1, 'Previous'), page < pages && link(page + 1, `Next ${PAGE}`)].filter(Boolean).join(' ');
+  return `<h2>All records</h2><p class="mut">${all.length} records, showing ${all.length ? (page - 1) * PAGE + 1 : 0}-${(page - 1) * PAGE + slice.length}</p>${table(slice, o.base)}${nav ? `<p>${nav}</p>` : ''}`;
 }
 
 export function renderPage(share: Share, summary: Summary, rows: Row[], opts: Opts): string {
@@ -70,7 +71,7 @@ export function renderPage(share: Share, summary: Summary, rows: Row[], opts: Op
     body = `${downloads(opts.base)}${summaryHtml(summary, opts.base, true)}<h2>Lab results</h2>${table(summary.labs, opts.base)}${askHtml(opts)}`;
   } else {
     const tab = opts.tab ?? 'summary';
-    const t = (k: string, n: string): string => `<a href="?tab=${k}"${tab === k ? ' class="on"' : ''}>${n}</a>`;
+    const t = (k: string, n: string): string => `<a href="${esc(opts.base)}?tab=${k}"${tab === k ? ' class="on"' : ''}>${n}</a>`;
     const inner = tab === 'records' ? recordsHtml(rows, opts) : tab === 'ask' ? askHtml(opts) : tab === 'download' ? `<h2>Download</h2>${downloads(opts.base)}` : summaryHtml(summary, opts.base, false);
     body = `<nav class="tabs">${t('summary', 'Summary')}${t('records', 'All records')}${t('ask', 'Ask')}${t('download', 'Download')}</nav>${inner}`;
   }
