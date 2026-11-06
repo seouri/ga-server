@@ -29,6 +29,7 @@ export type MockSmart = {
   revokeAll: () => void;
   authorized: (req: IncomingMessage) => boolean; // bearer check for FHIR routes
   route: (path: string, h: Handler) => void; // add a route (exact pathname)
+  onRequest?: (url: URL) => void; // test hook, runs before routing
   close: () => Promise<void>;
 };
 
@@ -56,6 +57,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
   let latest: string | undefined;
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', m.origin);
+    m.onRequest?.(url);
     const h = routes.get(url.pathname);
     if (!h) return json(res, 404, { error: 'not_found' });
     Promise.resolve(h(req, res, url)).catch(() => json(res, 500, { error: 'server_error' }));

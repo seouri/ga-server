@@ -16,7 +16,7 @@ export const sourceKey = (fhirBase: string): string => new URL(fhirBase).hostnam
 
 const isLocal = (u: string): boolean => ['127.0.0.1', 'localhost'].includes(new URL(u).hostname);
 
-// Never put a token or response body in an error: the OAuth error code, else the library's fixed message (no cause).
+// Never put a token or response body in an error: the OAuth error code, else the library's fixed message plus its direct cause's message only.
 const oauthError = (e: unknown, what: string): GaError => {
   if (e instanceof GaError) return e;
   const code = (e as { error?: unknown }).error;
@@ -28,7 +28,7 @@ const oauthError = (e: unknown, what: string): GaError => {
 export async function discover(dir: string, fhirBase: string, clientId: string): Promise<oidc.Configuration> {
   const base = fhirBase.replace(/\/+$/, '');
   if (!base.startsWith('https://') && !isLocal(base)) throw new GaError('FHIR base must be https');
-  const r = await fetch(`${base}/.well-known/smart-configuration`, { headers: { accept: 'application/json' } });
+  const r = await fetch(`${base}/.well-known/smart-configuration`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
   if (!r.ok) throw new GaError(`smart-configuration: HTTP ${r.status}`);
   const smart = (await r.json()) as oidc.ServerMetadata;
   if (typeof smart.token_endpoint !== 'string' || typeof smart.authorization_endpoint !== 'string') throw new GaError('smart-configuration lacks endpoints');
@@ -64,6 +64,7 @@ function listen(port: number): Promise<{ port: number; callback: Promise<URL>; c
       got = res;
       fail = rej;
     });
+    callback.catch(() => {}); // the timeout may fire while open() is still running; connect awaits callback later
     const server = createServer((req, res) => {
       const u = new URL(req.url ?? '/', `http://localhost:${(server.address() as AddressInfo).port}`);
       if (req.method !== 'GET' || u.pathname !== '/callback') {
@@ -156,11 +157,12 @@ export async function accessToken(dir: string, src: SourceRec, clientId: string)
   const t = loadSecret<Tokens>(dir, src.key);
   if (!t) throw new GaError('not_connected');
   if (fresh(t)) return t.access_token;
+  // Network discovery stays outside the lock: a stall inside it could outlive the 2-min stale limit.
+  const config = await discover(dir, src.fhirBase, clientId);
   return withLock(dir, src.key, async () => {
     const cur = loadSecret<Tokens>(dir, src.key) ?? t; // another process may have refreshed already
     if (fresh(cur)) return cur.access_token;
     if (!cur.refresh_token) throw new GaError('no_refresh_token');
-    const config = await discover(dir, src.fhirBase, clientId);
     const r = await oidc.refreshTokenGrant(config, cur.refresh_token).catch((e: unknown) => {
       throw (e as { error?: unknown }).error === 'invalid_grant' ? new GaError('invalid_grant') : oauthError(e, 'token refresh');
     });

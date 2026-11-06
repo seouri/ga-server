@@ -128,6 +128,18 @@ describe('accessToken', () => {
     expect(m.stats.reuse).toBe(0);
   });
 
+  it('fetches the SMART configuration outside the refresh lock', async () => {
+    const { m, src } = await setup();
+    const lockHeld: boolean[] = [];
+    m.onRequest = (u) => {
+      if (u.pathname.endsWith('/smart-configuration')) lockHeld.push(existsSync(join(dir, `${src.key}.lock`)));
+    };
+    expire(src.key);
+    await accessToken(dir, src, clientId);
+    expect(lockHeld).toEqual([false]);
+    expect(m.stats.refreshes).toBe(1);
+  });
+
   it('keeps the stored refresh token when the response omits one', async () => {
     const { m, src } = await setup({ rotate: false });
     const rt = loadSecret<Tokens>(dir, src.key)!.refresh_token;
