@@ -17,7 +17,8 @@ type Any = Record<string, any>; // FHIR resources are read loosely here, every a
 const cc = (c?: Any): string | undefined => c?.text ?? c?.coding?.[0]?.display ?? c?.coding?.[0]?.code;
 const codeKey = (r: Any): string => {
   const c = (r.code ?? r.medicationCodeableConcept ?? r.vaccineCode)?.coding?.[0];
-  return c?.code ? `${c.system ?? ''}|${c.code}` : `text|${cc(r.code) ?? ''}`;
+  const t = cc(r.code);
+  return c?.code ? `${c.system ?? ''}|${c.code}` : t ? `text|${t}` : `type|${r.resourceType}`;
 };
 const qty = (q?: Any): string | undefined => (q?.value === undefined ? undefined : [q.value, q.unit ?? q.code].filter((x) => x !== undefined).join(' '));
 const val = (o: Any): string | undefined => qty(o.valueQuantity) ?? o.valueString ?? cc(o.valueCodeableConcept) ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)) ?? (o.valueInteger === undefined ? undefined : String(o.valueInteger));
@@ -54,6 +55,7 @@ export function summarize(s: Scoped): Summary {
     const best = new Map<string, Resource>();
     for (const r of rs) {
       const k = codeKey(r);
+      if (k.startsWith('type|')) continue; // code-less: nothing to group by
       const cur = best.get(k);
       if (!cur || (dateOf(r) ?? '') > (dateOf(cur) ?? '')) best.set(k, r);
     }
@@ -62,7 +64,12 @@ export function summarize(s: Scoped): Summary {
   const p = trimPatient(s.patient);
   const n = p.name?.[0];
   const apple = new Map<string, Resource[]>();
-  for (const r of of((x) => groupOf(x) === 'apple')) apple.set(codeKey(r), [...(apple.get(codeKey(r)) ?? []), r]);
+  for (const r of of((x) => groupOf(x) === 'apple')) {
+    const k = codeKey(r);
+    const list = apple.get(k);
+    if (list) list.push(r);
+    else apple.set(k, [r]);
+  }
   return {
     patient: { name: n?.text ?? [...(n?.given ?? []), n?.family].filter(Boolean).join(' '), birthDate: p.birthDate, gender: p.gender },
     problems: of((r) => r.resourceType === 'Condition' && active(r) && !!(r as Any).category?.some((c: Any) => c.coding?.some((x: Any) => x.code === 'problem-list-item'))).map(item),
@@ -70,14 +77,14 @@ export function summarize(s: Scoped): Summary {
     allergies: of((r) => r.resourceType === 'AllergyIntolerance' && active(r)).map(item),
     labs: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'labs')),
     vitals: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'vitals')),
-    immunizations: of((r) => r.resourceType === 'Immunization').map(item).sort(newestFirst),
+    immunizations: of((r) => r.resourceType === 'Immunization' && (r as Any).status === 'completed').map(item).sort(newestFirst),
     // Apple readings are never listed one by one: one line per type.
     apple: [...apple.values()].map((rs) => {
       const dates = rs.map((r) => dateOf(r)).filter((d): d is string => !!d).sort();
       const last = rs.reduce((a, b) => ((dateOf(b) ?? '') > (dateOf(a) ?? '') ? b : a));
       const i = item(last);
       const v = i.value ? `${i.value}, latest; ` : '';
-      return { ...i, value: `${v}${rs.length} readings, ${dates[0] ?? '?'} to ${dates.at(-1) ?? '?'}`, date: dates.at(-1), note: 'home reading' };
+      return { ...i, value: `${v}${rs.length} readings, ${dates[0] ?? '?'} to ${dates.at(-1) ?? '?'}`, date: dates.at(-1), note: [i.note, 'home reading'].filter(Boolean).join('; ') };
     }),
   };
 }
@@ -88,7 +95,9 @@ export function recordRows(s: Scoped): Row[] {
   for (const r of s.resources) {
     const g = groupOf(r);
     if (g === 'apple') continue;
-    groups.set(g ?? 'other', [...(groups.get(g ?? 'other') ?? []), toItem(r, s, ctx)]);
+    const list = groups.get(g ?? 'other');
+    if (list) list.push(toItem(r, s, ctx));
+    else groups.set(g ?? 'other', [toItem(r, s, ctx)]);
   }
   return [...groups].map(([group, items]) => ({ group, items: items.sort(newestFirst) }));
 }

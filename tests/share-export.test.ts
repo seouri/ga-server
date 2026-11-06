@@ -69,3 +69,30 @@ test('pdf is a small PDF even with 5000 Apple readings', async () => {
   expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
   expect(pdf.length).toBeLessThan(1_000_000);
 });
+
+test('30,000 Apple readings summarize quickly', () => {
+  const many = scoped(Array.from({ length: 30000 }, (_, i) => apple(i)));
+  const t = Date.now();
+  expect(summarize(many).apple).toHaveLength(1);
+  expect(Date.now() - t).toBeLessThan(2000);
+});
+
+test('notes merge, values format, code-less and non-completed are dropped, bundle Patient is trimmed', () => {
+  const tag = (code: string) => ({ tag: [{ system: 'urn:ga-server:tag', code }] });
+  const a = { ...ldl('1', '2024-01-01', 100), meta: tag('possible-duplicate') } as Resource;
+  const b = { ...apple(1), meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }, { system: 'urn:ga-server:tag', code: 'extracted-by-llm' }] } } as Resource;
+  const str = r({ resourceType: 'Observation', id: 's', status: 'final', code: { text: 'Smell' }, category: [{ coding: [{ code: 'vital-signs' }] }], effectiveDateTime: '2024-01-01', valueString: 'ok' });
+  const cod = r({ resourceType: 'Observation', id: 'c', status: 'final', code: { text: 'Colour' }, category: [{ coding: [{ code: 'vital-signs' }] }], effectiveDateTime: '2024-01-01', valueCodeableConcept: { text: 'red' } });
+  const none = r({ resourceType: 'Observation', id: 'n', status: 'final', code: {}, category: [{ coding: [{ code: 'laboratory' }] }], effectiveDateTime: '2024-01-01' });
+  const imm = (id: string, status: string) => r({ resourceType: 'Immunization', id, status, vaccineCode: { text: 'Flu' }, occurrenceDateTime: '2024-01-01' });
+  const sc = scoped([a, b, str, cod, none, imm('i1', 'completed'), imm('i2', 'entered-in-error')]);
+  sc.patient = { ...sc.patient, identifier: [{ value: 'MRN' }], address: [{ city: 'X' }] } as Scoped['patient'];
+  const s = summarize(sc);
+  expect(s.labs.map((x) => x.note)).toEqual(['possible duplicate']);
+  expect(s.apple[0].note).toBe('read from a document by AI; home reading');
+  expect(s.vitals.map((x) => x.value).sort()).toEqual(['ok', 'red']);
+  expect(s.immunizations.map((x) => x.ref)).toEqual(['Immunization/i1']);
+  const p = toBundle(sc).entry![0].resource as unknown as Record<string, unknown>;
+  expect(p.identifier).toBeUndefined();
+  expect(p.address).toBeUndefined();
+});
