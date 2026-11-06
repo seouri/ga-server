@@ -15,7 +15,7 @@ body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:16px/1.45 s
 h1{font-size:1.15rem;margin:0 0 4px}h2{font-size:1.05rem;margin:24px 0 8px}a{color:var(--acc)}.mut{color:var(--mut);font-size:.9rem}
 .btn{display:inline-block;padding:10px 14px;margin:0 8px 8px 0;border:1px solid var(--line);border-radius:8px;background:var(--card);text-decoration:none}
 .tabs a{display:inline-block;padding:8px 12px;margin-right:4px;border-bottom:2px solid transparent}.tabs a.on{border-color:var(--acc);font-weight:600;text-decoration:none}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}th{overflow-wrap:normal;white-space:nowrap}
 .note{color:var(--mut);font-size:.85rem}textarea{width:100%;box-sizing:border-box;min-height:5rem;font:inherit;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px}
 button{font:inherit;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 .ans{background:var(--card);border-radius:8px;padding:10px 12px;margin:12px 0}`;

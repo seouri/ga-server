@@ -1,6 +1,6 @@
 # Registering GA with Epic
 
-Do this once, before connecting any hospital (see [Hospital portals](../README.md#hospital-portals-smart) in the README). It creates GA's signing key, publishes its public half, and registers GA as a patient app on Epic's developer site.
+Do this once, before connecting any hospital (see [Hospital portals](hospital-portals.md)). It creates GA's signing key, publishes its public half, and registers GA as a patient app on Epic's developer site.
 
 **a. Make GA's key and publish its public half.** Epic's form takes only *JWK Set URLs*, one for non-production and a different one for production, so the public key must sit at two public HTTPS addresses. It is a public key, never health data; one public GitHub Gist holding the same key under two file names works:
 
@@ -105,7 +105,7 @@ Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redir
 
 ## https callback
 
-Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel (the same Funnel that serves share links, see [Sharing](../README.md#sharing)). Only the `/callback` path is added, and GA listens behind it only while `ga connect` waits for your login; any other time it answers nothing.
+Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel (the same Funnel that serves share links, see [Sharing](sharing.md)). Only the `/callback` path is added, and GA listens behind it only while `ga connect` waits for your login; any other time it answers nothing.
 
 1. Your Funnel address is `https://<machine>.<tailnet>.ts.net`: `tailscale status --json | grep DNSName` (drop the trailing dot), or the Tailscale app's machine name. With the Mac App Store app, `tailscale` is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
 2. Route `/callback` to GA's login listener (once; it stays across restarts):
@@ -124,6 +124,8 @@ Production Epic accepts only `https` redirects, so GA receives the login callbac
 
 A login that never returns usually means Funnel is off or `/callback` isn't routed: check `tailscale funnel status`. Anyone can reach that URL while GA waits, but GA accepts only the one callback carrying the login's random `state`, and the code is useless without GA's private key and PKCE verifier.
 
+
+## Data Use Questionnaire
 
 Open it with **Open Data Use Questionnaire** on the app page. Epic shows some answers to patients when they log in, and **they cannot be changed after the app is marked ready for production**. Answers must be truthful: they describe GA as it is today (see [TERMS.md](../TERMS.md)). Save after each answer.
 
