@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import { GaError } from '../config.ts';
 import { COMPARTMENT } from '../engine.ts';
-import { finishLogin, pendingName, resultName } from './auth.ts';
+import { finishLogin, pendingName, resultName, sourceKey } from './auth.ts';
 import type { LoginResult } from './auth.ts';
 import { deleteSecret, loadSecret, readSources, saveSecret, writeSources } from './store.ts';
 import type { SourceRec } from './store.ts';
@@ -64,9 +64,9 @@ export function listLogins(dir: string, now = new Date()) {
   return out;
 }
 
-// One result per hospital: the newest login's dry run is the one hospital_enable previews, and old ones do not pile up.
+// A success replaces every other result for its hospital (just written, so the newest); a failure never deletes anything. The newest dry run is the one hospital_enable previews, and old ones do not pile up.
 function dropOlderResults(dir: string, keep: string, fhirBase: string): void {
-  for (const l of listLogins(dir)) if (l.name.startsWith('result-') && l.name !== keep && l.fhirBase === fhirBase) deleteSecret(dir, l.name);
+  for (const l of listLogins(dir)) if (l.name.startsWith('result-') && l.name !== keep && sourceKey(l.fhirBase) === sourceKey(fhirBase)) deleteSecret(dir, l.name);
 }
 
 // The gateway's /callback: finish the login, dry-run the source for counts, leave the outcome for waitForLogin / hospital_status.
@@ -82,10 +82,7 @@ export async function completeLogin(client: MedplumClient, dir: string, patientI
     return result;
   } catch (e) {
     // An unknown state leaves no file: nothing of ours to report, and forged states must not fill the store.
-    if (fhirBase) {
-      saveSecret(dir, out, { error: e instanceof Error ? e.message : 'login_failed', fhirBase } satisfies LoginResult);
-      dropOlderResults(dir, out, fhirBase);
-    }
+    if (fhirBase) saveSecret(dir, out, { error: e instanceof Error ? e.message : 'login_failed', fhirBase } satisfies LoginResult);
     throw e;
   }
 }

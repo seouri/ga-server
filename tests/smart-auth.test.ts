@@ -248,6 +248,15 @@ describe('startLogin / finishLogin', () => {
       expect(results()).toEqual([`${resultName(b.state)}.enc`]);
     });
 
+    it('a later failure for the same hospital leaves the success result alone', async () => {
+      const a = await start();
+      await run(a.search);
+      const l = await startLogin(dir, mock!.fhirBase, clientId, redirectUri);
+      await expect(run(`?code=bad&state=${l.state}`)).rejects.toThrow();
+      expect(results().sort()).toEqual([`${resultName(a.state)}.enc`, `${resultName(l.state)}.enc`].sort());
+      expect(loadSecret(dir, resultName(a.state))).toMatchObject({ source: { key: '127-0-0-1' } });
+    });
+
     it('expired login: result carries the error and fhirBase', async () => {
       const { state, search } = await start();
       const { saveSecret: save } = await import('../src/smart/store.ts');
