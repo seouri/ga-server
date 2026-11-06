@@ -35,22 +35,24 @@ GA can fetch your records from Epic patient portals (MyChart) by itself, over SM
 
 ### 1. Register the app with Epic (once)
 
-**a. Make GA's key and publish its public half.** Epic's form takes only a *JWK Set URL*, so the public key must sit at a public HTTPS address. It is a public key, never health data; a public GitHub Gist works:
+**a. Make GA's key and publish its public half.** Epic's form takes only *JWK Set URLs*, one for non-production and a different one for production, so the public key must sit at two public HTTPS addresses. It is a public key, never health data; one public GitHub Gist holding the same key under two file names works:
 
 ```sh
-ga keys                                                         # creates .ga/smart/ key (mode 0600), prints the public JWKS
-gh gist create --public -d "GA public key" .ga/smart/public.jwks.json
+ga keys                                                          # creates .ga/smart/ key (mode 0600), prints the public JWKS
+cp .ga/smart/public.jwks.json .ga/smart/production.jwks.json     # same public key, second name for Epic's production URL
+gh gist create --public -d "GA public key" .ga/smart/public.jwks.json .ga/smart/production.jwks.json
 ```
 
-No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box, name the file `public.jwks.json`, and choose **Create public gist**.
+No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box and name it `public.jwks.json`; choose **Add file**, paste again and name it `production.jwks.json`; then choose **Create public gist**.
 
-The gist's page is `https://gist.github.com/<user>/<gist id>` (`gh` prints it). Your JWK Set URL is then:
+The gist's page is `https://gist.github.com/<user>/<gist id>` (`gh` prints it). Your two JWK Set URLs are then:
 
 ```text
 https://gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json
+https://gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json
 ```
 
-Check it: `curl -s <that URL>` prints the same JSON as `ga keys`. `ga keys` never replaces an existing key, so the URL stays valid.
+Check them: `curl -s <URL>` prints the same JSON as `ga keys` for both. `ga keys` never replaces an existing key, so the URLs stay valid.
 
 **b. Create the app.** Sign in at https://fhir.epic.com, choose **Build Apps**, then **Create**, and fill the form:
 
@@ -66,9 +68,9 @@ Check it: `curl -s <that URL>` prints the same JSON as `ga keys`. `ga keys` neve
 | Is Confidential Client | **on** |
 | Requires Persistent Access | **on** |
 | Uses Rolling Refresh Tokens | **on** (GA saves each new refresh token) |
-| Can Have Indefinite Access | **on** (otherwise access ends and you log in again) |
+| Can Have Indefinite Access | leave as is (greyed out for new apps; access then lasts as long as the duration you pick at the MyChart login, so pick the longest) |
 | Non-Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/public.jwks.json` |
-| Production JWK Set URL | the same |
+| Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json` (Epic requires a different URL from non-production) |
 | Sandbox Client Secret | leave empty (GA signs with its key instead of a secret) |
 
 **Incoming APIs.** Select only **R4** APIs whose name has `.Read` or `.Search`; never `.Create`, `.Update`, `(Premium Billing)`, `(DSTU2)` or `(STU3)`. Type each name below into **Search available service list** and move every matching `.Read (R4)` and `.Search (… ) (R4)` entry to **Selected** with `>>`:
