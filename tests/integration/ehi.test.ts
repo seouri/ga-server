@@ -4,14 +4,14 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, write
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Encounter, Observation, Resource } from '@medplum/fhirtypes';
+import type { Condition, DiagnosticReport, Encounter, Immunization, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { mapConditions } from '../../src/ehi/conditions.ts';
 import { mapEncounters } from '../../src/ehi/encounters.ts';
 import { type EhiCtx, epicOrgNumber, PATIENT_REF, resolveUnlinked } from '../../src/ehi/ids.ts';
-import { importEhi } from '../../src/ehi/import.ts';
+import { importEhi, prepareEhi } from '../../src/ehi/import.ts';
 import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
@@ -145,6 +145,63 @@ test('R21: an EHI text-only medication never replaces a coded C-CDA medication',
   expect(await importResources(client, [ehiMr], src, pid, '')).toMatchObject({ created: 0, updated: 0 });
   const m = await client.readReference(mr.medicationReference as never);
   await client.deleteResource('Medication', m.id as string); // shared type: not in the patient compartment
+});
+
+// C1/I1: real mapper output over richer C-CDA records. Random keys: stable identifiers are global.
+test('an EHI update never replaces coded, referenced or more precise C-CDA values', async () => {
+  const k = randomUUID().slice(0, 8);
+  const [csn, prob, order, imm] = ['csn', 'prob', 'ord', 'imm'].map((x) => `${x}-${k}`);
+  const root = 'urn:oid:1.2.840.114350.1.13.99.';
+  const ccda = (type: string, id: string, epic: string | undefined, body: object): Resource =>
+    ({ resourceType: type, id, identifier: [{ system: 'urn:test:src', value: `${id}-${k}` }, ...(epic ? [{ system: `${root}${epic}`, value: id === 'e' ? csn : id === 'c' ? prob : id === 'd' ? order : imm }] : [])], ...body }) as Resource;
+  const subject = { reference: `Patient/${pid}` };
+  const at = '2024-01-05T09:30:00-05:00';
+  const cholesterol = { coding: [{ system: 'http://loinc.org', code: '2093-3' }], text: 'Cholesterol' };
+  const ucum = (value: number) => ({ value, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' });
+  const seed = [
+    { resourceType: 'Practitioner', id: 'pr', identifier: [{ system: 'urn:test:src', value: `pr-${k}` }], name: [{ text: 'Synthetic Doctor' }] } as Resource,
+    ccda('Encounter', 'e', '2.7.3.698084.8', { status: 'finished', class: { code: 'AMB' }, subject, period: { start: '2024-01-05T09:00:00-05:00', end: '2024-01-05T10:00:00-05:00' }, participant: [{ individual: { reference: 'Practitioner/pr', display: 'Synthetic Doctor' } }] }),
+    ccda('Condition', 'c', '2.7.2.768076', { category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }], code: { coding: [{ system: 'http://snomed.info/sct', code: '38341003' }] }, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, subject }),
+    ccda('Observation', 'o1', undefined, { status: 'final', code: cholesterol, subject, effectiveDateTime: at, valueQuantity: ucum(190), interpretation: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation', code: 'H' }] }] }),
+    ccda('Observation', 'o2', undefined, { status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '2085-9' }], text: 'HDL' }, subject, effectiveDateTime: at, valueQuantity: ucum(50) }),
+    ccda('DiagnosticReport', 'd', '2.7.2.798268', { status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '57698-3' }] }, subject, effectivePeriod: { start: at, end: '2024-01-05T11:00:00-05:00' }, result: [{ reference: 'Observation/o1' }, { reference: 'Observation/o2' }] }),
+    ccda('Immunization', 'i', '2.7.2.768076', { status: 'completed', vaccineCode: { coding: [{ system: 'http://hl7.org/fhir/sid/cvx', code: '141' }] }, patient: subject, occurrenceDateTime: '2023-10-01', route: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration', code: 'IM' }] } }),
+  ];
+  expect(await importResources(client, seed, { kind: 'ccda', file: 'synthetic-fill.xml', date: '2024-01-06', writer: 'importer' }, pid, 'h')).toMatchObject({ created: 7, invalid: 0 });
+  const data: Record<string, Record<string, string>[]> = {
+    PAT_ENC: [{ PAT_ENC_CSN_ID: csn, CONTACT_DATE: '1/5/2024 12:00:00 AM', VISIT_PROV_ID_PROV_NAME: 'DOCTOR, SYNTHETIC' }],
+    PROBLEM_LIST: [{ PROBLEM_LIST_ID: prob, DESCRIPTION: 'Synthetic problem', PROBLEM_STATUS_C_NAME: 'Active' }],
+    ORDER_PROC: [{ ORDER_PROC_ID: order, PROC_ID_PROC_NAME: 'LIPID PANEL', LAB_STATUS_C_NAME: 'Final result', PAT_ENC_CSN_ID: csn }],
+    ORDER_RESULTS: [{ ORDER_PROC_ID: order, LINE: '1', COMPONENT_ID_NAME: 'CHOLESTEROL', ORD_VALUE: '190', REFERENCE_UNIT: 'mg/dL', RESULT_STATUS_C_NAME: 'Final', RESULT_FLAG_C_NAME: 'High', RESULT_DATE: '1/5/2024 12:00:00 AM', PAT_ENC_CSN_ID: csn }],
+    IMMUNE: [{ IMMUNE_ID: imm, IMMUNZATN_ID_NAME: 'Influenza', IMMUNE_DATE: '10/1/2023 12:00:00 AM', ROUTE_C_NAME: 'Intramuscular', IMMNZTN_STATUS_C_NAME: 'Given' }],
+  };
+  const t = { rows: (n: string) => (data[n] ?? []).map((r) => new Proxy(r, { get: (o, f: string) => o[f] ?? '' })), skipped: [] } as unknown as EhiTables;
+  const ctx: EhiCtx = { org: `synthetic-fill-${k}`, date: '2026-01-17T08:30:00-05:00', timeZone: 'America/New_York', epicOrgNumber: '99' };
+  const ehi = async () => {
+    const { resources } = await prepareEhi(client, t, ctx, pid);
+    return importResources(client, resources, { kind: 'ehi', file: 'synthetic-fill', date: ctx.date, writer: 'importer' }, pid, '');
+  };
+  expect(await ehi()).toMatchObject({ created: 0, updated: 4, merged: 1, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
+  const one = async <T extends Resource>(type: string, epic: string, value: string) =>
+    (await client.searchResources(type as 'Encounter', { identifier: `${root}${epic}|${value}` }, { cache: 'no-cache' }))[0] as unknown as T;
+  const e = await one<Encounter>('Encounter', '2.7.3.698084.8', csn);
+  expect(e).toMatchObject({ status: 'finished', class: { code: 'AMB' }, period: { end: '2024-01-05T10:00:00-05:00' } });
+  expect(e.participant?.[0].individual?.reference).toMatch(/^Practitioner\//);
+  const c = await one<Condition>('Condition', '2.7.2.768076', prob);
+  expect(c.code).toEqual({ coding: [{ system: 'http://snomed.info/sct', code: '38341003' }], text: 'Synthetic problem' });
+  const d = await one<DiagnosticReport>('DiagnosticReport', '2.7.2.798268', order);
+  expect(d.effectivePeriod?.end).toBe('2024-01-05T11:00:00-05:00');
+  expect(d.effectiveDateTime).toBeUndefined();
+  expect(d.result).toHaveLength(2); // the unmatched C-CDA result is kept
+  const [o] = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3' }, { cache: 'no-cache' });
+  expect(o.interpretation?.[0].coding?.[0].code).toBe('H');
+  expect(o.valueQuantity).toEqual(ucum(190));
+  const i = await one<Immunization>('Immunization', '2.7.2.768076', imm);
+  expect(i.route?.coding?.[0].code).toBe('IM');
+  expect(i.route?.text).toBe('Intramuscular');
+  expect(await ehi()).toMatchObject({ created: 0, updated: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
+  const pr = await client.readReference(e.participant?.[0].individual as never);
+  await client.deleteResource('Practitioner', pr.id as string); // shared type: not in the patient compartment
 });
 
 const files = (d: string): { n: number; size: number } => {

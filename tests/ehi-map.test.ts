@@ -103,6 +103,7 @@ describe('EHI mappers', () => {
       subject: PATIENT_REF,
     });
     expect(e.class).toBeUndefined(); // unknown: left out (R11)
+    expect(e.status).toBeUndefined(); // neither status column says: left out, like class
   });
 
   it('mapConditions sets category and resolved status', () => {

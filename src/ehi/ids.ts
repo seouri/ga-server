@@ -52,7 +52,8 @@ export async function epicOrgNumber(client: MedplumClient, patientId: string): P
 }
 
 // Before import: a record whose Epic link id finds no existing record of the patient is new to GA. A new Condition
-// without a name says nothing: skipped and counted. A new Encounter gets class UNK (required; the export has none),
+// without a name says nothing: skipped and counted. A new Encounter gets class UNK (required; the export has none) and
+// status 'unknown' when the export has none,
 // while a linked one leaves class out so the engine keeps the C-CDA class (R11).
 export async function resolveUnlinked(
   client: MedplumClient,
@@ -76,7 +77,7 @@ export async function resolveUnlinked(
         skippedNoName++;
         continue;
       }
-      if (!linked && classless) (r as Encounter).class = { system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor', code: 'UNK' };
+      if (!linked && classless) Object.assign(r, { class: { system: 'http://terminology.hl7.org/CodeSystem/v3-NullFlavor', code: 'UNK' }, status: (r as Encounter).status ?? 'unknown' });
     }
     out.push(r);
   }

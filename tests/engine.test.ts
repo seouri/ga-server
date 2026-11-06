@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import type { MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
-import { decide, importResources, sameValue } from '../src/engine.ts';
+import { decide, fillFrom, importResources, sameValue } from '../src/engine.ts';
 import { stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
@@ -154,4 +154,43 @@ test('sameValue compares quantities, strings, first codings and booleans (R19)',
   expect(sameValue(o({ valueString: 'a' }), o({ valueString: 'a' }))).toBe(true);
   expect(sameValue(o({ valueQuantity: { value: 1, unit: 'kg' } }), o({ valueQuantity: { value: 1, unit: 'g' } }))).toBe(false);
   expect(sameValue(o({}), o({}))).toBe(false);
+});
+
+// C1/I1: an EHI update never replaces a more specific existing value with a less specific one.
+const EHI: SourceInfo = { kind: 'ehi', file: 'x', date: '2026-01-17', writer: 'importer' };
+const SNO = { system: 'http://snomed.info/sct', code: '1' };
+test('EHI fill keeps codings, references, periods, known status, UCUM and unmatched results', () => {
+  const ex = {
+    resourceType: 'Observation', status: 'final', code: { coding: [SNO] }, subject: { reference: 'Patient/p' },
+    interpretation: [{ coding: [{ system: 'v3', code: 'H' }], text: 'High' }],
+    effectivePeriod: { start: '2024-01-05T09:00:00Z', end: '2024-01-05T10:00:00Z' },
+    valueQuantity: { value: 5, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' },
+    referenceRange: [{ low: { value: 1, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' } }],
+  } as unknown as Resource;
+  const inc = {
+    resourceType: 'Observation', status: 'unknown', code: { text: 'Thing' }, subject: { reference: 'Patient/p' },
+    interpretation: [{ text: 'H' }], effectiveDateTime: '2024-01-05', valueQuantity: { value: 5, unit: 'mg/dL' },
+    referenceRange: [{ low: { value: 1, unit: 'mg/dL' } }],
+  } as unknown as Resource;
+  const f = fillFrom(ex, inc, EHI) as unknown as Record<string, unknown>;
+  expect(f).toEqual({ ...ex, code: { coding: [SNO], text: 'Thing' } });
+  // Idempotent: the stored result filled again is equal (decide compares bodies once source dates are out of the way).
+  expect(decide(f as unknown as Resource, fillFrom(f as unknown as Resource, inc, EHI))).toBe('skip');
+  // C-CDA unchanged: the incoming body as is.
+  expect(fillFrom(ex, inc, src('2026-01-01'))).toBe(inc);
+});
+
+test('EHI fill: participant display over reference, unknown status, same-day period; a more specific incoming value wins', () => {
+  const p = { individual: { reference: 'Practitioner/1', display: 'DR X' }, type: [{ coding: [{ code: 'ATND' }] }] };
+  const ex = { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, participant: [p], period: { start: '2024-01-05T09:00:00-05:00', end: '2024-01-05T10:00:00-05:00' } } as unknown as Resource;
+  const inc = { resourceType: 'Encounter', status: 'unknown', participant: [{ individual: { display: 'X, DR' } }], period: { start: '2024-01-05' } } as unknown as Resource;
+  expect(fillFrom(ex, inc, EHI)).toEqual(ex);
+  const newer = { resourceType: 'Encounter', status: 'cancelled', period: { start: '2024-01-06' }, participant: [{ individual: { reference: 'Practitioner/2' } }] } as unknown as Resource;
+  expect(fillFrom(ex, newer, EHI)).toMatchObject({ status: 'cancelled', period: { start: '2024-01-06' }, participant: [{ individual: { reference: 'Practitioner/2' } }] });
+  // Another day replaces the period; a text-only concept over a text-only one is just newer.
+  const o = { resourceType: 'Observation', effectivePeriod: { start: '2024-01-05' }, code: { text: 'a' } } as unknown as Resource;
+  expect(fillFrom(o, { resourceType: 'Observation', effectiveDateTime: '2024-01-07', code: { text: 'b' } } as unknown as Resource, EHI)).toEqual({ resourceType: 'Observation', effectiveDateTime: '2024-01-07', code: { text: 'b' } });
+  // A report keeps the results the export didn't match, existing first.
+  const dr = (refs: string[]) => ({ resourceType: 'DiagnosticReport', result: refs.map((reference) => ({ reference })) }) as unknown as Resource;
+  expect(fillFrom(dr(['Observation/a', 'Observation/b']), dr(['Observation/c', 'Observation/a']), EHI)).toEqual(dr(['Observation/a', 'Observation/b', 'Observation/c']));
 });

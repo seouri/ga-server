@@ -66,16 +66,49 @@ const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
 // Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
 const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
 const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
-function fillFrom(existing: R, incomingRes: R, s: SourceInfo): R {
+type O = Record<string, unknown>;
+const isObj = (x: unknown): x is O => !!x && typeof x === 'object' && !Array.isArray(x);
+const coded = (x: unknown) => isObj(x) && Array.isArray(x.coding) && x.coding.some((c) => (c as { code?: string }).code);
+const concept = (x: unknown) => isObj(x) && ('coding' in x || 'text' in x) && !('reference' in x);
+const day = (x: unknown) => (typeof x === 'string' ? x.slice(0, 10) : undefined);
+// C1/I1: incoming adds nothing more specific than existing: equal; a text-only concept (or 'unknown' code) over a coded one;
+// a display-only reference over a resolved one; 'unknown' over a known code; a start-only period on the same day; or an
+// object whose every field is equal or less specific (so a Quantity without system/code keeps its UCUM coding).
+function weaker(ex: unknown, inc: unknown): boolean {
+  if (canon(ex) === canon(inc)) return true;
+  if (inc === 'unknown' && typeof ex === 'string') return true;
+  if (Array.isArray(ex) && Array.isArray(inc)) {
+    return ex.length === inc.length ? inc.every((x, i) => weaker(ex[i], x)) : inc.every((x) => ex.some((e) => weaker(e, x)));
+  }
+  if (!isObj(ex) || !isObj(inc)) return false;
+  if (coded(ex) && concept(inc) && (!coded(inc) || code0(inc) === 'unknown')) return true;
+  if (ex.reference && !inc.reference && 'display' in inc) return true;
+  if (typeof ex.start === 'string' && !inc.end && day(ex.start) === day(inc.start) && Object.keys(inc).every((k) => k === 'start')) return true;
+  return Object.keys(inc).every((k) => weaker(ex[k], inc[k]));
+}
+// Same-length arrays merge element-wise; a weaker value keeps the existing one (a coded concept takes the incoming text if it has none).
+function merge(ex: unknown, inc: unknown): unknown {
+  if (ex === undefined) return inc;
+  if (Array.isArray(ex) && Array.isArray(inc) && ex.length === inc.length) return inc.map((x, i) => merge(ex[i], x));
+  if (!weaker(ex, inc)) return inc;
+  return isObj(ex) && isObj(inc) && coded(ex) && !ex.text && inc.text ? { ...ex, text: inc.text } : ex;
+}
+export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
   if (s.kind !== 'ehi') return incomingRes;
   // R21: a text-only medication never replaces a coded one (a Medication reference, or a concept with codings).
   const ex = existing as unknown as Record<string, { coding?: unknown[] } | undefined>;
   const med = (incomingRes as unknown as Record<string, { coding?: unknown[] } | undefined>).medicationCodeableConcept;
-  const incoming = { ...incomingRes } as R;
+  const incoming = { ...incomingRes };
   if (med && !med.coding?.length && (ex.medicationReference || ex.medicationCodeableConcept?.coding?.length)) {
     delete (incoming as unknown as Record<string, unknown>).medicationCodeableConcept;
   }
   const inc = incoming as unknown as Record<string, unknown>;
+  const exr = existing as unknown as O;
+  // A single time never replaces an existing period of the same choice element starting that day.
+  for (const k of Object.keys(inc)) {
+    const p = exr[`${choiceBase(k)}Period`] as { start?: string } | undefined;
+    if (k !== `${choiceBase(k)}Period` && choiceBase(k) !== k && p?.start && day(p.start) === day(inc[k])) delete inc[k];
+  }
   const incBases = new Set(Object.keys(inc).filter((k) => inc[k] !== undefined).map(choiceBase));
   const drop = (k: string): boolean => {
     if (BOOKKEEPING.has(k) || inc[k] !== undefined || incBases.has(choiceBase(k))) return true;
@@ -85,7 +118,15 @@ function fillFrom(existing: R, incomingRes: R, s: SourceInfo): R {
     return k.startsWith('abatement') && !!inc.clinicalStatus && !['resolved', 'inactive', 'remission'].includes(code0(inc.clinicalStatus) ?? '');
   };
   const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !drop(k)));
-  return { ...kept, ...incoming } as R;
+  const out = { ...kept, ...incoming } as unknown as O;
+  for (const k of Object.keys(inc)) if (!BOOKKEEPING.has(k)) out[k] = merge(exr[k], inc[k]);
+  // A report keeps the existing results the export didn't match (existing first: stable order for re-import equality).
+  const res = exr.result as { reference?: string }[] | undefined;
+  if (incoming.resourceType === 'DiagnosticReport' && res && Array.isArray(inc.result)) {
+    const have = new Set(res.map((r) => r.reference));
+    out.result = [...res, ...(inc.result as { reference?: string }[]).filter((r) => !have.has(r.reference))];
+  }
+  return out as unknown as T;
 }
 
 // Records carrying any of these Epic ids (scoped to the patient for compartment types), and those of them not yet
