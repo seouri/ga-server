@@ -5,6 +5,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { storeDocument } from '../../src/document.ts';
 import { BINARY_URL, loadScoped } from '../../src/share/scope.ts';
+import { toBundle } from '../../src/share/summary.ts';
 import type { Group, Share } from '../../src/share/store.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
@@ -106,6 +107,8 @@ test("notes share follows the attachment to its own Binary, not another patient'
   expect(s.resources.map((r) => r.resourceType)).toEqual(['DocumentReference']); // the archive stays out
   expect((s.resources[0] as DocumentReference).content[0].attachment.url).toContain('/storage/');
   expect(ids(s.support)).toEqual([`Binary/${bin.id}`]);
+  const bundle = JSON.stringify(toBundle(s)); // the note's presigned url is dropped; the support Binary carries no url
+  expect(bundle).not.toContain('/storage/');
 });
 
 test("patient B's records never appear in A's share", async () => {
