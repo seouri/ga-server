@@ -49,6 +49,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
   const verifyPasskey = deps.verifyPasskey ?? ((r, c) => verifyAuthentication(deps.dir, pub!, r, c));
   const fails = failLimiter();
   const registrations = failLimiter();
+  const authorizations = failLimiter();
 
   // WebAuthn challenges, server side only: one per interaction or enroll token, single use, short-lived.
   const challenges = new Map<string, { challenge: string; exp: number }>();
@@ -211,8 +212,9 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (i) return interaction(req, res, ip, i[1], i[2] ?? '');
     const e = /^\/enroll\/([A-Za-z0-9_-]+)$/.exec(path);
     if (e) return enroll(req, res, ip, e[1]);
-    // Each registration writes a client file: 20 per IP per 10 minutes.
-    if (path === '/reg' && req.method === 'POST' && registrations.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
+    // Each registration or authorization request writes a file: 20 of each per IP per 10 minutes.
+    const writes = path === '/reg' && req.method === 'POST' ? registrations : path === '/auth' ? authorizations : undefined;
+    if (writes?.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
     return oidc(req, res);
   }
 

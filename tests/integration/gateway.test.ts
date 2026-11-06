@@ -25,6 +25,8 @@ let dir: string;
 let server: Server;
 let base: string;
 const start = new Date().toISOString();
+let passkeyOk = false;
+const seen: string[] = [];
 
 beforeAll(async () => {
   const cfg = loadConfig();
@@ -38,7 +40,7 @@ beforeAll(async () => {
     tools: remoteTools(client, cfg, pid),
     share: { dir: join(dir, 'share'), load: async () => { throw new Error('unused'); }, log: async () => {}, fetchBinary: async () => { throw new Error('unused'); } },
     completeLogin: async () => ({}),
-    verifyPasskey: async () => true,
+    verifyPasskey: async (_r, challenge) => { seen.push(challenge); return passkeyOk; },
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -108,11 +110,23 @@ test('chat app connects, uses tools, refreshes, and is cut off when disconnected
   const clientId = (await reg.json()).client_id as string;
 
   const verifier = oidc.randomPKCECodeVerifier();
-  const login = await authorize(clientId, verifier);
+  let login = await authorize(clientId, verifier);
   expect(login.page?.html).toContain('Sign in with passkey');
-  const signed = await go(`${login.page!.path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  const signIn = () => go(`${login.page!.path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  // No passkey, no consent and no code: a failed passkey, consent posted at the login prompt.
+  expect((await signIn()).status).toBe(400);
+  expect(jar.has('ga_owner')).toBe(false);
+  const early = await go(`${login.page!.path}/consent`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'decision=allow' });
+  expect(early.status).toBe(400);
+  // The verifier gets the challenge shown on the page, once.
+  passkeyOk = true;
+  login = { page: { path: login.page!.path, html: await (await go(login.page!.path)).text() } };
+  const shown = /"challenge":"([^"]+)"/.exec(login.page!.html)?.[1];
+  const signed = await signIn();
   expect(signed.status).toBe(200);
+  expect(seen.at(-1)).toBe(shown);
   expect(jar.has('ga_owner')).toBe(true);
+  expect((await signIn()).status).toBe(400);
   const consent = await follow(await go((await signed.json()).redirect));
   expect(consent.page?.html).toContain('Claude Code wants to use your GA record');
   const done = await follow(await go(`${consent.page!.path}/consent`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'decision=allow' }));
