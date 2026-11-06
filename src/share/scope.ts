@@ -40,7 +40,6 @@ const BY_TYPE: Record<string, Group> = {
   Immunization: 'immunizations',
   Encounter: 'visits',
   DocumentReference: 'notes',
-  Composition: 'notes',
   Procedure: 'procedures',
   FamilyMemberHistory: 'family',
   Communication: 'messages',

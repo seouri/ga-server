@@ -28,7 +28,7 @@ test.each<[Resource, Group | undefined]>([
   [r({ resourceType: 'Immunization' }), 'immunizations'],
   [r({ resourceType: 'Encounter' }), 'visits'],
   [r({ resourceType: 'DocumentReference' }), 'notes'],
-  [r({ resourceType: 'Composition' }), 'notes'],
+  [r({ resourceType: 'Composition' }), undefined], // C-CDA narrative holds every section: `all` shares only
   [r({ resourceType: 'Procedure' }), 'procedures'],
   [r({ resourceType: 'FamilyMemberHistory' }), 'family'],
   [r({ resourceType: 'Communication' }), 'messages'],
