@@ -161,6 +161,25 @@ services:
       GA_LLM_MODEL: ${GA_LLM_MODEL:-}
     command: ['node', 'src/cli.ts', 'gateway', 'serve']
 
+  # Nightly backup (scripts/backup.sh): database dump, stored files and .ga to GA_BACKUP_DIR, newest 7 kept.
+  # Backups hold all health records: keep the directory on an encrypted disk. Same user as ga-sync so files stay yours.
+  ga-backup:
+    image: postgres:16
+    restart: unless-stopped
+    init: true
+    user: '${UID:-1000}:${GID:-1000}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: medplum # same as POSTGRES_PASSWORD above
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ga-binary:/ga-binary:ro
+      - ./.ga:/dot-ga:ro
+      - ${GA_BACKUP_DIR:-./backups}:/backups
+    command: ['bash', '/backup.sh']
+
 volumes:
   ga-postgres:
   ga-binary:

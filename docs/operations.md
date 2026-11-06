@@ -25,6 +25,8 @@ docker run --rm -v ga-server_ga-binary:/b:ro -v ~/ga-backup:/out postgres:16 tar
 cp -Rp .ga ~/ga-backup/dot-ga
 ```
 
+The `ga-backup` compose service does this every night into `./backups` (or `GA_BACKUP_DIR`), one dated folder per run, newest 7 kept; the restore below works with those files (`dot-ga.tgz` unpacks to `.ga`).
+
 ## Restore
 
 On the same or a new Mac, after cloning the repo (don't run `setup.sh`: the backup already holds your patient and admin account):
