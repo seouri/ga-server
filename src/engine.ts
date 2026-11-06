@@ -24,8 +24,8 @@ const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
-const OTHER_SOURCE = (system: string) =>
-  system.startsWith('urn:ga-server:id:ehi:') || ['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf', APPLE].includes(system);
+// Apple is left out: on an Apple-only record the hospital body wins (otherOntoApple).
+const OTHER_SOURCE = (system: string) => system.startsWith('urn:ga-server:id:ehi:') || ['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf'].includes(system);
 // Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
 const COMPARTMENT: Record<string, string> = {
   ...Object.fromEntries(
@@ -249,14 +249,19 @@ export async function importResources(
     const lastBy = r.meta?.author?.reference;
     return author && lastBy && lastBy !== author && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r;
   };
+  // A person (or the agent) last shaped this record: smart fill-only and last-seen writes leave it alone.
+  const personEdited = (r: Resource): boolean => {
+    const lastBy = r.meta?.author?.reference;
+    return !!(author && lastBy && lastBy !== author) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
+  };
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
-    const ext = r.extension ?? [];
-    const seen = !!source.seenAt && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
+    const { extension: ext = [], ...rest } = r;
+    const seen = !!source.seenAt && !personEdited(r) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
     if (!changed && !seen) return;
     const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
     const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];
-    await client.updateResource(protect({ ...r, extension } as Resource));
+    await client.updateResource(protect({ ...rest, ...(extension.length && { extension }) } as Resource));
     if (seen) report.seen = (report.seen ?? 0) + 1;
   };
 
@@ -348,6 +353,10 @@ export async function importResources(
       : [];
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
     const fillOnto = async (ex: R): Promise<void> => {
+      if (personEdited(ex)) {
+        report.skipped++;
+        return;
+      }
       const bases = new Set(Object.keys(ex).map(choiceBase));
       const add = Object.entries(incoming).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
       const have = new Set(idList(ex).map(idKey));
@@ -357,7 +366,7 @@ export async function importResources(
       if (added) report.merged++;
       else report.skipped++;
     };
-    // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF, Apple) wrote, on every sync.
+    // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF) wrote, on every sync.
     const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
     const fromApple = source.kind === 'apple-health';

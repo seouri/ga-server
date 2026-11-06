@@ -644,3 +644,34 @@ test('a conflict wins over fill-only: no fill, no smart identifier, no last-seen
   expect(found.issued).toBeUndefined();
   expect(found.extension?.some((e) => e.url === LAST_SEEN)).toBe(false);
 });
+
+test('a person-edited record gets neither a fill nor a last-seen stamp from an older-dated smart copy', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [ehiProblem(pl)], ehiSrc('2026-06-01'), pid, 'h');
+  const [before] = await byId('Condition', pl.system, pl.value);
+  // Someone other than GA's own client last wrote it: the engine sees a different author than the record's.
+  const spy = vi.spyOn(client, 'getProfile').mockReturnValue({ resourceType: 'Practitioner', id: 'someone-else' });
+  try {
+    const s = smartSrc('2026-11-05T00:00:00Z', { fillOnly: () => true, dateOf: () => '2026-01-01T00:00:00Z', seenAt: '2026-11-05T00:00:00Z' });
+    expect(await importResources(client, [smartProblem(pl, 'resolved')], s, pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, conflicts: 0, skipped: 1, seen: 0 });
+  } finally {
+    spy.mockRestore();
+  }
+  const [found] = await byId('Condition', pl.system, pl.value);
+  expect(found.meta?.versionId).toBe(before.meta?.versionId);
+  expect(found.onsetDateTime).toBeUndefined();
+  expect(systems(found)).not.toContain(SMART_SYS);
+  expect(found.extension?.some((e) => e.url === LAST_SEEN)).toBe(false);
+  expect(tagged(found, 'source-conflict')).toBe(false);
+});
+
+test('a fill-only smart copy of an Apple-only reading takes over the body (hospital beats Apple)', async () => {
+  const at = '2026-04-01T07:30:00-05:00';
+  await importResources(client, [phone(at, 81)], apple('2026-04-02'), pid, 'a');
+  const o = uid('o');
+  const portal = { ...weight(SMART_SYS, `Observation/${o}`, at, 81), status: 'amended' } as Resource;
+  expect(await importResources(client, [portal], smartSrc('2026-11-05T00:00:00Z', { fillOnly: () => true }), pid, 'h')).toMatchObject({ created: 0, merged: 1 });
+  const [found] = await client.searchResources('Observation', { identifier: `${SMART_SYS}|Observation/${o}` }, { cache: 'no-cache' });
+  expect(found.status).toBe('amended');
+  expect(systems(found)).toContain(APPLE);
+});
