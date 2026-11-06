@@ -96,22 +96,18 @@ export async function signingKey(dir: string): Promise<{ key: CryptoKey; kid: st
   return { key: (await importJWK(jwk, 'RS384')) as CryptoKey, kid: jwk.kid as string };
 }
 
+const readJson = <T>(f: string, empty: T): T => (existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as T) : empty);
+
 export type SourceRec = { key: string; name: string; fhirBase: string; patient?: string; enabledTypes?: string[] };
 
-export function readSources(dir: string): SourceRec[] {
-  const f = join(dir, 'sources.json');
-  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as SourceRec[]) : [];
-}
+export const readSources = (dir: string): SourceRec[] => readJson(join(dir, 'sources.json'), []);
 
 export function writeSources(dir: string, s: SourceRec[]): void {
   writeAtomic(join(dir, 'sources.json'), JSON.stringify(s, null, 2));
 }
 
 // Registered client id: not secret.
-export function readApp(dir: string): { clientId?: string } {
-  const f = join(dir, 'app.json');
-  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as { clientId?: string }) : {};
-}
+export const readApp = (dir: string): { clientId?: string } => readJson(join(dir, 'app.json'), {});
 
 export function writeApp(dir: string, app: { clientId?: string }): void {
   writeAtomic(join(dir, 'app.json'), JSON.stringify(app, null, 2));

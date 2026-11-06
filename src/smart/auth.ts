@@ -26,7 +26,7 @@ const oauthError = (e: unknown, what: string): GaError => {
   return new GaError(`${what} failed: ${typeof code === 'string' ? code : detail}`);
 };
 
-export async function discover(dir: string, fhirBase: string, clientId: string): Promise<oidc.Configuration> {
+async function discover(dir: string, fhirBase: string, clientId: string): Promise<oidc.Configuration> {
   const base = fhirBase.replace(/\/+$/, '');
   if (!base.startsWith('https://') && !isLocal(base)) throw new GaError('FHIR base must be https');
   const r = await fetch(`${base}/.well-known/smart-configuration`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
@@ -117,17 +117,15 @@ export async function connect(
       aud: base,
     });
     await open(url.href);
-    const current = await cb.callback;
-    const r = await oidc
-      .authorizationCodeGrant(config, current, { pkceCodeVerifier: verifier, expectedState: state })
-      .catch((e: unknown) => {
-        throw oauthError(e, 'authorization');
-      });
+    const r = await oidc.authorizationCodeGrant(config, await cb.callback, { pkceCodeVerifier: verifier, expectedState: state }).catch((e: unknown) => {
+      throw oauthError(e, 'authorization');
+    });
     const key = sourceKey(base);
-    saveSecret(dir, key, toTokens(r));
+    const t = toTokens(r);
+    saveSecret(dir, key, t);
     const sources = readSources(dir);
     const prev = sources.find((s) => s.key === key);
-    const rec: SourceRec = { ...prev, key, name: opts.name ?? prev?.name ?? key, fhirBase: base, patient: (r.patient as string) };
+    const rec: SourceRec = { ...prev, key, name: opts.name ?? prev?.name ?? key, fhirBase: base, patient: t.patient };
     writeSources(dir, [...sources.filter((s) => s.key !== key), rec]);
     return rec;
   } finally {

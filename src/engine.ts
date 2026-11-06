@@ -16,7 +16,7 @@ export type ImportReport = {
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
 };
-export type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
+type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 export const TAG = 'urn:ga-server:tag';
@@ -244,16 +244,14 @@ export async function importResources(
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
   const author = me ? `${me.resourceType}/${me.id}` : undefined;
+  const byOther = (r: Resource): boolean => {
+    const lastBy = r.meta?.author?.reference;
+    return !!(author && lastBy && lastBy !== author);
+  };
   // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky source-conflict tag.
-  const protect = (r: Resource): Resource => {
-    const lastBy = r.meta?.author?.reference;
-    return author && lastBy && lastBy !== author && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r;
-  };
+  const protect = (r: Resource): Resource => (byOther(r) && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r);
   // A person (or the agent) last shaped this record: smart fill-only and last-seen writes leave it alone.
-  const personEdited = (r: Resource): boolean => {
-    const lastBy = r.meta?.author?.reference;
-    return !!(author && lastBy && lastBy !== author) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
-  };
+  const personEdited = (r: Resource): boolean => byOther(r) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;

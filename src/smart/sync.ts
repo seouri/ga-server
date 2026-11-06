@@ -4,7 +4,7 @@ import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from '
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Attachment, DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
 import { GaError } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
 import { accessToken, type Tokens } from './auth.ts';
@@ -49,7 +49,7 @@ function dryRunClient(client: MedplumClient): MedplumClient {
     deleteResource: async () => undefined,
   };
   return new Proxy(client, {
-    get: (t, p, _r) => {
+    get: (t, p) => {
       if (typeof p === 'string' && Object.hasOwn(stubs, p)) return stubs[p];
       const v = Reflect.get(t, p, t);
       if (typeof v !== 'function') return v;
@@ -75,7 +75,7 @@ async function uploadBinaries(client: MedplumClient, resources: Resource[], bina
       { cache: 'no-cache' },
     );
     for (const c of d.content) {
-      const a: Attachment = c.attachment;
+      const a = c.attachment;
       const b = a.url && byRef.get(a.url);
       if (!b) continue;
       // Medplum may answer with a presigned storage URL: store the Binary/<id> form either way.
@@ -86,10 +86,11 @@ async function uploadBinaries(client: MedplumClient, resources: Resource[], bina
   }
 }
 
+const ext = (e: Endpoint | undefined, url: string): Extension | undefined => e?.extension?.find((x) => x.url === url);
+const forPatient = (patientId: string) => (e: Endpoint): boolean => ext(e, PATIENT)?.valueReference?.reference === `Patient/${patientId}`;
+
 const findEndpoint = async (client: MedplumClient, key: string, patientId: string): Promise<Endpoint | undefined> =>
-  (await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|${key}` }, { cache: 'no-cache' })).find(
-    (e) => e.extension?.find((x) => x.url === PATIENT)?.valueReference?.reference === `Patient/${patientId}`,
-  );
+  (await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|${key}` }, { cache: 'no-cache' })).find(forPatient(patientId));
 
 export async function writeEndpoint(
   client: MedplumClient,
@@ -107,7 +108,7 @@ export async function writeEndpoint(
   } catch {
     // unreadable token store: no expiry to report
   }
-  const lastSuccess = status === 'active' ? at : prev?.extension?.find((x) => x.url === LAST_SUCCESS)?.valueDateTime;
+  const lastSuccess = status === 'active' ? at : ext(prev, LAST_SUCCESS)?.valueDateTime;
   const extension: Extension[] = [
     { url: PATIENT, valueReference: { reference: `Patient/${patientId}` } },
     { url: LAST_ATTEMPT, valueDateTime: at },
@@ -230,7 +231,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     if (opts.dryRun) return ok; // an explicit --dry-run writes nothing at all
     try {
       // Never enabled: a status-only Endpoint, so agents see the source (off, not_enabled: stale) without any patient data.
-      await (pending ? writeEndpoint(client, dir, src, patientId, 'off', at, 'not_enabled') : writeEndpoint(client, dir, src, patientId, 'active', at));
+      await writeEndpoint(client, dir, src, patientId, pending ? 'off' : 'active', at, pending ? 'not_enabled' : undefined);
     } catch {
       console.error(`smart sync ${src.key}: status_write_error`);
       return { ...ok, error: 'status_write_error' }; // the import itself succeeded
@@ -268,23 +269,20 @@ export async function readStatus(
 ): Promise<{ source: string; name: string; status: string; lastSuccess?: string; error?: string; stale: boolean; enabledTypes: string[] }[]> {
   const now = new Date();
   const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' });
-  const listed = eps
-    .filter((e) => e.extension?.find((x) => x.url === PATIENT)?.valueReference?.reference === `Patient/${patientId}`)
-    .map((e) => {
-      const get = (url: string) => e.extension?.find((x) => x.url === url);
-      const lastSuccess = get(LAST_SUCCESS)?.valueDateTime;
-      const types = get(ENABLED_TYPES)?.valueString;
-      const error = get(LAST_ERROR)?.valueCode;
-      return {
-        source: e.identifier?.find((i) => i.system === SOURCE_ID)?.value ?? '',
-        name: e.name ?? '',
-        status: e.status,
-        ...(lastSuccess && { lastSuccess }),
-        ...(error && { error }),
-        stale: isStale(e.status, lastSuccess, now),
-        enabledTypes: types ? types.split(',') : [],
-      };
-    });
+  const listed = eps.filter(forPatient(patientId)).map((e) => {
+    const lastSuccess = ext(e, LAST_SUCCESS)?.valueDateTime;
+    const types = ext(e, ENABLED_TYPES)?.valueString;
+    const error = ext(e, LAST_ERROR)?.valueCode;
+    return {
+      source: e.identifier?.find((i) => i.system === SOURCE_ID)?.value ?? '',
+      name: e.name ?? '',
+      status: e.status,
+      ...(lastSuccess && { lastSuccess }),
+      ...(error && { error }),
+      stale: isStale(e.status, lastSuccess, now),
+      enabledTypes: types ? types.split(',') : [],
+    };
+  });
   const have = new Set(listed.map((s) => s.source));
   const pending = (dir ? readSources(dir) : [])
     .filter((s) => !have.has(s.key))

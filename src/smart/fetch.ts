@@ -8,12 +8,12 @@ import { SINGULAR_ID } from '../identity.ts';
 import { walkReferences } from '../patient.ts';
 import type { SourceRec } from './store.ts';
 
-export const OBS_CATEGORIES = ['laboratory', 'vital-signs', 'social-history', 'survey', 'exam', 'imaging', 'procedure', 'activity', 'therapy'];
-const COND_CATEGORIES = ['problem-list-item', 'encounter-diagnosis', 'health-concern'];
-const CATEGORIES: Record<string, string[]> = { Observation: OBS_CATEGORIES, Condition: COND_CATEGORIES };
+const CATEGORIES: Record<string, string[]> = {
+  Observation: ['laboratory', 'vital-signs', 'social-history', 'survey', 'exam', 'imaging', 'procedure', 'activity', 'therapy'],
+  Condition: ['problem-list-item', 'encounter-diagnosis', 'health-concern'],
+};
 
-// A PDF or image a DocumentReference points at. Task 5 uploads `data` with client.createBinary and replaces the
-// attachment url equal to `ref` with `Binary/<new id>`. Never inlined: Medplum's max JSON size is 1 MB.
+// A PDF or image a DocumentReference points at; uploadBinaries (sync.ts) stores it. Never inlined: Medplum's max JSON size is 1 MB.
 export type PendingBinary = { ref: string; contentType: string; data: Buffer };
 
 type R = Resource & { identifier?: Identifier[] | Identifier };
@@ -39,9 +39,10 @@ export async function fetchAll(
   const base = normBase(fhirBase);
   const skipped: Record<string, string> = {};
   const failures: Record<string, number> = {};
-  const fail = (what: string, status: number) => {
+  const fail = async (what: string, r: Response) => {
+    await r.body?.cancel();
     failures[what] = (failures[what] ?? 0) + 1;
-    skipped[what] = `${failures[what]} failed, last HTTP ${status}`;
+    skipped[what] = `${failures[what]} failed, last HTTP ${r.status}`;
   };
   const got = new Map<string, Resource>(); // by Type/id: category searches overlap
   const add = (r: Resource) => r.id && !got.has(keyOf(r)) && got.set(keyOf(r), r);
@@ -104,10 +105,7 @@ export async function fetchAll(
     if (!m || got.has(m)) continue;
     const res = await get(`${base}/${m}`, 'Medication');
     if (res.ok) add(await parse<Resource>(res, 'Medication'));
-    else {
-      await res.body?.cancel();
-      fail('Medication', res.status);
-    }
+    else await fail('Medication', res);
   }
 
   // Note bodies: Binary/<id> attachments are fetched into attachment.data (base64); mapForGa decides what they become.
@@ -117,8 +115,7 @@ export async function fetchAll(
       if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !URL.canParse(a.url, `${base}/`) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
       const res = await get(a.url, 'Binary', a.contentType ?? '*/*');
       if (!res.ok) {
-        await res.body?.cancel();
-        fail('Binary', res.status);
+        await fail('Binary', res);
         continue;
       }
       const type = res.headers.get('content-type') ?? '';
@@ -143,14 +140,14 @@ export async function fetchAll(
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 const entity = (m: string, e: string): string => {
-  const n = e[0] === '#' ? (e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)) : NaN;
   if (e[0] !== '#') return ENTITIES[e.toLowerCase()] ?? m;
+  const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
   return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
 };
 
 // Plain text of an HTML note: scripts, styles and head dropped, block ends become line breaks, entities decoded.
 // shortcut: only the common named entities are decoded; upgrade if notes show others.
-export function htmlToText(html: string): string {
+function htmlToText(html: string): string {
   return html
     .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
@@ -215,7 +212,7 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
       : type === 'text/plain' ? buf.toString('utf8') // shortcut: assumes UTF-8; upgrade if a server sends another charset
       : undefined;
     const { data: _d, url: _u, ...rest } = a;
-    // hash (base64 SHA-1, as FHIR defines it) and size of the stored bytes: Task 5 reuses an existing Binary when the hash matches.
+    // hash (base64 SHA-1, as FHIR defines it) and size of the stored bytes: uploadBinaries reuses an existing Binary when the hash matches.
     const sum = (b: Buffer) => ({ size: b.length, hash: createHash('sha1').update(b).digest('base64') });
     if (text === undefined) {
       binaries.push({ ref, contentType: a.contentType ?? 'application/octet-stream', data: buf });

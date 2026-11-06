@@ -25,6 +25,8 @@ const OPTIONS = {
   disconnect: {},
 } as const;
 const HOUR_MS = 3_600_000;
+// network, server or a held lock: worth a retry soon; off (login needed) is not
+const failed = (r: SyncResult): boolean => r.status === 'error' || r.error === 'busy';
 const NO_SOURCES = 'no sources connected';
 
 // Medplum client and patient. GA_PATIENT_ID is for tests only, as in mcp.ts.
@@ -71,7 +73,7 @@ async function daemon(): Promise<never> {
     if (Date.now() - last < wait) continue;
     last = Date.now();
     const at = new Date(last).toISOString();
-    let failed = false;
+    let retry = false;
     try {
       // Log in before checking sources, so "no sources connected" also proves the container reaches Medplum.
       const { client, patientId } = await ga();
@@ -79,13 +81,13 @@ async function daemon(): Promise<never> {
       if (!readSources(dir).length) console.log(`${at} ${NO_SOURCES}`);
       for (const r of await syncAll(client, dir, patientId)) {
         print(r, (s) => console.log(`${at} ${s}`));
-        failed ||= r.status === 'error' || r.error === 'busy'; // network, server or a held lock: retry soon; off (login needed) waits a day
+        retry ||= failed(r);
       }
     } catch (e) {
-      failed = true;
+      retry = true;
       console.error(`${at} sync failed: ${e instanceof GaError ? e.message : 'sync_error'}`);
     }
-    wait = failed ? HOUR_MS : 24 * HOUR_MS;
+    wait = retry ? HOUR_MS : 24 * HOUR_MS;
   }
 }
 
@@ -124,13 +126,13 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     const { client, patientId } = await ga(); // fails before the login when GA is not running
     if (id) writeApp(dir, { ...readApp(dir), clientId: id });
     const src = await connect(dir, positionals[0], clientId, browser, { name: values.name as string | undefined });
-    // No enabled types yet: syncSource only dry-runs. Under fallback A this is the only fetch.
+    // No enabled types yet: syncSource only dry-runs.
     const r = await syncSource(client, dir, src, patientId);
     print(r);
     if (r.status === 'pending' && !r.error) {
       console.log(`Next: enable only the types that are new to GA or link to what it holds: ga sync --enable <Type,...> ${src.key}`);
     }
-    if (r.status === 'error' || r.error === 'busy') process.exitCode = 1;
+    if (failed(r)) process.exitCode = 1;
   } else if (cmd === 'sync') {
     if (values.daemon) {
       usage(!positionals.length && !values.enable && !values['dry-run']);
@@ -157,7 +159,7 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     for (const src of chosen) {
       const r = await syncSource(client, dir, src, patientId, { dryRun: !!values['dry-run'] });
       print(r);
-      if (r.status === 'error' || r.error === 'busy') process.exitCode = 1;
+      if (failed(r)) process.exitCode = 1;
     }
   } else if (cmd === 'status') {
     usage(!positionals.length);
