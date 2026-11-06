@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FileAdapter } from '../src/gateway/adapter.ts';
+import { FileAdapter, sweepExpired } from '../src/gateway/adapter.ts';
 import { allowedRedirect, appName, createProvider, disconnectClient, listClients } from '../src/gateway/oauth.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
@@ -44,6 +44,17 @@ describe('allowedRedirect', () => {
 });
 
 describe('FileAdapter', () => {
+  it('sweepExpired removes expired records and keeps live ones', async () => {
+    const d = tmp();
+    let t = 1_000_000;
+    const a = new FileAdapter('AccessToken', d, () => t);
+    await a.upsert('old', { x: 1 }, 10);
+    await a.upsert('new', { x: 2 }, 1000);
+    await a.upsert('forever', { x: 3 });
+    sweepExpired(d, t + 20_000);
+    expect(readdirSync(join(d, 'oidc', 'AccessToken'))).toHaveLength(2);
+    expect(await a.find('new')).toEqual({ x: 2 });
+  });
   it('round-trips, expires, consumes and revokes by grant', async () => {
     const d = tmp();
     let t = 1_000_000;

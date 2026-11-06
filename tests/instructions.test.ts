@@ -43,3 +43,28 @@ describe('remote output cap and logging', () => {
     expect((await search(await connect(false))).content[0].text.length).toBeGreaterThan(200_000);
   });
 });
+
+describe('admin types are refused', () => {
+  const mk = async (resource: object) => {
+    const client = { search: async () => ({ entry: [{ resource: { resourceType: 'ClientApplication', secret: 's' } }, { resource }] }), readResource: async () => ({ resourceType: 'ClientApplication' }) } as unknown as MedplumClient;
+    const server = buildMcpServer({ client, cfg: {} as never, patientId: 'p' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([server.connect(a), c.connect(b)]);
+    return c;
+  };
+  const call = async (c: Client, name: string, args: Record<string, string>) => (await c.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
+  it('refuses fhir_read and fhir_search of ClientApplication', async () => {
+    const c = await mk({ resourceType: 'Observation', id: 'o' });
+    for (const r of [await call(c, 'fhir_read', { resourceType: 'ClientApplication', id: '1' }), await call(c, 'fhir_search', { resourceType: 'ClientApplication' })]) {
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toContain('not available');
+    }
+  });
+  it('drops included admin entries; Observation still works', async () => {
+    const r = await call(await mk({ resourceType: 'Observation', id: 'o' }), 'fhir_search', { resourceType: 'Observation' });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain('Observation');
+    expect(r.content[0].text).not.toContain('ClientApplication');
+  });
+});

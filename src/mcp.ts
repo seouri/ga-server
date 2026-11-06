@@ -121,6 +121,9 @@ export const readable = (x: unknown): unknown => {
 };
 
 const TYPE_RE = /^[A-Z][A-Za-z]+$/;
+// Medplum project-admin types (secrets, logins, bots): never readable through the agent tools, either transport.
+const ADMIN_TYPES = new Set(['ClientApplication', 'User', 'Project', 'ProjectMembership', 'Login', 'Bot', 'AccessPolicy', 'JsonWebKey', 'UserConfiguration', 'UserSecurityRequest', 'Subscription', 'Agent', 'DomainConfiguration', 'PasswordChangeRequest', 'SmartAppLaunch', 'BulkDataExport', 'AsyncJob']);
+const refuseAdmin = (t: string) => (ADMIN_TYPES.has(t) ? fail(new GaError(`${t} is not available through this tool`)) : undefined);
 export const text = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v) }] });
 export const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
 
@@ -162,8 +165,11 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     'fhir_search',
     { description: "Search the user's personal health record (GA) by FHIR resource type and search params.", inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) }, annotations: { readOnlyHint: true } },
     async ({ resourceType, params }) => {
+      const no = refuseAdmin(resourceType);
+      if (no) return no;
       try {
         const b = await client.search(resourceType as 'Observation', { ...params, _count: String(Math.min(Number(params._count) || 20, 1000)) }, { cache: 'no-cache' });
+        b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
         return text(readable(b));
       } catch (e) {
@@ -175,6 +181,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     'fhir_read',
     { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() }, annotations: { readOnlyHint: true } },
     async ({ resourceType, id }) => {
+      const no = refuseAdmin(resourceType);
+      if (no) return no;
       try {
         return text(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })));
       } catch (e) {

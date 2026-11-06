@@ -18,6 +18,7 @@ import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
+import { sweepExpired } from './adapter.ts';
 import { MAX_UPLOAD, UploadTooLarge, acceptUpload, cleanUploads, uploadLinkValid } from './uploads.ts';
 
 type Remote = Omit<NonNullable<ToolDeps['remote']>, 'log'>;
@@ -287,7 +288,10 @@ export async function serveGateway(): Promise<void> {
     share: shareDeps(client),
     completeLogin: (search) => completeLogin(client, smartDir(), cfg.patientId, search),
   });
-  const sweep = () => cleanUploads(gatewayDir());
+  const sweep = () => {
+    cleanUploads(gatewayDir());
+    sweepExpired(gatewayDir());
+  };
   sweep();
   setInterval(sweep, 3600_000).unref();
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';

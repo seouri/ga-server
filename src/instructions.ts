@@ -27,7 +27,7 @@ export function chatInstructions(): string {
         return l
           .replace('sourceFile: "<absolute path>"', 'fileId: "<the `fileId` from `upload_link`>"')
           .replace('refused with `already imported: <file>`', 'refused as already imported');
-      if (/^10\. /.test(l)) return '10. Medication status: a medication dropped from a newer list is not marked stopped. Apply the currency rule from step 4 above.';
+      if (/^10\. /.test(l)) return '10. Medication status: a medication dropped from a newer list is not marked stopped. Apply the currency rule from step 4 of the answering rules above.';
       return l;
     })
     .join('\n')

@@ -65,7 +65,6 @@ async function funnelHint(): Promise<void> {
   if (!/Funnel on/.test(out) || !/proxy http:\/\/(127\.0\.0\.1|localhost):8110\b/.test(out)) console.log('Links work after you run: tailscale funnel --bg 8110');
 }
 
-
 async function printLink(s: Share, token: string): Promise<void> {
   const url = `${s.baseUrl}/s/${token}`;
   console.log(url);

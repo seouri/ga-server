@@ -82,3 +82,17 @@ export class FileAdapter {
     for (const [f, p] of this.scan(models)) if (p.grantId === grantId) rmSync(f, { force: true });
   }
 }
+
+// Expired records are only deleted when read; sweep the rest (tokens nobody presents again).
+export function sweepExpired(dir: string, now: number = Date.now()): void {
+  const root = join(dir, 'oidc');
+  if (!existsSync(root)) return;
+  for (const m of readdirSync(root))
+    for (const f of readdirSync(join(root, m)).filter((f) => f.endsWith('.json'))) {
+      const file = join(root, m, f);
+      try {
+        const e = JSON.parse(readFileSync(file, 'utf8')) as Entry;
+        if (e.expiresAt !== undefined && e.expiresAt <= now) rmSync(file, { force: true });
+      } catch {} // unreadable or half-written: leave it
+    }
+}
