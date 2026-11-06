@@ -1,0 +1,103 @@
+// What a share shows: the summary, the per-group record rows and the FHIR bundle. Pure over Scoped.
+import { basename } from 'node:path';
+import type { Bundle, Resource } from '@medplum/fhirtypes';
+import { currency, currencyContext } from '../current.ts';
+import { TAG } from '../identity.ts';
+import { dateOf, groupOf, trimPatient } from './scope.ts';
+import type { Scoped } from './scope.ts';
+
+export type Item = { label: string; value?: string; date?: string; source?: string; note?: string; ref: string };
+export type Summary = {
+  patient: { name: string; birthDate?: string; gender?: string };
+  problems: Item[]; medications: Item[]; allergies: Item[]; labs: Item[]; vitals: Item[]; immunizations: Item[]; apple: Item[];
+};
+export type Row = { group: string; items: Item[] };
+
+type Any = Record<string, any>; // FHIR resources are read loosely here, every access is optional-chained.
+const cc = (c?: Any): string | undefined => c?.text ?? c?.coding?.[0]?.display ?? c?.coding?.[0]?.code;
+const codeKey = (r: Any): string => {
+  const c = (r.code ?? r.medicationCodeableConcept ?? r.vaccineCode)?.coding?.[0];
+  return c?.code ? `${c.system ?? ''}|${c.code}` : `text|${cc(r.code) ?? ''}`;
+};
+const qty = (q?: Any): string | undefined => (q?.value === undefined ? undefined : [q.value, q.unit ?? q.code].filter((x) => x !== undefined).join(' '));
+const val = (o: Any): string | undefined => qty(o.valueQuantity) ?? o.valueString ?? cc(o.valueCodeableConcept) ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)) ?? (o.valueInteger === undefined ? undefined : String(o.valueInteger));
+const formatValue = (r: Resource): string | undefined => {
+  const o = r as Any;
+  const comps = (o.component ?? []).map((c: Any) => val(c)).filter(Boolean);
+  return val(o) ?? (comps.length ? comps.join(' / ') : undefined);
+};
+const hasTag = (r: Resource, code: string): boolean => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
+const ref = (r: Resource): string => `${r.resourceType}/${r.id}`;
+
+export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources, s.endpoints)): Item {
+  const o = r as Any;
+  const med = o.medicationReference?.reference && s.support.find((x) => ref(x) === o.medicationReference.reference);
+  const label = cc(o.code) ?? cc(o.medicationCodeableConcept) ?? cc(o.vaccineCode) ?? cc((med as Any)?.code) ?? o.medicationReference?.display
+    ?? o.title ?? o.type?.[0]?.text ?? o.description ?? r.resourceType;
+  const notes = [
+    currency(r, ctx) === 'unconfirmed' && 'unconfirmed (not on the latest hospital list)',
+    hasTag(r, 'extracted-by-llm') && 'read from a document by AI',
+    hasTag(r, 'possible-duplicate') && 'possible duplicate',
+  ].filter(Boolean);
+  const source = r.meta?.source ? basename(r.meta.source) : undefined;
+  return { label, value: formatValue(r), date: dateOf(r), source, note: notes.join('; ') || undefined, ref: ref(r) };
+}
+
+const newestFirst = (a: Item, b: Item): number => (b.date ?? '').localeCompare(a.date ?? '');
+
+export function summarize(s: Scoped): Summary {
+  const ctx = currencyContext(s.resources, s.endpoints);
+  const item = (r: Resource): Item => toItem(r, s, ctx);
+  const of = (pred: (r: Resource) => boolean): Resource[] => s.resources.filter(pred);
+  const active = (r: Resource): boolean => currency(r, ctx) !== undefined;
+  const latest = (rs: Resource[]): Item[] => {
+    const best = new Map<string, Resource>();
+    for (const r of rs) {
+      const k = codeKey(r);
+      const cur = best.get(k);
+      if (!cur || (dateOf(r) ?? '') > (dateOf(cur) ?? '')) best.set(k, r);
+    }
+    return [...best.values()].map(item).sort(newestFirst);
+  };
+  const p = trimPatient(s.patient);
+  const n = p.name?.[0];
+  const apple = new Map<string, Resource[]>();
+  for (const r of of((x) => groupOf(x) === 'apple')) apple.set(codeKey(r), [...(apple.get(codeKey(r)) ?? []), r]);
+  return {
+    patient: { name: n?.text ?? [...(n?.given ?? []), n?.family].filter(Boolean).join(' '), birthDate: p.birthDate, gender: p.gender },
+    problems: of((r) => r.resourceType === 'Condition' && active(r) && !!(r as Any).category?.some((c: Any) => c.coding?.some((x: Any) => x.code === 'problem-list-item'))).map(item),
+    medications: of((r) => (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') && active(r)).map(item),
+    allergies: of((r) => r.resourceType === 'AllergyIntolerance' && active(r)).map(item),
+    labs: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'labs')),
+    vitals: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'vitals')),
+    immunizations: of((r) => r.resourceType === 'Immunization').map(item).sort(newestFirst),
+    // Apple readings are never listed one by one: one line per type.
+    apple: [...apple.values()].map((rs) => {
+      const dates = rs.map((r) => dateOf(r)).filter((d): d is string => !!d).sort();
+      const last = rs.reduce((a, b) => ((dateOf(b) ?? '') > (dateOf(a) ?? '') ? b : a));
+      const i = item(last);
+      const v = i.value ? `${i.value}, latest; ` : '';
+      return { ...i, value: `${v}${rs.length} readings, ${dates[0] ?? '?'} to ${dates.at(-1) ?? '?'}`, date: dates.at(-1), note: 'home reading' };
+    }),
+  };
+}
+
+export function recordRows(s: Scoped): Row[] {
+  const ctx = currencyContext(s.resources, s.endpoints);
+  const groups = new Map<string, Item[]>();
+  for (const r of s.resources) {
+    const g = groupOf(r);
+    if (g === 'apple') continue;
+    groups.set(g ?? 'other', [...(groups.get(g ?? 'other') ?? []), toItem(r, s, ctx)]);
+  }
+  return [...groups].map(([group, items]) => ({ group, items: items.sort(newestFirst) }));
+}
+
+export function toBundle(s: Scoped): Bundle {
+  const clean = (r: Resource): Resource => (r.meta?.source ? { ...r, meta: { ...r.meta, source: basename(r.meta.source) } } : r);
+  return {
+    resourceType: 'Bundle',
+    type: 'collection',
+    entry: [trimPatient(s.patient), ...s.resources, ...s.support].map((r) => ({ resource: clean(r) })),
+  };
+}
