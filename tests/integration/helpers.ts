@@ -13,10 +13,13 @@ export async function createTestPatient(client: MedplumClient): Promise<string> 
 }
 
 export async function cleanupTestPatient(client: MedplumClient, patientId: string): Promise<void> {
-  const bundle = await client.get<Bundle>(`fhir/R4/Patient/${patientId}/$everything?_count=1000`, { cache: 'no-cache' });
-  for (const e of bundle.entry ?? []) {
-    const r = e.resource;
-    if (r && r.resourceType !== 'Patient') await client.deleteResource(r.resourceType, r.id as string);
+  // Only compartment matches: $everything also includes referenced shared records (Organization, Practitioner...), which may be real.
+  // Repeat until nothing matches, so a compartment larger than one page is fully deleted.
+  for (;;) {
+    const bundle = await client.get<Bundle>(`fhir/R4/Patient/${patientId}/$everything?_count=1000`, { cache: 'no-cache' });
+    const mine = (bundle.entry ?? []).flatMap((e) => (e.search?.mode === 'match' && e.resource && e.resource.resourceType !== 'Patient' ? [e.resource] : []));
+    if (!mine.length) break;
+    for (const r of mine) await client.deleteResource(r.resourceType, r.id as string);
   }
   await client.deleteResource('Patient', patientId);
 }

@@ -341,6 +341,23 @@ test('a patient-compartment resource without a subject does not link to another 
   }
 });
 
+test('a C-CDA Encounter without subject and Device without patient are found again on re-import', async () => {
+  const e = uid('enc');
+  const d = uid('dev');
+  const batch: Resource[] = [
+    { resourceType: 'Encounter', id: e, identifier: src(e), status: 'finished', class: { code: 'AMB' } },
+    { resourceType: 'Device', id: d, identifier: src(d), deviceName: [{ name: 'synthetic-ehr', type: 'user-friendly-name' }] },
+  ];
+  try {
+    expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
+    expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, skipped: 2 });
+  } finally {
+    // outside any patient compartment, so cleanupTestPatient would miss them
+    for (const [type, id] of [['Encounter', e], ['Device', d]] as const)
+      for (const r of await client.searchResources(type, { identifier: `urn:test:src|${id}` }, { cache: 'no-cache' })) await client.deleteResource(type, r.id as string);
+  }
+});
+
 const dupOf = (r: Resource) => ((r as Observation).extension ?? []).filter((e) => e.url === 'urn:ga-server:ext:possible-duplicate-of').map((e) => e.valueReference?.reference);
 
 test('an ambiguous link creates a possible-duplicate pointing at every candidate', async () => {

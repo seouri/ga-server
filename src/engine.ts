@@ -309,7 +309,9 @@ export async function importResources(
     // Searches stay outside the try: only a write's validation failure is tolerated.
     // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
     const field = COMPARTMENT[type];
-    const byStable = (await client.searchOne(type, { identifier: idKey(ident), ...(field && { [field]: `Patient/${patientId}` }) }, { cache: 'no-cache' })) as R | undefined;
+    // A record stored without a patient (the converter emits some C-CDA Encounters/Devices so) belongs to no other patient: match it too.
+    const byStable = (await client.searchOne(type, { identifier: idKey(ident), ...(field && { [field]: `Patient/${patientId}` }) }, { cache: 'no-cache' }) ??
+      (field ? await client.searchOne(type, { identifier: idKey(ident), [`${field}:missing`]: 'true' }, { cache: 'no-cache' }) : undefined)) as R | undefined;
     const link = byStable ? { dups: [] } : await linkHit(incoming, ident);
     const linked = link.hit;
     const existing = byStable ?? linked;
