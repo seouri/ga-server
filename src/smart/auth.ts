@@ -69,24 +69,25 @@ const toTokens = (r: oidc.TokenEndpointResponse, prev?: Tokens): Tokens => {
   };
 };
 
-// Waits for one GET /callback on 127.0.0.1 and answers the browser at once (the exchange happens after).
-function listen(port: number): Promise<{ port: number; callback: Promise<URL>; close: () => void }> {
+// Waits for one GET /callback on 127.0.0.1 and answers the browser at once (the exchange happens after); resolves its query.
+// "/" too: a Tailscale Funnel path mount may strip "/callback" before proxying here.
+function listen(port: number): Promise<{ port: number; callback: Promise<string>; close: () => void }> {
   return new Promise((resolve, reject) => {
-    let got: (u: URL) => void;
+    let got: (search: string) => void;
     let fail: (e: Error) => void;
-    const callback = new Promise<URL>((res, rej) => {
+    const callback = new Promise<string>((res, rej) => {
       got = res;
       fail = rej;
     });
     callback.catch(() => {}); // the timeout may fire while open() is still running; connect awaits callback later
     const server = createServer((req, res) => {
       const u = new URL(req.url ?? '/', `http://localhost:${(server.address() as AddressInfo).port}`);
-      if (req.method !== 'GET' || u.pathname !== '/callback') {
+      if (req.method !== 'GET' || !['/callback', '/callback/', '/'].includes(u.pathname) || !u.searchParams.has('state')) {
         res.writeHead(404).end();
         return;
       }
       res.writeHead(200, { 'content-type': 'text/plain' }).end('GA received the authorization. You can close this window.');
-      got(u);
+      got(u.search);
     });
     const timer = setTimeout(() => fail(new GaError('authorization timed out')), 10 * 60_000);
     const close = () => {
@@ -104,7 +105,7 @@ export async function connect(
   fhirBase: string,
   clientId: string,
   open: (url: string) => void | Promise<void>,
-  opts: { name?: string; port?: number } = {},
+  opts: { name?: string; port?: number; redirectUri?: string } = {},
 ): Promise<SourceRec> {
   const base = fhirBase.replace(/\/+$/, '');
   const config = await discover(dir, base, clientId);
@@ -112,7 +113,8 @@ export async function connect(
   const state = oidc.randomState();
   const cb = await listen(opts.port ?? 8765);
   try {
-    const redirectUri = `http://localhost:${cb.port}/callback`;
+    // https (e.g. a Tailscale Funnel address proxying to this listener) for production Epic; localhost otherwise.
+    const redirectUri = opts.redirectUri ?? `http://localhost:${cb.port}/callback`;
     const url = oidc.buildAuthorizationUrl(config, {
       redirect_uri: redirectUri,
       scope: SCOPE,
@@ -122,7 +124,10 @@ export async function connect(
       aud: base,
     });
     await open(url.href);
-    const r = await oidc.authorizationCodeGrant(config, await cb.callback, { pkceCodeVerifier: verifier, expectedState: state }).catch((e: unknown) => {
+    // openid-client sends the callback URL's origin and path as redirect_uri, so rebuild it from the registered one.
+    const current = new URL(redirectUri);
+    current.search = await cb.callback;
+    const r = await oidc.authorizationCodeGrant(config, current, { pkceCodeVerifier: verifier, expectedState: state }).catch((e: unknown) => {
       throw oauthError(e, 'authorization');
     });
     const key = sourceKey(base);

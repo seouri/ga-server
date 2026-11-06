@@ -31,7 +31,7 @@ Check them: `curl -s <URL>` prints the same JSON as `ga keys` for both. `ga keys
 | Automatic Client Distribution | **USCDI v3** (Epic offers the app to every Epic organization on its own; with **None** each hospital must enable it by hand) |
 | Public Documentation URL | leave empty |
 | Incoming APIs | see below |
-| Endpoint URI | `http` + `localhost:8765/callback` |
+| Endpoint URI | `http` + `localhost:8765/callback` (sandbox), then **Add Another URI**: `https` + `<machine>.<tailnet>.ts.net/callback` (production; see [https callback](#https-callback)) |
 | Can Register Dynamic Clients | off |
 | Is Confidential Client | **on** |
 | Requires Persistent Access | **on** |
@@ -88,7 +88,7 @@ GA asks each hospital which of these it supports and fetches only those, so extr
 
 **d. Sandbox first, production last.** Click **Save & Ready for Sandbox** and test against Epic's sandbox with the **Non-Production Client ID**. Marking it ready for production freezes the app (Epic: "the app cannot be edited") and, with USCDI v3, Epic sends it to every qualifying Epic customer. So before **Save & Ready for Production**, all of these must be done:
 
-- **An `https` Endpoint URI.** Production rejects an app whose only redirect is `http://localhost:8765/callback`; GA does not have an https callback yet (planned: a Tailscale Funnel address such as `https://<machine>.<tailnet>.ts.net/callback`, added as a second Endpoint URI).
+- **An `https` Endpoint URI**, added and tested as in [https callback](#https-callback).
 - The required fields above (Summary, Intended Purposes, Intended Users, Terms URL), both questionnaires, and the open.epic terms-of-use checkbox.
 
 Other customers receiving the app cannot use it: only your Mac holds GA's private key.
@@ -103,7 +103,27 @@ Log in as Epic's sandbox patient `fhircamila` / `epicepic1` and choose the longe
 
 Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redirect works; Epic issues a refresh token without `openid`; access duration up to 1 year; Epic grants no `patient/*.read` wildcard, so GA names each type; the dry run fetched 308 records across 13 types. Types Epic refused (403: not among the selected APIs, e.g. FamilyMemberHistory, MedicationStatement) or rejected (400: CarePlan, Media, Specimen need parameters GA doesn't send) are skipped and listed.
 
-## Data Use Questionnaire
+## https callback
+
+Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel (the same Funnel that serves share links, see [Sharing](../README.md#sharing)). Only the `/callback` path is added, and GA listens behind it only while `ga connect` waits for your login; any other time it answers nothing.
+
+1. Your Funnel address is `https://<machine>.<tailnet>.ts.net`: `tailscale status --json | grep DNSName` (drop the trailing dot), or the Tailscale app's machine name. With the Mac App Store app, `tailscale` is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
+2. Route `/callback` to GA's login listener (once; it stays across restarts):
+
+   ```sh
+   tailscale funnel --bg --set-path /callback 8765
+   tailscale funnel status          # shows /callback proxying to 127.0.0.1:8765, beside / for share links if set
+   ```
+
+3. In the Epic app, **Add Another URI**: `https` + `<machine>.<tailnet>.ts.net/callback`. Keep the `http://localhost:8765/callback` one for the sandbox.
+4. Connect with it once; GA remembers it (in `.ga/smart/app.json`) for later `ga connect` runs:
+
+   ```sh
+   ga connect <hospital FHIR base URL> --client-id <Client ID> --redirect-uri https://<machine>.<tailnet>.ts.net/callback
+   ```
+
+A login that never returns usually means Funnel is off or `/callback` isn't routed: check `tailscale funnel status`. Anyone can reach that URL while GA waits, but GA accepts only the one callback carrying the login's random `state`, and the code is useless without GA's private key and PKCE verifier.
+
 
 Open it with **Open Data Use Questionnaire** on the app page. Epic shows some answers to patients when they log in, and **they cannot be changed after the app is marked ready for production**. Answers must be truthful: they describe GA as it is today (see [TERMS.md](../TERMS.md)). Save after each answer.
 

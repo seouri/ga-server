@@ -106,9 +106,10 @@ export function writeSources(dir: string, s: SourceRec[]): void {
   writeAtomic(join(dir, 'sources.json'), JSON.stringify(s, null, 2));
 }
 
-// Registered client id: not secret.
-export const readApp = (dir: string): { clientId?: string } => readJson(join(dir, 'app.json'), {});
+// Registered client id and redirect URI: not secret.
+type App = { clientId?: string; redirectUri?: string };
+export const readApp = (dir: string): App => readJson(join(dir, 'app.json'), {});
 
-export function writeApp(dir: string, app: { clientId?: string }): void {
+export function writeApp(dir: string, app: App): void {
   writeAtomic(join(dir, 'app.json'), JSON.stringify(app, null, 2));
 }

@@ -16,6 +16,7 @@ export type MockOpts = {
   noRefresh?: boolean; // fallback A: never issue a refresh token
   rotate?: boolean; // default true; false = refresh response omits refresh_token and the old one stays valid
   expiresIn?: number;
+  redirectUri?: string; // a registered https redirect (Funnel) accepted besides http://localhost:<port>/callback
   // Return an RS256 id_token from the code exchange when `openid` was requested (iss = <origin>/oauth2), with `issuer` advertised or not.
   idToken?: 'advertised' | 'unadvertised';
 };
@@ -140,7 +141,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
       p.get('response_type') === 'code' &&
       p.get('code_challenge_method') === 'S256' &&
       p.get('aud') === m.fhirBase &&
-      /^http:\/\/localhost:\d+\/callback$/.test(redirect);
+      (/^http:\/\/localhost:\d+\/callback$/.test(redirect) || redirect === opts.redirectUri);
     if (!ok) return json(res, 400, { error: 'invalid_request' });
     const code = `code-${randomUUID()}`;
     m.stats.scopes.push(p.get('scope') ?? '');

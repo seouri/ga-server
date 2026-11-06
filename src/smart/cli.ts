@@ -12,14 +12,14 @@ import type { SyncResult } from './sync.ts';
 
 const USAGE: Record<string, string> = {
   keys: 'ga keys',
-  connect: 'ga connect <fhir-base-url> [--client-id <id>] [--name <label>]',
+  connect: 'ga connect <fhir-base-url> [--client-id <id>] [--name <label>] [--redirect-uri <https url>]',
   sync: 'ga sync [--dry-run] [--enable <Type,...>|all] [source] | ga sync --daemon',
   status: 'ga status',
   disconnect: 'ga disconnect <source>',
 };
 const OPTIONS = {
   keys: {},
-  connect: { 'client-id': { type: 'string' }, name: { type: 'string' } },
+  connect: { 'client-id': { type: 'string' }, name: { type: 'string' }, 'redirect-uri': { type: 'string' } },
   sync: { 'dry-run': { type: 'boolean' }, enable: { type: 'string' }, daemon: { type: 'boolean' } },
   status: {},
   disconnect: {},
@@ -124,8 +124,11 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     const clientId = id || readApp(dir).clientId;
     if (!clientId) throw new GaError('first connect needs --client-id <id> (the client ID from your app registration)');
     const { client, patientId } = await ga(); // fails before the login when GA is not running
-    if (id) writeApp(dir, { ...readApp(dir), clientId: id });
-    const src = await connect(dir, positionals[0], clientId, browser, { name: values.name as string | undefined });
+    const redirect = values['redirect-uri'] as string | undefined;
+    if (redirect && !/^https:\/\/[^/?#]+\/[^?#]*$/.test(redirect)) throw new GaError('--redirect-uri must be an https URL, e.g. https://<machine>.<tailnet>.ts.net/callback');
+    if (id || redirect) writeApp(dir, { ...readApp(dir), ...(id && { clientId: id }), ...(redirect && { redirectUri: redirect }) });
+    const redirectUri = redirect ?? readApp(dir).redirectUri;
+    const src = await connect(dir, positionals[0], clientId, browser, { name: values.name as string | undefined, redirectUri });
     // No enabled types yet: syncSource only dry-runs.
     const r = await syncSource(client, dir, src, patientId);
     print(r);

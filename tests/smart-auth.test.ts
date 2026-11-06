@@ -99,6 +99,24 @@ describe('connect', () => {
     expect(mock.stats.assertions).toBe(0);
     expect(readSources(dir)).toEqual([]);
   });
+
+  // Production Epic needs an https redirect: a Funnel address that proxies to the local listener, here with "/callback" stripped.
+  it('uses a registered https redirect URI and accepts the proxied callback', async () => {
+    const redirectUri = 'https://ga.example.ts.net/callback';
+    const { publicJwks } = await ensureKeys(dir);
+    mock = await startMock({ clientId, jwks: publicJwks, redirectUri });
+    const port = 18765;
+    const viaFunnel = async (url: string): Promise<void> => {
+      const r = await fetch(url, { redirect: 'manual' });
+      const cb = new URL(r.headers.get('location')!);
+      expect(cb.origin + cb.pathname).toBe(redirectUri);
+      expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(404); // a stray hit without state does not end the login
+      await fetch(`http://127.0.0.1:${port}/${cb.search}`);
+    };
+    const src = await connect(dir, mock.fhirBase, clientId, viaFunnel, { port, redirectUri });
+    expect(src.patient).toBe('synthetic-patient-1');
+    expect(loadSecret<Tokens>(dir, src.key)!.refresh_token).toBeTruthy();
+  });
 });
 
 describe('accessToken', () => {
