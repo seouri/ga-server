@@ -7,7 +7,7 @@ import type { Resource } from '@medplum/fhirtypes';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { logAccess, readLog } from '../src/share/audit.ts';
 import type { Scoped } from '../src/share/scope.ts';
-import { createServer } from '../src/share/server.ts';
+import { createServer, failLimiter } from '../src/share/server.ts';
 import { createShare, revokeShare, type Share } from '../src/share/store.ts';
 
 const HEADERS = {
@@ -179,9 +179,15 @@ test('/ask: empty, too long, oversized body, answer error, not set up', async ()
   const { token } = share();
   expect(await (await ask(token, '   ')).text()).toContain('Please enter a question');
   expect(await (await ask(token, 'x'.repeat(2001))).text()).toContain('2000 characters');
-  const big = await fetch(`${base}/s/${token}/ask`, { method: 'POST', body: 'q=' + 'x'.repeat(5000) });
+  const big = await fetch(`${base}/s/${token}/ask`, { method: 'POST', body: 'q=' + 'x'.repeat(21 * 1024) });
   expect(big.status).toBe(413);
   expectHeaders(big);
+  expect(await big.text()).toContain('Question too long');
+  // Chunked (no Content-Length): the streaming count rejects it.
+  const chunks = new ReadableStream({ start(c) { for (let i = 0; i < 30; i++) c.enqueue(new TextEncoder().encode('x'.repeat(1024))); c.close(); } });
+  const chunked = await fetch(`${base}/s/${token}/ask`, { method: 'POST', body: chunks, duplex: 'half' } as RequestInit);
+  expect(chunked.status).toBe(413);
+  expect(await chunked.text()).toContain('Question too long');
   const err = await (await ask(token, 'hi')).text();
   expect(err).toContain('Sorry, the question could not be answered right now.');
   expect(err).not.toContain('secret internal detail');
@@ -190,16 +196,29 @@ test('/ask: empty, too long, oversized body, answer error, not set up', async ()
   expect(await (await ask(token, 'hi')).text()).toContain('Questions are not set up');
 });
 
-test('rate limit: 21 bad tokens from one X-Forwarded-For give 429, other IPs unaffected', async () => {
-  await start();
+test('rate limit: 21 bad tokens from one IP give 429; a valid token still works; the limit lifts after the window', async () => {
+  let clock = Date.now();
+  await start({ now: () => new Date(clock) });
   const { token } = share();
   const h = { 'x-forwarded-for': '198.51.100.7' };
   for (let i = 0; i < 20; i++) expect((await get(`/s/bad${i}`, h)).status).toBe(404);
   const r = await get('/s/bad20', h);
   expect(r.status).toBe(429);
   expectHeaders(r);
-  expect((await get(`/s/${token}`, h)).status).toBe(429);
-  expect((await get(`/s/${token}`, { 'x-forwarded-for': '198.51.100.8' })).status).toBe(200);
+  expect((await get(`/s/${token}`, h)).status).toBe(200);
+  expect((await get('/s/bad21', { 'x-forwarded-for': '198.51.100.8' })).status).toBe(404);
+  clock += 10 * 60_000;
+  expect((await get('/s/bad22', h)).status).toBe(404);
+});
+
+test('failLimiter stays bounded under 20k spoofed IPs and evicts the oldest', () => {
+  const l = failLimiter();
+  const t = Date.now();
+  for (let i = 0; i < 21; i++) l.fail('victim', t);
+  expect(l.fail('victim', t)).toBe(true);
+  for (let i = 0; i < 20_000; i++) l.fail(`10.0.${i >> 8}.${i & 255}`, t);
+  expect(l.size()).toBe(10_000);
+  expect(l.fail('victim', t)).toBe(false); // evicted, counts afresh
 });
 
 test('load failure and log failure: no stack leaks, log failure does not break the page', async () => {

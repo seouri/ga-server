@@ -22,7 +22,6 @@ export type Share = {
   baseUrl: string;
   created: string;
   revoked?: string;
-  asked?: { day: string; n: number };
 };
 
 export type ShareOpts = {
@@ -129,14 +128,16 @@ export function tokenOf(dir: string, id: string): string {
   return t;
 }
 
+// Daily counters live in asked.json, not shares.json: the server never rewrites shares.json, so it cannot undo a CLI revoke.
+const askedFile = (dir: string): string => join(dir, 'asked.json');
 export function takeQuestion(dir: string, id: string, now: Date = new Date()): boolean {
-  const all = read(dir);
-  const s = all.find((x) => x.id === id);
+  const s = read(dir).find((x) => x.id === id);
   if (!s) throw new GaError(`no share ${id}`);
+  const all = (existsSync(askedFile(dir)) ? JSON.parse(readFileSync(askedFile(dir), 'utf8')) : {}) as Record<string, { day: string; n: number }>;
   const day = localDay(now);
-  const n = s.asked?.day === day ? s.asked.n : 0;
+  const n = all[id]?.day === day ? all[id].n : 0;
   if (n >= s.questionsPerDay) return false;
-  s.asked = { day, n: n + 1 };
-  write(dir, all);
+  all[id] = { day, n: n + 1 };
+  writeAtomic(askedFile(dir), JSON.stringify(all, null, 2));
   return true;
 }

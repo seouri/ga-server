@@ -68,6 +68,13 @@ describe('questions and token', () => {
     expect([1, 2, 3].map(() => takeQuestion(dir, share.id, now))).toEqual([true, true, false]);
     expect(takeQuestion(dir, share.id, new Date(2026, 10, 7, 0, 5))).toBe(true);
   });
+  it('takeQuestion never rewrites shares.json (cannot undo a concurrent revoke)', () => {
+    const { share } = createShare(dir, { ...base, audience: 'doctor' }, now);
+    const before = readFileSync(join(dir, 'shares.json'), 'utf8');
+    expect(takeQuestion(dir, share.id, now)).toBe(true);
+    expect(readFileSync(join(dir, 'shares.json'), 'utf8')).toBe(before);
+    expect(JSON.parse(readFileSync(join(dir, 'asked.json'), 'utf8'))[share.id]).toEqual({ day: '2026-11-06', n: 1 });
+  });
   it('tokenOf returns the original token', () => {
     const { share, token } = createShare(dir, { ...base, audience: 'family' }, now);
     expect(tokenOf(dir, share.id)).toBe(token);

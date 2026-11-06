@@ -24,10 +24,11 @@ const HEADERS: Record<string, string> = {
   'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
 };
-const BODY_LIMIT = 4096;
+const BODY_LIMIT = 20 * 1024;
 const MAX_Q = 2000;
 const WINDOW = 10 * 60_000;
 const MAX_FAILS = 20;
+const MAX_IPS = 10_000;
 const TABS = new Set(['summary', 'records', 'ask', 'download']);
 const HTML = 'text/html; charset=utf-8';
 
@@ -92,23 +93,34 @@ async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: Ser
   return false;
 }
 
+// Failed token lookups per client IP, fixed window from the first failure. fail() records one and says whether the IP is over the limit.
+// Bounded: at maxIps the oldest IP is evicted (Map insertion order), O(1) per request.
+export function failLimiter(maxIps = MAX_IPS): { fail: (ip: string, t: number) => boolean; size: () => number } {
+  const fails = new Map<string, { start: number; n: number }>();
+  return {
+    fail(ip, t) {
+      let f = fails.get(ip);
+      if (f && t - f.start >= WINDOW) { fails.delete(ip); f = undefined; }
+      if (f) return ++f.n > MAX_FAILS;
+      if (fails.size >= maxIps) fails.delete(fails.keys().next().value!);
+      fails.set(ip, { start: t, n: 1 });
+      return false;
+    },
+    size: () => fails.size,
+  };
+}
+
 export function createServer(deps: ServerDeps): http.Server {
   const now = deps.now ?? (() => new Date());
-  // Failed token lookups per client IP, fixed window from the first failure.
-  const fails = new Map<string, { start: number; n: number }>();
-  const recent = (ip: string, t: number): { start: number; n: number } | undefined => {
-    const f = fails.get(ip);
-    if (f && t - f.start >= WINDOW) fails.delete(ip);
-    return fails.get(ip);
-  };
+  const limiter = failLimiter();
 
   async function handle(req: http.IncomingMessage, res: Res): Promise<void> {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
     const xff = req.headers['x-forwarded-for'];
+    // [check] Task 8: confirm Funnel replaces (not appends to) X-Forwarded-For; if it appends, the first value is client-controlled.
     const ip = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
     const ua = req.headers['user-agent'];
     const t = now();
-    if ((recent(ip, t.getTime())?.n ?? 0) >= MAX_FAILS) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
 
     let url: URL;
     try { url = new URL(req.url ?? '/', 'http://localhost'); } catch { return notFound(res); }
@@ -117,13 +129,8 @@ export function createServer(deps: ServerDeps): http.Server {
     const [, token, rest = ''] = m;
 
     const share = findByToken(deps.dir, token!, t);
-    if (!share) {
-      if (fails.size > 10_000) for (const k of fails.keys()) recent(k, t.getTime());
-      const f = recent(ip, t.getTime());
-      if (f) f.n++;
-      else fails.set(ip, { start: t.getTime(), n: 1 });
-      return notFound(res);
-    }
+    // Only failed lookups count and only they get 429: a valid link keeps working behind a shared IP.
+    if (!share) return limiter.fail(ip, t.getTime()) ? send(res, 429, 'Too many requests', 'text/plain; charset=utf-8') : notFound(res);
 
     const route = req.method === 'POST' ? (rest === '/ask' ? 'ask' : '') : req.method === 'GET' ? rest : '';
     const known = route === '' || route === '/' || route === 'ask' || route === '/qr' || route === '/download/summary.pdf' || route === '/download/records.json' || route.startsWith('/doc/');
@@ -137,16 +144,18 @@ export function createServer(deps: ServerDeps): http.Server {
     if (route === '/qr') return send(res, 200, await renderQr(`${share.baseUrl}/s/${token}`));
 
     if (route === 'ask') {
-      let body: string;
+      let body: string | undefined;
       try { body = await readBody(req); } catch (e) {
         if (!(e instanceof TooLarge)) throw e;
+      }
+      const s = await deps.load(share);
+      const page = (o: { answer?: { q: string; a: string }; notice?: string }, status = 200, extra: Record<string, string> = {}): void =>
+        send(res, status, renderPage(share, summarize(s), recordRows(s), { base: pageBase, tab: 'ask', askEnabled: !!deps.ask, ...o }), HTML, extra);
+      if (body === undefined) {
         res.on('finish', () => req.destroy());
-        return send(res, 413, 'Question too long', 'text/plain; charset=utf-8', { Connection: 'close' });
+        return page({ notice: 'Question too long' }, 413, { Connection: 'close' });
       }
       const q = (new URLSearchParams(body).get('q') ?? '').trim();
-      const s = await deps.load(share);
-      const page = (o: { answer?: { q: string; a: string }; notice?: string }): void =>
-        send(res, 200, renderPage(share, summarize(s), recordRows(s), { base: pageBase, tab: 'ask', askEnabled: !!deps.ask, ...o }));
       if (!deps.ask) return page({});
       if (!q) return page({ notice: 'Please enter a question.' });
       if (q.length > MAX_Q) return page({ notice: `Questions are limited to ${MAX_Q} characters.` });
@@ -186,11 +195,14 @@ export function createServer(deps: ServerDeps): http.Server {
     }));
   }
 
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     handle(req, res).catch(() => {
       // Never a stack trace on the wire.
       if (!res.headersSent) send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8');
       else res.destroy();
     });
   });
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 20_000;
+  return server;
 }
