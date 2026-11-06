@@ -9,15 +9,28 @@ export const smartDir = (cfgPath: string = defaultConfigPath()): string => join(
 
 // Same-dir temp file then rename, so a crash never leaves a half-written file.
 function writeAtomic(file: string, data: string | Buffer, mode?: number): void {
-  mkdirSync(dirname(file), { recursive: true });
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
-function aesKey(dir: string): Buffer {
+// Only saveSecret may create the key, exclusively, so tokens are never orphaned by a silent new key.
+function aesKey(dir: string, create: boolean): Buffer {
   const f = join(dir, 'key.bin');
-  if (!existsSync(f)) writeAtomic(f, randomBytes(32), 0o600);
+  if (create && !existsSync(f)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(f, randomBytes(32), { mode: 0o600, flag: 'wx' });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+  }
   return readFileSync(f);
 }
 
@@ -29,7 +42,7 @@ const secretFile = (dir: string, name: string): string => {
 
 export function saveSecret(dir: string, name: string, data: unknown): void {
   const iv = randomBytes(12);
-  const c = createCipheriv('aes-256-gcm', aesKey(dir), iv);
+  const c = createCipheriv('aes-256-gcm', aesKey(dir, true), iv);
   const ct = Buffer.concat([c.update(JSON.stringify(data), 'utf8'), c.final()]);
   writeAtomic(secretFile(dir, name), Buffer.concat([iv, c.getAuthTag(), ct]), 0o600);
 }
@@ -39,7 +52,7 @@ export function loadSecret<T>(dir: string, name: string): T | undefined {
   if (!existsSync(f)) return undefined;
   try {
     const b = readFileSync(f);
-    const d = createDecipheriv('aes-256-gcm', aesKey(dir), b.subarray(0, 12));
+    const d = createDecipheriv('aes-256-gcm', aesKey(dir, false), b.subarray(0, 12));
     d.setAuthTag(b.subarray(12, 28));
     return JSON.parse(Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8')) as T;
   } catch {
@@ -54,8 +67,16 @@ export function deleteSecret(dir: string, name: string): void {
 export async function ensureKeys(dir: string): Promise<{ publicJwks: { keys: object[] }; publicPem: string; created: boolean }> {
   const priv = join(dir, 'private.jwk.json');
   const pub = join(dir, 'public.jwks.json');
-  if (existsSync(priv) && existsSync(pub)) {
-    const publicJwks = JSON.parse(readFileSync(pub, 'utf8')) as { keys: object[] };
+  const hasPriv = existsSync(priv);
+  const hasPub = existsSync(pub);
+  if (hasPub && !hasPriv) {
+    throw new GaError('signing key missing: run ga keys after restoring .ga/smart/private.jwk.json or delete public.jwks.json to start over');
+  }
+  if (hasPriv) {
+    // Never regenerate over an existing private key: it is registered with the hospital.
+    const { d, p, q, dp, dq, qi, key_ops, ext, ...pubJwk } = JSON.parse(readFileSync(priv, 'utf8')) as JWK;
+    const publicJwks = hasPub ? (JSON.parse(readFileSync(pub, 'utf8')) as { keys: object[] }) : { keys: [pubJwk] };
+    if (!hasPub) writeAtomic(pub, JSON.stringify(publicJwks));
     const publicPem = await exportSPKI((await importJWK({ ...publicJwks.keys[0], alg: 'RS384' } as JWK, 'RS384', { extractable: true })) as CryptoKey);
     return { publicJwks, publicPem, created: false };
   }
@@ -70,7 +91,7 @@ export async function ensureKeys(dir: string): Promise<{ publicJwks: { keys: obj
 
 export async function signingKey(dir: string): Promise<{ key: CryptoKey; kid: string }> {
   const f = join(dir, 'private.jwk.json');
-  if (!existsSync(f)) throw new GaError('signing key missing: run ga smart setup');
+  if (!existsSync(f)) throw new GaError('signing key missing: run ga keys');
   const jwk = JSON.parse(readFileSync(f, 'utf8')) as JWK;
   return { key: (await importJWK(jwk, 'RS384')) as CryptoKey, kid: jwk.kid as string };
 }

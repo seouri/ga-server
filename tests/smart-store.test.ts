@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,10 +11,10 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('secrets', () => {
   it('round-trips, encrypts, is 0600, detects tampering, deletes', () => {
-    saveSecret(dir, 'src1', { refresh_token: 'r1' });
-    expect(loadSecret(dir, 'src1')).toEqual({ refresh_token: 'r1' });
+    saveSecret(dir, 'src1', { refresh_token: 'r1-sentinel-zq81' });
+    expect(loadSecret(dir, 'src1')).toEqual({ refresh_token: 'r1-sentinel-zq81' });
     const f = join(dir, 'tokens', 'src1.enc');
-    expect(readFileSync(f).includes('r1')).toBe(false);
+    expect(readFileSync(f).includes('r1-sentinel-zq81')).toBe(false);
     expect(statSync(f).mode & 0o777).toBe(0o600);
     expect(statSync(join(dir, 'key.bin')).mode & 0o777).toBe(0o600);
     const b = readFileSync(f); b[b.length - 1] ^= 1; writeFileSync(f, b);
@@ -22,6 +22,12 @@ describe('secrets', () => {
     deleteSecret(dir, 'src1');
     expect(loadSecret(dir, 'src1')).toBeUndefined();
     deleteSecret(dir, 'src1');
+  });
+  it('never recreates key.bin under existing tokens', () => {
+    saveSecret(dir, 's', { a: 1 });
+    rmSync(join(dir, 'key.bin'));
+    expect(() => loadSecret(dir, 's')).toThrow(/token store unreadable/);
+    expect(existsSync(join(dir, 'key.bin'))).toBe(false);
   });
 });
 
@@ -34,6 +40,19 @@ describe('keys', () => {
     expect(a.publicJwks.keys[0]).not.toHaveProperty('d');
     expect(a.publicPem).toContain('BEGIN PUBLIC KEY');
     expect(statSync(join(dir, 'private.jwk.json')).mode & 0o777).toBe(0o600);
+  });
+  it('rebuilds a missing public file from the private key, never regenerating', async () => {
+    const a = await ensureKeys(dir);
+    rmSync(join(dir, 'public.jwks.json'));
+    const b = await ensureKeys(dir);
+    expect(b.created).toBe(false);
+    expect(b.publicJwks).toEqual(a.publicJwks);
+    expect(existsSync(join(dir, 'public.jwks.json'))).toBe(true);
+  });
+  it('refuses a public file without its private key', async () => {
+    await ensureKeys(dir);
+    rmSync(join(dir, 'private.jwk.json'));
+    await expect(ensureKeys(dir)).rejects.toThrow(/signing key missing: run ga keys/);
   });
   it('signs a verifiable RS384 JWT', async () => {
     const { publicJwks } = await ensureKeys(dir);
