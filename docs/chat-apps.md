@@ -74,4 +74,3 @@ In each app, add a custom connector with the URL from step 5; the passkey login 
 - `docker compose logs ga-gateway` shows whether remote access is on (`remote access on: <url>/mcp`).
 - The app says the connector is unreachable: check `tailscale funnel status`, that the Mac is awake and online, and that a firewall allows Tailscale.
 - Registration fails with "redirect_uris must belong to a known chat app": the app's redirect address isn't in `config/chat-apps.json`; add it and restart `ga-gateway`.
-- Tools stop working after a few days away: reconnect the app; its login lasts 90 days of inactivity.
