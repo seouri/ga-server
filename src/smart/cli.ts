@@ -3,11 +3,11 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { GaError, getClient, loadConfig } from '../config.ts';
-import { COMPARTMENT } from '../engine.ts';
+import { disconnectSource, enableTypes } from './actions.ts';
 import { connect, startLogin, waitForLogin } from './auth.ts';
-import { deleteSecret, ensureKeys, readApp, readSources, smartDir, writeApp, writeSources } from './store.ts';
+import { ensureKeys, readApp, readSources, smartDir, writeApp } from './store.ts';
 import type { SourceRec } from './store.ts';
-import { readStatus, syncAll, syncSource, writeEndpoint } from './sync.ts';
+import { readStatus, syncAll, syncSource } from './sync.ts';
 import type { SyncResult } from './sync.ts';
 
 const USAGE: Record<string, string> = {
@@ -160,12 +160,7 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     const chosen = pick(sources, positionals[0]);
     if (values.enable) {
       if (chosen.length > 1) throw new GaError('several sources connected: name the source, e.g. ga sync --enable <Type,...> <source>');
-      const all = Object.keys(COMPARTMENT);
-      const types = values.enable === 'all' ? all : (values.enable as string).split(',').map((t) => t.trim()).filter(Boolean);
-      const bad = types.filter((t) => !all.includes(t));
-      if (bad.length || !types.length) throw new GaError(`unknown type: ${bad.join(',') || '(none)'}; known: ${all.join(',')}`);
-      chosen[0].enabledTypes = types;
-      writeSources(dir, sources.map((s) => (s.key === chosen[0].key ? chosen[0] : s)));
+      chosen[0] = enableTypes(dir, chosen[0].key, values.enable === 'all' ? 'all' : (values.enable as string).split(','));
     }
     const { client, patientId } = await ga();
     for (const src of chosen) {
@@ -190,10 +185,7 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     usage(positionals.length === 1);
     const [src] = pick(readSources(dir), positionals[0]);
     const { client, patientId } = await ga();
-    // Status first: if this write fails the tokens remain and the source still works. The source stays listed
-    // (enabled types kept for a reconnect); with no tokens, sync skips it.
-    await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
-    deleteSecret(dir, src.key);
+    await disconnectSource(client, dir, src.key, patientId);
     console.log(`${src.key}: disconnected; records already fetched stay. Reconnect: ga connect ${src.fhirBase}`);
   }
   return true;

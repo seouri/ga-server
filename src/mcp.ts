@@ -14,6 +14,7 @@ import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { chatInstructions } from './instructions.ts';
+import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerShareTools } from './tools/shares.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
@@ -227,8 +228,11 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       }
     },
   );
-  if (remote) registerShareTools(server, deps);
-  // Tasks 6, 10, 11 add here, when remote is set: registerHospitalTools, registerImportTools, registerAppTools.
+  if (remote) {
+    registerShareTools(server, deps);
+    registerHospitalTools(server, deps);
+  }
+  // Tasks 10, 11 add here, when remote is set: registerImportTools, registerAppTools.
   return server;
 }
 

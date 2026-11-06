@@ -1,6 +1,6 @@
 // SMART standalone launch: PKCE S256 + state, private_key_jwt (RS384), rotating refresh tokens.
-import { createHash } from 'node:crypto';
-import { closeSync, openSync, rmSync, statSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, openSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import * as oidc from 'openid-client';
 import { GaError } from '../config.ts';
 import { deleteSecret, loadSecret, readSources, saveSecret, signingKey, writeSources } from './store.ts';
 import type { SourceRec } from './store.ts';
+import type { SyncResult } from './sync.ts';
 
 export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
 
@@ -143,7 +144,7 @@ export async function connect(
   fhirBase: string,
   clientId: string,
   open: (url: string) => void | Promise<void>,
-  opts: { name?: string; port?: number; redirectUri?: string } = {},
+  opts: { name?: string; port?: number } = {},
 ): Promise<SourceRec> {
   const base = fhirBase.replace(/\/+$/, '');
   const config = await discover(dir, base, clientId);
@@ -151,8 +152,7 @@ export async function connect(
   const state = oidc.randomState();
   const cb = await listen(opts.port ?? 8765);
   try {
-    // https (e.g. a Tailscale Funnel address proxying to this listener) for production Epic; localhost otherwise.
-    const redirectUri = opts.redirectUri ?? `http://localhost:${cb.port}/callback`;
+    const redirectUri = `http://localhost:${cb.port}/callback`;
     await open((await authUrl(config, base, redirectUri, state, verifier)).href);
     return await exchange(dir, config, base, redirectUri, await cb.callback, verifier, state, opts.name);
   } finally {
@@ -164,7 +164,7 @@ export async function connect(
 const hash = (state: string): string => createHash('sha256').update(state).digest('hex');
 export const pendingName = (state: string): string => `pending-${hash(state)}`;
 export const resultName = (state: string): string => `result-${hash(state)}`;
-export type LoginResult = { source: SourceRec } | { error: string };
+export type LoginResult = { source: SourceRec; result: SyncResult } | { error: string; fhirBase: string };
 type Pending = { verifier: string; state: string; fhirBase: string; clientId: string; redirectUri: string; name?: string; expires: number };
 const LOGIN_TTL_MS = 10 * 60_000;
 
@@ -181,9 +181,16 @@ export async function startLogin(dir: string, fhirBase: string, clientId: string
 
 export async function finishLogin(dir: string, search: string, now: Date = new Date()): Promise<SourceRec> {
   const state = new URLSearchParams(search).get('state') ?? '';
-  const p = loadSecret<Pending>(dir, pendingName(state));
-  if (!p) throw new GaError('unknown_state');
-  deleteSecret(dir, pendingName(state)); // single use, even when expired or the exchange fails
+  // Claim by rename before reading: of two concurrent callbacks with one state only one wins; single use even when expired or the exchange fails.
+  const claimed = `claimed-${hash(state)}-${randomBytes(6).toString('hex')}`;
+  try {
+    renameSync(join(dir, 'tokens', `${pendingName(state)}.enc`), join(dir, 'tokens', `${claimed}.enc`));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new GaError('unknown_state');
+    throw e;
+  }
+  const p = loadSecret<Pending>(dir, claimed)!;
+  deleteSecret(dir, claimed);
   if (now.getTime() > p.expires) throw new GaError('login_expired');
   const config = await discover(dir, p.fhirBase, p.clientId);
   return exchange(dir, config, p.fhirBase, p.redirectUri, search, p.verifier, p.state, p.name);
