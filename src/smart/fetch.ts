@@ -46,10 +46,12 @@ export async function fetchAll(
   const got = new Map<string, Resource>(); // by Type/id: category searches overlap
   const add = (r: Resource) => r.id && !got.has(keyOf(r)) && got.set(keyOf(r), r);
 
-  // The token goes only to URLs under the FHIR base. 401 and 5xx abort the fetch; other 4xx are the caller's to skip.
+  // The token goes only to URLs under the FHIR base (or the base itself with a query: HAPI pages as <base>?_getpages=).
+  const inside = (u: string): boolean => u.startsWith(`${base}/`) || u.startsWith(`${base}?`);
+  // 401 and 5xx abort the fetch; other 4xx are the caller's to skip.
   const get = async (url: string, what: string, accept = 'application/fhir+json'): Promise<Response> => {
     const u = new URL(url, `${base}/`).href;
-    if (!u.startsWith(`${base}/`)) throw new GaError(`${what}: URL outside the FHIR base`);
+    if (!inside(u)) throw new GaError(`${what}: URL outside the FHIR base`);
     const r = await fetch(u, { headers: { authorization: `Bearer ${token}`, accept }, signal: AbortSignal.timeout(60_000) });
     if (r.status === 401 || r.status >= 500) throw new GaError(`${what}: HTTP ${r.status}`);
     return r;
@@ -59,7 +61,7 @@ export async function fetchAll(
     const seen = new Set<string>();
     for (let url: string | undefined = first; url && !seen.has(url); ) {
       seen.add(url);
-      if (!new URL(url, `${base}/`).href.startsWith(`${base}/`)) throw new GaError(`${what}: next link outside the FHIR base`);
+      if (!inside(new URL(url, `${base}/`).href)) throw new GaError(`${what}: next link outside the FHIR base`);
       const r = await get(url, what);
       if (!r.ok) {
         await r.body?.cancel();

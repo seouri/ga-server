@@ -7,8 +7,8 @@ A local Medplum FHIR server for one person's health records, with an MCP server 
 Prerequisites: Docker Desktop, Node 26 (runs the `.ts` sources directly).
 
 ```sh
-docker compose up -d     # Medplum, Postgres, binary storage, C-CDA converter
-npm install
+npm install              # first: the ga-sync service runs this repo's code
+docker compose up -d     # Medplum, Postgres, binary storage, C-CDA converter, daily portal sync
 node src/cli.ts setup    # creates the patient and .ga/config.json, rotates the Medplum admin password
 npm link                 # optional: puts `ga` on your PATH (examples below use it)
 ```
@@ -29,12 +29,68 @@ An Apple Health export brings per-reading vitals, daily summaries (heart rate, s
 
 `--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-import/extract.md`, also `/ga-import <file>` in Claude Code, and `AGENTS.md`).
 
+## Hospital portals (SMART)
+
+GA can fetch your records from Epic patient portals (MyChart) by itself, over SMART on FHIR, with read-only access. You register GA once as your own app with Epic, then connect each hospital once; after that the `ga-sync` service fetches daily. Tokens are encrypted in `.ga/smart/`; nothing leaves the machine except requests to the hospitals' own servers.
+
+### 1. Register the app with Epic (once)
+
+```sh
+ga keys      # creates GA's signing key (.ga/smart/, mode 0600) and prints the public JWKS and PEM
+```
+
+1. Create a free account at https://fhir.epic.com and choose Build Apps, then Create.
+2. Application audience: **Patients**. Make it a **confidential client** (asymmetric key, `private_key_jwt`).
+3. Incoming APIs: the **USCDI R4** read and search APIs (AllergyIntolerance, Condition, DiagnosticReport, DocumentReference, Binary, Encounter, Immunization, MedicationRequest, Observation, Patient, Procedure, and the rest you want). Read only; GA never writes.
+4. Turn on **refresh tokens** (persistent access), so GA can fetch without you logging in each time.
+5. Redirect URI: `http://localhost:8765/callback`.
+6. Public key: paste the `ga keys` output, the JWKS or the PEM, whichever the form accepts. If it only takes a JWK Set URL, host `.ga/smart/public.jwks.json` at any public static URL: it is a public key, never health data.
+7. Mark the app **ready for production** and note its **client ID**. Epic distributes it to organizations; that can take a while.
+
+Unverified until a real registration goes through (record the answers here): the exact form fields, whether Epic accepts the `localhost` redirect for production, and whether each organization must activate the app first.
+
+**Fallback A (no refresh tokens).** If Epic issues no refresh token or caps access at about an hour, GA fetches only during `ga connect`: log in again whenever you want fresh data. Between logins the source shows `off`.
+
+### 2. Connect each hospital
+
+Find the hospital's FHIR R4 base URL in Epic's endpoint list (https://open.epic.com/MyApps/Endpoints), for example `https://fhir.example-hospital.org/api/FHIR/R4`.
+
+```sh
+ga connect https://fhir.example-hospital.org/api/FHIR/R4 --client-id <client ID> --name "Hospital A"
+```
+
+`--client-id` is needed only the first time. Your browser opens the MyChart login; choose the longest access duration offered. GA then runs a **dry run**: it fetches everything, prints per-type counts (created, linked, updated, flagged) and writes nothing. Check the flagged counts, then enable the types you trust:
+
+```sh
+ga sync --enable Condition,Observation,MedicationRequest fhir-example-hospital-org   # or --enable all
+ga sync                 # fetch every connected source now (prints counts only)
+ga sync --dry-run       # counts only, writes nothing
+ga status               # per source: status, last success, STALE flag, enabled types
+ga disconnect fhir-example-hospital-org   # deletes the tokens; records already fetched stay
+```
+
+A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs. After `ga disconnect`, `ga connect` reconnects it.
+
+### 3. Daily sync
+
+`docker compose up -d` also starts `ga-sync`, which runs `ga sync --daemon`: a sync at startup, then every 24 hours, logging counts only (`docker compose logs ga-sync`). It runs as your user so files in `.ga/` stay yours; on Linux export your ids first (`UID=$(id -u) GID=$(id -g) docker compose up -d`, or put `UID` and `GID` in `.env`). Docker Desktop on macOS maps ownership itself.
+
+### What syncs and what doesn't
+
+Synced: every patient-scoped type the portal offers (problems, diagnoses, labs, vitals, medications, immunizations, allergies, procedures, encounters, reports, clinical notes and more). Records already in GA from C-CDA or EHI imports are linked, not copied; re-fetching unchanged data changes nothing.
+
+Not synced: MyChart messages and some note types (they keep coming from EHI exports); Quest and LabCorp results not ordered through Epic; Apple Health (import its export); PDFs (`/ga-import`).
+
+**Stale sources.** If a source is `off` (login needed), `error`, or not synced for over 48 hours, `ga status` marks it STALE and your agent says so in the first line of its answer. `off`: run `ga connect <url>`. `error`: retried on the next run, or `ga sync` now.
+
+**Troubleshooting `ga connect`.** The browser must reach http://localhost:8765/callback on this machine; GA listens on 127.0.0.1:8765 only. If a firewall blocks it, another process holds port 8765, or the browser resolves localhost to [::1] where something else listens, connect times out or errors but fails safely (the code is useless without GA's PKCE verifier and state). Fix: free port 8765 (lsof -i :8765), allow loopback, retry ga connect.
+
 ## Review flags and limits
 
 - `possible-duplicate`: the same test on the same day with a different value, unit or time. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
 - `source-conflict`: a newer import differs from a record a person or agent changed; GA kept the existing record and never overwrites it. Same search with `source-conflict`.
 - A PDF/image is imported once; importing the same file again is refused.
-- Stale medications: a medication dropped from a newer C-CDA list is not marked stopped. An `active` MedicationStatement whose source date is older than the newest C-CDA import is unconfirmed.
+- Stale medications: a medication dropped from a newer list is not marked stopped. A portal-synced medication is current only if its `last-seen` matches its source's latest sync; otherwise, an `active` medication whose source date is older than the newest Epic import is unconfirmed.
 
 ## Connect an agent
 
@@ -151,7 +207,7 @@ Add `disable-model-invocation: true` to the frontmatter if a skill should run on
 
 ## Where data lives
 
-Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Ports bind to `127.0.0.1` only; nothing is exposed to the network.
+Docker named volumes `ga-postgres` and `ga-binary`. Config and credentials: `.ga/config.json` (gitignored). Portal keys, client ID, source list and encrypted tokens: `.ga/smart/`. Ports bind to `127.0.0.1` only; nothing is exposed to the network.
 
 ## Admin app
 

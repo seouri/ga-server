@@ -74,6 +74,18 @@ describe('fetchAll', () => {
     await expect(fetchAll(m2.fhirBase, m2.grant(), P, ['Encounter'])).rejects.toThrow('next link');
     await m2.close();
   });
+
+  it('follows a HAPI-style next link on the base itself (<base>?_getpages=...)', async () => {
+    const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+    serveFixtures(m2);
+    const bundle = (link: object[], id: string) =>
+      JSON.stringify({ resourceType: 'Bundle', type: 'searchset', link, entry: [{ resource: { resourceType: 'Encounter', id, status: 'finished' } }] });
+    m2.route('/fhir/Encounter', (_q, res) => void res.end(bundle([{ relation: 'next', url: `${m2.fhirBase}?_getpages=p2&_getpagesoffset=1` }], 'enc-p1')));
+    m2.route('/fhir', (q, res) => void (m2.authorized(q) ? res.end(bundle([], 'enc-p2')) : res.writeHead(401).end()));
+    const got = await fetchAll(m2.fhirBase, m2.grant(), P, ['Encounter']);
+    await m2.close();
+    expect(got.byType.Encounter).toBe(2);
+  });
 });
 
 describe('mapForGa', () => {

@@ -35,8 +35,16 @@ export async function discover(dir: string, fhirBase: string, clientId: string):
   const meta = { ...smart, issuer: smart.issuer ?? base }; // SMART configuration is not OIDC discovery; openid-client needs an issuer
   const tokenEndpoint = smart.token_endpoint;
   const { key, kid } = await signingKey(dir);
-  // SMART/Epic want aud = token endpoint, not the issuer the library defaults to.
-  const auth = oidc.PrivateKeyJwt({ key, kid }, { [oidc.modifyAssertion]: (_h, p) => void (p.aud = tokenEndpoint) });
+  // SMART/Epic want aud = token endpoint, not the issuer the library defaults to, and a typ JWT header (the SMART sandbox rejects its absence).
+  const auth = oidc.PrivateKeyJwt(
+    { key, kid },
+    {
+      [oidc.modifyAssertion]: (h, p) => {
+        h.typ = 'JWT';
+        p.aud = tokenEndpoint;
+      },
+    },
+  );
   const config = new oidc.Configuration(meta, clientId, {}, auth);
   // Plain http only for a loopback server (tests); openid-client refuses it everywhere else.
   if (isLocal(base) && isLocal(tokenEndpoint) && isLocal(smart.authorization_endpoint)) oidc.allowInsecureRequests(config);

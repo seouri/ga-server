@@ -86,7 +86,7 @@ const findEndpoint = async (client: MedplumClient, key: string, patientId: strin
     (e) => e.extension?.find((x) => x.url === PATIENT)?.valueReference?.reference === `Patient/${patientId}`,
   );
 
-async function writeEndpoint(
+export async function writeEndpoint(
   client: MedplumClient,
   dir: string,
   src: SourceRec,
@@ -170,9 +170,10 @@ export async function syncSource(
     // Error codes only: messages from servers or the engine may carry content.
     const code = e instanceof GaError && /^[a-z_]+$/.test(e.message) ? e.message : stage;
     // No usable refresh token: only reconnecting helps.
-    const status = code === 'invalid_grant' || code === 'no_refresh_token' ? 'off' : 'error';
+    const status = code === 'invalid_grant' || code === 'no_refresh_token' || code === 'not_connected' ? 'off' : 'error';
     console.error(`smart sync ${src.key}: ${code}`);
-    if (!dryRun) await writeEndpoint(client, dir, src, patientId, status, at, code); // a throw here: syncAll records status_write_error
+    // not_connected: no tokens, i.e. ga disconnect, which already wrote the Endpoint off/disconnected.
+    if (!dryRun && code !== 'not_connected') await writeEndpoint(client, dir, src, patientId, status, at, code); // a throw here: syncAll records status_write_error
     return { source: src.key, status, error: code };
   }
 }
@@ -194,7 +195,7 @@ export async function readStatus(
   client: MedplumClient,
   patientId: string,
   dir?: string, // given: configured sources with no Endpoint yet (never synced for real) are listed as pending
-): Promise<{ source: string; name: string; status: string; lastSuccess?: string; stale: boolean; enabledTypes: string[] }[]> {
+): Promise<{ source: string; name: string; status: string; lastSuccess?: string; error?: string; stale: boolean; enabledTypes: string[] }[]> {
   const now = new Date();
   const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' });
   const listed = eps
@@ -203,11 +204,13 @@ export async function readStatus(
       const get = (url: string) => e.extension?.find((x) => x.url === url);
       const lastSuccess = get(LAST_SUCCESS)?.valueDateTime;
       const types = get(ENABLED_TYPES)?.valueString;
+      const error = get(LAST_ERROR)?.valueCode;
       return {
         source: e.identifier?.find((i) => i.system === SOURCE_ID)?.value ?? '',
         name: e.name ?? '',
         status: e.status,
         ...(lastSuccess && { lastSuccess }),
+        ...(error && { error }),
         stale: isStale(e.status, lastSuccess, now),
         enabledTypes: types ? types.split(',') : [],
       };

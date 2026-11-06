@@ -1,0 +1,169 @@
+// ga keys / connect / sync / status / disconnect. Prints counts, type names and error codes only: never tokens, names of people or content.
+import { execFile } from 'node:child_process';
+import { join } from 'node:path';
+import { parseArgs } from 'node:util';
+import { GaError, getClient, loadConfig } from '../config.ts';
+import { COMPARTMENT } from '../engine.ts';
+import { connect } from './auth.ts';
+import { deleteSecret, ensureKeys, readApp, readSources, smartDir, writeApp, writeSources } from './store.ts';
+import type { SourceRec } from './store.ts';
+import { readStatus, syncAll, syncSource, writeEndpoint } from './sync.ts';
+import type { SyncResult } from './sync.ts';
+
+const USAGE: Record<string, string> = {
+  keys: 'ga keys',
+  connect: 'ga connect <fhir-base-url> [--client-id <id>] [--name <label>]',
+  sync: 'ga sync [--dry-run] [--enable <Type,...>|all] [source] | ga sync --daemon',
+  status: 'ga status',
+  disconnect: 'ga disconnect <source>',
+};
+const OPTIONS = {
+  keys: {},
+  connect: { 'client-id': { type: 'string' }, name: { type: 'string' } },
+  sync: { 'dry-run': { type: 'boolean' }, enable: { type: 'string' }, daemon: { type: 'boolean' } },
+  status: {},
+  disconnect: {},
+} as const;
+const DAY_MS = 24 * 3_600_000;
+const NO_SOURCES = 'no sources connected';
+
+// Medplum client and patient. GA_PATIENT_ID is for tests only, as in mcp.ts.
+async function ga() {
+  const cfg = loadConfig();
+  return { client: await getClient(cfg), patientId: process.env.GA_PATIENT_ID || cfg.patientId };
+}
+
+function pick(sources: SourceRec[], arg: string | undefined): SourceRec[] {
+  if (!arg) return sources;
+  const s = sources.find((x) => x.key === arg || x.name === arg);
+  if (!s) throw new GaError(`unknown source: ${arg} (see ga status)`);
+  return [s];
+}
+
+function print(r: SyncResult, log: (s: string) => void = console.log): void {
+  const c = r.report;
+  const dry = r.status === 'pending' ? ' (dry run: nothing written)' : '';
+  const counts = c ? ` created ${c.created}, updated ${c.updated}, possible duplicates ${c.possibleDuplicates}, invalid ${c.invalid}${dry}` : '';
+  const hint = r.status === 'off' ? ': run ga connect <fhir-base-url>' : '';
+  log(`${r.source}: ${r.status}${counts}${r.error ? ` error ${r.error}${hint}` : ''}`);
+  for (const [t, n] of Object.entries(c?.byType ?? {}).sort()) log(`  ${t}: created ${n.created}, linked ${n.linked}, updated ${n.updated}, flagged ${n.flagged}`);
+  for (const [t, why] of Object.entries(r.skipped ?? {}).sort()) log(`  skipped ${t}: ${why}`);
+}
+
+function browser(url: string): void {
+  console.log(`Log in to the patient portal in your browser. Choose the longest access duration offered.\n${url}`);
+  // GA_OPEN=fetch: tests only, plays a browser against the auto-approving mock server.
+  if (process.env.GA_OPEN === 'fetch') return void fetch(url).catch(() => undefined);
+  if (process.platform === 'darwin') execFile('open', [url], () => undefined); // the URL is printed either way
+}
+
+async function daemon(): Promise<never> {
+  for (;;) {
+    const at = new Date().toISOString();
+    try {
+      // Log in before checking sources, so "no sources connected" also proves the container reaches Medplum.
+      const { client, patientId } = await ga();
+      const dir = smartDir();
+      if (!readSources(dir).length) console.log(`${at} ${NO_SOURCES}`);
+      for (const r of await syncAll(client, dir, patientId)) print(r, (s) => console.log(`${at} ${s}`));
+    } catch (e) {
+      console.error(`${at} sync failed: ${e instanceof GaError ? e.message : 'sync_error'}`);
+    }
+    await new Promise((r) => setTimeout(r, DAY_MS));
+  }
+}
+
+// Returns false when argv is not a SMART command.
+export async function smartCommand(argv: string[]): Promise<boolean> {
+  const cmd = argv[0] as keyof typeof OPTIONS;
+  if (!Object.hasOwn(OPTIONS, cmd)) return false;
+  let values: Record<string, string | boolean | undefined>;
+  let positionals: string[];
+  try {
+    const parsed = parseArgs({ args: argv.slice(1), options: OPTIONS[cmd], allowPositionals: true, strict: true });
+    values = parsed.values as typeof values;
+    positionals = parsed.positionals;
+  } catch {
+    throw new GaError(`usage: ${USAGE[cmd]}`);
+  }
+  const usage = (ok: boolean) => {
+    if (!ok) throw new GaError(`usage: ${USAGE[cmd]}`);
+  };
+  const dir = smartDir();
+
+  if (cmd === 'keys') {
+    usage(!positionals.length);
+    const { publicJwks, publicPem } = await ensureKeys(dir);
+    console.log(JSON.stringify(publicJwks, null, 2));
+    console.log(publicPem.trim());
+    console.log(
+      `Public key only (also in ${join(dir, 'public.jwks.json')}). Paste the JWKS or the PEM, whichever the app registration form accepts. ` +
+        'If it only takes a JWK Set URL, host public.jwks.json at any public static URL: it is a public key, never health data.',
+    );
+  } else if (cmd === 'connect') {
+    usage(positionals.length === 1);
+    const id = values['client-id'] as string | undefined;
+    const clientId = id || readApp(dir).clientId;
+    if (!clientId) throw new GaError('first connect needs --client-id <id> (the client ID from your app registration)');
+    const { client, patientId } = await ga(); // fails before the login when GA is not running
+    if (id) writeApp(dir, { ...readApp(dir), clientId: id });
+    const src = await connect(dir, positionals[0], clientId, browser, { name: values.name as string | undefined });
+    // No enabled types yet: syncSource only dry-runs. Under fallback A this is the only fetch.
+    const r = await syncSource(client, dir, src, patientId);
+    print(r);
+    if (r.status === 'pending' && !r.error) {
+      console.log(`Next: check the flagged counts, then enable types: ga sync --enable <Type,...>|all ${src.key}`);
+    }
+    if (r.status === 'error') process.exitCode = 1;
+  } else if (cmd === 'sync') {
+    if (values.daemon) {
+      usage(!positionals.length && !values.enable && !values['dry-run']);
+      await daemon();
+    }
+    usage(positionals.length <= 1);
+    const sources = readSources(dir);
+    if (!sources.length) {
+      if (values.enable) throw new GaError(`${NO_SOURCES}: run ga connect <fhir-base-url> first`);
+      console.log(NO_SOURCES);
+      return true;
+    }
+    const chosen = pick(sources, positionals[0]);
+    if (values.enable) {
+      if (chosen.length > 1) throw new GaError('several sources connected: name the source, e.g. ga sync --enable all <source>');
+      const all = Object.keys(COMPARTMENT);
+      const types = values.enable === 'all' ? all : (values.enable as string).split(',').map((t) => t.trim()).filter(Boolean);
+      const bad = types.filter((t) => !all.includes(t));
+      if (bad.length || !types.length) throw new GaError(`unknown type: ${bad.join(',') || '(none)'}; known: ${all.join(',')}`);
+      chosen[0].enabledTypes = types;
+      writeSources(dir, sources.map((s) => (s.key === chosen[0].key ? chosen[0] : s)));
+    }
+    const { client, patientId } = await ga();
+    for (const src of chosen) {
+      const r = await syncSource(client, dir, src, patientId, { dryRun: !!values['dry-run'] });
+      print(r);
+      if (r.status === 'error') process.exitCode = 1;
+    }
+  } else if (cmd === 'status') {
+    usage(!positionals.length);
+    if (!readSources(dir).length) {
+      console.log(NO_SOURCES);
+      return true;
+    }
+    const { client, patientId } = await ga();
+    for (const s of await readStatus(client, patientId, dir)) {
+      const types = s.enabledTypes.length ? s.enabledTypes.join(',') : 'none (dry run only)';
+      console.log(
+        `${s.name} (${s.source}): ${s.status}${s.error ? ` (${s.error})` : ''}, last success ${s.lastSuccess ?? 'never'}${s.stale ? ', STALE' : ''}, types: ${types}`,
+      );
+    }
+  } else {
+    usage(positionals.length === 1);
+    const [src] = pick(readSources(dir), positionals[0]);
+    const { client, patientId } = await ga();
+    deleteSecret(dir, src.key);
+    // The source stays listed (its enabled types kept for a reconnect); with no tokens, sync skips it.
+    await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
+    console.log(`${src.key}: disconnected; records already fetched stay. Reconnect: ga connect ${src.fhirBase}`);
+  }
+  return true;
+}

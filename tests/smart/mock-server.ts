@@ -162,6 +162,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
         subject: opts.clientId,
       });
       if (!protectedHeader.kid || !kids.has(protectedHeader.kid)) throw new Error('kid');
+      if (protectedHeader.typ !== 'JWT') throw new Error('typ'); // SMART Backend Services / Epic: typ JWT
       if (payload.aud !== m.tokenEndpoint) throw new Error('aud'); // exactly the token endpoint, not an array
       if (!payload.jti || jtis.has(payload.jti)) throw new Error('jti');
       jtis.add(payload.jti);

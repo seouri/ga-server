@@ -19,11 +19,15 @@ export const defaultConfigPath = (): string =>
   process.env.GA_CONFIG || join(dirname(fileURLToPath(import.meta.url)), '..', '.ga', 'config.json');
 
 export function loadConfig(path = defaultConfigPath()): GaConfig {
+  let cfg: GaConfig;
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as GaConfig;
+    cfg = JSON.parse(readFileSync(path, 'utf8')) as GaConfig;
   } catch {
     throw new GaError('run ga setup first');
   }
+  // The ga-sync container reaches Medplum by service name, not localhost.
+  if (process.env.GA_BASE_URL) cfg.baseUrl = process.env.GA_BASE_URL;
+  return cfg;
 }
 
 export const notRunning = (e: unknown) =>
