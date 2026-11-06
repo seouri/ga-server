@@ -87,7 +87,7 @@ async function uploadBinaries(client: MedplumClient, resources: Resource[], bina
 }
 
 const ext = (e: Endpoint | undefined, url: string): Extension | undefined => e?.extension?.find((x) => x.url === url);
-const forPatient = (patientId: string) => (e: Endpoint): boolean => ext(e, PATIENT)?.valueReference?.reference === `Patient/${patientId}`;
+export const forPatient = (patientId: string) => (e: Endpoint): boolean => ext(e, PATIENT)?.valueReference?.reference === `Patient/${patientId}`;
 
 const findEndpoint = async (client: MedplumClient, key: string, patientId: string): Promise<Endpoint | undefined> =>
   (await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|${key}` }, { cache: 'no-cache' })).find(forPatient(patientId));

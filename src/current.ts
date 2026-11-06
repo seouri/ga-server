@@ -34,10 +34,14 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[]): C
   return { lastSuccess, newestImport };
 }
 
-export function currency(r: Resource, ctx: Ctx): Currency | undefined {
-  if (!COVERED.has(r.resourceType)) return undefined;
+// Active medication, problem or allergy: the records the currency rule covers.
+export function isActive(r: Resource): boolean {
   const a = r as R;
-  if (a.status !== 'active' && !a.clinicalStatus?.coding?.some((c) => c.code === 'active')) return undefined;
+  return COVERED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
+}
+
+export function currency(r: Resource, ctx: Ctx): Currency | undefined {
+  if (!isActive(r)) return undefined;
   const seen = extDate(r, LAST_SEEN);
   if (seen !== undefined) {
     const keys = ((r as { identifier?: { system?: string; value?: string }[] }).identifier ?? [])
