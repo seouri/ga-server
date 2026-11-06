@@ -95,10 +95,10 @@ The strategy is **conditional create on a stable identifier**: `POST` with `If-N
 
 | Source | Location (outside repo) | Format | Milestone |
 |---|---|---|---|
-| Epic "Health Summary" | `/path/to/health-data/HealthSummary_export/IHE_XDM/*/DOC000{1-8}.XML` | C-CDA R2.1 (IHE XDM). 8 docs, all with labs, vitals, meds, problems, allergies, immunizations, social history. Overlap between them is heavy. | **1** |
-| Outside lab PDF | `/path/to/health-data/checkup-report.pdf` | 8 pages, text layer, no images. Probably a non-US checkup (guess). | **1** |
-| Epic EHI export (Epic) | `/path/to/health-data/ehi-export/` | 5,531 TSV tables + schema HTML. The data is small (~85 result rows, ~60 encounters). Also RTF notes and PDF media. | 2 |
-| Apple Health export | `/path/to/health-data/apple-health-export/` | `export.xml` is 2 GB, so it needs a streaming parser. `clinical-records/` has only 3 FHIR JSONs. Also ECGs and GPX routes. | 2 |
+| Epic "Health Summary" | `<real-data-dir>/HealthSummary_<date>/IHE_XDM/*/DOC000{1-8}.XML` | C-CDA R2.1 (IHE XDM). 8 docs, all with labs, vitals, meds, problems, allergies, immunizations, social history. Overlap between them is heavy. | **1** |
+| Outside lab PDF | `<real-data-dir>/<lab-report>.pdf` | 8 pages, text layer, no images. Probably a non-US checkup (guess). | **1** |
+| Epic EHI export | `<real-data-dir>/<ehi-export-folder>/` | 5,531 TSV tables + schema HTML. The data is small (~85 result rows, ~60 encounters). Also RTF notes and PDF media. | 2 |
+| Apple Health export | `<real-data-dir>/<apple-health-export>/` | `export.xml` is 2 GB, so it needs a streaming parser. `clinical-records/` has only 3 FHIR JSONs. Also ECGs and GPX routes. | 2 |
 | SMART-on-FHIR pull | hospital portals | Patient standalone launch | 3 |
 
 - **PDF/image importer: two modes [user].**

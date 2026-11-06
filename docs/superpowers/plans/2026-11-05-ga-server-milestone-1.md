@@ -191,8 +191,8 @@ Algorithm for `importResources`:
 - [ ] **Step 2: Run** `npx vitest run tests/ccda.test.ts && npm run test:int`. Expected: FAIL.
 - [ ] **Step 3: Implement** `src/ccda.ts`, `src/document.ts` and the CLI command. Parse XML with the built-in regex for `effectiveTime` only. Don't add an XML library.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
-- [ ] **Step 5: Real-data check (spec [check]).** Run `GA_REAL_DATA=/path/to/health-data npm run test:int -- real-data`. The test:
-  1. imports `HealthSummary_export/IHE_XDM/Patient1/` twice
+- [ ] **Step 5: Real-data check (spec [check]).** Run `GA_REAL_DATA=<real-data-dir> npm run test:int -- real-data`. The test:
+  1. imports `HealthSummary_<date>/IHE_XDM/<patient-folder>/` twice
   2. asserts that the second report has `created:0`
   3. asserts that exactly one Patient exists
   4. prints, **counts only**, how many converter ids repeated across the 8 docs and how many Observations were `merged` by content key
@@ -270,8 +270,8 @@ Load the `claude-api` skill before writing this task's code.
   - For each input, search GA and assert presence or report it as missing: age/birthDate, sex, total cholesterol (LOINC 2093-3), HDL (2085-9), LDL (13457-7 / 18262-6), systolic BP (8480-6), BP-med status (active MedicationStatement/Request list), A1c (4548-4), smoking (72166-2), eGFR (33914-3 / 62238-1 / 98979-8), BMI (39156-5).
   - Each found item must have `meta.source`.
   - Print presence or absence only, no values.
-- [ ] **Step 2: Run** `GA_REAL_DATA=/path/to/health-data npm run test:int -- real-data`. Expected: PASS, with the presence table printed.
-- [ ] **Step 3: Import the lab PDF in local-agent mode.** In Claude Code in this repo, ask: "Import /path/to/health-data/checkup-report.pdf into GA." Expected: a `ga_import` report with `created > 0`. Asking again gives `created: 0`.
+- [ ] **Step 2: Run** `GA_REAL_DATA=<real-data-dir> npm run test:int -- real-data`. Expected: PASS, with the presence table printed.
+- [ ] **Step 3: Import the lab PDF in local-agent mode.** In Claude Code in this repo, ask: "Import <real-data-dir>/<lab-report>.pdf into GA." Expected: a `ga_import` report with `created > 0`. Asking again gives `created: 0`.
 - [ ] **Step 4: Rerun the presence table.** Expected: the gaps the PDF covers are now present.
 - [ ] **Step 5: Run the milestone question.** In Claude Code, ask "Is starting Atorvastatin 40 mg the right decision?" Expected: the answer
   - cites GA resources

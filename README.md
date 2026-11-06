@@ -66,7 +66,7 @@ The server tells Claude that GA is your health record, so plain questions work. 
 
 ```
 > Import /path/to/checkup-2024.pdf into GA.
-> Import ~/Downloads/HealthSummary_export into GA.
+> Import ~/Downloads/HealthSummary_<date> into GA.
 ```
 
 Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`). The MCP tools can't import C-CDA themselves.

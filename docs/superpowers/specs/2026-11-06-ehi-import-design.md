@@ -31,7 +31,7 @@ Builds on `docs/superpowers/specs/2026-11-05-ga-server-design.md` (milestone 1, 
 
 ## What's in the export (recon of the user's file, counts only)
 
-`ehi-export/`: 5,531 TSV tables (570 non-empty), `EHITables Schema/*.htm` (one page per table), `Rich Text/` (39 RTF notes), `Media/` (34 files: 25 PDF, 2 TIF, 1 JPG, 6 HTML), `readme.PDF`.
+`<ehi-export-folder>/`: 5,531 TSV tables (570 non-empty), `EHITables Schema/*.htm` (one page per table), `Rich Text/` (39 RTF notes), `Media/` (34 files: 25 PDF, 2 TIF, 1 JPG, 6 HTML), `readme.PDF`.
 
 ## Mapping [call; builder may refine]
 

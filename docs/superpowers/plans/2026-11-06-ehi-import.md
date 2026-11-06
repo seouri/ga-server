@@ -28,7 +28,7 @@
 - No invented codes: values without a known standard code use `code.text`.
 - Billing, claims, insurance, scheduling and audit tables are archived only, never mapped.
 - Integration tests use `createTestPatient`/`cleanupTestPatient`. Medplum allows 5 admin logins per minute, so run only focused integration files while iterating.
-- Real export path: `GA_REAL_DATA=/path/to/health-data`, folder `ehi-export/`.
+- Real export path: `GA_REAL_DATA=<real-data-dir>`, folder `<ehi-export-folder>/`.
 
 ## Review Focus
 
@@ -198,7 +198,7 @@
 - [ ] **Step 2: Run** `npx vitest run tests/integration/ehi.test.ts`. Expected: FAIL.
 - [ ] **Step 3: Implement** the orchestrator, archive and CLI branch.
 - [ ] **Step 4: Run** the same command. Expected: PASS.
-- [ ] **Step 5: Real data.** Extend `real-data.test.ts` with an EHI case. Run `GA_REAL_DATA=/path/to/health-data npx vitest run tests/integration/real-data.test.ts`. Write counts only to the gitignored workspace:
+- [ ] **Step 5: Real data.** Extend `real-data.test.ts` with an EHI case. Run `GA_REAL_DATA=<real-data-dir> npx vitest run tests/integration/real-data.test.ts`. Write counts only to the gitignored workspace:
   - first and second import reports
   - per-type counts against source table row counts, with the skip reasons
   - merged and flagged counts against the C-CDA data, including the 19 linked orders
