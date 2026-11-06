@@ -1,5 +1,7 @@
-// Full chat-app flow against the running Medplum: DCR, PKCE authorize, passkey (injected) and consent, token, MCP tools, refresh, disconnect.
-import { mkdtempSync, rmSync } from 'node:fs';
+// Full chat-app flow against the running Medplum: DCR, PKCE authorize, passkey (injected) and consent, token, MCP tools, refresh, disconnect;
+// consent Deny; an upload link through to ga_import by fileId.
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -50,6 +52,10 @@ afterAll(async () => {
   await new Promise((ok) => server?.close(ok));
   for (const a of await client.searchResources('AuditEvent', { _tag: `${REMOTE_TAG}|Claude Code`, date: `ge${start}`, _count: '100' }, { cache: 'no-cache' })) {
     if (a.entity?.[0]?.what?.display === 'fhir_search') await client.deleteResource('AuditEvent', a.id!);
+  }
+  for (const d of pid ? await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' }) : []) {
+    const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
+    if (bin) await client.deleteResource('Binary', bin);
   }
   if (pid) await cleanupTestPatient(client, pid);
   rmSync(dir, { recursive: true, force: true });
@@ -164,4 +170,55 @@ test('chat app connects, uses tools, refreshes, and is cut off when disconnected
   const logged = await client.searchResources('AuditEvent', { _tag: `${REMOTE_TAG}|Claude Code`, date: `ge${start}`, _count: '100' }, { cache: 'no-cache' });
   expect(logged.filter((a) => a.entity?.[0]?.what?.display === 'fhir_search')).toHaveLength(2);
   expect(logged.every((a) => !a.entity?.[0]?.detail)).toBe(true);
+});
+
+test('consent Deny returns access_denied; an upload link stores a file once, for the owner only, and ga_import uses it', async () => {
+  jar.clear();
+  passkeyOk = true;
+  const reg = await fetch(`${base}/reg`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: 'test2' }) });
+  const clientId = (await reg.json()).client_id as string;
+  const login = await authorize(clientId, oidc.randomPKCECodeVerifier());
+  await go(login.page!.path);
+  const signed = await go(`${login.page!.path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  const consent = await follow(await go((await signed.json()).redirect));
+  const denied = await follow(await go(`${consent.page!.path}/consent`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'decision=deny' }));
+  expect(denied.code?.get('error')).toBe('access_denied');
+  expect(denied.code?.get('code')).toBeNull();
+
+  const verifier = oidc.randomPKCECodeVerifier();
+  const again = await authorize(clientId, verifier);
+  const done = await follow(await go(`${again.page!.path}/consent`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'decision=allow' }));
+  const t = await token({ grant_type: 'authorization_code', code: done.code!.get('code')!, redirect_uri: REDIRECT, client_id: clientId, code_verifier: verifier, resource: RESOURCE });
+  const c = await mcp(t.body.access_token);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const r = (await c.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
+    return { isError: r.isError, text: r.content[0].text };
+  };
+
+  const link = JSON.parse((await call('upload_link', { purpose: 'lab PDF' })).text) as { url: string; fileId: string };
+  const path = new URL(link.url).pathname;
+  // A unique synthetic PDF, so "imported once" starts fresh each run.
+  const pdf = Buffer.concat([readFileSync(join(import.meta.dirname, '..', 'fixtures', 'labs-synthetic.pdf')), Buffer.from(`\n%${randomUUID()}\n`)]);
+  const post = () => go(`${path}?name=labs.pdf`, { method: 'POST', body: pdf });
+  // A new browser: no owner cookie, so the passkey page, and a POST stores nothing.
+  jar.clear();
+  expect(await (await go(path)).text()).toContain('Sign in with passkey');
+  expect((await post()).status).toBe(403);
+  expect(existsSync(join(dir, 'uploads'))).toBe(false);
+  const up = await go(`${path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  expect(await up.json()).toEqual({ redirect: path });
+  const stored = await post();
+  expect(stored.status).toBe(200);
+  expect((await stored.json()).fileId).toBe(link.fileId);
+  expect((await post()).status).toBe(404);
+  expect(readdirSync(join(dir, 'uploads'))).toEqual([link.fileId]);
+
+  const obs = { resourceType: 'Observation', status: 'final', code: { text: 'Synthetic upload check' }, valueQuantity: { value: 1, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' }, effectiveDateTime: '2024-03-01' };
+  expect((await call('ga_import', { resources: [obs] })).text).toContain('call upload_link first');
+  const r = await call('ga_import', { resources: [obs], fileId: link.fileId, documentDate: '2024-03-02' });
+  expect(r.isError).toBeUndefined();
+  expect(JSON.parse(r.text).created).toBe(1);
+  expect((await call('ga_import', { resources: [obs], fileId: link.fileId })).text).toContain('already imported');
+  expect((await call('import_file', { fileId: link.fileId })).text).toContain('call ga_import with this fileId');
+  await c.close();
 });

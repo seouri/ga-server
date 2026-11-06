@@ -15,6 +15,7 @@ import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { chatInstructions } from './instructions.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
+import { registerImportTools } from './tools/imports.ts';
 import { registerShareTools } from './tools/shares.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
@@ -126,7 +127,8 @@ export type ToolDeps = {
   client: MedplumClient;
   cfg: GaConfig;
   patientId: string;
-  remote?: { publicUrl: string; clientName: string; log: (tool: string) => Promise<void> };
+  // dir: the gateway's state directory (uploads); default gatewayDir().
+  remote?: { publicUrl: string; clientName: string; dir?: string; log: (tool: string) => Promise<void> };
 };
 
 const CAP = 150_000; // claude.ai's tool-result limit is about this size
@@ -213,7 +215,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       }
     },
   );
-  server.registerTool(
+  // Remote ga_import (by fileId) is in tools/imports.ts.
+  if (!remote) server.registerTool(
     'ga_import',
     {
       description: 'Import resources extracted from one local PDF/image: stores the file, links resources to it, dedups. Call once per document.',
@@ -231,8 +234,9 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
   if (remote) {
     registerShareTools(server, deps);
     registerHospitalTools(server, deps);
+    registerImportTools(server, deps);
   }
-  // Tasks 10, 11 add here, when remote is set: registerImportTools, registerAppTools.
+  // Task 11 adds here, when remote is set: registerAppTools.
   return server;
 }
 

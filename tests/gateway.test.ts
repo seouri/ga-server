@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,9 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { GaError } from '../src/config.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { createProvider } from '../src/gateway/oauth.ts';
-import { enrollLink } from '../src/gateway/passkey.ts';
+import { enrollLink, ownerCookie } from '../src/gateway/passkey.ts';
+import { writeJson } from '../src/gateway/store.ts';
+import { newUpload, uploadPath } from '../src/gateway/uploads.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const RESOURCE = `${PUBLIC}/mcp`;
@@ -21,6 +24,7 @@ let server: Server;
 let base: string;
 let calls: { publicUrl: string; clientName: string }[];
 let logins: string[];
+let passkeyOk = false;
 
 function start(publicUrl: string | null = PUBLIC): Promise<void> {
   server = createGateway({
@@ -39,11 +43,12 @@ function start(publicUrl: string | null = PUBLIC): Promise<void> {
       if (state === 'bad') throw new GaError('token exchange failed: secret detail');
       return {};
     },
+    verifyPasskey: async () => passkeyOk,
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; ok(); }));
 }
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; });
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; passkeyOk = false; });
 afterEach(async () => { await new Promise((ok) => server?.close(ok)); rmSync(dir, { recursive: true, force: true }); });
 
 // A second provider on the same directory mints tokens the gateway will find.
@@ -81,7 +86,7 @@ test('a valid token runs the tools for the client app', async () => {
   const r = await initialize(token);
   expect(r.status).toBe(200);
   await r.text();
-  expect(calls).toEqual([{ publicUrl: PUBLIC, clientName: 'claude.ai' }]);
+  expect(calls).toEqual([{ publicUrl: PUBLIC, clientName: 'claude.ai', dir }]);
   expect((await fetch(`${base}/mcp`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(405);
 });
 
@@ -210,4 +215,61 @@ test('authorization and registration requests are limited per IP', async () => {
   expect((await fetch(`${base}/auth`, { headers: h })).status).toBe(429);
   for (let i = 0; i < 20; i++) expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).not.toBe(429);
   expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).toBe(429);
+});
+
+test('upload links: passkey first, owner POST stores once, strangers store nothing', async () => {
+  await start();
+  writeJson(dir, 'passkeys.json', [{ id: 'AAAA', publicKey: 'AAAA', counter: 0 }]);
+  const bad = await fetch(`${base}/upload/nope`);
+  expect(bad.status).toBe(404);
+  expect(await bad.text()).toContain('This upload link is no longer valid');
+
+  const u = newUpload(dir, PUBLIC);
+  const path = `/upload/${u.token}`;
+  const post = (cookie = '', name = 'lab report.pdf') =>
+    fetch(`${base}${path}?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { cookie }, body: '%PDF-1.4 synthetic' });
+  // Not signed in: the passkey page, and a POST stores nothing and keeps the link.
+  const page = await fetch(base + path);
+  expect(page.status).toBe(200);
+  expect(await page.text()).toContain('Sign in with passkey');
+  expect((await post()).status).toBe(403);
+  expect(existsSync(join(dir, 'uploads'))).toBe(false);
+
+  const login = () => fetch(`${base}${path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  expect((await login()).status).toBe(400);
+  await fetch(base + path);
+  passkeyOk = true;
+  const signed = await login();
+  expect(signed.status).toBe(200);
+  expect(await signed.json()).toEqual({ redirect: path });
+  const cookie = signed.headers.getSetCookie()[0].split(';')[0];
+  expect((await login()).status).toBe(400); // the challenge was single use
+
+  const picker = await fetch(base + path, { headers: { cookie } });
+  const nonce = /script-src 'nonce-([^']+)'/.exec(picker.headers.get('content-security-policy')!)?.[1];
+  expect(await picker.text()).toContain(`<script nonce="${nonce}">`);
+  const ok = await post(cookie);
+  expect(ok.status).toBe(200);
+  const { fileId } = await ok.json();
+  expect(fileId).toBe(u.fileId);
+  expect(readFileSync(uploadPath(dir, fileId), 'utf8')).toBe('%PDF-1.4 synthetic');
+  expect(uploadPath(dir, fileId).endsWith('/lab_report.pdf')).toBe(true);
+  // Used: refused, nothing more stored.
+  expect((await post(cookie)).status).toBe(404);
+  expect(readdirSync(join(dir, 'uploads'))).toEqual([fileId]);
+});
+
+test('an upload over 2 GB is refused with 413 before the link is used', async () => {
+  await start();
+  const u = newUpload(dir, PUBLIC);
+  const status = await new Promise<number>((ok, fail) => {
+    const r = http.request(`${base}/upload/${u.token}`, { method: 'POST', headers: { cookie: ownerCookie(dir).split(';')[0], 'content-length': String(2 * 1024 ** 3 + 1) } }, (res) => {
+      res.resume();
+      ok(res.statusCode!);
+    });
+    r.on('error', fail);
+    r.write('x');
+  });
+  expect(status).toBe(413);
+  expect(existsSync(join(dir, 'uploads'))).toBe(false);
 });

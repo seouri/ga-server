@@ -61,7 +61,7 @@ test('valid token: 200, headers, summary, view logged', async () => {
   const html = await r.text();
   expect(html).toContain('Testolol 5 mg');
   expect(html).toContain('Test Person');
-  expect(logs).toEqual([{ share: expect.objectContaining({ id: s.id }), e: { kind: 'view', ip: '203.0.113.5', ua: 'ua-test' } }]);
+  expect(logs).toEqual([{ share: expect.objectContaining({ id: s.id }), e: { kind: 'view', ip: '10.0.0.1', ua: 'ua-test' } }]);
 });
 
 test('unknown, revoked and expired tokens: 404 with an identical body; load never called', async () => {
@@ -218,6 +218,12 @@ test('rate limit: 21 bad tokens from one IP give 429; a valid token still works;
   expect((await get('/s/bad21', { 'x-forwarded-for': '198.51.100.8' })).status).toBe(404);
   clock += 10 * 60_000;
   expect((await get('/s/bad22', h)).status).toBe(404);
+});
+
+test('a forged leftmost X-Forwarded-For entry does not change the limiter key', async () => {
+  await start();
+  for (let i = 0; i < 20; i++) expect((await get(`/s/bad${i}`, { 'x-forwarded-for': `192.0.2.${i}, 198.51.100.9` })).status).toBe(404);
+  expect((await get('/s/bad20', { 'x-forwarded-for': '192.0.2.99, 198.51.100.9' })).status).toBe(429);
 });
 
 test('failLimiter stays bounded under 20k spoofed IPs and evicts the oldest', () => {

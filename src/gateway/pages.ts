@@ -1,5 +1,5 @@
-// Gateway pages: owner sign-in, consent, passkey enrollment, hospital login return. Every interpolated value goes through esc;
-// the one script per page carries a nonce and uses only the browser's WebAuthn API.
+// Gateway pages: owner sign-in, consent, passkey enrollment, file upload, hospital login return. Every interpolated value goes through esc;
+// the one script per page carries a nonce and calls only WebAuthn and this origin.
 import { doc, esc } from '../share/page.ts';
 
 const msg = (title: string, text: string): string => doc(title, `<h1>${esc(text)}</h1>`);
@@ -45,3 +45,25 @@ export const consentPage = (app: string, uid: string): string =>
   doc('Allow access to GA', `<h1>${esc(app)} wants to use your GA record</h1>
 <p>It can read your health records, import documents, and manage shares and hospital connections. You can disconnect it at any time.</p>
 <form method="post" action="/interaction/${esc(uid)}/consent"><button name="decision" value="allow">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
+
+export const uploadInvalid = (): string => msg('Link not valid', 'This upload link is no longer valid. Ask your chat for a new one.');
+
+// Posts the picked file as the raw request body, its name in the query.
+export const uploadPage = (nonce: string): string =>
+  doc('Upload to GA', `<h1>Upload a file to GA</h1>
+<p>A PDF or photo as it is; an export (Apple Health, Epic EHI, C-CDA) as a .zip. Up to 2 GB. This link works once.</p>
+<p><input type="file" id="f"></p><button id="go">Upload</button><p id="m" class="mut"></p>
+<script nonce="${esc(nonce)}">
+const m = document.getElementById('m');
+document.getElementById('go').addEventListener('click', async () => {
+  const f = document.getElementById('f').files[0];
+  if (!f) return;
+  m.textContent = 'Uploading...';
+  try {
+    const r = await fetch(location.pathname + '?name=' + encodeURIComponent(f.name), { method: 'POST', body: f });
+    m.textContent = (await r.json()).done;
+  } catch {
+    m.textContent = 'The upload failed. Ask your chat for a new link.';
+  }
+});
+</script>`);

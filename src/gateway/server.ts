@@ -1,5 +1,5 @@
 // ga-gateway: the one public service behind Tailscale Funnel. OAuth (oidc-provider), owner sign-in and consent, passkey enrollment,
-// MCP over HTTP at /mcp (bearer token), the hospital login return at /callback and the share pages at /s/...
+// MCP over HTTP at /mcp (bearer token), one-time upload pages at /upload/<token>, the hospital login return at /callback and the share pages at /s/...
 // Without a public URL it serves only /s/... and /callback.
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
@@ -18,6 +18,7 @@ import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
+import { MAX_UPLOAD, UploadTooLarge, acceptUpload, cleanUploads, uploadLinkValid } from './uploads.ts';
 
 type Remote = Omit<NonNullable<ToolDeps['remote']>, 'log'>;
 export type GatewayDeps = {
@@ -33,6 +34,8 @@ type Req = http.IncomingMessage;
 type Res = http.ServerResponse;
 const PORT = 8110;
 const CHALLENGE_MS = 5 * 60_000;
+const BODY_MS = 30_000;
+const UPLOAD_IDLE_MS = 60_000;
 const MAX_CHALLENGES = 1000;
 const json = (res: Res, status: number, v: unknown, extra: Record<string, string> = {}): void => send(res, status, JSON.stringify(v), 'application/json', extra);
 // The share CSP plus one nonce'd script that may call back to this origin.
@@ -81,7 +84,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     }
   };
 
-  async function callback(req: Req, res: Res, search: string): Promise<void> {
+  async function callback(res: Res, search: string): Promise<void> {
     try {
       await deps.completeLogin(search);
     } catch (e) {
@@ -108,7 +111,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     }
     // Stateless: no session, so no GET stream and nothing to DELETE.
     if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' }, { Allow: 'POST' });
-    const server = deps.tools({ publicUrl: pub!, clientName: appName(client.redirectUris[0]) });
+    const server = deps.tools({ publicUrl: pub!, clientName: appName(client.redirectUris[0]), dir: deps.dir });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       transport.close().catch(() => {});
@@ -186,6 +189,43 @@ export function createGateway(deps: GatewayDeps): http.Server {
     json(res, 200, { done: 'Passkey saved. You can close this window.' }, { 'Set-Cookie': ownerCookie(deps.dir) });
   }
 
+  // The link is checked without being used (link previews); only the owner's POST uses it, then streams the file.
+  async function upload(req: Req, res: Res, ip: string, token: string, action: string, name: string): Promise<void> {
+    if (!uploadLinkValid(deps.dir, token)) return failed(res, ip, () => send(res, 404, pages.uploadInvalid()));
+    const owner = isOwner(deps.dir, req.headers.cookie);
+    if (action === '' && req.method === 'GET') {
+      const nonce = randomBytes(16).toString('base64');
+      if (owner) return send(res, 200, pages.uploadPage(nonce), undefined, scriptCsp(nonce));
+      if (!readJson<unknown[]>(deps.dir, 'passkeys.json', []).length) return send(res, 200, pages.noPasskey());
+      const options = await authenticationOptions(deps.dir, pub!);
+      putChallenge(`upload:${token}`, options.challenge);
+      return send(res, 200, pages.loginPage(nonce, options), undefined, scriptCsp(nonce));
+    }
+    if (action === '/login' && req.method === 'POST') {
+      const challenge = takeChallenge(`upload:${token}`);
+      const response = parse(await body(req));
+      if (!challenge || !response || !(await verifyPasskey(response, challenge))) return failed(res, ip, () => json(res, 400, { done: 'Sign-in failed. Reload the page to try again.' }));
+      return json(res, 200, { redirect: `/upload/${token}` }, { 'Set-Cookie': ownerCookie(deps.dir) });
+    }
+    if (action === '' && req.method === 'POST') {
+      if (!owner) return json(res, 403, { done: 'Sign in first: reload the page.' });
+      const big = () => json(res, 413, { done: 'The file is over the 2 GB limit.' }, { Connection: 'close' });
+      if (Number(req.headers['content-length']) > MAX_UPLOAD) return big();
+      // A large upload outlasts the body deadline: an idle timeout instead.
+      clearTimeout(deadlines.get(req));
+      req.socket.setTimeout(UPLOAD_IDLE_MS, () => req.socket.destroy());
+      try {
+        const { fileId } = await acceptUpload(deps.dir, token, name, req);
+        return json(res, 200, { done: `Uploaded (file id ${fileId}). Return to your chat.`, fileId });
+      } catch (e) {
+        if (e instanceof UploadTooLarge) return big();
+        if (e instanceof GaError) return send(res, 404, pages.uploadInvalid());
+        throw e;
+      }
+    }
+    return send(res, 404, renderInactive());
+  }
+
   async function handle(req: Req, res: Res): Promise<void> {
     let url: URL;
     try {
@@ -196,7 +236,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     const path = url.pathname;
     if (path.startsWith('/s/')) return share(req, res);
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
-    if (path === '/callback' || path === '/callback/') return req.method === 'GET' ? callback(req, res, url.search) : send(res, 404, renderInactive());
+    if (path === '/callback' || path === '/callback/') return req.method === 'GET' ? callback(res, url.search) : send(res, 404, renderInactive());
     if (!provider) return send(res, 404, renderInactive());
 
     // Never trust forwarded headers from outside: issuer, redirects and Secure cookies always use the public URL.
@@ -212,19 +252,26 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (i) return interaction(req, res, ip, i[1], i[2] ?? '');
     const e = /^\/enroll\/([A-Za-z0-9_-]+)$/.exec(path);
     if (e) return enroll(req, res, ip, e[1]);
+    const u = /^\/upload\/([A-Za-z0-9_-]+)(\/login)?$/.exec(path);
+    if (u) return upload(req, res, ip, u[1], u[2] ?? '', url.searchParams.get('name') ?? 'upload');
     // Each registration or authorization request writes a file: 20 of each per IP per 10 minutes.
     const writes = path === '/reg' && req.method === 'POST' ? registrations : path === '/auth' ? authorizations : undefined;
     if (writes?.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
     return oidc(req, res);
   }
 
+  // requestTimeout would cut off a large upload, so each request gets its own body deadline; upload() swaps it for an idle timeout.
+  const deadlines = new WeakMap<Req, NodeJS.Timeout>();
   const server = http.createServer((req, res) => {
+    const t = setTimeout(() => req.complete || req.socket.destroy(), BODY_MS).unref();
+    deadlines.set(req, t);
+    res.once('close', () => clearTimeout(t));
     handle(req, res).catch(() => {
       if (!res.headersSent) send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8');
       else res.destroy();
     });
   });
-  server.requestTimeout = 30_000;
+  server.requestTimeout = 0;
   server.headersTimeout = 20_000;
   return server;
 }
@@ -241,6 +288,9 @@ export async function serveGateway(): Promise<void> {
     share: shareDeps(client),
     completeLogin: (search) => completeLogin(client, smartDir(), cfg.patientId, search),
   });
+  const sweep = () => cleanUploads(gatewayDir());
+  sweep();
+  setInterval(sweep, 3600_000).unref();
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
   const model = process.env.GA_LLM_MODEL;

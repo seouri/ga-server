@@ -1,4 +1,5 @@
 {
+  "fileHosts": [],
   "apps": [
     { "name": "claude.ai", "redirects": ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"] },
     { "name": "ChatGPT", "redirects": ["https://chatgpt.com/connector_platform_oauth_redirect", "https://chatgpt.com/connector/oauth/*"] },

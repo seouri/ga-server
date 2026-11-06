@@ -120,9 +120,10 @@ export function failLimiter(maxIps = MAX_IPS): { fail: (ip: string, t: number) =
 }
 
 // [check] Task 8: confirm Funnel replaces (not appends to) X-Forwarded-For; if it appends, the first value is client-controlled.
+// The rightmost entry is the one the single trusted proxy (Funnel) saw, whether it appends or replaces; anything left of it is client-supplied.
 export function clientIp(req: http.IncomingMessage): string {
   const xff = req.headers['x-forwarded-for'];
-  return (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+  return (Array.isArray(xff) ? xff.at(-1) : xff)?.split(',').at(-1)?.trim() || req.socket.remoteAddress || 'unknown';
 }
 
 // The /s/... routes, for createServer and the gateway.
