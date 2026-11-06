@@ -236,7 +236,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     registerShareTools(server, deps);
     registerHospitalTools(server, deps);
     registerImportTools(server, deps);
-    registerAppTools(server, deps);
+    if (remote.disconnect) registerAppTools(server, deps); // the gateway supplies it
   }
   return server;
 }
