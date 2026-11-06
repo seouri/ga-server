@@ -630,3 +630,17 @@ test('unchanged re-import only advances last-seen', async () => {
   // A third run at the same time writes nothing.
   expect(await run(T2, T2)).toMatchObject({ created: 0, updated: 0, seen: 0 });
 });
+
+test('a conflict wins over fill-only: no fill, no smart identifier, no last-seen', async () => {
+  const at = '2026-03-04T08:00:00Z';
+  const agentObs = chol(uid('o'), 155, at);
+  await importResources(client, [agentObs], { kind: 'pdf', file: 'synthetic.pdf', date: '2026-01-01', writer: 'agent', llm: true }, pid, uid('h'));
+  const o = uid('o');
+  const portal = { ...chol(o, 155, at), identifier: [{ system: SMART_SYS, value: `Observation/${o}` }], issued: '2026-03-05T00:00:00Z' } as Resource;
+  const r = await importResources(client, [portal], smartSrc('2026-11-05T00:00:00Z', { seenAt: '2026-11-05T00:00:00Z', fillOnly: () => true }), pid, 'h');
+  expect(r).toMatchObject({ created: 0, merged: 0, skipped: 1, seen: 0 });
+  const [found] = await client.searchResources('Observation', { identifier: `urn:test:src|${agentObs.id}` }, { cache: 'no-cache' });
+  expect(systems(found)).not.toContain(SMART_SYS);
+  expect(found.issued).toBeUndefined();
+  expect(found.extension?.some((e) => e.url === LAST_SEEN)).toBe(false);
+});

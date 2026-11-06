@@ -375,13 +375,13 @@ export async function importResources(
         if (fromApple && idList(existing).some((i) => i.system !== APPLE && !inc.has(idKey(i)))) {
           await keep(existing, false);
           report.skipped++;
+        } else if (d === 'conflict') {
+          if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
+          report.conflicts++;
         } else if (fillOnly(existing)) await fillOnto(existing);
         else if (d === 'update') {
           await unionUpdate(client, existing, filled);
           report.updated++;
-        } else if (d === 'conflict') {
-          if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
-          report.conflicts++;
         } else if (linked) {
           // Equal or older source: only record its identifiers, so the next import finds it by stable identifier.
           const have = new Set(idList(existing).map(idKey));
@@ -401,8 +401,8 @@ export async function importResources(
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
           const otherOntoApple = !fromApple && isApple(same) && !hasNonApple(same); // hospital body beats an Apple-only one
-          if (fillOnly(same)) await fillOnto(same);
-          else if (d === 'conflict') report.skipped++;
+          if (d === 'conflict') report.skipped++;
+          else if (fillOnly(same)) await fillOnto(same);
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
             if (otherOntoApple || (d === 'update' && !appleOntoOther && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent'))) await unionUpdate(client, same, filled);
