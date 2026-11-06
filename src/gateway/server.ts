@@ -90,7 +90,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     send(res, 200, pages.callbackDone());
   }
 
-  // The token must exist, be unexpired, carry scope ga for GA's /mcp, and belong to a client that still exists.
+  // The token must exist, be unexpired (find() does not check exp), carry scope ga for GA's /mcp, and belong to a client that still exists.
   async function bearer(req: Req): Promise<{ redirectUris: string[] } | undefined> {
     const m = /^Bearer ([A-Za-z0-9_-]{1,200})$/.exec(req.headers.authorization ?? '');
     const at = m && (await provider.AccessToken.find(m[1]));
@@ -159,7 +159,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
       if (decision !== 'allow') {
         return provider.interactionFinished(req, res, { error: 'access_denied', error_description: 'The owner did not allow access' }, { mergeWithLastSubmission: false });
       }
-      const grant = details.grantId ? await provider.Grant.find(details.grantId) : new provider.Grant({ accountId: 'owner', clientId: details.params.client_id });
+      const grant = (details.grantId && (await provider.Grant.find(details.grantId))) || new provider.Grant({ accountId: 'owner', clientId: details.params.client_id });
       // ga is both an OIDC scope and the /mcp resource scope.
       grant.addOIDCScope(['ga offline_access', ...(details.prompt.details.missingOIDCScope ?? [])].join(' '));
       grant.addResourceScope(resource, 'ga offline_access');
