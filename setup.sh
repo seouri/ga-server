@@ -22,17 +22,8 @@ fi
 
 echo "==> npm install"
 npm install
-echo "==> docker compose up -d"
-docker compose up -d
-printf "==> waiting for the FHIR server"
-i=0
-until curl -sf http://127.0.0.1:8103/healthcheck >/dev/null 2>&1; do
-  i=$((i + 1))
-  if [ "$i" -gt 90 ]; then echo; echo "The FHIR server did not start in 3 minutes: docker compose logs medplum-server"; exit 1; fi
-  printf "."
-  sleep 2
-done
-echo
+echo "==> docker compose up -d (waits until the FHIR server is healthy)"
+docker compose up -d --wait --wait-timeout 300
 echo "==> ga setup"
 node src/cli.ts setup
 echo "==> npm link (puts 'ga' on your PATH)"

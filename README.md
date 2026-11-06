@@ -36,7 +36,7 @@ Prerequisites: [Docker Desktop](https://docs.docker.com/desktop/setup/install/ma
 ./setup.sh
 ```
 
-It checks that Docker is installed and running and that Node 26 and npm are installed (printing the download link for anything missing), then runs the four steps below, waiting for the FHIR server to come up before `setup`. It is safe to re-run. The same steps by hand:
+It checks that Docker is installed and running and that Node 26 and npm are installed (printing the download link for anything missing), then runs the four steps below (with `docker compose up -d --wait`, so `setup` starts only once the FHIR server is healthy). It is safe to re-run. The same steps by hand:
 
 ```sh
 npm install              # first: the ga-sync service runs this repo's code
