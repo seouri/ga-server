@@ -1,5 +1,6 @@
 // Synthetic SMART on FHIR server for tests: 127.0.0.1, random port, no real data.
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -28,6 +29,7 @@ export type MockSmart = {
   currentRefresh: () => string | undefined;
   revokeAll: () => void;
   authorized: (req: IncomingMessage) => boolean; // bearer check for FHIR routes
+  grant: () => string; // a valid access token without the OAuth dance (FHIR route tests)
   route: (path: string, h: Handler) => void; // add a route (exact pathname)
   onRequest?: (url: URL) => void; // test hook, runs before routing
   close: () => Promise<void>;
@@ -77,6 +79,11 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
       access.clear();
     },
     authorized: (req) => access.has((req.headers.authorization ?? '').replace(/^Bearer /, '')),
+    grant: () => {
+      const at = `at-${randomUUID()}`;
+      access.add(at);
+      return at;
+    },
     route: (path, h) => void routes.set(path, h),
     close: () => new Promise((r) => server.close(() => r())),
   };
@@ -188,4 +195,59 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
   });
 
   return m;
+}
+
+const FIX = new URL('../fixtures/smart/', import.meta.url);
+const BIN_TYPES: Record<string, string> = { html: 'text/html', rtf: 'text/rtf', pdf: 'application/pdf' };
+const PAGE = 2;
+const REJECTED = new Set(['Observation|exam', 'Condition|health-concern']); // Epic answers 400 for categories it doesn't support
+const SEARCH_EXTRA = new Set(['patient', 'category', '_page']);
+
+// Serves tests/fixtures/smart as an Epic-shaped FHIR R4 server: metadata, reads, patient searches (paged, PAGE per page,
+// absolute next links, an OperationOutcome entry like Epic's), and Binary/<id> as raw bytes. Every route needs a bearer.
+export function serveFixtures(m: MockSmart): { requests: string[] } {
+  const base = m.fhirBase;
+  const fix = (f: string) => readFileSync(new URL(f, FIX), 'utf8').replaceAll('{{base}}', base);
+  const db = (JSON.parse(fix('resources.json')) as { entry: { resource: { resourceType: string; id: string } & Record<string, unknown> }[] }).entry.map((e) => e.resource);
+  const requests: string[] = [];
+  const guard = (h: Handler): Handler => (req, res, url) => {
+    requests.push(url.pathname + url.search);
+    if (!m.authorized(req)) return json(res, 401, { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login' }] });
+    return h(req, res, url);
+  };
+  const cap = JSON.parse(fix('capability.json')) as { rest: { resource: { type: string }[] }[] };
+  m.route('/fhir/metadata', guard((_q, res) => json(res, 200, cap)));
+  for (const r of db) m.route(`/fhir/${r.resourceType}/${r.id}`, guard((_q, res) => json(res, 200, r)));
+  const codes = (r: Record<string, unknown>) => JSON.stringify(r.category ?? []);
+  const patientOf = (r: Record<string, unknown>) => ((r.subject ?? r.patient) as { reference?: string } | undefined)?.reference;
+  for (const type of new Set([...db.map((r) => r.resourceType), ...cap.rest[0].resource.map((r) => r.type)])) {
+    m.route(`/fhir/${type}`, guard((_q, res, url) => {
+      const p = url.searchParams;
+      const cat = p.get('category');
+      if ([...p.keys()].some((k) => !SEARCH_EXTRA.has(k)) || !p.get('patient')) return json(res, 400, { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'invalid' }] });
+      if (cat && REJECTED.has(`${type}|${cat}`)) return json(res, 400, { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'not-supported' }] });
+      const hits = db.filter((r) => r.resourceType === type && patientOf(r) === `Patient/${p.get('patient')}` && (!cat || codes(r).includes(`"${cat}"`)));
+      const page = Number(p.get('_page') ?? '1');
+      const next = new URL(url.href.replace(m.origin, base.replace(/\/fhir$/, '')));
+      next.searchParams.set('_page', String(page + 1));
+      json(res, 200, {
+        resourceType: 'Bundle',
+        type: 'searchset',
+        total: hits.length,
+        link: [{ relation: 'self', url: url.href }, ...(hits.length > page * PAGE ? [{ relation: 'next', url: next.href }] : [])],
+        entry: [
+          ...hits.slice((page - 1) * PAGE, page * PAGE).map((r) => ({ fullUrl: `${base}/${type}/${r.id}`, resource: r, search: { mode: 'match' } })),
+          { resource: { resourceType: 'OperationOutcome', issue: [{ severity: 'information', code: 'informational' }] }, search: { mode: 'outcome' } },
+        ],
+      });
+    }));
+  }
+  for (const f of readdirSync(new URL('binaries/', FIX))) {
+    const [id, ext] = f.split('.');
+    m.route(`/fhir/Binary/${id}`, guard((_q, res) => {
+      res.writeHead(200, { 'content-type': BIN_TYPES[ext] });
+      res.end(readFileSync(new URL(`binaries/${f}`, FIX)));
+    }));
+  }
+  return { requests };
 }

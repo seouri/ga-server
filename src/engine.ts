@@ -27,7 +27,7 @@ const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Apple is left out: on an Apple-only record the hospital body wins (otherOntoApple).
 const OTHER_SOURCE = (system: string) => system.startsWith('urn:ga-server:id:ehi:') || ['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf'].includes(system);
 // Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
-const COMPARTMENT: Record<string, string> = {
+export const COMPARTMENT: Record<string, string> = {
   ...Object.fromEntries(
     ['Observation', 'DiagnosticReport', 'Encounter', 'Condition', 'MedicationRequest', 'MedicationStatement', 'MedicationAdministration',
       'MedicationDispense', 'Procedure', 'DocumentReference', 'Communication', 'QuestionnaireResponse', 'ServiceRequest', 'CarePlan', 'Goal',

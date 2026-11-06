@@ -1,0 +1,23 @@
+{
+  "resourceType": "CapabilityStatement",
+  "status": "active",
+  "kind": "instance",
+  "fhirVersion": "4.0.1",
+  "format": ["json"],
+  "rest": [{
+    "mode": "server",
+    "resource": [
+      { "type": "Patient", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "Observation", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "Condition", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "Encounter", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "DocumentReference", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "MedicationRequest", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "AllergyIntolerance", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "Immunization", "interaction": [{ "code": "read" }] },
+      { "type": "Medication", "interaction": [{ "code": "read" }] },
+      { "type": "Practitioner", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "Binary", "interaction": [{ "code": "read" }] }
+    ]
+  }]
+}
