@@ -1,0 +1,123 @@
+# Registering GA with Epic
+
+Do this once, before connecting any hospital (see [Hospital portals](../README.md#hospital-portals-smart) in the README). It creates GA's signing key, publishes its public half, and registers GA as a patient app on Epic's developer site.
+
+**a. Make GA's key and publish its public half.** Epic's form takes only *JWK Set URLs*, one for non-production and a different one for production, so the public key must sit at two public HTTPS addresses. It is a public key, never health data; one public GitHub Gist holding the same key under two file names works:
+
+```sh
+ga keys                                                          # creates .ga/smart/ key (mode 0600), prints the public JWKS
+cp .ga/smart/public.jwks.json .ga/smart/non-production.jwks.json   # same public key,
+cp .ga/smart/public.jwks.json .ga/smart/production.jwks.json       # one name per Epic environment
+gh gist create --public -d "GA public key" .ga/smart/non-production.jwks.json .ga/smart/production.jwks.json
+```
+
+No `gh`? Either install it and sign in once (`brew install gh && gh auth login`, see https://cli.github.com), or skip it: run `cat .ga/smart/public.jwks.json | pbcopy`, open https://gist.github.com, paste into the file box and name it `non-production.jwks.json`; choose **Add file**, paste again and name it `production.jwks.json`; then choose **Create public gist**.
+
+The gist's page is `https://gist.github.com/<user>/<gist id>` (`gh` prints it). Your two JWK Set URLs are then:
+
+```text
+https://gist.githubusercontent.com/<user>/<gist id>/raw/non-production.jwks.json
+https://gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json
+```
+
+Check them: `curl -s <URL>` prints the same JSON as `ga keys` for both. `ga keys` never replaces an existing key, so the URLs stay valid.
+
+**b. Create the app.** Sign in at https://fhir.epic.com, choose **Build Apps**, then **Create**, and fill the form:
+
+| Field | Value |
+|---|---|
+| Application Name | `GA` |
+| Application Audience | **Patients** |
+| Automatic Client Distribution | **USCDI v3** (Epic offers the app to every Epic organization on its own; with **None** each hospital must enable it by hand) |
+| Public Documentation URL | leave empty |
+| Incoming APIs | see below |
+| Endpoint URI | `http` + `localhost:8765/callback` |
+| Can Register Dynamic Clients | off |
+| Is Confidential Client | **on** |
+| Requires Persistent Access | **on** |
+| Uses Rolling Refresh Tokens | **on** (GA saves each new refresh token) |
+| Can Have Indefinite Access | leave as is (greyed out for new apps; access then lasts as long as the duration you pick at the MyChart login, so pick the longest) |
+| Non-Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/non-production.jwks.json` |
+| Production JWK Set URL | `https` + `gist.githubusercontent.com/<user>/<gist id>/raw/production.jwks.json` (Epic requires a different URL from non-production) |
+| Sandbox Client Secret | leave empty (GA signs with its key instead of a secret) |
+
+**Incoming APIs.** Select only **R4** APIs whose name has `.Read` or `.Search`; never `.Create`, `.Update`, `(Premium Billing)`, `(DSTU2)` or `(STU3)`. Type each name below into **Search available service list** and move every matching `.Read (R4)` and `.Search (… ) (R4)` entry to **Selected** with `>>`:
+
+```text
+AllergyIntolerance
+Binary
+CarePlan
+CareTeam
+Condition
+Device
+DiagnosticReport
+DocumentReference
+Encounter
+Goal
+Immunization
+Location
+Medication
+MedicationRequest
+Observation
+Organization
+Patient
+Practitioner
+PractitionerRole
+Procedure
+Provenance
+ServiceRequest
+```
+
+GA asks each hospital which of these it supports and fetches only those, so extra ones are harmless and missing ones are just skipped.
+
+**c. Save.** Epic then shows the **Client ID** (production) and the **Non-Production Client ID** (sandbox), and more fields:
+
+| Field | Value |
+|---|---|
+| SMART on FHIR Version | **R4** |
+| SMART Scope Version | **SMART v1** (GA requests `patient/*.read`, v1 syntax) |
+| FHIR ID Generation Scheme | **Use Unconstrained FHIR IDs**. Never change it later: GA links portal records by Epic's IDs, so new IDs would duplicate every record |
+| Summary | `Personal health record: keeps a read-only copy of my own records on my own computer.` |
+| Description | `GA is a self-hosted personal health record for one patient. It reads the patient's own records with read-only SMART on FHIR access, stores them only on the patient's computer, and never writes back to the EHR or shares data with third parties.` |
+| Intended Purposes | **Individuals' Access to their EHI** |
+| Intended Users | **Individual/Caregiver** |
+| Thumbnail, Screenshots | optional |
+| Terms and Conditions Secure URL | `https://github.com/<user>/ga-server/blob/main/TERMS.md` (this repo's [TERMS.md](../TERMS.md); the repo must be public) |
+| Additional Disclosure Information URL | leave empty |
+| Data Use Questionnaire | see [Data Use Questionnaire](#data-use-questionnaire) below |
+
+**d. Sandbox first, production last.** Click **Save & Ready for Sandbox** and test against Epic's sandbox with the **Non-Production Client ID**. Marking it ready for production freezes the app (Epic: "the app cannot be edited") and, with USCDI v3, Epic sends it to every qualifying Epic customer. So before **Save & Ready for Production**, all of these must be done:
+
+- **An `https` Endpoint URI.** Production rejects an app whose only redirect is `http://localhost:8765/callback`; GA does not have an https callback yet (planned: a Tailscale Funnel address such as `https://<machine>.<tailnet>.ts.net/callback`, added as a second Endpoint URI).
+- The required fields above (Summary, Intended Purposes, Intended Users, Terms URL), both questionnaires, and the open.epic terms-of-use checkbox.
+
+Other customers receiving the app cannot use it: only your Mac holds GA's private key.
+
+Still unverified (record the answers here): whether Epic issues refresh tokens without the `openid` scope (GA requests only `offline_access launch/patient patient/*.read`).
+
+## Data Use Questionnaire
+
+Open it with **Open Data Use Questionnaire** on the app page. Epic shows some answers to patients when they log in, and **they cannot be changed after the app is marked ready for production**. Answers must be truthful: they describe GA as it is today (see [TERMS.md](../TERMS.md)). Save after each answer.
+
+### Questionnaire from 5/28/2021
+
+| Question | Answer |
+|---|---|
+| Which option best describes the company offering the app? | **An individual or independent developer.** |
+| How is this app funded? | **This app is produced by volunteers or is available in the open source community.** (only this one) |
+| Where does this app store user data? | **This app can store user data locally on the user's device.** and **This app offers users an option to store data in locations outside of the user's control.** (questions and PDF reading send record text to your AI provider, if you turn them on) |
+| For how long does this app store user data? | **This app stores your data indefinitely.** |
+| Does this app allow users to delete all of the data that have been stored about them? | **Yes, this app allows users to delete all of the data that have been stored about them.** |
+| Other than the user, who has access to user data? | **People and groups users authorize.** (share links) and **Apps that users authorize.** (your AI agents over MCP, and Claude answering share-link questions) |
+| For each entity that can access user data, will the user approve sharing data with that specific entity? | **Yes, users specifically approve for each entity.** (one approval per share link, not per access) |
+| Will the user be notified by default of each access to user's data? | **No.** (GA logs share access; it does not notify) |
+| Does the app developer allow users to obtain a complete record of the data that have been collected about them? | **Yes, the app developer allows users to obtain a complete record of the data that have been stored about them.** |
+| Does the app developer use data about a user for reasons other than providing direct services to the user? | **No, the app developer doesn't use data about users beyond providing direct services.** |
+| What other individuals from the user's health record does the app use data about beyond providing direct services? | **No one.** (only this one) |
+| How does the app use data about other individuals in the user's health record? | tick nothing |
+| Does this app allow users to obtain a complete record of who has accessed data about them? | **No, this app allows users to obtain only a partial record of who has accessed data about them.** (`ga share log` covers share links, not your own agents' reads) |
+| Is user data retained after a user deletes the app and closes their account? | **No.** |
+
+### Questionnaire from 12/27/2018
+
+Answer this tab too: hospitals on older Epic versions show it, and an unanswered one warns patients at login. Give the answers that match the table above for each overlapping question. (Record its exact questions and answers here when you fill it in.)
