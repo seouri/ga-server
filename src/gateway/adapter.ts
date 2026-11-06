@@ -66,6 +66,7 @@ export class FileAdapter {
 
   async consume(id: string): Promise<void> {
     const f = this.file(id);
+    if (!existsSync(f)) return;
     const e = JSON.parse(readFileSync(f, 'utf8')) as Entry;
     e.payload.consumed = Math.floor(this.now() / 1000);
     writeAtomic(f, JSON.stringify(e), 0o600);

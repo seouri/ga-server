@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import type { Share } from './store.ts';
 import { newestFirst, type Item, type Row, type Summary } from './summary.ts';
 
-const esc = (s: unknown): string =>
+export const esc = (s: unknown): string =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 type Opts = { base: string; tab?: 'summary' | 'records' | 'ask' | 'download'; page?: number; group?: string; askEnabled: boolean; answer?: { q: string; a: string }; notice?: string };
@@ -20,7 +20,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;
 button{font:inherit;padding:10px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 .ans{background:var(--card);border-radius:8px;padding:10px 12px;margin:12px 0}`;
 
-const doc = (title: string, body: string): string =>
+export const doc = (title: string, body: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title><style>${CSS}</style></head><body>${body}</body></html>`;
 
 const day = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : new Date(iso).toLocaleDateString('en-CA')); // local zone, like expiry itself

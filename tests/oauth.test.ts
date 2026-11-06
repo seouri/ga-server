@@ -59,6 +59,7 @@ describe('FileAdapter', () => {
     await rt.upsert('r1', { jti: 'r1', grantId: 'g1' }, 60);
     await rt.consume('r1');
     expect((await rt.find('r1'))?.consumed).toEqual(expect.any(Number));
+    await expect(rt.consume('missing')).resolves.toBeUndefined();
 
     await at.upsert('a2', { jti: 'a2', grantId: 'g1' }, 60);
     await at.upsert('a3', { jti: 'a3', grantId: 'g2' }, 60);

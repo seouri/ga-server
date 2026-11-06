@@ -58,7 +58,7 @@ function validateClient(_ctx: unknown, key: string, value: unknown, metadata: Re
 
 export function createProvider(opts: { publicUrl: string; dir: string; now?: () => number }) {
   const resource = `${opts.publicUrl}/mcp`;
-  return new Provider(opts.publicUrl, {
+  const provider = new Provider(opts.publicUrl, {
     adapter: (model: string) => new FileAdapter(model, opts.dir, opts.now),
     cookies: { keys: [cookieKey(opts.dir)] },
     jwks: jwks(opts.dir),
@@ -70,6 +70,8 @@ export function createProvider(opts: { publicUrl: string; dir: string; now?: () 
     features: {
       devInteractions: { enabled: false },
       registration: { enabled: true },
+      // Off: post_logout_redirect_uris would make /session/end an open redirect on GA's domain.
+      rpInitiatedLogout: { enabled: false },
       resourceIndicators: {
         enabled: true,
         defaultResource: (_ctx: unknown, _client: unknown, oneOf?: string) => oneOf ?? resource,
@@ -104,6 +106,9 @@ export function createProvider(opts: { publicUrl: string; dir: string; now?: () 
       Session: 12 * 3600,
     },
   });
+  // Behind Funnel: the gateway pins Host and X-Forwarded-Proto before a request reaches the provider.
+  provider.proxy = true;
+  return provider;
 }
 
 export type GaProvider = ReturnType<typeof createProvider>;

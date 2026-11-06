@@ -33,7 +33,7 @@ On the same or a new Mac, after cloning the repo (don't run `setup.sh`: the back
 cp -Rp ~/ga-backup/dot-ga .ga
 npm install && npm link
 docker compose up -d --wait
-docker compose stop medplum-server ga-sync ga-share
+docker compose stop medplum-server ga-sync ga-gateway
 docker compose exec -T postgres sh -c 'dropdb -U medplum medplum && createdb -U medplum medplum'
 docker compose exec -T postgres pg_restore -U medplum -d medplum --no-owner < ~/ga-backup/ga-postgres.dump
 docker run --rm -v ga-server_ga-binary:/b -v ~/ga-backup:/in postgres:16 tar xzf /in/ga-binary.tgz -C /b

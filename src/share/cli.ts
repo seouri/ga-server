@@ -14,7 +14,7 @@ import { logAccess, readLog } from './audit.ts';
 import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
-import { createServer, downloadName } from './server.ts';
+import { createServer, downloadName, type ShareDeps } from './server.ts';
 import { createShare, expiryWords, listShares, parseGroups, parseSince, revokeShare, shareDir, status, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
@@ -149,13 +149,13 @@ export const binaryFetcher = (client: MedplumClient) => async (ref: string): Pro
   return { data: Buffer.from(await blob.arrayBuffer()), contentType: blob.type };
 };
 
-async function serve(): Promise<void> {
-  const client = await getClient(loadConfig());
+// Share server deps, for ga share serve and ga gateway serve.
+export function shareDeps(client: MedplumClient): ShareDeps {
   // Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
   const model = process.env.GA_LLM_MODEL;
   const llm = model ? new OpenAI({ baseURL: process.env.GA_LLM_BASE_URL || undefined, apiKey: process.env.GA_LLM_API_KEY || 'none' }) : undefined;
   const cached = scopedCache(loadScoped);
-  const server = createServer({
+  return {
     dir: shareDir(),
     load: (share) => cached(client, share),
     log: (share, e) => logAccess(client, share, e),
@@ -163,11 +163,17 @@ async function serve(): Promise<void> {
     ...(llm && model && {
       ask: (q, s, share) => ask(q, s, share, { llm, model, ...(offersVaccines(share) && { vaccines: () => vaccineGaps(client, share.patientId) }) }),
     }),
-  });
+  };
+}
+
+async function serve(): Promise<void> {
+  console.log('ga share serve is deprecated: use ga gateway serve (share pages plus chat-app access)');
+  const server = createServer(shareDeps(await getClient(loadConfig())));
   // Loopback unless told otherwise: the container sets 0.0.0.0 and publishes the port on 127.0.0.1 only.
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
-  console.log(`ga-share listening on ${host}:${PORT}${llm ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
+  const model = process.env.GA_LLM_MODEL;
+  console.log(`ga-share listening on ${host}:${PORT}${model ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
 }
 
 // Returns false when argv is not a share command.

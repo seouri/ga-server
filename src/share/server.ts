@@ -8,7 +8,7 @@ import { BINARY_URL, type Scoped, inScope } from './scope.ts';
 import { findByToken, takeQuestion, type Share } from './store.ts';
 import { recordRows, summarize, toBundle } from './summary.ts';
 
-type ServerDeps = {
+export type ShareDeps = {
   dir: string;
   load: (share: Share) => Promise<Scoped>;
   log: (share: Share, e: AccessEvent) => Promise<void>;
@@ -17,7 +17,7 @@ type ServerDeps = {
   now?: () => Date;
 };
 
-const HEADERS: Record<string, string> = {
+export const HEADERS: Record<string, string> = {
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',
   'X-Robots-Tag': 'noindex',
@@ -33,7 +33,7 @@ const TABS = new Set(['summary', 'records', 'ask', 'download']);
 const HTML = 'text/html; charset=utf-8';
 
 type Res = http.ServerResponse;
-const send = (res: Res, status: number, body: string | Buffer, type = HTML, extra: Record<string, string> = {}): void => {
+export const send = (res: Res, status: number, body: string | Buffer, type = HTML, extra: Record<string, string> = {}): void => {
   res.writeHead(status, { 'Content-Type': type, ...extra });
   res.end(body);
 };
@@ -50,8 +50,8 @@ export function downloadName(s: Scoped, kind: 'health-summary.pdf' | 'health-rec
   return `${who}_${base}_${stamp}.${ext}`;
 }
 
-class TooLarge extends Error {}
-function readBody(req: http.IncomingMessage): Promise<string> {
+export class TooLarge extends Error {}
+export function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((ok, fail) => {
     if (Number(req.headers['content-length']) > BODY_LIMIT) return fail(new TooLarge());
     const chunks: Buffer[] = [];
@@ -83,7 +83,7 @@ async function streamBundle(res: Res, s: Scoped, name: string): Promise<void> {
   res.end(']}');
 }
 
-async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: ServerDeps): Promise<boolean> {
+async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: ShareDeps): Promise<boolean> {
   const d = s.resources.find((r): r is DocumentReference => r.resourceType === 'DocumentReference' && r.id === id && inScope(r, share));
   const atts = (d?.content ?? []).map((c) => c.attachment).filter((a): a is Attachment => !!a);
   const inline = atts.find((a) => a.data);
@@ -119,15 +119,20 @@ export function failLimiter(maxIps = MAX_IPS): { fail: (ip: string, t: number) =
   };
 }
 
-export function createServer(deps: ServerDeps): http.Server {
+// [check] Task 8: confirm Funnel replaces (not appends to) X-Forwarded-For; if it appends, the first value is client-controlled.
+export function clientIp(req: http.IncomingMessage): string {
+  const xff = req.headers['x-forwarded-for'];
+  return (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+}
+
+// The /s/... routes, for createServer and the gateway.
+export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: Res) => Promise<void> {
   const now = deps.now ?? (() => new Date());
   const limiter = failLimiter();
 
-  async function handle(req: http.IncomingMessage, res: Res): Promise<void> {
+  return async function handle(req: http.IncomingMessage, res: Res): Promise<void> {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
-    const xff = req.headers['x-forwarded-for'];
-    // [check] Task 8: confirm Funnel replaces (not appends to) X-Forwarded-For; if it appends, the first value is client-controlled.
-    const ip = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const ip = clientIp(req);
     const ua = req.headers['user-agent'];
     const t = now();
 
@@ -203,8 +208,11 @@ export function createServer(deps: ServerDeps): http.Server {
       group: url.searchParams.get('group') ?? undefined,
       askEnabled: !!deps.ask,
     }));
-  }
+  };
+}
 
+export function createServer(deps: ShareDeps): http.Server {
+  const handle = shareHandler(deps);
   const server = http.createServer((req, res) => {
     handle(req, res).catch(() => {
       // Never a stack trace on the wire.
