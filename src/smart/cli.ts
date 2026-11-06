@@ -42,11 +42,16 @@ function pick(sources: SourceRec[], arg: string | undefined): SourceRec[] {
 
 function print(r: SyncResult, log: (s: string) => void = console.log): void {
   const c = r.report;
-  const dry = r.status === 'pending' ? ' (dry run: nothing written)' : '';
+  const dry = r.dryRun ? ' (dry run: nothing written)' : '';
   const counts = c ? ` created ${c.created}, updated ${c.updated}, possible duplicates ${c.possibleDuplicates}, invalid ${c.invalid}${dry}` : '';
   const hint = r.status === 'off' ? ': run ga connect <fhir-base-url>' : '';
   log(`${r.source}: ${r.status}${counts}${r.error ? ` error ${r.error}${hint}` : ''}`);
-  for (const [t, n] of Object.entries(c?.byType ?? {}).sort()) log(`  ${t}: created ${n.created}, linked ${n.linked}, updated ${n.updated}, flagged ${n.flagged}`);
+  const types = [...new Set([...Object.keys(r.fetched ?? {}), ...Object.keys(c?.byType ?? {})])].filter((t) => t !== 'Patient').sort();
+  for (const t of types) {
+    const n = c?.byType?.[t] ?? { created: 0, linked: 0, updated: 0, flagged: 0 };
+    log(`  ${t}: fetched ${r.fetched?.[t] ?? 0}, created ${n.created}, linked ${n.linked}, updated ${n.updated}, flagged ${n.flagged}`);
+  }
+  if (r.dryRun && c) log('  created on a type GA already holds from Epic (C-CDA/EHI) = likely duplicates — leave that type disabled');
   for (const [t, why] of Object.entries(r.skipped ?? {}).sort()) log(`  skipped ${t}: ${why}`);
 }
 
@@ -57,9 +62,15 @@ function browser(url: string): void {
   if (process.platform === 'darwin') execFile('open', [url], () => undefined); // the URL is printed either way
 }
 
+// Wakes hourly and syncs once 24 h of wall-clock time has passed (1 h after a failed run), so Mac or VM sleep,
+// which pauses timers, never pushes the daily sync out by the hours spent asleep.
 async function daemon(): Promise<never> {
-  for (;;) {
-    const at = new Date().toISOString();
+  let last = 0;
+  let wait = 0; // startup: sync now
+  for (;; await new Promise((r) => setTimeout(r, HOUR_MS))) {
+    if (Date.now() - last < wait) continue;
+    last = Date.now();
+    const at = new Date(last).toISOString();
     let failed = false;
     try {
       // Log in before checking sources, so "no sources connected" also proves the container reaches Medplum.
@@ -74,7 +85,7 @@ async function daemon(): Promise<never> {
       failed = true;
       console.error(`${at} sync failed: ${e instanceof GaError ? e.message : 'sync_error'}`);
     }
-    await new Promise((r) => setTimeout(r, failed ? HOUR_MS : 24 * HOUR_MS));
+    wait = failed ? HOUR_MS : 24 * HOUR_MS;
   }
 }
 
@@ -117,9 +128,9 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     const r = await syncSource(client, dir, src, patientId);
     print(r);
     if (r.status === 'pending' && !r.error) {
-      console.log(`Next: check the flagged counts, then enable types: ga sync --enable <Type,...>|all ${src.key}`);
+      console.log(`Next: enable only the types that are new to GA or link to what it holds: ga sync --enable <Type,...> ${src.key}`);
     }
-    if (r.status === 'error') process.exitCode = 1;
+    if (r.status === 'error' || r.error === 'busy') process.exitCode = 1;
   } else if (cmd === 'sync') {
     if (values.daemon) {
       usage(!positionals.length && !values.enable && !values['dry-run']);
@@ -134,7 +145,7 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     }
     const chosen = pick(sources, positionals[0]);
     if (values.enable) {
-      if (chosen.length > 1) throw new GaError('several sources connected: name the source, e.g. ga sync --enable all <source>');
+      if (chosen.length > 1) throw new GaError('several sources connected: name the source, e.g. ga sync --enable <Type,...> <source>');
       const all = Object.keys(COMPARTMENT);
       const types = values.enable === 'all' ? all : (values.enable as string).split(',').map((t) => t.trim()).filter(Boolean);
       const bad = types.filter((t) => !all.includes(t));
@@ -146,7 +157,7 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     for (const src of chosen) {
       const r = await syncSource(client, dir, src, patientId, { dryRun: !!values['dry-run'] });
       print(r);
-      if (r.status === 'error') process.exitCode = 1;
+      if (r.status === 'error' || r.error === 'busy') process.exitCode = 1;
     }
   } else if (cmd === 'status') {
     usage(!positionals.length);

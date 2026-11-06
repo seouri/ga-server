@@ -59,21 +59,21 @@ Find the hospital's FHIR R4 base URL in Epic's endpoint list (https://open.epic.
 ga connect https://fhir.example-hospital.org/api/FHIR/R4 --client-id <client ID> --name "Hospital A"
 ```
 
-`--client-id` is needed only the first time. Your browser opens the MyChart login; choose the longest access duration offered. GA then runs a **dry run**: it fetches everything, prints per-type counts (created, linked, updated, flagged) and writes nothing. Check the flagged counts, then enable the types you trust:
+`--client-id` is needed only the first time. Your browser opens the MyChart login; choose the longest access duration offered. GA then runs a **dry run**: it fetches everything, prints per type how many records it fetched and how many would be created, linked to a record GA already holds, updated or flagged, and writes no records (only a status entry, so your agent knows the source is not enabled yet). Records from C-CDA or EHI imports are linked only where Epic shares an ID with the portal: if a type GA already holds from Epic shows `created`, those are likely duplicates of what you have, so leave that type disabled. Enable the types that link or are new to GA:
 
 ```sh
-ga sync --enable Condition,Observation,MedicationRequest fhir-example-hospital-org   # or --enable all
+ga sync --enable Condition,Observation,MedicationRequest fhir-example-hospital-org
 ga sync                 # fetch every connected source now (prints counts only)
 ga sync --dry-run       # counts only, writes nothing
 ga status               # per source: status, last success, STALE flag, enabled types
 ga disconnect fhir-example-hospital-org   # deletes the tokens; records already fetched stay
 ```
 
-A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs. After `ga disconnect`, `ga connect` reconnects it.
+A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs; `ga status` shows it `off (not_enabled)` until you enable types. Two syncs of one source never run at once: the second waits up to 30 seconds, then reports `busy` and changes nothing. After `ga disconnect`, `ga connect` reconnects it.
 
 ### 3. Daily sync
 
-`docker compose up -d` also starts `ga-sync`, which runs `ga sync --daemon`: a sync at startup, then every 24 hours, logging counts only (`docker compose logs ga-sync`). It runs as your user so files in `.ga/` stay yours; on Linux export your ids first (`UID=$(id -u) GID=$(id -g) docker compose up -d`, or put `UID` and `GID` in `.env`). Docker Desktop on macOS maps ownership itself.
+`docker compose up -d` also starts `ga-sync`, which runs `ga sync --daemon`: a sync at startup, then once 24 hours have passed (it checks hourly, so a sleeping Mac catches up on wake; an hour after a failed run), logging counts only (`docker compose logs ga-sync`). It runs as your user so files in `.ga/` stay yours; on Linux export your ids first (`UID=$(id -u) GID=$(id -g) docker compose up -d`, or put `UID` and `GID` in `.env`). Docker Desktop on macOS maps ownership itself.
 
 ### What syncs and what doesn't
 
@@ -81,7 +81,7 @@ Synced: every patient-scoped type the portal offers (problems, diagnoses, labs, 
 
 Not synced: MyChart messages and some note types (they keep coming from EHI exports); Quest and LabCorp results not ordered through Epic; Apple Health (import its export); PDFs (`/ga-import`).
 
-**Stale sources.** If a source is `off` (login needed), `error`, or not synced for over 48 hours, `ga status` marks it STALE and your agent says so in the first line of its answer. `off`: run `ga connect <url>`. `error`: retried on the next run, or `ga sync` now.
+**Stale sources.** If a source is `off` (login needed), `error`, or not synced for over 48 hours, `ga status` marks it STALE and your agent says so in the first line of its answer. `off`: run `ga connect <url>`, except `off (not_enabled)`: enable types with `ga sync --enable <Type,...> <source>`. `error`: retried on the next run, or `ga sync` now.
 
 **Troubleshooting `ga connect`.** The browser must reach http://localhost:8765/callback on this machine; GA listens on 127.0.0.1:8765 only. If a firewall blocks it, another process holds port 8765, or the browser resolves localhost to [::1] where something else listens, connect times out or errors but fails safely (the code is useless without GA's PKCE verifier and state). Fix: free port 8765 (lsof -i :8765), allow loopback, retry ga connect.
 

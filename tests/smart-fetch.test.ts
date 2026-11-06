@@ -168,4 +168,14 @@ describe('mapForGa', () => {
     // Input untouched.
     expect(find<DocumentReference>(fetched, 'DocumentReference/doc-pdf').content[0].attachment.data).toBeDefined();
   });
+
+  it('treats a malformed absolute reference as unresolvable instead of throwing', () => {
+    const src = { key: 'k', name: 'Synthetic Hospital', fhirBase: m.fhirBase };
+    const obs = {
+      resourceType: 'Observation', id: 'bad1', status: 'final', code: { text: 'Synthetic' },
+      performer: [{ reference: 'http://', display: 'Synthetic Lab' }, { reference: 'https://[bad/Practitioner/1' }],
+    } as Observation;
+    const { resources } = mapForGa([obs], src);
+    expect((resources[0] as Observation).performer).toEqual([{ display: 'Synthetic Lab' }]);
+  });
 });

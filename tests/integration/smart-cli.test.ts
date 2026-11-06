@@ -44,9 +44,9 @@ beforeAll(async () => {
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   dir = mkdtempSync(join(tmpdir(), 'ga-smart-cli-int-'));
-  // Medplum connection fields only; the test patient comes from GA_PATIENT_ID.
-  const { baseUrl, clientId, clientSecret, patientId, converterUrl } = JSON.parse(readFileSync(defaultConfigPath(), 'utf8'));
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ baseUrl, clientId, clientSecret, patientId, converterUrl }), { mode: 0o600 });
+  // Medplum connection fields only, and the test patient (also passed as GA_PATIENT_ID): never the real patient id.
+  const { baseUrl, clientId, clientSecret, converterUrl } = JSON.parse(readFileSync(defaultConfigPath(), 'utf8'));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ baseUrl, clientId, clientSecret, patientId: pid, converterUrl }), { mode: 0o600 });
   const { publicJwks } = await ensureKeys(join(dir, 'smart'));
   m = await startMock({ clientId: 'synthetic-client', jwks: publicJwks });
   serveFixtures(m);
@@ -66,18 +66,20 @@ test('connect dry-runs, sync --enable writes, status reports, disconnect turns t
   expect(c.stderr).not.toMatch(/smart sync|error/i);
   expect(c.code).toBe(0);
   expect(c.stdout).toMatch(/dry run/);
-  expect(c.stdout).toMatch(/^ {2}Condition: created \d+/m);
-  expect(c.stdout).toContain(`ga sync --enable`);
+  expect(c.stdout).toMatch(/^ {2}Condition: fetched 2, created 2, linked 0, updated 0, flagged 0$/m);
+  expect(c.stdout).toMatch(/created on a type GA already holds from Epic \(C-CDA\/EHI\) = likely duplicates/);
+  expect(c.stdout).not.toMatch(/^ {2}Patient:/m);
+  expect(c.stdout).toContain(`ga sync --enable <Type,...> ${key}`);
   expect(c.stdout).not.toContain('synthetic-patient-1');
-  expect(await compartment()).toEqual([]); // a dry run writes nothing
-  expect(await endpoint()).toBeUndefined();
+  expect(await compartment()).toEqual([]); // a dry run writes no patient data
+  expect((await endpoint())?.status).toBe('off'); // only the status entry: not_enabled
 
   const d = await cli('sync', '--dry-run');
   expect(d.code).toBe(0);
-  expect(d.stdout).toMatch(/^ {2}Condition: created \d+/m);
+  expect(d.stdout).toMatch(/^ {2}Condition: fetched 2, created 2/m);
   expect(await compartment()).toEqual([]);
 
-  expect((await cli('status')).stdout).toMatch(/Test Hospital \(127-0-0-1\): pending, last success never, STALE, types: none \(dry run only\)/);
+  expect((await cli('status')).stdout).toMatch(/Test Hospital \(127-0-0-1\): off \(not_enabled\), last success never, STALE, types: none \(dry run only\)/);
 
   const s = await cli('sync', '--enable', 'Condition', key);
   expect(s.code).toBe(0);

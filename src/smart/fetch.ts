@@ -114,7 +114,7 @@ export async function fetchAll(
   for (const r of got.values()) {
     if (r.resourceType !== 'DocumentReference') continue;
     for (const { attachment: a } of (r as DocumentReference).content ?? []) {
-      if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
+      if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !URL.canParse(a.url, `${base}/`) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
       const res = await get(a.url, 'Binary', a.contentType ?? '*/*');
       if (!res.ok) {
         await res.body?.cancel();
@@ -193,7 +193,13 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
   const inBatch = new Set(rs.map(keyOf));
   const keep = (ref: string): string | undefined => {
     if (ref.startsWith('#')) return ref;
-    if (/^https?:/i.test(ref)) ref = new URL(ref).href;
+    if (/^https?:/i.test(ref)) {
+      try {
+        ref = new URL(ref).href;
+      } catch {
+        return undefined; // malformed absolute reference: unresolvable, so display-only or dropped
+      }
+    }
     const local = (ref.startsWith(`${base}/`) ? ref.slice(base.length + 1) : ref).replace(/\/_history\/.*$/, '');
     return inBatch.has(local) ? local : undefined;
   };

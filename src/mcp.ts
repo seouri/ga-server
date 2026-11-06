@@ -132,7 +132,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         "For any question about the user's own health, look here first and cite the records you use. " +
         'Hospital portal sync status: first fhir_search Endpoint with identifier urn:ga-server:id:smart-source| (system only). A source is stale if its ' +
         'status is off or error, or its extension urn:ga-server:ext:smart-last-success is missing or older than 48 hours. If any is stale, start the ' +
-        'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so), else `ga sync`. ' +
+        'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
         'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed.',

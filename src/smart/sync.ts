@@ -1,5 +1,8 @@
 // Sync one or all SMART sources into GA: token -> fetch -> map -> Binaries -> importResources -> Endpoint status.
 import { randomUUID } from 'node:crypto';
+import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
+import { hostname } from 'node:os';
+import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Attachment, DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
 import { GaError } from '../config.ts';
@@ -13,6 +16,8 @@ export type SyncResult = {
   status: 'active' | 'error' | 'off' | 'pending'; // pending: no enabled types yet, so only a dry run ran
   report?: ImportReport;
   perType?: Record<string, { created: number; flagged: number }>;
+  fetched?: Record<string, number>; // per type, as the portal returned them
+  dryRun?: boolean;
   error?: string;
   skipped?: Record<string, string>;
 };
@@ -127,13 +132,67 @@ export async function writeEndpoint(
 
 const lastUpdated = (r: Resource): string | undefined => r.meta?.lastUpdated;
 
+const LOCK_STALE_MS = 2 * 3_600_000;
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+// Per-source sync lock (O_EXCL), so a daemon run and a manual ga sync never both create the same record. Shared .ga/ with
+// the ga-sync container: a pid is only checked on the host that wrote it; elsewhere only the 2 h age frees the lock.
+async function takeSyncLock(dir: string, key: string, waitMs: number): Promise<string | undefined> {
+  const f = join(dir, `${key}.sync.lock`);
+  for (const end = Date.now() + waitMs; ; ) {
+    try {
+      const fd = openSync(f, 'wx', 0o600);
+      writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), started: Date.now() }));
+      closeSync(fd);
+      return f;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+    let held: { pid?: number; host?: string; started?: number } = {};
+    let started = Date.now();
+    try {
+      started = statSync(f).mtimeMs;
+      held = JSON.parse(readFileSync(f, 'utf8'));
+    } catch {
+      // vanished or mid-write: held, aged by its mtime
+    }
+    const stale =
+      (held.host === hostname() && typeof held.pid === 'number' && !alive(held.pid)) ||
+      Date.now() - (held.started ?? started) > LOCK_STALE_MS;
+    if (stale) rmSync(f, { force: true });
+    else if (Date.now() >= end) return undefined;
+    else await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 export async function syncSource(
   client: MedplumClient,
   dir: string,
   src: SourceRec,
   patientId: string,
-  opts: { dryRun?: boolean; now?: Date } = {},
+  opts: { dryRun?: boolean; now?: Date; lockWaitMs?: number } = {},
 ): Promise<SyncResult> {
+  const lock = await takeSyncLock(dir, src.key, opts.lockWaitMs ?? 30_000);
+  if (!lock) {
+    // Another sync of this source is running: leave its Endpoint alone and report the status it has.
+    const ep = await findEndpoint(client, src.key, patientId).catch(() => undefined);
+    return { source: src.key, status: (ep?.status as SyncResult['status'] | undefined) ?? 'pending', error: 'busy' };
+  }
+  try {
+    return await runSync(client, dir, src, patientId, opts);
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+async function runSync(client: MedplumClient, dir: string, src: SourceRec, patientId: string, opts: { dryRun?: boolean; now?: Date }): Promise<SyncResult> {
   const at = (opts.now ?? new Date()).toISOString(); // one timestamp: source date, last-seen and last-success
   const pending = !src.enabledTypes; // no enabled types yet: counts only, nothing in GA, until the user enables them
   const dryRun = !!opts.dryRun || pending;
@@ -157,10 +216,19 @@ export async function syncSource(
       patientId,
       '',
     );
-    const ok: SyncResult = { source: src.key, status: pending ? 'pending' : 'active', report, perType: report.byType, skipped: fetched.skipped };
-    if (dryRun) return ok;
+    const ok: SyncResult = {
+      source: src.key,
+      status: pending ? 'pending' : 'active',
+      report,
+      perType: report.byType,
+      fetched: fetched.byType,
+      skipped: fetched.skipped,
+      ...(dryRun && { dryRun: true }),
+    };
+    if (opts.dryRun) return ok; // an explicit --dry-run writes nothing at all
     try {
-      await writeEndpoint(client, dir, src, patientId, 'active', at);
+      // Never enabled: a status-only Endpoint, so agents see the source (off, not_enabled: stale) without any patient data.
+      await (pending ? writeEndpoint(client, dir, src, patientId, 'off', at, 'not_enabled') : writeEndpoint(client, dir, src, patientId, 'active', at));
     } catch {
       console.error(`smart sync ${src.key}: status_write_error`);
       return { ...ok, error: 'status_write_error' }; // the import itself succeeded
@@ -172,8 +240,8 @@ export async function syncSource(
     // No usable refresh token: only reconnecting helps.
     const status = code === 'invalid_grant' || code === 'no_refresh_token' || code === 'not_connected' ? 'off' : 'error';
     console.error(`smart sync ${src.key}: ${code}`);
-    // not_connected: no tokens, i.e. ga disconnect, which already wrote the Endpoint off/disconnected.
-    if (!dryRun && code !== 'not_connected') await writeEndpoint(client, dir, src, patientId, status, at, code); // a throw here: syncAll records status_write_error
+    // not_connected: no tokens, i.e. ga disconnect, which already wrote the Endpoint off/disconnected. A never-enabled source is written off.
+    if (!opts.dryRun && code !== 'not_connected') await writeEndpoint(client, dir, src, patientId, pending ? 'off' : status, at, code); // a throw here: syncAll records status_write_error
     return { source: src.key, status, error: code };
   }
 }

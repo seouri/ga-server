@@ -1,7 +1,7 @@
 // SMART sync against the synthetic mock server and the local Medplum, always on throwaway test patients.
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Condition, DocumentReference, Extension, Resource } from '@medplum/fhirtypes';
@@ -105,18 +105,20 @@ describe('syncSource', () => {
     fresh(src.key);
   });
 
-  it('without enabled types only dry-runs: per-type counts, nothing written, listed as pending', async () => {
+  it('without enabled types only dry-runs: per-type counts, no patient data, a status-only Endpoint (off, not_enabled)', async () => {
     writeSources(dir, [src]);
     const before = await client.readResource('Patient', pid, { cache: 'no-cache' });
     // Medplum can't search Binary: watch every write method on the real client instead.
     const writes = (['createResource', 'updateResource', 'patchResource', 'createBinary', 'deleteResource', 'post', 'put', 'patch', 'delete', 'executeBatch'] as const)
       .map((k) => vi.spyOn(client, k));
     const r = await syncSource(client, dir, src, pid);
-    for (const w of writes) {
-      expect(w).not.toHaveBeenCalled();
-      w.mockRestore();
-    }
-    expect(r).toMatchObject({ source: src.key, status: 'pending' });
+    const [create, , , , , post, ...rest] = writes;
+    expect(create.mock.calls.map((c) => (c[0] as Resource).resourceType)).toEqual(['Endpoint']); // the status entry only
+    expect(post.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/\/Endpoint$/)]); // createResource's own POST
+    for (const w of [...writes.slice(1, 5), ...rest]) expect(w).not.toHaveBeenCalled();
+    for (const w of writes) w.mockRestore();
+    expect(r).toMatchObject({ source: src.key, status: 'pending', dryRun: true });
+    expect(r.fetched).toMatchObject({ Condition: 2, Observation: 5 });
     dryCounts = r.perType ?? {};
     expect(Object.fromEntries(Object.entries(dryCounts).map(([t, c]) => [t, c.created]))).toEqual({
       Condition: 2, DocumentReference: 3, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5,
@@ -124,10 +126,16 @@ describe('syncSource', () => {
     expect(Object.values(dryCounts).every((c) => c.flagged === 0)).toBe(true);
     expect(await compartment(pid)).toEqual([]);
     expect((await client.readResource('Patient', pid, { cache: 'no-cache' })).meta?.versionId).toBe(before.meta?.versionId);
-    expect(await endpoints(src.key)).toHaveLength(0);
+    const eps = await endpoints(src.key);
+    expect(eps).toHaveLength(1);
+    expect(eps[0].status).toBe('off');
+    expect(ext(eps[0], 'urn:ga-server:ext:smart-last-error')?.valueCode).toBe('not_enabled');
+    expect(ext(eps[0], 'urn:ga-server:ext:smart-patient')?.valueReference?.reference).toBe(`Patient/${pid}`);
+    expect(ext(eps[0], 'urn:ga-server:ext:smart-last-success')).toBeUndefined();
     expect(await client.searchResources('Medication', { identifier: `urn:ga-server:id:smart:${src.key}|Medication/med1` }, { cache: 'no-cache' })).toHaveLength(0);
-    expect(await readStatus(client, pid)).toEqual([]);
-    expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'Synthetic Hospital', status: 'pending', stale: true, enabledTypes: [] }]);
+    const off = { source: src.key, name: 'Synthetic Hospital', status: 'off', error: 'not_enabled', stale: true, enabledTypes: [] };
+    expect(await readStatus(client, pid)).toEqual([off]);
+    expect(await readStatus(client, pid, dir)).toEqual([off]);
   });
 
   it('first enabled sync creates what the dry run counted and marks the Endpoint active', async () => {
@@ -161,6 +169,45 @@ describe('syncSource', () => {
     for (const x of mine) expect(ext(x as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t2.toISOString());
     expect(bins(mine)).toEqual(binsBefore);
     expect((await readStatus(client, pid))[0].lastSuccess).toBe(t2.toISOString());
+  });
+
+  it('an explicit dry run on an enabled source writes nothing, not even the Endpoint', async () => {
+    const writes = (['createResource', 'updateResource', 'patchResource', 'createBinary', 'deleteResource', 'post', 'put', 'patch', 'delete', 'executeBatch'] as const)
+      .map((k) => vi.spyOn(client, k));
+    const r = await syncSource(client, dir, src, pid, { dryRun: true });
+    for (const w of writes) {
+      expect(w).not.toHaveBeenCalled();
+      w.mockRestore();
+    }
+    expect(r).toMatchObject({ status: 'active', dryRun: true, report: { created: 0 } });
+    expect((await readStatus(client, pid))[0].lastSuccess).toBe(t2.toISOString());
+  });
+});
+
+describe('sync lock', () => {
+  it('a second concurrent sync of one source reports busy and writes nothing; a waiting one runs after; a dead lock is taken', async () => {
+    const pid = await newPatient();
+    const src: SourceRec = { key: newKey('lock'), name: 'Lock Hospital', fhirBase: m.fhirBase, patient: P, enabledTypes: ['Observation'] };
+    fresh(src.key);
+    const obs = async () => (await compartment(pid)).filter((x) => x.resourceType === 'Observation').length;
+    // The first call takes the lock before its first await, so the second (no wait) finds it held.
+    const [a, b] = await Promise.all([syncSource(client, dir, src, pid), syncSource(client, dir, src, pid, { lockWaitMs: 0 })]);
+    expect(a).toMatchObject({ status: 'active', report: { created: 5 } });
+    expect(b).toEqual({ source: src.key, status: 'pending', error: 'busy' }); // no Endpoint yet: nothing to report
+    expect(await obs()).toBe(5);
+    expect(await endpoints(src.key)).toHaveLength(1);
+    // With the default wait the second runs once the first is done, and finds nothing new.
+    const [c, d] = await Promise.all([syncSource(client, dir, src, pid), syncSource(client, dir, src, pid)]);
+    expect([c.report?.created, d.report?.created]).toEqual([0, 0]);
+    expect(await obs()).toBe(5);
+    // A lock left by a dead process on this host is stale.
+    writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: 2 ** 22 + 1, host: hostname(), started: Date.now() }));
+    expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toMatchObject({ status: 'active' });
+    // A live lock from another host (the ga-sync container) is not, until 2 h old.
+    writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: 2 ** 22 + 1, host: 'other-host', started: Date.now() }));
+    expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toEqual({ source: src.key, status: 'active', error: 'busy' });
+    writeFileSync(join(dir, `${src.key}.sync.lock`), JSON.stringify({ pid: 1, host: 'other-host', started: Date.now() - 3 * H }));
+    expect(await syncSource(client, dir, src, pid, { lockWaitMs: 0 })).toMatchObject({ status: 'active', report: { created: 0 } });
   });
 });
 
@@ -243,14 +290,17 @@ describe('syncAll', () => {
     expect(st.find((s) => s.source === good.key)).toMatchObject({ status: 'active', stale: false, enabledTypes: ['Observation'] });
   });
 
-  it('a first-connect source that fails returns its failure, writes nothing and reads as pending', async () => {
+  it('a first-connect source that fails returns its failure and writes a status-only Endpoint (off, the failure code)', async () => {
     const pid = await newPatient();
     const src: SourceRec = { key: newKey('firstfail'), name: 'New Hospital', fhirBase: m.fhirBase, patient: P };
     saveSecret(dir, src.key, { access_token: 'at-expired', refresh_token: 'rt-revoked', expires_at: Date.now() - 1000, patient: P });
     writeSources(dir, [src]);
     expect(await syncAll(client, dir, pid)).toEqual([{ source: src.key, status: 'off', error: 'invalid_grant' }]);
-    expect(await endpoints(src.key)).toHaveLength(0);
-    expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'New Hospital', status: 'pending', stale: true, enabledTypes: [] }]);
+    const [ep] = await endpoints(src.key);
+    expect(ep.status).toBe('off');
+    expect(ext(ep, 'urn:ga-server:ext:smart-last-success')).toBeUndefined();
+    expect(await compartment(pid)).toEqual([]);
+    expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'New Hospital', status: 'off', error: 'invalid_grant', stale: true, enabledTypes: [] }]);
   });
 });
 
