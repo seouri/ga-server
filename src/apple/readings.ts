@@ -29,10 +29,10 @@ export const READINGS: Record<string, Def> = {
 };
 const EVENTS: Record<string, string> = { HighHeartRateEvent: 'High heart rate notification', LowCardioFitnessEvent: 'Low cardio fitness notification' };
 
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
-const short = (t: string) => t.replace(/^HK(?:Quantity|Category)TypeIdentifier/, '');
-const SUBJECT = { reference: 'Patient/apple-patient' };
-const UCUM = 'http://unitsofmeasure.org';
+export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+export const short = (t: string) => t.replace(/^HK(?:Quantity|Category)TypeIdentifier/, '');
+export const SUBJECT = { reference: 'Patient/apple-patient' };
+export const UCUM = 'http://unitsofmeasure.org';
 
 function base(rec: AhRecord, key: string, code: Observation['code'], category: string): Observation {
   const o: Observation = {

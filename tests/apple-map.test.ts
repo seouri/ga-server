@@ -47,3 +47,59 @@ describe('Apple readings', () => {
     expect(r.result().resources[0].valueString).toBe('HKCategoryValueNotApplicable');
   });
 });
+
+import { Daily } from '../src/apple/daily.ts';
+import { readExport } from '../src/apple/read.ts';
+
+const hk = (t: string, value: string, unit: string | undefined, sourceName: string, s: string, e = s): AhRecord => ({ type: `HKQuantityTypeIdentifier${t}`, value, unit, sourceName, startDate: s, endDate: e });
+const sl = (v: string, sourceName: string, s: string, e: string): AhRecord => ({ type: 'HKCategoryTypeIdentifierSleepAnalysis', value: `HKCategoryValueSleepAnalysis${v}`, sourceName, startDate: s, endDate: e });
+const daily = (rs: AhRecord[], sums: Parameters<Daily['summary']>[0][] = []) => { const d = new Daily(); for (const x of rs) d.add(x); for (const s of sums) d.summary(s); return d.result(); };
+const comp = (o: { component?: { code: { text?: string }; valueQuantity?: { value?: number } }[] }, t: string) => o.component!.find((c) => c.code.text === t)?.valueQuantity?.value;
+
+describe('Apple daily', () => {
+  it('heart rate daily mean', () => {
+    const { resources: [o] } = daily(['08', '09', '10'].map((h, i) => hk('HeartRate', String(60 + 20 * i), 'count/min', 'W', `2026-03-01T${h}:00:00-05:00`)));
+    expect(o.valueQuantity).toMatchObject({ value: 80, code: '/min' });
+    expect(comp(o, 'Minimum')).toBe(60); expect(comp(o, 'Maximum')).toBe(100); expect(comp(o, 'Sample count')).toBe(3);
+    expect(o.effectivePeriod).toEqual({ start: '2026-03-01T00:00:00-05:00', end: '2026-03-02T00:00:00-05:00' });
+    expect(o.code.coding).toBeUndefined();
+    expect(o.device).toBeUndefined();
+  });
+  it('steps use the largest source; two offsets make one day', () => {
+    const { resources: [o], skips } = daily([
+      hk('StepCount', '4000', 'count', 'Watch', '2026-03-01T09:00:00-05:00'),
+      hk('StepCount', '3000', 'count', 'Watch', '2026-03-01T20:00:00-08:00'),
+      hk('StepCount', '5000', 'count', 'Phone', '2026-03-01T12:00:00-05:00'),
+    ]);
+    expect(o.valueQuantity).toMatchObject({ value: 7000, code: '{steps}' });
+    expect(o.code.coding![0].code).toBe('41950-7');
+    expect(skips.activityEmptyDays).toBe(0);
+  });
+  it('converts miles and skips bad units', () => {
+    const r = daily([hk('DistanceWalkingRunning', '1', 'mi', 'W', '2026-03-01T09:00:00-05:00'), hk('FlightsClimbed', '3', 'furlong', 'W', '2026-03-01T09:00:00-05:00')]);
+    expect(r.resources).toHaveLength(1);
+    expect(r.resources[0].valueQuantity).toMatchObject({ value: 1.609, code: 'km' });
+    expect(r.skips.unexpectedUnit).toBe(1);
+  });
+  it('fixture sleep and rings', async () => {
+    const d = new Daily();
+    await readExport('tests/fixtures/apple', { record: (r) => { d.add(r); }, summary: (s) => d.summary(s), clinical: () => {} });
+    const { resources, skips } = d.result();
+    const sleep = resources.find((o) => o.code.text === 'Sleep, nightly (Apple Health)')!;
+    expect(sleep.valueQuantity).toMatchObject({ value: 240, code: 'min' });
+    expect(comp(sleep, 'Deep sleep')).toBe(60);
+    expect(comp(sleep, 'In bed')).toBe(480);
+    expect(sleep.effectivePeriod!.start).toBe('2026-03-01T23:00:00-05:00');
+    const rings = resources.filter((o) => o.code.text === 'Activity rings, daily (Apple Health)');
+    expect(rings).toHaveLength(1);
+    expect(rings[0].component).toHaveLength(3);
+    expect(skips.activityEmptyDays).toBe(1);
+    expect(resources.filter((o) => o.code.text === 'Sleep, nightly (Apple Health)')[0].effectivePeriod!.end).toBe('2026-03-02T03:00:00-05:00');
+  });
+  it('is deterministic and splits nights by 3h gap', () => {
+    const rs = [sl('AsleepCore', 'W', '2026-03-01T23:00:00-05:00', '2026-03-02T02:00:00-05:00'), sl('AsleepREM', 'W', '2026-03-02T06:00:00-05:00', '2026-03-02T07:00:00-05:00')];
+    const a = daily(rs).resources, b = daily(rs).resources;
+    expect(a.map((o) => o.identifier![0].value)).toEqual(b.map((o) => o.identifier![0].value));
+    expect(a).toHaveLength(2);
+  });
+});
