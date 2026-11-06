@@ -65,8 +65,8 @@ async function funnelHint(): Promise<void> {
   if (!/Funnel on/.test(out) || !/proxy http:\/\/(127\.0\.0\.1|localhost):8110\b/.test(out)) console.log('Links work after you run: tailscale funnel --bg 8110');
 }
 
-const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
-const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
+export const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
+export const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
 
 async function printLink(s: Share, token: string): Promise<void> {
   const url = `${s.baseUrl}/s/${token}`;
@@ -77,7 +77,7 @@ async function printLink(s: Share, token: string): Promise<void> {
 
 const patientId = (): string => process.env.GA_PATIENT_ID || loadConfig().patientId; // GA_PATIENT_ID: tests only, as in smart/cli.ts
 
-function parseGroups(v: string): Group[] | 'all' {
+export function parseGroups(v: string): Group[] | 'all' {
   if (v === 'all') return 'all';
   const gs = v.split(',').map((g) => g.trim()).filter(Boolean);
   for (const g of gs) if (!GROUPS.includes(g as Group)) throw new GaError(`unknown group ${g}: use all or some of ${GROUPS.join(', ')}`);
