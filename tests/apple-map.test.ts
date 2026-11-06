@@ -57,7 +57,7 @@ import { readExport } from '../src/apple/read.ts';
 
 const hk = (t: string, value: string, unit: string | undefined, sourceName: string, s: string, e = s): AhRecord => ({ type: `HKQuantityTypeIdentifier${t}`, value, unit, sourceName, startDate: s, endDate: e });
 const sl = (v: string, sourceName: string, s: string, e: string): AhRecord => ({ type: 'HKCategoryTypeIdentifierSleepAnalysis', value: `HKCategoryValueSleepAnalysis${v}`, sourceName, startDate: s, endDate: e });
-const daily = (rs: AhRecord[], sums: Parameters<Daily['summary']>[0][] = []) => { const d = new Daily(); for (const x of rs) d.add(x); for (const s of sums) d.summary(s); return d.result(); };
+const daily = (rs: AhRecord[], sums: Parameters<Daily['summary']>[0][] = []) => { const d = new Daily('America/New_York'); for (const x of rs) d.add(x); for (const s of sums) d.summary(s); return d.result(); };
 const comp = (o: { component?: { code: { text?: string }; valueQuantity?: { value?: number } }[] }, t: string) => o.component!.find((c) => c.code.text === t)?.valueQuantity?.value;
 
 describe('Apple daily', () => {
@@ -79,6 +79,19 @@ describe('Apple daily', () => {
     expect(o.code.coding![0].code).toBe('41950-7');
     expect(skips.activityEmptyDays).toBe(0);
   });
+  it('days follow the user time zone, DST included, not the export offset', () => {
+    // Apple writes -05:00 all year: 23:30-05:00 on Jul 4 is 00:30 EDT on Jul 5.
+    const [j] = daily([hk('HeartRate', '60', 'count/min', 'W', '2026-07-04T23:30:00-05:00')]).resources;
+    expect(j.effectivePeriod).toEqual({ start: '2026-07-05T00:00:00-04:00', end: '2026-07-06T00:00:00-04:00' });
+    // US fall back, 2026-11-01: the day starts in EDT and ends in EST.
+    const [o] = daily([
+      hk('HeartRate', '70', 'count/min', 'W', '2026-11-01T22:00:00-05:00'),
+      hk('HeartRate', '60', 'count/min', 'W', '2026-11-01T00:30:00-04:00'),
+    ]).resources;
+    expect(o.effectivePeriod).toEqual({ start: '2026-11-01T00:00:00-04:00', end: '2026-11-02T00:00:00-05:00' });
+    const [s] = daily([hk('StepCount', '10', 'count', 'W', '2026-03-08T09:00:00-04:00'), hk('StepCount', '10', 'count', 'W', '2026-03-08T01:00:00-05:00')]).resources;
+    expect(s.effectivePeriod).toEqual({ start: '2026-03-08T00:00:00-05:00', end: '2026-03-09T00:00:00-04:00' });
+  });
   it('converts miles and skips bad units', () => {
     const r = daily([hk('DistanceWalkingRunning', '1', 'mi', 'W', '2026-03-01T09:00:00-05:00'), hk('FlightsClimbed', '3', 'furlong', 'W', '2026-03-01T09:00:00-05:00')]);
     expect(r.resources).toHaveLength(1);
@@ -86,7 +99,7 @@ describe('Apple daily', () => {
     expect(r.skips.unexpectedUnit).toBe(1);
   });
   it('fixture sleep and rings', async () => {
-    const d = new Daily();
+    const d = new Daily('America/New_York');
     await readExport('tests/fixtures/apple', { record: (r) => { d.add(r); }, summary: (s) => d.summary(s), clinical: () => {} });
     const { resources, skips } = d.result();
     const sleep = resources.find((o) => o.code.text === 'Sleep, nightly (Apple Health)')!;

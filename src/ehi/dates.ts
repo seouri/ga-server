@@ -4,7 +4,7 @@ import type { EhiCtx } from './ids.ts';
 const pad = (n: string) => n.padStart(2, '0');
 
 // Minutes east of UTC that `timeZone` had at instant `ms` (Intl's built-in tz data).
-function offsetAt(timeZone: string, ms: number): number {
+export function offsetAt(timeZone: string, ms: number): number {
   const p = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
       .formatToParts(ms)

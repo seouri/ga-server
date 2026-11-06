@@ -1,4 +1,5 @@
 import type { Observation, ObservationComponent } from '@medplum/fhirtypes';
+import { offsetAt } from '../ehi/dates.ts';
 import { APPLE } from '../identity.ts';
 import type { AhRecord, AhSummary } from './read.ts';
 import { SUBJECT, UCUM, sha, short } from './readings.ts';
@@ -33,30 +34,45 @@ const merge = (ivs: { s: number; e: number }[]) => {
   return out;
 };
 const minutes = (ivs: { s: number; e: number }[]) => merge(ivs).reduce((a, i) => a + (i.e - i.s), 0) / 60000;
-const offsetOf = (iso: string) => iso.slice(-6);
+// Apple writes every timestamp in the export device's offset at export time (e.g. -05:00 all year), so a reading's
+// calendar day and a day's bounds come from the user's time zone, DST included.
+// shortcut: one zone for the whole history (this machine's, as for EHI); travel days land on home-zone dates.
+const zone = (m: number) => `${m < 0 ? '-' : '+'}${String(Math.floor(Math.abs(m) / 60)).padStart(2, '0')}:${String(Math.abs(m) % 60).padStart(2, '0')}`;
 const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86400e3).toISOString().slice(0, 10);
 
 export class Daily {
-  private rates = new Map<string, { kind: string; day: string; off: string; sum: number; min: number; max: number; n: number }>();
+  private rates = new Map<string, { kind: string; day: string; sum: number; min: number; max: number; n: number }>();
   // shortcut: largest single source per day approximates Apple's source-priority merge; upgrade to interval merge if totals look wrong
-  private totals = new Map<string, { kind: string; day: string; off: string; bySrc: Map<string, number> }>();
+  private totals = new Map<string, { kind: string; day: string; bySrc: Map<string, number> }>();
   private asleep: Iv[] = [];
   private inBed: Iv[] = [];
   private rings: Observation[] = [];
   private skips = { activityEmptyDays: 0, unexpectedUnit: 0, badValue: 0 };
 
-  private obs(key: string, code: Observation['code'], day: string, off: string): Observation {
+  private timeZone: string;
+  constructor(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) { this.timeZone = timeZone; }
+
+  private localDay(iso: string): string {
+    const ms = Date.parse(iso);
+    return new Date(ms + offsetAt(this.timeZone, ms) * 60000).toISOString().slice(0, 10);
+  }
+  private midnight(day: string): string {
+    const local = Date.parse(`${day}T00:00:00Z`);
+    return `${day}T00:00:00${zone(offsetAt(this.timeZone, local - offsetAt(this.timeZone, local) * 60000))}`;
+  }
+
+  private obs(key: string, code: Observation['code'], day: string): Observation {
     return {
       resourceType: 'Observation', status: 'final',
       category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'activity' }] }],
       code, subject: SUBJECT, identifier: [{ system: APPLE, value: sha(`daily|${key}|${day}`) }],
-      effectivePeriod: { start: `${day}T00:00:00${off}`, end: `${nextDay(day)}T00:00:00${off}` },
+      effectivePeriod: { start: this.midnight(day), end: this.midnight(nextDay(day)) },
     };
   }
 
   add(rec: AhRecord): boolean {
     const t = short(rec.type);
-    const day = rec.startDate.slice(0, 10);
+    const day = this.localDay(rec.startDate);
     if (t === 'SleepAnalysis') {
       const m = /SleepAnalysis(InBed|Awake|Asleep)(\w*)$/.exec(rec.value ?? '');
       if (!m || m[1] === 'Awake') return true;
@@ -73,11 +89,11 @@ export class Daily {
       if (rec.unit !== rate.unit) { this.skips.unexpectedUnit++; return true; }
       const a = this.rates.get(k);
       if (a) { a.sum += v; a.n++; a.min = Math.min(a.min, v); a.max = Math.max(a.max, v); }
-      else this.rates.set(k, { kind: t, day, off: offsetOf(rec.startDate), sum: v, min: v, max: v, n: 1 });
+      else this.rates.set(k, { kind: t, day, sum: v, min: v, max: v, n: 1 });
     } else {
       const conv = rec.unit ? tot.conv[rec.unit] : undefined;
       if (!conv) { this.skips.unexpectedUnit++; return true; }
-      const a = this.totals.get(k) ?? { kind: t, day, off: offsetOf(rec.startDate), bySrc: new Map() };
+      const a = this.totals.get(k) ?? { kind: t, day, bySrc: new Map() };
       a.bySrc.set(rec.sourceName, (a.bySrc.get(rec.sourceName) ?? 0) + conv(v));
       this.totals.set(k, a);
     }
@@ -88,7 +104,7 @@ export class Daily {
     const kcal = s.activeEnergyBurned ?? 0, ex = s.appleExerciseTime ?? 0, st = s.appleStandHours ?? 0;
     if (kcal === 0 && ex === 0 && st === 0 && (s.activeEnergyBurnedGoal ?? 0) === 0) { this.skips.activityEmptyDays++; return; }
     if (s.activeEnergyBurnedUnit !== 'Cal' && s.activeEnergyBurnedUnit !== 'kcal') { this.skips.unexpectedUnit++; return; }
-    const o = this.obs('activity', { text: 'Activity rings, daily (Apple Health)' }, s.date, '');
+    const o = this.obs('activity', { text: 'Activity rings, daily (Apple Health)' }, s.date);
     delete o.effectivePeriod; // ActivitySummary carries no offset
     o.effectiveDateTime = s.date;
     o.component = [comp('Active energy burned', kcal, 'kcal'), comp('Exercise minutes', ex, 'min'), comp('Stand hours', st, 'h')];
@@ -107,8 +123,8 @@ export class Daily {
     const ends = clusters.map((c) => Math.max(...c.map((i) => i.e)));
     for (const [n, c] of clusters.entries()) {
       const first = c[0], last = c.reduce((a, b) => (b.e > a.e ? b : a));
-      const wake = last.eStr.slice(0, 10);
-      const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake, '');
+      const wake = this.localDay(last.eStr);
+      const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake);
       o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${first.sStr}`) }]; // wake day can repeat (naps)
       o.effectivePeriod = { start: first.sStr, end: last.eStr };
       o.valueQuantity = q(r(minutes(c), 1), 'min');
@@ -136,7 +152,7 @@ export class Daily {
     const out: Observation[] = [];
     for (const a of this.rates.values()) {
       const d = RATES[a.kind];
-      const o = this.obs(a.kind, { text: d.text }, a.day, a.off);
+      const o = this.obs(a.kind, { text: d.text }, a.day);
       o.valueQuantity = q(r(a.sum / a.n, 1), d.ucum);
       o.component = [comp('Minimum', a.min, d.ucum), comp('Maximum', a.max, d.ucum), comp('Sample count', a.n, '1')];
       out.push(o);
@@ -145,7 +161,7 @@ export class Daily {
       const d = TOTALS[a.kind];
       const code: Observation['code'] = { text: d.text };
       if (d.loinc) code.coding = [{ system: 'http://loinc.org', code: d.loinc }];
-      const o = this.obs(a.kind, code, a.day, a.off);
+      const o = this.obs(a.kind, code, a.day);
       o.valueQuantity = q(r(Math.max(...a.bySrc.values()), 3), d.ucum);
       out.push(o);
     }
