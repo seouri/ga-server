@@ -1,7 +1,6 @@
 // What a share may show: the security core. Every share route and Ask tool reads only loadScoped's result.
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Endpoint, Patient, Resource } from '@medplum/fhirtypes';
-import { GaError } from '../config.ts';
+import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { isActive } from '../current.ts';
 import { TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
@@ -9,7 +8,22 @@ import type { Group, Share } from './store.ts';
 
 export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[] };
 
-const NEVER = new Set(['Endpoint', 'Provenance', 'AuditEvent', 'Patient']);
+// Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own.
+const NEVER = new Set([
+  'Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person',
+]);
+// FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
+export const COMPARTMENT_TYPES = [
+  'Account', 'AdverseEvent', 'AllergyIntolerance', 'Appointment', 'AppointmentResponse', 'AuditEvent', 'Basic', 'BodyStructure',
+  'CarePlan', 'CareTeam', 'ChargeItem', 'Claim', 'ClaimResponse', 'ClinicalImpression', 'Communication', 'CommunicationRequest',
+  'Composition', 'Condition', 'Consent', 'Coverage', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'DetectedIssue',
+  'DeviceRequest', 'DeviceUseStatement', 'DiagnosticReport', 'DocumentManifest', 'DocumentReference', 'Encounter', 'EnrollmentRequest',
+  'EpisodeOfCare', 'ExplanationOfBenefit', 'FamilyMemberHistory', 'Flag', 'Goal', 'Group', 'ImagingStudy', 'Immunization',
+  'ImmunizationEvaluation', 'ImmunizationRecommendation', 'Invoice', 'List', 'MeasureReport', 'Media', 'MedicationAdministration',
+  'MedicationDispense', 'MedicationRequest', 'MedicationStatement', 'MolecularSequence', 'NutritionOrder', 'Observation', 'Patient',
+  'Person', 'Procedure', 'Provenance', 'QuestionnaireResponse', 'RelatedPerson', 'RequestGroup', 'ResearchSubject', 'RiskAssessment',
+  'Schedule', 'ServiceRequest', 'Specimen', 'SupplyDelivery', 'SupplyRequest', 'Task', 'VisionPrescription',
+].filter((t) => !NEVER.has(t)) as ResourceType[];
 const ARCHIVES = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive']);
 const BY_TYPE: Record<string, Group> = {
   DiagnosticReport: 'labs',
@@ -96,40 +110,44 @@ function supportRefs(r: Resource, out: Set<string>): void {
   walk(r);
 }
 
-// Pure part of loadScoped: compartment matches in, the share's records and the support refs they need out.
-export function selectScoped(matches: Resource[], share: Share): { patient: Patient; resources: Resource[]; refs: string[] } {
-  const p = matches.find((r): r is Patient => r.resourceType === 'Patient' && r.id === share.patientId);
-  if (!p) throw new GaError(`share ${share.id}: patient ${share.patientId} not found`);
-  const resources = matches.filter((r) => inScope(r, share));
+// Pure part of loadScoped: compartment records in, the share's records and the support refs they need out.
+export function selectScoped(compartment: Resource[], share: Share): { resources: Resource[]; refs: string[] } {
+  const resources = compartment.filter((r) => inScope(r, share));
   const refs = new Set<string>();
   for (const r of resources) supportRefs(r, refs);
-  return { patient: trimPatient(p), resources, refs: [...refs] };
+  return { resources, refs: [...refs] };
 }
 
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {
-  const matches: Resource[] = [];
-  const included = new Map<string, Resource>();
-  let url: string | undefined = `fhir/R4/Patient/${share.patientId}/$everything?_count=1000`;
-  while (url) {
-    const b: Bundle = await client.get<Bundle>(url, { cache: 'no-cache' });
-    for (const e of b.entry ?? []) {
-      if (!e.resource) continue;
-      if (e.search?.mode === 'match') matches.push(e.resource);
-      else included.set(`${e.resource.resourceType}/${e.resource.id}`, e.resource);
-    }
-    const next = b.link?.find((l) => l.relation === 'next')?.url;
-    // Relative, so a next link carrying Medplum's own host still goes through the client's base URL.
-    url = next ? (({ pathname, search }) => (pathname + search).replace(/^\//, ''))(new URL(next)) : undefined;
+  const opts = { cache: 'no-cache' as const };
+  const p = await client.readResource('Patient', share.patientId, opts);
+  // Per type, not $everything: Medplum caps _offset at 10000. _sort=_lastUpdated with _count >= 20 makes it page by _cursor.
+  const compartment: Resource[] = [];
+  for (const type of COMPARTMENT_TYPES) {
+    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000' };
+    for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
-  const { patient, resources, refs } = selectScoped(matches, share);
-  const support: Resource[] = [];
+  const { resources, refs } = selectScoped(compartment, share);
+  const ids = new Map<string, string[]>();
   for (const ref of refs) {
     const [type, id] = ref.split('/');
-    const r = included.get(ref) ?? (await client.readResource(type as 'Medication', id).catch(() => undefined));
-    if (r) support.push(r);
+    ids.set(type, [...(ids.get(type) ?? []), id]);
   }
-  const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' });
-  return { patient, resources, support, endpoints: eps.filter(forPatient(share.patientId)) };
+  const support: Resource[] = [];
+  for (const [type, list] of ids) {
+    for (let i = 0; i < list.length; i += 100) {
+      const chunk = list.slice(i, i + 100);
+      if (type === 'Binary') {
+        // Binary is not searchable in Medplum; a deleted one is just left out.
+        for (const id of chunk) {
+          const b = await client.readResource('Binary', id, opts).catch(() => undefined);
+          if (b) support.push(b);
+        }
+      } else support.push(...(await client.searchResources(type as ResourceType, { _id: chunk.join(','), _count: '1000' }, opts)));
+    }
+  }
+  const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, opts);
+  return { patient: trimPatient(p), resources, support, endpoints: eps.filter(forPatient(share.patientId)) };
 }
 
 export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof loadScoped {

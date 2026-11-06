@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Patient, Resource } from '@medplum/fhirtypes';
-import { dateOf, groupOf, inScope, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
+import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Group, Share } from '../src/share/store.ts';
 
@@ -48,6 +48,12 @@ test.each([
   r({ resourceType: 'Provenance' }),
   r({ resourceType: 'AuditEvent' }),
   r({ resourceType: 'Patient', id: 'p' }),
+  r({ resourceType: 'Coverage' }),
+  r({ resourceType: 'RelatedPerson' }),
+  r({ resourceType: 'Account' }),
+  r({ resourceType: 'Claim' }),
+  r({ resourceType: 'ExplanationOfBenefit' }),
+  r({ resourceType: 'Person' }),
   archive('urn:ga-server:id:ehi-archive'),
   archive('urn:ga-server:id:apple-health-archive'),
 ])('never shared, even with all: %#', (res) => {
@@ -104,13 +110,15 @@ test('selectScoped follows support references only from in-scope records', () =>
   const out = selectScoped([r({ resourceType: 'Patient', id: 'p', telecom: [{ value: '1' }] }), ms, lab, note], share({ groups: ['medications'] }));
   expect(out.resources).toEqual([ms]);
   expect(out.refs.sort()).toEqual(['Medication/m1', 'Practitioner/pr1']);
-  expect(out.patient).toEqual({ resourceType: 'Patient', id: 'p' });
   const all = selectScoped([r({ resourceType: 'Patient', id: 'p' }), note], share());
   expect(all.refs).toEqual(['Binary/00000000-0000-0000-0000-000000000001']);
 });
 
-test('selectScoped fails without the share patient', () => {
-  expect(() => selectScoped([r({ resourceType: 'Patient', id: 'other' })], share())).toThrow(/not found/);
+test('never-shared types are not even fetched', () => {
+  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Binary', 'Medication']) {
+    expect(COMPARTMENT_TYPES).not.toContain(t);
+  }
+  for (const t of ['Observation', 'MedicationStatement', 'DocumentReference', 'Communication', 'Condition']) expect(COMPARTMENT_TYPES).toContain(t);
 });
 
 afterEach(() => vi.useRealTimers());
