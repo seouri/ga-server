@@ -163,7 +163,7 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; 
   for (let turn = 0; ; turn++) {
     let msg: Any, finish: string | undefined;
     try {
-      const res = await deps.llm.chat.completions.create({ model: deps.model, max_completion_tokens: 4000, tools, messages: [...messages] });
+      const res = await deps.llm.chat.completions.create({ model: deps.model, max_completion_tokens: 4000, tools, messages });
       ({ message: msg, finish_reason: finish } = res.choices?.[0] ?? {});
     } catch (e) {
       // Status and error code only: bodies can echo record content.
@@ -171,7 +171,7 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; 
       throw e;
     }
     // Some servers send tool calls with finish_reason 'stop': branch on the calls themselves.
-    const calls: Any[] = (msg?.tool_calls ?? []).filter((c: Any) => c?.type === 'function');
+    const calls: Any[] = (msg?.tool_calls ?? []).filter((c: Any) => c?.function?.name);
     if (!calls.length) {
       const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
       if (!text) return SORRY;
