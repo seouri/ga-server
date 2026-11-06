@@ -22,10 +22,10 @@ Back to the [README](../README.md).
    ```
 
    If you earlier routed `/callback` to port 8765, remove that route first: `tailscale funnel --set-path /callback off`. `tailscale funnel reset` clears every route; then run the line above.
-4. Create your passkey. This prints a one-time link (valid 24 hours); open it on your phone:
+4. Create your passkey (the `ga` command doesn't read `.env`, so give the address here too). This prints a one-time link (valid 24 hours); open it on your phone:
 
    ```sh
-   ga passkey link
+   GA_PUBLIC_URL=https://<machine>.<tailnet>.ts.net ga passkey link
    ```
 
 5. In the chat app, add a custom connector with the URL `https://<machine>.<tailnet>.ts.net/mcp`. The app sends you to GA's login page: sign in with your passkey and approve the app by name.
@@ -50,7 +50,7 @@ Read tools (`fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10y
 | Imports | `upload_link`, `import_file`, `import_status`, `ga_import` |
 | Apps | `connected_apps`, `disconnect_app` |
 
-Creating a share and enabling a hospital's record types are two steps: a preview first, then the action after your yes. The agent carries that yes, so a document with hidden instructions could in theory fool it. Every share is in `share_list` and the access log and can be revoked at once.
+Creating a share and enabling a hospital's record types are two steps: a preview first, then the action after your yes. The agent carries that yes: see [SECURITY.md](../SECURITY.md).
 
 **Importing files.** The chat app can't hand GA a file, so ask it to import one: `upload_link` returns a link (single use, 15 minutes). Open it, sign in with your passkey, and pick the file. For a PDF or photo you pick it in the chat too, so the agent can read it. Apple Health, Epic EHI and C-CDA exports go up as a zip and import in the background; ask for the status. ChatGPT attachments are off until a file host is added to `config/chat-apps.json` (`fileHosts`, empty now), so use the upload link there too.
 
@@ -58,13 +58,13 @@ Connecting a hospital from chat needs the https redirect registered with Epic ([
 
 ## Per app
 
-None of these has been tested yet; acceptance testing comes next. Each app's redirect addresses are in `config/chat-apps.json`.
+Each app's redirect addresses are in `config/chat-apps.json`.
 
-- **Claude Code** (any machine): `claude mcp add --transport http ga https://<machine>.<tailnet>.ts.net/mcp`. Not yet verified. Must pass.
-- **Grok (grok.com)**: free account. Not yet verified. Must pass; if the free plan can't add a custom connector, claude.ai is the second must-pass app.
+- **Claude Code** (any machine): `claude mcp add --transport http ga https://<machine>.<tailnet>.ts.net/mcp`. Not yet verified.
+- **Grok (grok.com)**: free account. Not yet verified.
 - **claude.ai**: a free personal account allows one custom connector. On an Enterprise plan only an organization Owner can add one. Not yet verified.
 - **ChatGPT**: whether attaching files needs a paid plan is not yet known. Not yet verified.
-- **Gemini app**: breaks if refresh tokens rotate, so GA keeps one token for it. Not yet verified.
+- **Gemini app**: not yet verified.
 - **Grok Bot**: not yet verified.
 
 In each app, add a custom connector with the URL from step 5; the passkey login is the same everywhere.
