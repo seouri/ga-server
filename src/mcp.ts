@@ -11,7 +11,7 @@ import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
 import { pairImmunizations } from './ehi/history.ts';
 import { type SourceInfo, stableIdentifier } from './identity.ts';
-import { riskScore } from './risk.ts';
+import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
@@ -157,7 +157,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
     },
   );
   server.registerTool(
-    'risk_score',
+    'cardiovascular_risk_10yr',
     {
       description:
         '10-year cardiovascular risk from inputs you read from GA: AHA PREVENT base model (ASCVD and total CVD) and the 2013 Pooled Cohort Equations. ' +
@@ -168,7 +168,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         race: z.enum(['black', 'other']).optional(),
       },
     },
-    async (input) => text(riskScore(input)),
+    async (input) => text(cardiovascularRisk10yr(input)),
   );
   server.registerTool(
     'vaccine_gaps',

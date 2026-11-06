@@ -35,7 +35,7 @@ An Epic EHI export brings encounters, problems, labs, medications, immunizations
 
 ## Connect an agent
 
-The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`, `vaccine_gaps` (adult vaccination status against the CDC 2025 schedule) and `risk_score` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
+The stdio MCP server exposes `fhir_search`, `fhir_read`, `ga_import`, `vaccine_gaps` (adult vaccination status against the CDC 2025 schedule) and `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
 
 - Claude Code: open this repo; `.mcp.json` registers `ga-server`.
 - Codex / Hermes: register a stdio MCP server with command `node /absolute/path/to/ga-server/src/cli.ts mcp`. Point the agent at `AGENTS.md` for the PDF extraction rules.

@@ -2,7 +2,7 @@
 name: ga
 description: Answer a question about the user's own health strictly from their GA (Guardian Angel) record, with citations. Use when the user types /ga or asks to "check GA" or "use my records".
 argument-hint: "<question about your health>"
-allowed-tools: mcp__ga-server__fhir_search mcp__ga-server__fhir_read mcp__ga-server__risk_score mcp__ga-server__vaccine_gaps
+allowed-tools: mcp__ga-server__fhir_search mcp__ga-server__fhir_read mcp__ga-server__cardiovascular_risk_10yr mcp__ga-server__vaccine_gaps
 ---
 
 Answer the question from the user's GA record. If no question was given, ask for one.
@@ -17,5 +17,5 @@ Answer the question from the user's GA record. If no question was given, ask for
    - Medications: an `active` MedicationStatement or MedicationRequest whose source date (`urn:ga-server:ext:source-date`) is older than the newest Epic import may be stale.
 5. **Epic EHI data:** notes are DocumentReference (`text/plain` attachment; RTF original linked via `relatesTo`); MyChart messages are Communication (`payload`, `sent`, `inResponseTo` thread); family history is FamilyMemberHistory; Epic health maintenance is Observation `Health maintenance: <topic>` (Epic's status at export time) plus Procedure completions. Current medications = `active` MedicationStatement plus `active` MedicationRequest.
 6. **Vaccinations:** call `vaccine_gaps` (optional `asOf`); never judge the schedule yourself. Report its schedule edition, statuses, records used, unmatched and possible-duplicate records. Show Epic health maintenance as a second opinion, dated as of the export.
-7. **Risk scores:** for cardiovascular risk, gather the inputs from GA and call `risk_score`. Never compute PREVENT or PCE yourself. List which inputs came from which record and which you had to assume (for example race, or diabetes inferred from A1c).
+7. **Risk scores:** for cardiovascular risk, gather the inputs from GA and call `cardiovascular_risk_10yr`. Never compute PREVENT or PCE yourself. List which inputs came from which record and which you had to assume (for example race, or diabetes inferred from A1c).
 8. **Answer briefly:** the direct answer first, then the evidence, then what's missing that would change it. For decisions, frame it as input for a conversation with their clinician.

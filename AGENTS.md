@@ -1,8 +1,8 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `risk_score`, `vaccine_gaps`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
 
-- Cardiovascular risk: gather inputs from GA and call `risk_score` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
+- Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
 
 - Claude Code: `.mcp.json` registers it; Claude Code launches project MCP servers with the project directory as cwd, and `ga mcp` finds its config via `GA_CONFIG` or the package root regardless of cwd. If your agent starts it elsewhere, use the absolute path to `src/cli.ts`.

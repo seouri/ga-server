@@ -2,7 +2,7 @@
 // Pooled Cohort Equations. Coefficients and term definitions are copied from the MIT-licensed preventr R package
 // (base_10yr, run_models/prep_terms, pce_model), which is the reference the tests check against.
 
-export type RiskInput = {
+export type CardiovascularRiskInput = {
   age: number;
   sex: 'male' | 'female';
   totalC: number; // mg/dL
@@ -15,7 +15,7 @@ export type RiskInput = {
   egfr: number; // mL/min/1.73m2
   race?: 'black' | 'other'; // PCE only; PREVENT does not use race
 };
-export type RiskResult = { preventAscvd: number | null; preventTotalCvd: number | null; pce: number | null; notes: string[] };
+export type CardiovascularRiskResult = { preventAscvd: number | null; preventTotalCvd: number | null; pce: number | null; notes: string[] };
 
 // Rows: age, non-HDL, HDL, SBP<110, SBP>=110, diabetes, smoking, BMI<30, BMI>=30, eGFR<60, eGFR>=60, BP tx, statin,
 // BP tx*SBP>=110, statin*non-HDL, age*non-HDL, age*HDL, age*SBP>=110, age*diabetes, age*smoking, age*BMI>=30, age*eGFR<60, constant.
@@ -32,7 +32,7 @@ const PREVENT_10YR = {
 
 const MMOL = 0.02586; // mg/dL -> mmol/L, as in preventr
 
-function preventTerms(x: RiskInput): number[] {
+function preventTerms(x: CardiovascularRiskInput): number[] {
   const age = (x.age - 55) / 10;
   const nonHdl = (x.totalC - x.hdlC) * MMOL - 3.5;
   const hdl = (x.hdlC * MMOL - 1.3) / 0.3;
@@ -51,7 +51,7 @@ const logistic = (coef: number[], terms: number[]) => {
   return Math.exp(lo) / (1 + Math.exp(lo));
 };
 
-function pce(x: RiskInput): number {
+function pce(x: CardiovascularRiskInput): number {
   const [la, lt, lh, ls] = [x.age, x.totalC, x.hdlC, x.sbp].map(Math.log);
   const [s, d] = [Number(x.smoker), Number(x.diabetes)];
   const black = x.race === 'black';
@@ -66,7 +66,7 @@ function pce(x: RiskInput): number {
 }
 
 // Validity ranges as enforced by preventr; out-of-range inputs give null with a note instead of an extrapolation.
-export function riskScore(x: RiskInput): RiskResult {
+export function cardiovascularRisk10yr(x: CardiovascularRiskInput): CardiovascularRiskResult {
   const notes: string[] = [];
   const inRange = (v: number, lo: number, hi: number, name: string) => (v >= lo && v <= hi) || (notes.push(`${name} ${v} outside ${lo}-${hi}`), false);
   const common = inRange(x.totalC, 130, 320, 'total cholesterol') && inRange(x.hdlC, 20, 100, 'HDL') && inRange(x.sbp, 90, 180, 'SBP');

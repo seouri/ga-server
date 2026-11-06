@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest';
-import { riskScore, type RiskInput } from '../src/risk.ts';
+import { cardiovascularRisk10yr, type CardiovascularRiskInput } from '../src/cardiovascular-risk.ts';
 
 // Synthetic patients; expected values generated with the preventr R package (estimate_risk, 10yr base model,
 // rounded to 3 decimals; pce_model to 6 decimals).
-const cases: [RiskInput, number, number, number | null][] = [
+const cases: [CardiovascularRiskInput, number, number, number | null][] = [
   [{ age: 50, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90, race: 'other' }, 0.019, 0.027, 0.03092],
   [{ age: 62, sex: 'female', sbp: 145, bpTx: true, totalC: 240, hdlC: 45, statin: false, diabetes: true, smoker: true, egfr: 55, race: 'other' }, 0.193, 0.302, 0.301928],
   [{ age: 45, sex: 'male', sbp: 104, bpTx: false, totalC: 280, hdlC: 70, statin: true, diabetes: false, smoker: true, egfr: 105, race: 'black' }, 0.022, 0.032, 0.048634],
@@ -13,7 +13,7 @@ const cases: [RiskInput, number, number, number | null][] = [
 ];
 
 test.each(cases)('matches preventr for %o', (input, ascvd, totalCvd, pce) => {
-  const r = riskScore(input);
+  const r = cardiovascularRisk10yr(input);
   expect(Math.abs((r.preventAscvd as number) - ascvd)).toBeLessThanOrEqual(0.0005);
   expect(Math.abs((r.preventTotalCvd as number) - totalCvd)).toBeLessThanOrEqual(0.0005);
   if (pce === null) expect(r.pce).toBeNull();
@@ -21,7 +21,7 @@ test.each(cases)('matches preventr for %o', (input, ascvd, totalCvd, pce) => {
 });
 
 test('out-of-range inputs return null with a note instead of extrapolating', () => {
-  const r = riskScore({ age: 85, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 });
+  const r = cardiovascularRisk10yr({ age: 85, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 });
   expect(r).toMatchObject({ preventAscvd: null, preventTotalCvd: null, pce: null });
   expect(r.notes.join(' ')).toMatch(/age/);
 });
