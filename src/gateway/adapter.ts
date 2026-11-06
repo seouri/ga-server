@@ -87,12 +87,15 @@ export class FileAdapter {
 export function sweepExpired(dir: string, now: number = Date.now()): void {
   const root = join(dir, 'oidc');
   if (!existsSync(root)) return;
-  for (const m of readdirSync(root))
-    for (const f of readdirSync(join(root, m)).filter((f) => f.endsWith('.json'))) {
-      const file = join(root, m, f);
-      try {
-        const e = JSON.parse(readFileSync(file, 'utf8')) as Entry;
-        if (e.expiresAt !== undefined && e.expiresAt <= now) rmSync(file, { force: true });
-      } catch {} // unreadable or half-written: leave it
-    }
+  // A sweep must never throw (stray files like .DS_Store, races with deletes): it runs at startup and on an interval.
+  try {
+    for (const m of readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()))
+      for (const f of readdirSync(join(root, m.name)).filter((f) => f.endsWith('.json'))) {
+        const file = join(root, m.name, f);
+        try {
+          const e = JSON.parse(readFileSync(file, 'utf8')) as Entry;
+          if (e.expiresAt !== undefined && e.expiresAt <= now) rmSync(file, { force: true });
+        } catch {} // unreadable or half-written: leave it
+      }
+  } catch {}
 }

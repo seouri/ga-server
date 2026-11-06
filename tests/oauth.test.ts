@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -54,6 +54,15 @@ describe('FileAdapter', () => {
     sweepExpired(d, t + 20_000);
     expect(readdirSync(join(d, 'oidc', 'AccessToken'))).toHaveLength(2);
     expect(await a.find('new')).toEqual({ x: 2 });
+  });
+  it('sweepExpired ignores stray files and still removes expired records', async () => {
+    const d = tmp();
+    const a = new FileAdapter('AccessToken', d, () => 1_000_000);
+    await a.upsert('old', { x: 1 }, 10);
+    writeFileSync(join(d, 'oidc', '.DS_Store'), 'x');
+    writeFileSync(join(d, 'oidc', 'AccessToken', '.DS_Store'), 'x');
+    expect(() => sweepExpired(d, 1_000_000 + 20_000)).not.toThrow();
+    expect(readdirSync(join(d, 'oidc', 'AccessToken'))).toEqual(['.DS_Store']);
   });
   it('round-trips, expires, consumes and revokes by grant', async () => {
     const d = tmp();

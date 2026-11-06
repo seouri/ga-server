@@ -289,7 +289,9 @@ export async function serveGateway(): Promise<void> {
     completeLogin: (search) => completeLogin(client, smartDir(), cfg.patientId, search),
   });
   const sweep = () => {
-    cleanUploads(gatewayDir());
+    try {
+      cleanUploads(gatewayDir());
+    } catch {} // must not skip sweepExpired or crash the interval
     sweepExpired(gatewayDir());
   };
   sweep();

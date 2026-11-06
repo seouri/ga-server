@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
-import { type MedplumClient, OperationOutcomeError } from '@medplum/core';
+import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
 import type { Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -122,7 +122,8 @@ export const readable = (x: unknown): unknown => {
 
 const TYPE_RE = /^[A-Z][A-Za-z]+$/;
 // Medplum project-admin types (secrets, logins, bots): never readable through the agent tools, either transport.
-const ADMIN_TYPES = new Set(['ClientApplication', 'User', 'Project', 'ProjectMembership', 'Login', 'Bot', 'AccessPolicy', 'JsonWebKey', 'UserConfiguration', 'UserSecurityRequest', 'Subscription', 'Agent', 'DomainConfiguration', 'PasswordChangeRequest', 'SmartAppLaunch', 'BulkDataExport', 'AsyncJob']);
+// Medplum's own lists (so upgrades are covered) plus the types GA already blocked.
+const ADMIN_TYPES = new Set([...protectedResourceTypes, ...projectAdminResourceTypes, 'ClientApplication', 'User', 'Project', 'ProjectMembership', 'Login', 'Bot', 'AccessPolicy', 'JsonWebKey', 'UserConfiguration', 'UserSecurityRequest', 'Subscription', 'Agent', 'DomainConfiguration', 'PasswordChangeRequest', 'SmartAppLaunch', 'BulkDataExport', 'AsyncJob']);
 const refuseAdmin = (t: string) => (ADMIN_TYPES.has(t) ? fail(new GaError(`${t} is not available through this tool`)) : undefined);
 export const text = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v) }] });
 export const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
