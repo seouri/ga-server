@@ -4,6 +4,8 @@
 
 **All of your health records in one place, on your own computer, for your AI agent.** GA keeps one person's records in a local FHIR server and lets Claude Code, or any MCP agent, read them, import into them and share them. Hospital portals, Epic exports, Apple Health and lab PDFs land in one deduplicated record.
 
+GA is a working implementation of [Guardian Angel](https://guardian.ga.org): the patient's own decision-making layer on top of the health record, which the EHR itself cannot become.
+
 > **Not medical advice.** GA is not a medical device. Answers support a conversation with your clinician; they don't replace one. See [TERMS.md](TERMS.md).
 
 ## Quick start
