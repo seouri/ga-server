@@ -1,0 +1,1 @@
+{"resourceType":"Patient","id":"p1","identifier":[{"use":"usual","system":"urn:oid:1.2.840.114350.1.13.999.2.7.5.737384.69","value":"E000001"},{"system":"urn:oid:1.2.840.114350.1.13.999.2.7.5.737384.14","value":"Z000001"}],"name":[{"use":"official","family":"Person","given":["Test"]}],"gender":"unknown","birthDate":"1970-01-01"}

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [
+<!-- HealthKit Export Version: 14 -->
+<!ELEMENT HealthData (ExportDate,Me,(Record|Correlation|Workout|ActivitySummary|ClinicalRecord)*)>
+<!ATTLIST HealthData
+  locale CDATA #REQUIRED
+>
+<!ELEMENT ExportDate EMPTY>
+<!ATTLIST ExportDate
+  value CDATA #REQUIRED
+>
+<!ELEMENT Me EMPTY>
+<!ATTLIST Me
+  HKCharacteristicTypeIdentifierDateOfBirth         CDATA #REQUIRED
+  HKCharacteristicTypeIdentifierBiologicalSex       CDATA #REQUIRED
+>
+<!ELEMENT Record ((MetadataEntry)*)>
+<!ELEMENT Correlation ((MetadataEntry|Record)*)>
+<!ELEMENT Workout ((MetadataEntry|WorkoutEvent|WorkoutStatistics|Record)*)>
+<!ELEMENT ActivitySummary EMPTY>
+<!ELEMENT ClinicalRecord EMPTY>
+]>
+<HealthData locale="en_US">
+ <ExportDate value="2026-11-05 13:39:52 -0500"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="1970-01-01" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexNotSet"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count/min" creationDate="2026-03-01 08:00:00 -0500" startDate="2026-03-01 08:00:00 -0500" endDate="2026-03-01 08:00:00 -0500" value="60"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count/min" creationDate="2026-03-01 09:00:00 -0500" startDate="2026-03-01 09:00:00 -0500" endDate="2026-03-01 09:00:00 -0500" value="80">
+  <MetadataEntry key="HKMetadataKeyHeartRateMotionContext" value="1"/>
+  <MetadataEntry key="HKMetadataKeySyncIdentifier" value="test-sync-1"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count/min" creationDate="2026-03-01 10:00:00 -0500" startDate="2026-03-01 10:00:00 -0500" endDate="2026-03-01 10:00:00 -0500" value="100"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count" creationDate="2026-03-01 09:00:00 -0500" startDate="2026-03-01 09:00:00 -0500" endDate="2026-03-01 09:30:00 -0500" value="4000"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count" creationDate="2026-03-01 14:00:00 -0500" startDate="2026-03-01 14:00:00 -0500" endDate="2026-03-01 14:30:00 -0500" value="3000"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Test iPhone" sourceVersion="17.0" unit="count" creationDate="2026-03-01 12:00:00 -0500" startDate="2026-03-01 12:00:00 -0500" endDate="2026-03-01 12:30:00 -0500" value="5000"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Test iPhone" sourceVersion="17.0" unit="kg" creationDate="2026-03-01 07:00:00 -0500" startDate="2026-03-01 07:00:00 -0500" endDate="2026-03-01 07:00:00 -0500" value="79"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Test iPhone" sourceVersion="17.0" unit="kg" creationDate="2026-03-01 19:00:00 -0500" startDate="2026-03-01 19:00:00 -0500" endDate="2026-03-01 19:00:00 -0500" value="79.4"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Scale &amp; Co" sourceVersion="1.0" unit="kg" creationDate="2026-03-02 07:00:00 -0500" startDate="2026-03-02 07:00:00 -0500" endDate="2026-03-02 07:00:00 -0500" value="79.2"/>
+ <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Test iPhone" sourceVersion="17.0" unit="mmHg" creationDate="2026-03-01 08:30:00 -0500" startDate="2026-03-01 08:30:00 -0500" endDate="2026-03-01 08:30:00 -0500" value="120"/>
+ <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Test iPhone" sourceVersion="17.0" unit="mmHg" creationDate="2026-03-01 08:30:00 -0500" startDate="2026-03-01 08:30:00 -0500" endDate="2026-03-01 08:30:00 -0500" value="80"/>
+ <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Test iPhone" sourceVersion="17.0" creationDate="2026-03-01 08:30:00 -0500" startDate="2026-03-01 08:30:00 -0500" endDate="2026-03-01 08:30:00 -0500">
+  <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Test iPhone" sourceVersion="17.0" unit="mmHg" creationDate="2026-03-01 08:30:00 -0500" startDate="2026-03-01 08:30:00 -0500" endDate="2026-03-01 08:30:00 -0500" value="120"/>
+  <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Test iPhone" sourceVersion="17.0" unit="mmHg" creationDate="2026-03-01 08:30:00 -0500" startDate="2026-03-01 08:30:00 -0500" endDate="2026-03-01 08:30:00 -0500" value="80"/>
+ </Correlation>
+ <Workout workoutActivityType="HKWorkoutActivityTypeWalking" duration="30" durationUnit="min" sourceName="Test Watch" sourceVersion="11.0" creationDate="2026-03-01 17:00:00 -0500" startDate="2026-03-01 17:00:00 -0500" endDate="2026-03-01 17:30:00 -0500">
+  <WorkoutEvent type="HKWorkoutEventTypePause" date="2026-03-01 17:10:00 -0500" duration="0.5" durationUnit="min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierStepCount" startDate="2026-03-01 17:00:00 -0500" endDate="2026-03-01 17:30:00 -0500" sum="3000" unit="count"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" unit="count/min" creationDate="2026-03-01 17:15:00 -0500" startDate="2026-03-01 17:15:00 -0500" endDate="2026-03-01 17:15:00 -0500" value="100"/>
+ </Workout>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Test iPhone" sourceVersion="17.0" creationDate="2026-03-01 22:30:00 -0500" startDate="2026-03-01 22:30:00 -0500" endDate="2026-03-02 06:30:00 -0500" value="HKCategoryValueSleepAnalysisInBed"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" creationDate="2026-03-01 23:00:00 -0500" startDate="2026-03-01 23:00:00 -0500" endDate="2026-03-02 02:00:00 -0500" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Test Watch" sourceVersion="17.0" device="&lt;&lt;HKDevice: 0x600001234&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch7,1, software:11.0&gt;" creationDate="2026-03-02 02:00:00 -0500" startDate="2026-03-02 02:00:00 -0500" endDate="2026-03-02 03:00:00 -0500" value="HKCategoryValueSleepAnalysisAsleepDeep"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Test iPhone" sourceVersion="17.0" creationDate="2026-03-01 23:30:00 -0500" startDate="2026-03-01 23:30:00 -0500" endDate="2026-03-02 01:00:00 -0500" value="HKCategoryValueSleepAnalysisAsleepUnspecified"/>
+ <ActivitySummary dateComponents="2026-03-01" activeEnergyBurned="450.5" activeEnergyBurnedGoal="500" activeEnergyBurnedUnit="Cal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="42" appleExerciseTimeGoal="30" appleStandHours="11" appleStandHoursGoal="12"/>
+ <ActivitySummary dateComponents="2020-11-05" activeEnergyBurned="0" activeEnergyBurnedGoal="0" activeEnergyBurnedUnit="Cal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="0" appleExerciseTimeGoal="30" appleStandHours="0" appleStandHoursGoal="12"/>
+ <ClinicalRecord type="Patient" identifier="p1" sourceName="Example Hospital" sourceURL="https://fhir.example.org/R4/Patient/p1" fhirVersion="4.0.1" receivedDate="2026-02-25 11:00:30 -0500" resourceFilePath="/clinical-records/Patient-A.json"/>
+ <ClinicalRecord type="AllergyIntolerance" identifier="a1" sourceName="Example Hospital" sourceURL="https://fhir.example.org/R4/AllergyIntolerance/a1" fhirVersion="4.0.1" receivedDate="2026-02-25 11:00:31 -0500" resourceFilePath="/clinical-records/AllergyIntolerance-B.json"/>
+ <ClinicalRecord type="Observation" identifier="o1" sourceName="Old Clinic" sourceURL="https://fhir.example.org/DSTU2/Observation/o1" fhirVersion="1.0.2" receivedDate="2026-02-25 11:00:32 -0500" resourceFilePath="/clinical-records/Observation-C.json"/>
+</HealthData>
