@@ -11,7 +11,9 @@ const TOOL = 'submit_resources';
 const instructions = () =>
   readFileSync(new URL('../.claude/skills/ga-import/extract.md', import.meta.url), 'utf8');
 
-type Sdk = { messages: { stream: (p: any) => { finalMessage: () => Promise<Anthropic.Message> } } };
+export type Sdk = {
+  messages: { stream: (p: any) => { finalMessage: () => Promise<Anthropic.Message> }; create: (p: any) => Promise<Anthropic.Message> };
+};
 
 // Sends the document to the Claude API (opt-in: only called for `--llm api`). Never logs contents or values.
 export async function extractWithApi(filePath: string, apiKey: string, client: Sdk = new Anthropic({ apiKey })): Promise<Resource[]> {

@@ -100,7 +100,7 @@ function untrusted(r: Resource): Resource {
 }
 
 // Keeps MCP output small: no narrative, meta reduced to source and tags.
-const slim = (r: Resource) => {
+export const slim = (r: Resource) => {
   const { text: _t, meta, ...rest } = r as Resource & { text?: Narrative };
   return { ...rest, meta: { source: meta?.source, tag: meta?.tag } };
 };
