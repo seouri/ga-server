@@ -22,9 +22,9 @@ export type SyncResult = {
   skipped?: Record<string, string>;
 };
 
-const SOURCE_ID = 'urn:ga-server:id:smart-source';
+export const SOURCE_ID = 'urn:ga-server:id:smart-source';
 const X = 'urn:ga-server:ext:smart-';
-const LAST_SUCCESS = `${X}last-success`;
+export const LAST_SUCCESS = `${X}last-success`;
 const LAST_ATTEMPT = `${X}last-attempt`;
 const LAST_ERROR = `${X}last-error`;
 const ACCESS_EXPIRES = `${X}access-expires`;

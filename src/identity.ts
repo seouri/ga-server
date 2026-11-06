@@ -16,8 +16,8 @@ export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 export const APPLE = 'urn:ga-server:id:apple-health';
-const TAG = 'urn:ga-server:tag';
-const SRC_DATE = 'urn:ga-server:ext:source-date';
+export const TAG = 'urn:ga-server:tag';
+export const SRC_DATE = 'urn:ga-server:ext:source-date';
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
