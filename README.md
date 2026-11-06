@@ -106,6 +106,8 @@ ga share log [<id>]                                     # who opened what, when,
 ga share export <id> [--out dir]                        # <Name>_health-summary_<date_time>.pdf and <Name>_health-records-FHIR_<date_time>.json, mode 0600
 ```
 
+**From Claude Code.** Ask in plain words, with or without `/ga`: "/ga share my labs and medications from the last 2 years with Dr. Kim for a week", "share everything with Mom, no expiry", "list my shares", "revoke the Dr. Kim share", "who opened Mom's link?". Claude shows the parsed audience, scope, dates and expiry and runs `ga share …` only after you confirm. The terminal QR code may not survive in the chat; ask for the link, open it on your phone, and tap **Show QR**.
+
 **Turning on links.** `docker compose up -d` starts `ga-share`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:
 
 1. In the Tailscale admin console, turn on MagicDNS and HTTPS certificates (DNS page) and allow Funnel for your tailnet (Access controls: the `funnel` node attribute; Tailscale offers to add it the first time).
