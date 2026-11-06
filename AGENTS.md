@@ -17,7 +17,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fh
 - Family history: `FamilyMemberHistory`. Social history, vitals: `Observation`. Questionnaires: `QuestionnaireResponse`.
 - Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
-- Current medications = `active` MedicationStatement plus `active` MedicationRequest.
+- Current medications = `active` MedicationStatement plus `active` MedicationRequest. An `active` MedicationRequest is only as current as its source date (`urn:ga-server:ext:source-date`): one older than the newest Epic import (C-CDA or EHI) is unconfirmed.
 - Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Show Epic health maintenance as a second opinion, labelled as of the export date.
 
 ## PDF extraction (mirrors .claude/skills/ga-extract/SKILL.md)

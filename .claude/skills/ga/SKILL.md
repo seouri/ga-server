@@ -14,7 +14,7 @@ Answer the question from the user's GA record. If no question was given, ask for
    - `extracted-by-llm` tag: the value was read from a document by an agent; say so.
    - `possible-duplicate` tag: two records may be the same result; mention both.
    - Problems: `category` `problem-list-item` is the problem list; `encounter-diagnosis` is what was coded at a visit, not a standing problem.
-   - Medications: an `active` MedicationStatement whose source date (`urn:ga-server:ext:source-date`) is older than the newest Epic import may be stale.
+   - Medications: an `active` MedicationStatement or MedicationRequest whose source date (`urn:ga-server:ext:source-date`) is older than the newest Epic import may be stale.
 5. **Epic EHI data:** notes are DocumentReference (`text/plain` attachment; RTF original linked via `relatesTo`); MyChart messages are Communication (`payload`, `sent`, `inResponseTo` thread); family history is FamilyMemberHistory; Epic health maintenance is Observation `Health maintenance: <topic>` (Epic's status at export time) plus Procedure completions. Current medications = `active` MedicationStatement plus `active` MedicationRequest.
 6. **Vaccinations:** call `vaccine_gaps` (optional `asOf`); never judge the schedule yourself. Report its schedule edition, statuses, records used, unmatched and possible-duplicate records. Show Epic health maintenance as a second opinion, dated as of the export.
 7. **Risk scores:** for cardiovascular risk, gather the inputs from GA and call `risk_score`. Never compute PREVENT or PCE yourself. List which inputs came from which record and which you had to assume (for example race, or diabetes inferred from A1c).
