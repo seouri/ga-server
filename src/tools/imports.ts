@@ -23,7 +23,6 @@ const jobs = new Map<string, Job>(); // shortcut: in memory, lost on restart; pe
 const FILE = z.object({ download_url: z.string(), file_name: z.string() }).optional();
 const CHATGPT = { 'openai/fileParams': ['file'] };
 type File = { download_url: string; file_name: string };
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 const fns = { importExtracted, importAny, fetch: globalThis.fetch as (u: URL, i: RequestInit) => Promise<Response>, fileHosts: undefined as string[] | undefined };
 export function registerImportTools(server: McpServer, deps: ToolDeps, dir = deps.remote?.dir ?? gatewayDir(), f: Partial<typeof fns> = {}): void {
@@ -128,7 +127,7 @@ export function registerImportTools(server: McpServer, deps: ToolDeps, dir = dep
             job.report = await importPath(client, { ...cfg, patientId }, root, { tz });
             job.status = 'done';
           } catch (e) {
-            Object.assign(job, { status: 'failed', message: msg(e) });
+            Object.assign(job, { status: 'failed', message: e instanceof Error ? e.message : String(e) });
           } finally {
             if (tmp) rmSync(tmp, { recursive: true, force: true });
           }
