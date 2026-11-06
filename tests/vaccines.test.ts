@@ -149,3 +149,22 @@ test('sex outside male/female still runs the schedule', () => {
   const r = evaluateVaccines(schedule, { ...base, sex: undefined }, AS_OF);
   expect(status(r, 'td-tdap')?.status).toBe('due');
 });
+
+test('immunity needs a leading positive word, no negation, and an antibody test for bare disease names (I2)', () => {
+  const ev = (name: string, value: string) => ({ name, value, date: '2020-01-01', source: 'x' });
+  const varicella = (e: ReturnType<typeof ev>) => status(evaluateVaccines(schedule, { ...base, birthDate: '1990-01-01', immunity: [e] }, AS_OF), 'varicella')?.status;
+  expect(varicella(ev('Varicella IgG antibody', 'Positive'))).toBe('immune');
+  expect(varicella(ev('VZV IgG', 'Immune'))).toBe('immune');
+  expect(varicella(ev('Varicella IgG antibody', 'Immune status unknown'))).not.toBe('immune');
+  for (const value of ['Uncertain', 'Borderline', 'Low positive', 'Insufficient', 'Indeterminate', 'Equivocal', 'Negative', 'Non-reactive', 'Not immune', 'See note: positive']) {
+    expect(varicella(ev('Varicella IgG antibody', value))).not.toBe('immune');
+  }
+  expect(varicella(ev('Varicella IgM', 'Positive'))).not.toBe('immune'); // acute infection, not immunity
+  expect(varicella(ev('Varicella zoster virus IgM antibody', 'Positive'))).not.toBe('immune');
+  expect(varicella(ev('VZV PCR', 'Positive'))).not.toBe('immune'); // bare name, no antibody term
+  expect(varicella(ev('Varicella', 'Positive'))).not.toBe('immune');
+  const mmr = (names: string[]) => status(evaluateVaccines(schedule, { ...base, immunity: names.map((n) => ev(n, 'Positive')) }, AS_OF), 'mmr')?.status;
+  expect(mmr(['Measles antibody', 'Mumps IgG', 'Rubella titer'])).toBe('immune');
+  expect(mmr(['Measles IgM', 'Mumps IgG', 'Rubella titer'])).not.toBe('immune');
+  expect(mmr(['Measles', 'Mumps', 'Rubella'])).not.toBe('immune');
+});

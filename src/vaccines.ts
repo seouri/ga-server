@@ -50,7 +50,10 @@ const norm = (s = '') => ` ${squash(s).trim()} `;
 const has = (name: string, alias: string) => name.includes(squash(alias));
 const cvxNorm = (c = '') => c.trim().replace(/^0+(?=\d)/, '');
 const hits = (m: Match, d: Dose) => (d.cvx !== undefined && m.cvx.some((c) => cvxNorm(c) === cvxNorm(d.cvx))) || m.names.some((n) => has(norm(d.name), n));
-const NEGATED = /\bnon|\bnot\b|\bneg|\bno\b|equivocal|indeterminate/;
+const NEGATED = /\bnon|\bnot\b|\bneg|\bno\b|equivocal|indeterminate|unknown|uncertain|borderline|\blow\b|insufficient/;
+// A bare disease name (Measles, VZV) also names infection tests (IgM, PCR): immunity needs an antibody term; IgM never counts.
+const BARE = new Set(['measles', 'mumps', 'rubella', 'varicella', 'vzv']);
+const ANTIBODY = /\b(antibod\w*|ab|igg|immun\w*|titer|titre)\b/;
 const addMonths = (date: string, n: number) => {
   const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() + n);
@@ -89,8 +92,10 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
     const last = doses.at(-1)?.date.slice(0, 10);
     const out = (status: Status, reason: string, used: Ref[] = records) => ({ vaccine: v.id, status, records: used, reason });
 
-    const pos = (e: Evidence) => v.immuneIf!.positive.some((p) => has(norm(e.value), p)) && !NEGATED.test(norm(e.value));
-    const ev = (n: string) => immunity.filter((e) => has(norm(e.name), n) && pos(e));
+    // The value must start with a positive word ("Positive (immune)"), not merely contain one ("Immune status unknown").
+    const pos = (e: Evidence) => v.immuneIf!.positive.some((p) => new RegExp(`^${p}\\b`).test(e.value.trim().toLowerCase())) && !NEGATED.test(norm(e.value));
+    const named = (e: Evidence, n: string) => { const nm = norm(e.name); return has(nm, n) && !/\bigm\b/.test(nm) && (!BARE.has(n) || ANTIBODY.test(nm)); };
+    const ev = (n: string) => immunity.filter((e) => named(e, n) && pos(e));
     if (v.immuneIf) {
       const groups = v.immuneIf.names.map(ev);
       const ok = v.immuneIf.all ? groups.every((g) => g.length) : groups.some((g) => g.length);
