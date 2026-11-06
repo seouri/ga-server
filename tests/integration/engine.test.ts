@@ -500,6 +500,7 @@ test('hospital exact match after apple wins, and a newer apple export changes no
   expect(rows).toHaveLength(1);
   expect(rows[0].note?.[0].text).toBe('clinic');
   expect(tagged(rows[0], 'src-ehi')).toBe(true);
+  expect(rows[0].identifier?.map((i) => i.system)).toContain(APPLE);
 });
 
 test('older hospital export exact match still beats an apple-only record', async () => {
@@ -510,4 +511,34 @@ test('older hospital export exact match still beats an apple-only record', async
   expect(rows).toHaveLength(1);
   expect(rows[0].note?.[0].text).toBe('clinic');
   expect(tagged(rows[0], 'src-ehi')).toBe(true);
+  expect(rows[0].identifier?.map((i) => i.system)).toContain(APPLE);
+});
+
+test('one Apple identifier for two patients makes two records; the first is never moved or changed', async () => {
+  const other = await createTestPatient(client);
+  try {
+    const id = uid('daily'); // Apple daily ids are sha(type|day): the same for every patient
+    const at = '2026-03-07';
+    const theirs = { ...weight(APPLE, id, at, 70), subject: { reference: `Patient/${other}` } };
+    expect(await importResources(client, [theirs], apple('2026-11-05'), other, 'a')).toMatchObject({ created: 1 });
+    expect(await importResources(client, [weight(APPLE, id, at, 90)], apple('2027-01-01'), pid, 'a')).toMatchObject({ created: 1, updated: 0 });
+    const found = await client.searchResources('Observation', { identifier: `${APPLE}|${id}` }, { cache: 'no-cache' });
+    expect(found.map((o) => o.subject?.reference).sort()).toEqual([`Patient/${other}`, `Patient/${pid}`].sort());
+    const first = found.find((o) => o.subject?.reference === `Patient/${other}`) as Observation;
+    expect(first.valueQuantity?.value).toBe(70);
+  } finally {
+    await cleanupTestPatient(client, other);
+  }
+});
+
+test('a newer Apple copy of an allergy carrying its hospital identifiers updates it', async () => {
+  const allergy = (criticality: 'low' | 'high'): Resource =>
+    ({ resourceType: 'AllergyIntolerance', identifier: [{ system: APPLE, value: uid('allergy') }, { system: 'urn:test:hospital', value: 'a1' }], patient: me(), code: { text: 'synthetic allergen' }, criticality, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] } }) as Resource;
+  const first = allergy('low');
+  expect(await importResources(client, [first], apple('2026-11-05'), pid, 'a')).toMatchObject({ created: 1 });
+  const next = { ...allergy('high'), identifier: (first as Observation).identifier } as Resource;
+  expect(await importResources(client, [next], apple('2027-01-01'), pid, 'a')).toMatchObject({ updated: 1, skipped: 0 });
+  const rows = (await all()).filter((r) => r.resourceType === 'AllergyIntolerance' && r.code?.text === 'synthetic allergen');
+  expect(rows).toHaveLength(1);
+  expect((rows[0] as { criticality?: string }).criticality).toBe('high');
 });

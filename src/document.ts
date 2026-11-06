@@ -14,7 +14,7 @@ export async function storeDocument(
 ): Promise<{ docRef: DocumentReference; fileHash: string; created: boolean }> {
   const data = readFileSync(filePath);
   const fileHash = createHash('sha256').update(data).digest('hex');
-  const query = `identifier=urn:ga-server:id:file|${fileHash}`;
+  const query = `identifier=urn:ga-server:id:file|${fileHash}&subject=Patient/${patientId}`; // per patient: the same file may belong to two
   // Look first so a re-import doesn't upload an orphan Binary.
   const existing = await client.searchOne('DocumentReference', query, { cache: 'no-cache' });
   if (existing) return { docRef: existing, fileHash, created: false };

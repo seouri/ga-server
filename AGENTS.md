@@ -27,6 +27,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fh
 - Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each.
 - Records coded "daily mean" or "daily total" are summaries, not readings. Steps and distance take the largest single source per day.
 - Sleep is one Observation per night (stage components).
+- "Activity rings, daily (Apple Health)" is Apple's own per-day ring totals: components Active energy burned (kcal), Exercise minutes, Stand hours.
 - A home reading and a clinic reading on the same day are both real; don't merge or flag them.
 - Health Records inside the export are hospital copies: trust the hospital source over the Apple copy.
 - The ECG is a text `DocumentReference` (CSV) plus an Observation with its classification.

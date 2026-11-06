@@ -20,7 +20,7 @@ async function manifestHash(dir: string): Promise<string> {
   return createHash('sha256').update(lines.sort().join('\n')).digest('hex');
 }
 
-// shortcut: the tar.gz is uploaded as one Binary (10 MB for the real export); upgrade to chunks if exports reach GBs.
+// shortcut: the tar.gz is uploaded as one Binary (a ~155 MB real Apple Health archive uploaded fine); upgrade to chunks if exports reach GBs.
 export async function archiveFolder(client: MedplumClient, dir: string, patientId: string, system: string): Promise<'stored' | 'already-present'> {
   const id = { system, value: await manifestHash(dir) };
   const query = { identifier: `${id.system}|${id.value}`, subject: `Patient/${patientId}` };

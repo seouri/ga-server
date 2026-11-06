@@ -307,7 +307,9 @@ export async function importResources(
     delete incoming.id;
     const type = incoming.resourceType;
     // Searches stay outside the try: only a write's validation failure is tolerated.
-    const byStable = (await client.searchOne(type, { identifier: idKey(ident) })) as R | undefined;
+    // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
+    const field = COMPARTMENT[type];
+    const byStable = (await client.searchOne(type, { identifier: idKey(ident), ...(field && { [field]: `Patient/${patientId}` }) }, { cache: 'no-cache' })) as R | undefined;
     const link = byStable ? { dups: [] } : await linkHit(incoming, ident);
     const linked = link.hit;
     const existing = byStable ?? linked;
@@ -332,7 +334,9 @@ export async function importResources(
         const filled = fillFrom(existing, incoming, source);
         const d = decide(existing, filled, author);
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
-        if (fromApple && hasNonApple(existing)) report.skipped++;
+        // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
+        const inc = new Set(idList(incoming).map(idKey));
+        if (fromApple && idList(existing).some((i) => i.system !== APPLE && !inc.has(idKey(i)))) report.skipped++;
         else if (d === 'update') {
           await unionUpdate(client, existing, filled);
           report.updated++;
