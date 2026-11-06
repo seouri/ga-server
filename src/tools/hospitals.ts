@@ -1,43 +1,16 @@
 // Hospital (Epic SMART) tools for chat apps (remote servers only). The login itself finishes at the gateway's /callback (completeLogin).
-import { readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
 import { preview, takeConfirmed } from '../confirm.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
-import { checkTypes, disconnectSource, enableTypes } from '../smart/actions.ts';
+import { checkTypes, disconnectSource, enableTypes, listLogins } from '../smart/actions.ts';
 import { startLogin } from '../smart/auth.ts';
-import type { LoginResult } from '../smart/auth.ts';
-import { deleteSecret, loadSecret, readApp, readSources, smartDir } from '../smart/store.ts';
+import { deleteSecret, readApp, readSources, smartDir } from '../smart/store.ts';
 import { readStatus, syncAll, syncSource } from '../smart/sync.ts';
 
 const fns = { startLogin, readStatus, syncAll, syncSource };
-type Pending = { fhirBase: string; expires: number };
-
-// Pending logins are encrypted files in tokens/: pending-<hash> (waiting) and result-<hash> (finished or failed).
-function logins(dir: string, now = new Date()) {
-  const t = join(dir, 'tokens');
-  const files = existsSync(t) ? readdirSync(t) : [];
-  const names = (prefix: string) => files.filter((f) => f.startsWith(prefix) && f.endsWith('.enc')).map((f) => f.slice(0, -4));
-  const out: { name: string; id: string; fhirBase: string; status: string; fetched?: Record<string, number>; sourceKey?: string }[] = [];
-  for (const name of names('pending-')) {
-    const p = loadSecret<Pending>(dir, name);
-    if (!p) continue;
-    if (p.expires < now.getTime()) deleteSecret(dir, name);
-    else out.push({ name, id: name.slice(8), fhirBase: p.fhirBase, status: 'waiting' });
-  }
-  for (const name of names('result-')) {
-    const r = loadSecret<LoginResult>(dir, name);
-    if (!r) continue;
-    const id = name.slice(7);
-    if ('error' in r) out.push({ name, id, fhirBase: r.fhirBase, status: `failed: ${r.error}` });
-    else out.push({ name, id, fhirBase: r.source.fhirBase, status: 'finished', fetched: r.result.fetched, sourceKey: r.source.key });
-  }
-  return out;
-}
-
 export function registerHospitalTools(server: McpServer, deps: ToolDeps, dir = smartDir(), f: Partial<typeof fns> = {}): void {
   const { client, patientId, remote } = deps;
   if (!remote) throw new GaError('hospital tools need a remote server');
@@ -81,7 +54,7 @@ export function registerHospitalTools(server: McpServer, deps: ToolDeps, dir = s
       try {
         return text({
           sources: await status(client, patientId, dir),
-          pendingLogins: logins(dir).map(({ id, fhirBase, status: s, fetched }) => ({ id, fhirBase, status: s, ...(fetched && { fetched }) })),
+          pendingLogins: listLogins(dir).map(({ id, fhirBase, status: s, fetched }) => ({ id, fhirBase, status: s, ...(fetched && { fetched }) })),
         });
       } catch (e) {
         return fail(e);
@@ -104,13 +77,13 @@ export function registerHospitalTools(server: McpServer, deps: ToolDeps, dir = s
         const want = checkTypes(types);
         const args = { source: src.key, types: want };
         if (!confirm) {
-          const done = logins(dir).find((l) => l.sourceKey === src.key && l.fetched);
+          const done = listLogins(dir).find((l) => l.sourceKey === src.key && l.fetched);
           const fetched = done?.fetched ?? (await sync(client, dir, src, patientId, { dryRun: true })).fetched ?? {};
-          return text({ source: src.key, types: want, fetched: Object.fromEntries(want.map((t) => [t, fetched[t] ?? 0])), ...preview('enable', structuredClone(args)) });
+          return text({ source: src.key, types: want, fetched: Object.fromEntries(want.map((t) => [t, fetched[t] ?? 0])), ...preview('enable', args) });
         }
         if (!isDeepStrictEqual(takeConfirmed<typeof args>('enable', confirm), args)) throw new GaError('arguments changed since the preview; ask for a new preview');
         const rec = enableTypes(dir, src.key, want);
-        for (const l of logins(dir)) if (l.sourceKey === src.key) deleteSecret(dir, l.name); // its dry run is out of date now
+        for (const l of listLogins(dir)) if (l.sourceKey === src.key) deleteSecret(dir, l.name); // its dry run is out of date now
         return text(await sync(client, dir, rec, patientId));
       } catch (e) {
         return fail(e);

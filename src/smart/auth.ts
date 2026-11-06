@@ -189,7 +189,8 @@ export async function finishLogin(dir: string, search: string, now: Date = new D
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new GaError('unknown_state');
     throw e;
   }
-  const p = loadSecret<Pending>(dir, claimed)!;
+  const p = loadSecret<Pending>(dir, claimed);
+  if (!p) throw new GaError('unknown_state');
   deleteSecret(dir, claimed);
   if (now.getTime() > p.expires) throw new GaError('login_expired');
   const config = await discover(dir, p.fhirBase, p.clientId);
