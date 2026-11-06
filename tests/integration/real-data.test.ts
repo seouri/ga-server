@@ -301,6 +301,7 @@ test.skipIf(!apple)('real Apple Health export: test patient, imports twice, arch
     importAppleHealth(client, cfg, dir, pid).catch((e) => {
       throw new Error(`import failed: ${safe(e)}`);
     });
+  let bodyOk = false, left = 0, binariesLeft = 0, binaryIds: string[] = [], cleanupError: string | undefined;
   try {
     const first = await run();
     out.first = first;
@@ -354,6 +355,7 @@ test.skipIf(!apple)('real Apple Health export: test patient, imports twice, arch
     }
     console.log(JSON.stringify(out));
     writeFileSync('.superpowers/sdd/2026-11-05-apple-health-import/task-7-real.json', JSON.stringify(out, null, 1));
+    expect((out.archive as { documents: number }).documents).toBe(1);
     expect(first.possibleDuplicates).toBe(0);
     expect(first.seconds).toBeLessThan(1800);
     expect(second).toMatchObject({ created: 0, updated: 0 });
@@ -361,20 +363,34 @@ test.skipIf(!apple)('real Apple Health export: test patient, imports twice, arch
     const a = out.archive as { binaryBytes: number; unpacked: unknown; folder: unknown };
     expect(a.binaryBytes).toBeGreaterThan(100e6);
     expect(a.unpacked).toEqual(a.folder);
+    bodyOk = true;
   } finally {
-    // $everything is capped per call: delete by tag in pages until none remain, then the patient.
-    for (const t of [...types, 'Binary'] as const) {
-      if (t === 'Binary') continue;
-      for (;;) {
-        const rs = await client.searchResources(t, { patient: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' });
-        if (!rs.length) break;
-        for (const r of rs) await client.deleteResource(t, r.id as string);
+    // Cleanup errors are logged, not thrown, so they cannot mask a body failure; a clean body asserts cleanup below.
+    try {
+      // Binaries first (the DocumentReferences hold their urls), then the resources in pages ($everything is capped per call).
+      const docs = await client.searchResources('DocumentReference', { patient: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' });
+      binaryIds = docs.flatMap((d) => d.content.map((c) => c.attachment.url?.match(/(?:Binary|storage)\/([0-9a-f-]{36})/)?.[1] ?? '')).filter(Boolean);
+      for (const t of types) {
+        for (;;) {
+          const rs = await client.searchResources(t, { patient: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' });
+          if (!rs.length) break;
+          for (const r of rs) await client.deleteResource(t, r.id as string);
+        }
       }
+      for (const b of binaryIds) await client.deleteResource('Binary', b);
+      for (const t of types) left += (await client.search(t, { patient: `Patient/${pid}`, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
+      await client.deleteResource('Patient', pid);
+      for (const b of binaryIds) if (await client.readResource('Binary', b).then(() => true, () => false)) binariesLeft++;
+    } catch (e) {
+      cleanupError = safe(e);
+      console.error(`cleanup failed: ${cleanupError}`);
     }
-    let left = 0;
-    for (const t of types) left += (await client.search(t, { patient: `Patient/${pid}`, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
-    console.log(JSON.stringify({ remainingForTestPatient: left }));
-    await client.deleteResource('Patient', pid);
+    console.log(JSON.stringify({ remainingForTestPatient: left, binariesDeleted: binaryIds.length - binariesLeft, binariesLeft, cleanupError }));
+  }
+  if (bodyOk) {
+    expect(cleanupError).toBeUndefined();
     expect(left).toBe(0);
+    expect(binaryIds).toHaveLength(1);
+    expect(binariesLeft).toBe(0);
   }
 }, 3_600_000);
