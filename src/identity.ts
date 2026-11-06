@@ -3,12 +3,16 @@ import type { Identifier, Observation, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
 
 export type SourceInfo = {
-  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health';
+  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'smart';
   file: string;
   date: string;
   writer: 'importer' | 'agent';
   llm?: boolean;
+  dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
+  fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
+  seenAt?: string; // stamp/refresh LAST_SEEN on every record this import touches or skips
 };
+export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 export const APPLE = 'urn:ga-server:id:apple-health';
@@ -57,12 +61,19 @@ function ccdaKey(r: Resource, patientId: string): string {
 // Epic OIDs (any org root): the Epic-native ids C-CDA and EHI records share, used to link records across sources.
 export const EPIC_OID = 'urn:oid:1.2.840.114350.';
 
+const OWN_ID: Partial<Record<SourceInfo['kind'], { name: string; ok: (system: string) => boolean }>> = {
+  ehi: { name: 'EHI', ok: (x) => x.startsWith('urn:ga-server:id:ehi:') },
+  'apple-health': { name: 'Apple Health', ok: (x) => x === APPLE },
+  smart: { name: 'SMART', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
+};
+
 export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = ''): Identifier {
-  if (s.kind === 'ehi' || s.kind === 'apple-health') {
-    // EHI and Apple mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>, or APPLE) first.
+  const own = OWN_ID[s.kind];
+  if (own) {
+    // EHI, Apple and SMART mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>, APPLE, or
+    // urn:ga-server:id:smart:<host> | <Type>/<id>) first.
     const id = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-    const ok = s.kind === 'ehi' ? id?.system?.startsWith('urn:ga-server:id:ehi:') : id?.system === APPLE;
-    if (!ok || !id?.value) throw new GaError(`${r.resourceType} has no ${s.kind === 'ehi' ? 'EHI' : 'Apple Health'} identifier`);
+    if (!id?.system || !own.ok(id.system) || !id.value) throw new GaError(`${r.resourceType} has no ${own.name} identifier`);
     return { system: id.system, value: id.value };
   }
   if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };
@@ -87,6 +98,10 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   const tags = (meta.tag ??= []);
   for (const code of codes) if (!tags.some((t) => t.system === TAG && t.code === code)) tags.push({ system: TAG, code });
   meta.source = s.file;
-  out.extension = [...(out.extension ?? []).filter((e) => e.url !== SRC_DATE), { url: SRC_DATE, valueDateTime: s.date }];
+  out.extension = [
+    ...(out.extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== LAST_SEEN),
+    { url: SRC_DATE, valueDateTime: s.dateOf?.(r) ?? s.date },
+    ...(s.seenAt ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
+  ];
   return out;
 }

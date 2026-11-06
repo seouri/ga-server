@@ -198,7 +198,7 @@ export async function importPath(client: MedplumClient, cfg: GaConfig, path: str
     const resources = await convertCcda(xml, cfg.converterUrl);
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
     const r = await importResources(client, resources, { kind: 'ccda', file, date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
-    for (const k of Object.keys(total) as (keyof ImportReport)[]) total[k] += r[k];
+    for (const k of Object.keys(total) as Exclude<keyof ImportReport, 'seen' | 'byType'>[]) total[k] += r[k];
   }
   return total;
 }

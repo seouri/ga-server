@@ -77,6 +77,6 @@ export async function importEhi(
   const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');
   const files = { mediaUnknownType: 0, rtfNoNote: 0 };
   const docs = await importDocuments(client, dir, t, ctx, patientId, files);
-  for (const k of Object.keys(report) as (keyof ImportReport)[]) report[k] += docs[k];
+  for (const k of Object.keys(report) as Exclude<keyof ImportReport, 'seen' | 'byType'>[]) report[k] += docs[k];
   return { ...report, skippedTables: t.skipped.length, archived, skips: { ...skips, ...files, tables: t.skipped } };
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Observation, Resource } from '@medplum/fhirtypes';
-import { APPLE, contentKey, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import { APPLE, contentKey, LAST_SEEN, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const ccda: SourceInfo = { kind: 'ccda', file: 'a.xml', date: '2024-07-26T00:00:00Z', writer: 'importer' };
 const pdf: SourceInfo = { kind: 'pdf', file: 'b.pdf', date: '2024-08-01', writer: 'agent', llm: true };
@@ -89,4 +89,27 @@ test('stableIdentifier for apple-health returns the first Apple identifier', () 
   const o = { ...obs('2026-03-01'), identifier: [{ system: APPLE, value: 'abc' }] };
   expect(stableIdentifier(o, apple, '')).toEqual({ system: APPLE, value: 'abc' });
   expect(() => stableIdentifier(obs('2026-03-01'), apple, '')).toThrow(/no Apple Health identifier/);
+});
+
+const smart: SourceInfo = { kind: 'smart', file: 'https://fhir.example.org/R4', date: '2026-11-05T00:00:00Z', writer: 'importer' };
+const SMART_ID = { system: 'urn:ga-server:id:smart:fhir-example-org', value: 'Observation/1' };
+
+test('stableIdentifier for smart returns the first SMART identifier', () => {
+  const o = { ...obs('2026-03-01'), identifier: [SMART_ID, { system: 'urn:oid:1.2.840.114350.1', value: 'x' }] };
+  expect(stableIdentifier(o, smart, '')).toEqual(SMART_ID);
+  expect(() => stableIdentifier(obs('2026-03-01'), smart, '')).toThrow(/no SMART identifier/);
+  expect(() => stableIdentifier({ ...obs('2026-03-01'), identifier: [{ system: APPLE, value: 'a' }] }, smart, '')).toThrow(/no SMART identifier/);
+});
+
+test('stamp uses the per-resource source date and writes last-seen', () => {
+  const r = { ...obs('2026-03-01'), identifier: [SMART_ID] };
+  const dated = stamp(r, { ...smart, dateOf: () => '2026-01-02T00:00:00Z' }, SMART_ID) as Observation;
+  expect(dated.extension).toEqual([{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-01-02T00:00:00Z' }]);
+  expect(dated.meta?.tag?.map((t) => t.code)).toContain('src-smart');
+  const seen = stamp(r, { ...smart, dateOf: () => undefined, seenAt: '2026-11-05T00:00:00Z' }, SMART_ID) as Observation;
+  expect(LAST_SEEN).toBe('urn:ga-server:ext:last-seen');
+  expect(seen.extension).toEqual([
+    { url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-05T00:00:00Z' },
+    { url: LAST_SEEN, valueDateTime: '2026-11-05T00:00:00Z' },
+  ]);
 });

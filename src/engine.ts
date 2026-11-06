@@ -1,7 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { APPLE, contentHash, contentKey, EPIC_OID, effective, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -13,13 +13,19 @@ export type ImportReport = {
   conflicts: number;
   possibleDuplicates: number;
   invalid: number;
+  seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
+  byType?: Record<string, TypeCounts>; // only for kind 'smart'
 };
+export type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 export const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
+// Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
+const OTHER_SOURCE = (system: string) =>
+  system.startsWith('urn:ga-server:id:ehi:') || ['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf', APPLE].includes(system);
 // Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
 const COMPARTMENT: Record<string, string> = {
   ...Object.fromEntries(
@@ -57,7 +63,7 @@ const canon = (x: unknown) =>
 // because existing accumulates extra identifiers from merges.
 function body(r: R): unknown {
   const { id: _i, meta: _m, identifier: _id, extension, ...rest } = r;
-  const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF);
+  const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN);
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 
@@ -96,7 +102,7 @@ function merge(ex: unknown, inc: unknown): unknown {
   return isObj(ex) && isObj(inc) && coded(ex) && !ex.text && inc.text ? { ...ex, text: inc.text } : ex;
 }
 export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
-  if (s.kind !== 'ehi') return incomingRes;
+  if (s.kind !== 'ehi' && s.kind !== 'smart') return incomingRes;
   // R21: a text-only medication never replaces a coded one (a Medication reference, or a concept with codings).
   const ex = existing as unknown as Record<string, { coding?: unknown[] } | undefined>;
   const med = (incomingRes as unknown as Record<string, { coding?: unknown[] } | undefined>).medicationCodeableConcept;
@@ -229,7 +235,11 @@ export async function importResources(
   patientId: string,
   fileHash: string,
 ): Promise<ImportReport> {
-  const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
+  const report: ImportReport = {
+    created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0,
+    ...(source.seenAt && { seen: 0 }),
+    ...(source.kind === 'smart' && { byType: {} }),
+  };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
@@ -238,6 +248,16 @@ export async function importResources(
   const protect = (r: Resource): Resource => {
     const lastBy = r.meta?.author?.reference;
     return author && lastBy && lastBy !== author && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r;
+  };
+  // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
+  const keep = async (r: R, changed: boolean): Promise<void> => {
+    const ext = r.extension ?? [];
+    const seen = !!source.seenAt && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
+    if (!changed && !seen) return;
+    const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
+    const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];
+    await client.updateResource(protect({ ...r, extension } as Resource));
+    if (seen) report.seen = (report.seen ?? 0) + 1;
   };
 
   const patient = await client.readResource('Patient', patientId);
@@ -298,6 +318,7 @@ export async function importResources(
 
   const idMap = new Map<string, string>();
   for (const src of ordered) {
+    const before = { ...report };
     const r = structuredClone(src) as R;
     walkReferences(r, (ref) => idMap.get(ref));
     let ident = stableIdentifier(r, source, fileHash, patientId);
@@ -325,6 +346,19 @@ export async function importResources(
           new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
         )
       : [];
+    // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
+    const fillOnto = async (ex: R): Promise<void> => {
+      const bases = new Set(Object.keys(ex).map(choiceBase));
+      const add = Object.entries(incoming).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
+      const have = new Set(idList(ex).map(idKey));
+      const ids = idList(incoming).filter((i) => !have.has(idKey(i)));
+      const added = add.length + ids.length > 0;
+      await keep({ ...ex, ...Object.fromEntries(add), identifier: [...idList(ex), ...ids] } as R, added);
+      if (added) report.merged++;
+      else report.skipped++;
+    };
+    // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF, Apple) wrote, on every sync.
+    const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
     const fromApple = source.kind === 'apple-health';
     const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[];
@@ -338,7 +372,10 @@ export async function importResources(
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
         const inc = new Set(idList(incoming).map(idKey));
-        if (fromApple && idList(existing).some((i) => i.system !== APPLE && !inc.has(idKey(i)))) report.skipped++;
+        if (fromApple && idList(existing).some((i) => i.system !== APPLE && !inc.has(idKey(i)))) {
+          await keep(existing, false);
+          report.skipped++;
+        } else if (fillOnly(existing)) await fillOnto(existing);
         else if (d === 'update') {
           await unionUpdate(client, existing, filled);
           report.updated++;
@@ -348,9 +385,12 @@ export async function importResources(
         } else if (linked) {
           // Equal or older source: only record its identifiers, so the next import finds it by stable identifier.
           const have = new Set(idList(existing).map(idKey));
-          await client.updateResource(protect({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] } as Resource));
+          await keep({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] }, true);
           report.merged++;
-        } else report.skipped++;
+        } else {
+          await keep(existing, false);
+          report.skipped++;
+        }
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
         const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
@@ -361,11 +401,12 @@ export async function importResources(
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
           const otherOntoApple = !fromApple && isApple(same) && !hasNonApple(same); // hospital body beats an Apple-only one
-          if (d === 'conflict') report.skipped++;
+          if (fillOnly(same)) await fillOnto(same);
+          else if (d === 'conflict') report.skipped++;
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
             if (otherOntoApple || (d === 'update' && !appleOntoOther && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent'))) await unionUpdate(client, same, filled);
-            else await client.updateResource(protect({ ...same, identifier: [...(same.identifier ?? []), ident] } as Resource));
+            else await keep({ ...same, identifier: [...(same.identifier ?? []), ident] }, true);
             report.merged++;
           }
         } else if (matches.length) {
@@ -389,6 +430,14 @@ export async function importResources(
       // Element paths only: server diagnostics can echo values. References to this resource stay unresolved.
       console.error(`invalid ${(e.outcome.issue ?? []).map((i) => `${type}/${i.expression?.join(',')}`).join(' ')}`);
       report.invalid++;
+    }
+    if (report.byType) {
+      const t = (report.byType[type] ??= { created: 0, linked: 0, updated: 0, flagged: 0, seen: 0 });
+      t.created += report.created - before.created;
+      t.linked += report.merged - before.merged;
+      t.updated += report.updated - before.updated;
+      t.flagged += report.possibleDuplicates - before.possibleDuplicates + report.conflicts - before.conflicts;
+      t.seen += (report.seen ?? 0) - (before.seen ?? 0);
     }
   }
   return report;

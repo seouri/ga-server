@@ -4,7 +4,7 @@ import type { Bundle, MedicationStatement, Observation, Patient, Resource } from
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
-import { APPLE, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
+import { APPLE, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -558,4 +558,75 @@ test('a newer Apple copy of an allergy carrying its hospital identifiers updates
   const rows = (await all()).filter((r) => r.resourceType === 'AllergyIntolerance' && r.code?.text === 'synthetic allergen');
   expect(rows).toHaveLength(1);
   expect((rows[0] as { criticality?: string }).criticality).toBe('high');
+});
+
+// SMART: GA identifier first (urn:ga-server:id:smart:<host>|<Type>/<id>), then the server's Epic ids for linking.
+const SMART_SYS = 'urn:ga-server:id:smart:fhir-example-org';
+const smartSrc = (date: string, extra: Partial<SourceInfo> = {}): SourceInfo => ({ kind: 'smart', file: 'https://fhir.example.org/R4', date, writer: 'importer', ...extra });
+const CODED = { coding: [{ system: 'http://snomed.info/sct', code: '38341003' }], text: 'synthetic-problem' };
+const ehiProblem = (pl: { system: string; value: string }) =>
+  ({ ...problem([{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl], 'active'), code: CODED, note: [{ text: 'synthetic-note' }] }) as Resource;
+const smartProblem = (pl: { system: string; value: string }, status: 'active' | 'resolved') =>
+  ({ ...problem([{ system: SMART_SYS, value: `Condition/${pl.value}` }, pl], status), code: { text: 'portal-name' }, onsetDateTime: '2020-01-02' }) as Resource;
+
+test('fill-only smart never replaces an EHI body', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [ehiProblem(pl)], ehiSrc('2026-01-01'), pid, 'h');
+  const s = smartProblem(pl, 'resolved');
+  const fill = (date: string) => smartSrc(date, { fillOnly: () => true });
+  expect(await importResources(client, [s], fill('2026-11-05T00:00:00Z'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 1 });
+  // Permanent: the second sync finds it by the SMART id and still only fills.
+  expect(await importResources(client, [s], fill('2026-11-06T00:00:00Z'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 1 });
+  const found = await byId('Condition', pl.system, pl.value);
+  expect(found).toHaveLength(1);
+  expect(found[0].code).toEqual(CODED);
+  expect(found[0].note).toEqual([{ text: 'synthetic-note' }]);
+  expect(found[0].clinicalStatus?.coding?.[0]?.code).toBe('active');
+  expect(found[0].onsetDateTime).toBe('2020-01-02');
+  expect(systems(found[0])).toContain(SMART_SYS);
+});
+
+test('smart with a real newer date updates', async () => {
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [ehiProblem(pl)], ehiSrc('2026-01-01'), pid, 'h');
+  // The sync date is older than the EHI export: only the per-resource date makes it newer.
+  const newer = smartSrc('2025-01-01T00:00:00Z', { fillOnly: () => false, dateOf: () => '2026-10-01T00:00:00Z' });
+  expect(await importResources(client, [smartProblem(pl, 'resolved')], newer, pid, 'h')).toMatchObject({ created: 0, updated: 1 });
+  const [found] = await byId('Condition', pl.system, pl.value);
+  expect(found.clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+  // A newer text-only code never replaces the coded EHI one; fields the portal lacks are kept.
+  expect(found.code?.coding).toEqual(CODED.coding);
+  expect(found.note).toEqual([{ text: 'synthetic-note' }]);
+  expect(found.extension?.find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime).toBe('2026-10-01T00:00:00Z');
+});
+
+test('unchanged re-import only advances last-seen', async () => {
+  const o = uid('o');
+  const c = uid('c');
+  // No meta.lastUpdated: a different sync date each run must not count as an update.
+  const batch: Resource[] = [
+    { ...chol(o, 170, '2026-02-03'), identifier: [{ system: SMART_SYS, value: `Observation/${o}` }] },
+    { ...problem([{ system: SMART_SYS, value: `Condition/${c}` }], 'active'), id: c },
+  ];
+  const run = (date: string, seenAt: string) => importResources(client, batch, smartSrc(date, { seenAt, fillOnly: () => true }), pid, 'h');
+  const T1 = '2026-11-04T00:00:00Z';
+  const T2 = '2026-11-05T00:00:00Z';
+  expect(await run(T1, T1)).toMatchObject({ created: 2, seen: 0 });
+  const fetch = async () =>
+    [
+      ...(await client.searchResources('Observation', { identifier: `${SMART_SYS}|Observation/${o}` }, { cache: 'no-cache' })),
+      ...(await client.searchResources('Condition', { identifier: `${SMART_SYS}|Condition/${c}` }, { cache: 'no-cache' })),
+    ] as (Resource & { extension?: { url: string; valueDateTime?: string }[] })[];
+  const before = await fetch();
+  const second = await run(T2, T2);
+  expect(second).toMatchObject({ created: 0, updated: 0, merged: 0, seen: 2 });
+  const zero = { created: 0, linked: 0, updated: 0, flagged: 0 };
+  expect(second.byType).toEqual({ Observation: { ...zero, seen: 1 }, Condition: { ...zero, seen: 1 } });
+  const after = await fetch();
+  expect(after).toHaveLength(2);
+  const strip = ({ meta: _m, extension, ...r }: Resource & { extension?: { url: string }[] }) => ({ ...r, extension: extension?.filter((e) => e.url !== LAST_SEEN) });
+  for (const r of after) expect(r.extension?.find((e) => e.url === LAST_SEEN)?.valueDateTime).toBe(T2);
+  expect(after.map(strip)).toEqual(before.map(strip));
+  // A third run at the same time writes nothing.
+  expect(await run(T2, T2)).toMatchObject({ created: 0, updated: 0, seen: 0 });
 });
