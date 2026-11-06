@@ -26,7 +26,7 @@ flowchart LR
   fhir --> share["ga-share<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family"])
 ```
 
-Everything runs on your Mac. Data leaves it only to your own hospitals (fetching), the people you share a link with, and your own AI provider (the agent itself, and share-link questions if you turn them on). The agent never talks to Medplum directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
+Everything runs on your Mac. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent you chat with, and share-link questions if you turn them on). The agent never talks to Medplum directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
 
 ## Setup (new Mac)
 
