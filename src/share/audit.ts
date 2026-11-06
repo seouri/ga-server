@@ -4,7 +4,7 @@ import type { AuditEvent } from '@medplum/fhirtypes';
 import type { Share } from './store.ts';
 
 export type AccessEvent = { kind: 'view' | 'download' | 'question' | 'doc'; detail?: string; ip?: string; ua?: string; answerLength?: number };
-export type LogEntry = { at: string; label: string; kind: string; detail?: string; ip?: string };
+type LogEntry = { at: string; label: string; kind: string; detail?: string; ip?: string };
 
 const TAG_SYSTEM = 'urn:ga-server:share';
 const KIND_SYSTEM = 'urn:ga-server:share-access';

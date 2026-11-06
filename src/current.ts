@@ -3,7 +3,7 @@ import type { Endpoint, Resource } from '@medplum/fhirtypes';
 import { LAST_SEEN, SRC_DATE, TAG } from './identity.ts';
 import { LAST_SUCCESS, SOURCE_ID } from './smart/sync.ts';
 
-export type Currency = 'current' | 'unconfirmed';
+type Currency = 'current' | 'unconfirmed';
 export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
 const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);

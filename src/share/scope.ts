@@ -2,7 +2,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, isActive } from '../current.ts';
-import { TAG } from '../identity.ts';
+import { hasTag } from '../engine.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
@@ -55,17 +55,17 @@ const SUPPORT_REF = /^(Medication|Practitioner|Organization|Location|Binary)\/([
 export const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
 
 type Any = Record<string, unknown>;
-const hasCategory = (r: Resource, code: string): boolean =>
+export const hasCategory = (r: Resource, code: string): boolean =>
   ((r as { category?: { coding?: { code?: string }[] }[] }).category ?? []).some((c) => c.coding?.some((x) => x.code === code));
 
 export function groupOf(r: Resource): Group | undefined {
-  if (r.meta?.tag?.some((t) => t.system === TAG && t.code === 'src-apple-health')) return 'apple';
+  if (hasTag(r, 'src-apple-health')) return 'apple';
   if (r.resourceType === 'Observation') {
     if (hasCategory(r, 'laboratory')) return 'labs';
     if (hasCategory(r, 'vital-signs')) return 'vitals';
     // GA's PDF extraction emits lab results without a category.
     const uncategorized = !(r as { category?: unknown[] }).category?.length;
-    return uncategorized && r.meta?.tag?.some((t) => t.system === TAG && (t.code === 'extracted-by-llm' || t.code === 'src-pdf')) ? 'labs' : undefined;
+    return uncategorized && (hasTag(r, 'extracted-by-llm') || hasTag(r, 'src-pdf')) ? 'labs' : undefined;
   }
   return BY_TYPE[r.resourceType];
 }
@@ -79,7 +79,7 @@ export function dateOf(r: Resource): string | undefined {
 }
 
 const STANDING_CLINICAL = new Set(['recurrence', 'relapse']);
-export const isStanding = (r: Resource): boolean =>
+const isStanding = (r: Resource): boolean =>
   isActive(r) || (r.resourceType === 'Condition' && !!(r as { clinicalStatus?: { coding?: { code?: string }[] } }).clinicalStatus?.coding?.some((c) => !!c.code && STANDING_CLINICAL.has(c.code)));
 
 const neverShared = (r: Resource): boolean =>

@@ -4,8 +4,8 @@ import { dirname, join } from 'node:path';
 import { GaError, defaultConfigPath } from '../config.ts';
 import { loadSecret, saveSecret, writeAtomic } from '../smart/store.ts';
 
-export type Group = 'labs' | 'vitals' | 'medications' | 'problems' | 'allergies' | 'immunizations' | 'visits' | 'notes' | 'procedures' | 'family' | 'messages' | 'apple';
-export const GROUPS: readonly Group[] = ['labs', 'vitals', 'medications', 'problems', 'allergies', 'immunizations', 'visits', 'notes', 'procedures', 'family', 'messages', 'apple'];
+export const GROUPS = ['labs', 'vitals', 'medications', 'problems', 'allergies', 'immunizations', 'visits', 'notes', 'procedures', 'family', 'messages', 'apple'] as const;
+export type Group = (typeof GROUPS)[number];
 
 export type Share = {
   id: string;
@@ -24,18 +24,8 @@ export type Share = {
   revoked?: string;
 };
 
-export type ShareOpts = {
-  audience: 'doctor' | 'family';
-  label: string;
-  groups?: Group[] | 'all';
-  since?: string;
-  until?: string;
-  expires?: string;
-  layout?: 'A' | 'B';
-  questionsPerDay?: number;
-  patientId: string;
-  baseUrl: string;
-};
+// expires here is user input (7d, YYYY-MM-DD, never), parsed by parseExpiry.
+type ShareOpts = Pick<Share, 'audience' | 'label' | 'patientId' | 'baseUrl'> & Partial<Pick<Share, 'groups' | 'since' | 'until' | 'expires' | 'layout' | 'questionsPerDay'>>;
 
 const DOCTOR_GROUPS: Group[] = ['labs', 'medications', 'problems', 'allergies', 'immunizations', 'vitals'];
 const DAY = 86400000;
@@ -46,7 +36,7 @@ const localDay = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1
 export const shareDir = (cfgPath: string = defaultConfigPath()): string => join(dirname(cfgPath), 'share');
 
 const file = (dir: string): string => join(dir, 'shares.json');
-const read = (dir: string): Share[] => (existsSync(file(dir)) ? (JSON.parse(readFileSync(file(dir), 'utf8')) as Share[]) : []);
+export const listShares = (dir: string): Share[] => (existsSync(file(dir)) ? (JSON.parse(readFileSync(file(dir), 'utf8')) as Share[]) : []);
 const write = (dir: string, s: Share[]): void => writeAtomic(file(dir), JSON.stringify(s, null, 2), 0o600);
 
 function parseDate(s: string): Date | undefined {
@@ -100,21 +90,19 @@ export function createShare(dir: string, opts: ShareOpts, now: Date = new Date()
   };
   // Secret first: a share without a recoverable token would be unusable.
   saveSecret(dir, `share-${id}`, token);
-  write(dir, [...read(dir), share]);
+  write(dir, [...listShares(dir), share]);
   return { share, token };
 }
 
-export const listShares = (dir: string): Share[] => read(dir);
-
 export function findByToken(dir: string, token: string, now: Date = new Date()): Share | undefined {
   const h = hash(token);
-  const s = read(dir).find((x) => x.tokenHash === h);
+  const s = listShares(dir).find((x) => x.tokenHash === h);
   if (!s || s.revoked || (s.expires && now.getTime() > Date.parse(s.expires))) return undefined;
   return s;
 }
 
 export function revokeShare(dir: string, id: string, now: Date = new Date()): Share {
-  const all = read(dir);
+  const all = listShares(dir);
   const s = all.find((x) => x.id === id);
   if (!s) throw new GaError(`no share ${id}`);
   s.revoked ??= now.toISOString();
@@ -131,7 +119,7 @@ export function tokenOf(dir: string, id: string): string {
 // Daily counters live in asked.json, not shares.json: the server never rewrites shares.json, so it cannot undo a CLI revoke.
 const askedFile = (dir: string): string => join(dir, 'asked.json');
 export function takeQuestion(dir: string, id: string, now: Date = new Date()): boolean {
-  const s = read(dir).find((x) => x.id === id);
+  const s = listShares(dir).find((x) => x.id === id);
   if (!s) throw new GaError(`no share ${id}`);
   const all = (existsSync(askedFile(dir)) ? JSON.parse(readFileSync(askedFile(dir), 'utf8')) : {}) as Record<string, { day: string; n: number }>;
   const day = localDay(now);

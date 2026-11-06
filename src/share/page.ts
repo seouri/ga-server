@@ -1,9 +1,9 @@
 // Server-rendered share page. No scripts (CSP), so tabs, QR and Ask are plain links and a form. Every interpolated value goes through esc.
 import QRCode from 'qrcode';
 import type { Share } from './store.ts';
-import type { Item, Row, Summary } from './summary.ts';
+import { newestFirst, type Item, type Row, type Summary } from './summary.ts';
 
-export const esc = (s: unknown): string =>
+const esc = (s: unknown): string =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 type Opts = { base: string; tab?: 'summary' | 'records' | 'ask' | 'download'; page?: number; group?: string; askEnabled: boolean; answer?: { q: string; a: string }; notice?: string };
@@ -56,7 +56,7 @@ function askHtml(o: Opts): string {
 function recordsHtml(rows: Row[], o: Opts): string {
   // Unknown or absent group: all groups.
   const group = rows.some((r) => r.group === o.group) ? o.group : undefined;
-  const all = rows.filter((r) => !group || r.group === group).flatMap((r) => r.items).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  const all = rows.filter((r) => !group || r.group === group).flatMap((r) => r.items).sort(newestFirst);
   const pages = Math.max(1, Math.ceil(all.length / PAGE));
   const page = Math.min(pages, Math.max(1, Math.floor(Number(o.page)) || 1));
   const slice = all.slice((page - 1) * PAGE, page * PAGE);

@@ -8,7 +8,7 @@ import { BINARY_URL, type Scoped, inScope } from './scope.ts';
 import { findByToken, takeQuestion, type Share } from './store.ts';
 import { recordRows, summarize, toBundle } from './summary.ts';
 
-export type ServerDeps = {
+type ServerDeps = {
   dir: string;
   load: (share: Share) => Promise<Scoped>;
   log: (share: Share, e: AccessEvent) => Promise<void>;
@@ -38,7 +38,7 @@ const send = (res: Res, status: number, body: string | Buffer, type = HTML, extr
   res.end(body);
 };
 const notFound = (res: Res): void => send(res, 404, renderInactive());
-const safeName = (s: string): string => s.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '').slice(0, 100) || 'document';
+export const safeName = (s: string, fallback = 'document'): string => s.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '').slice(0, 100) || fallback;
 const attach = (name: string): Record<string, string> => ({ 'Content-Disposition': `attachment; filename="${safeName(name)}"` });
 
 class TooLarge extends Error {}

@@ -1,9 +1,9 @@
 // What a share shows: the summary, the per-group record rows and the FHIR bundle. Pure over Scoped.
 import { basename } from 'node:path';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
-import { currency, currencyContext } from '../current.ts';
-import { TAG } from '../identity.ts';
-import { BINARY_URL, dateOf, groupOf, trimPatient } from './scope.ts';
+import { currency, currencyContext, type Ctx } from '../current.ts';
+import { hasTag } from '../engine.ts';
+import { BINARY_URL, dateOf, groupOf, hasCategory, trimPatient } from './scope.ts';
 import type { Scoped } from './scope.ts';
 
 export type Item = { label: string; value?: string; date?: string; source?: string; note?: string; ref: string };
@@ -27,10 +27,9 @@ const formatValue = (r: Resource): string | undefined => {
   const comps = (o.component ?? []).map((c: Any) => val(c)).filter(Boolean);
   return val(o) ?? (comps.length ? comps.join(' / ') : undefined);
 };
-const hasTag = (r: Resource, code: string): boolean => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 const ref = (r: Resource): string => `${r.resourceType}/${r.id}`;
 
-export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources, s.endpoints, s.newestImport)): Item {
+function toItem(r: Resource, s: Scoped, ctx: Ctx): Item {
   const o = r as Any;
   const med = o.medicationReference?.reference && s.support.find((x) => ref(x) === o.medicationReference.reference);
   const label = cc(o.code) ?? cc(o.medicationCodeableConcept) ?? cc(o.vaccineCode) ?? cc((med as Any)?.code) ?? o.medicationReference?.display
@@ -44,7 +43,7 @@ export function toItem(r: Resource, s: Scoped, ctx = currencyContext(s.resources
   return { label, value: formatValue(r), date: dateOf(r), source, note: notes.join('; ') || undefined, ref: ref(r) };
 }
 
-const newestFirst = (a: Item, b: Item): number => (b.date ?? '').localeCompare(a.date ?? '');
+export const newestFirst = (a: Item, b: Item): number => (b.date ?? '').localeCompare(a.date ?? '');
 
 export function summarize(s: Scoped): Summary {
   const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
@@ -72,7 +71,7 @@ export function summarize(s: Scoped): Summary {
   }
   return {
     patient: { name: n?.text ?? [...(n?.given ?? []), n?.family].filter(Boolean).join(' '), birthDate: p.birthDate, gender: p.gender },
-    problems: of((r) => r.resourceType === 'Condition' && active(r) && !!(r as Any).category?.some((c: Any) => c.coding?.some((x: Any) => x.code === 'problem-list-item'))).map(item),
+    problems: of((r) => r.resourceType === 'Condition' && active(r) && hasCategory(r, 'problem-list-item')).map(item),
     medications: of((r) => (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') && active(r)).map(item),
     allergies: of((r) => r.resourceType === 'AllergyIntolerance' && active(r)).map(item),
     labs: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'labs')),
@@ -93,24 +92,22 @@ export function recordRows(s: Scoped): Row[] {
   const ctx = currencyContext(s.resources, s.endpoints, s.newestImport);
   const groups = new Map<string, Item[]>();
   for (const r of s.resources) {
-    const g = groupOf(r);
+    const g = groupOf(r) ?? 'other';
     if (g === 'apple') continue;
-    const list = groups.get(g ?? 'other');
+    const list = groups.get(g);
     if (list) list.push(toItem(r, s, ctx));
-    else groups.set(g ?? 'other', [toItem(r, s, ctx)]);
+    else groups.set(g, [toItem(r, s, ctx)]);
   }
   return [...groups].map(([group, items]) => ({ group, items: items.sort(newestFirst) }));
 }
 
 // Medplum answers attachment urls with presigned storage URLs (or Binary refs): useless outside, and a bearer link while valid.
-const dropStorageUrls = (r: Resource): Resource => {
-  if (r.resourceType !== 'DocumentReference' || !r.content?.some((c) => c.attachment?.url && BINARY_URL.test(c.attachment.url))) return r;
-  return { ...r, content: r.content.map((c) => {
+const dropStorageUrls = (r: Resource): Resource =>
+  r.resourceType !== 'DocumentReference' || !r.content ? r : { ...r, content: r.content.map((c) => {
     if (!c.attachment?.url || !BINARY_URL.test(c.attachment.url)) return c;
     const { url: _, ...attachment } = c.attachment;
     return { ...c, attachment };
   }) };
-};
 
 export function toBundle(s: Scoped): Bundle {
   const clean = (r0: Resource): Resource => {

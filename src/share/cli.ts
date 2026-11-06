@@ -14,7 +14,7 @@ import { logAccess, readLog } from './audit.ts';
 import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
-import { createServer } from './server.ts';
+import { createServer, safeName } from './server.ts';
 import { GROUPS, createShare, listShares, parseSince, revokeShare, shareDir, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
@@ -28,7 +28,7 @@ const CREATE = {
 } as const;
 const TAILSCALE = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
 
-function args(argv: string[], options: Record<string, { type: 'string' | 'boolean' }> = {}) {
+function args(argv: string[], options: Record<string, { type: 'string' | 'boolean' }>) {
   try {
     return parseArgs({ args: argv, options, allowPositionals: true, strict: true });
   } catch {
@@ -65,12 +65,11 @@ async function funnelHint(): Promise<void> {
   if (!/Funnel on/.test(out) || !/proxy http:\/\/(127\.0\.0\.1|localhost):8110\b/.test(out)) console.log('Links work after you run: tailscale funnel --bg 8110');
 }
 
-const linkOf = (s: Share, token: string): string => `${s.baseUrl}/s/${token}`;
 const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
 const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
 
 async function printLink(s: Share, token: string): Promise<void> {
-  const url = linkOf(s, token);
+  const url = `${s.baseUrl}/s/${token}`;
   console.log(url);
   console.log(await QRCode.toString(url, { type: 'terminal', small: true }));
   console.log(`For: ${s.label} (${s.audience}). Shows: ${scopeWords(s)}. Expires: ${expiryWords(s)}.`);
@@ -145,11 +144,10 @@ async function exportShare(argv: string[]): Promise<void> {
   const s = find(positionals[0]);
   const scoped = await loadScoped(await getClient(loadConfig()), s);
   const out = (values.out as string | undefined) ?? process.cwd();
-  const name = s.label.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._]+/, '').slice(0, 100) || 'share';
-  const pdf = await toPdf(summarize(scoped), recordRows(scoped), { label: s.label, created: s.created, scope: scopeWords(s) });
-  writeAtomic(join(out, `${name}-summary.pdf`), pdf, 0o600);
-  writeAtomic(join(out, `${name}-records.json`), JSON.stringify(toBundle(scoped)), 0o600);
-  console.log(`wrote ${join(out, `${name}-summary.pdf`)} and ${join(out, `${name}-records.json`)}`);
+  const [pdfFile, jsonFile] = ['summary.pdf', 'records.json'].map((f) => join(out, `${safeName(s.label, 'share')}-${f}`));
+  writeAtomic(pdfFile, await toPdf(summarize(scoped), recordRows(scoped), { label: s.label, created: s.created, scope: scopeWords(s) }), 0o600);
+  writeAtomic(jsonFile, JSON.stringify(toBundle(scoped)), 0o600);
+  console.log(`wrote ${pdfFile} and ${jsonFile}`);
 }
 
 // Downloads through the client's base URL, so it works in the container where Medplum's presigned localhost URLs do not.
@@ -164,12 +162,10 @@ async function serve(): Promise<void> {
   const client = await getClient(loadConfig());
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const sdk = apiKey ? new Anthropic({ apiKey }) : undefined;
+  const cached = scopedCache(loadScoped);
   const server = createServer({
     dir: shareDir(),
-    load: (() => {
-      const cached = scopedCache(loadScoped);
-      return (share: Share) => cached(client, share);
-    })(),
+    load: (share) => cached(client, share),
     log: (share, e) => logAccess(client, share, e),
     fetchBinary: binaryFetcher(client),
     ...(sdk && {
