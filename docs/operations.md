@@ -12,7 +12,9 @@ Back to the [README](../README.md).
 | Portal signing key, client ID, sources, encrypted tokens | `.ga/smart/` |
 | Shares and their encrypted link tokens | `.ga/share/` |
 
-All ports bind to `127.0.0.1`. Nothing is reachable from the network unless you turn on Tailscale Funnel for share links and the portal login callback.
+All ports bind to `127.0.0.1`. Nothing is reachable from the network unless you turn on Tailscale Funnel, which exposes one service, `ga-gateway` (port 8110): share links, the hospital login return `/callback` and, only if `GA_PUBLIC_URL` is set in `.env`, chat-app access (`/mcp`, login and upload pages; see [GA from chat apps](chat-apps.md)). The FHIR server and admin app are never exposed. Chat-app logins live in `.ga/` and come back with a restore.
+
+After changing `.env`, run `docker compose up -d`. The services restart on their own after a reboot or Docker restart. Share links, chat apps and daily sync work only while the computer is awake and online: on a Mac, keep it plugged in and stop it sleeping (System Settings, Battery or Lock Screen, or run `caffeinate -s`).
 
 ## Backup
 
@@ -25,7 +27,7 @@ docker run --rm -v ga-server_ga-binary:/b:ro -v ~/ga-backup:/out postgres:16 tar
 cp -Rp .ga ~/ga-backup/dot-ga
 ```
 
-The `ga-backup` compose service does this every night into `./backups` (or `GA_BACKUP_DIR`), one dated folder per run, newest 7 kept; on Linux run `mkdir -p backups` first (Docker would create it root-owned). To restore from one of those folders, set `B=backups/<date_time>` and use `$B/ga-postgres.dump`, `$B/ga-binary.tgz` (in place of `~/ga-backup/...`), and for `.ga` run `mkdir .ga && tar xzf $B/dot-ga.tgz -C .ga` instead of the `cp` line below.
+The `ga-backup` compose service does this every night into `./backups` (or `GA_BACKUP_DIR`), one dated folder per run, newest 7 kept; on Linux run `mkdir -p backups` first (Docker would create it root-owned). To restore from one of those folders, set `B=$PWD/backups/<date_time>` (absolute: `docker run -v` treats a relative path as a volume name) and use `$B/ga-postgres.dump`, `$B/ga-binary.tgz` (in place of `~/ga-backup/...`), and for `.ga` run `mkdir .ga && tar xzf $B/dot-ga.tgz -C .ga` instead of the `cp` line below.
 
 ## Restore
 
@@ -48,7 +50,7 @@ docker compose up -d --wait
 docker compose down          # stops GA; your records stay in the Docker volumes
 docker compose down -v       # also DELETES all records and stored files (back up first)
 npm unlink -g ga-server      # removes the ga command
-tailscale funnel reset       # stops exposing share links and the login callback
+tailscale funnel reset       # stops exposing GA to the internet
 ```
 
 Then delete the repo folder, which includes `.ga/` with your keys and tokens. Also remove GA's access in each hospital's MyChart (or `ga disconnect <source>` first).
