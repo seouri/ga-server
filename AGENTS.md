@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
