@@ -146,11 +146,15 @@ export const binaryFetcher = (client: MedplumClient) => async (ref: string): Pro
   return { data: Buffer.from(await blob.arrayBuffer()), contentType: blob.type };
 };
 
+// Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
+export function llmFromEnv(): { llm: OpenAI; model: string } | undefined {
+  const model = process.env.GA_LLM_MODEL;
+  return model ? { llm: new OpenAI({ baseURL: process.env.GA_LLM_BASE_URL || undefined, apiKey: process.env.GA_LLM_API_KEY || 'none' }), model } : undefined;
+}
+
 // Share page deps, for ga gateway serve.
 export function shareDeps(client: MedplumClient): ShareDeps {
-  // Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
-  const model = process.env.GA_LLM_MODEL;
-  const llm = model ? new OpenAI({ baseURL: process.env.GA_LLM_BASE_URL || undefined, apiKey: process.env.GA_LLM_API_KEY || 'none' }) : undefined;
+  const { llm, model } = llmFromEnv() ?? {};
   const cached = scopedCache(loadScoped);
   return {
     dir: shareDir(),

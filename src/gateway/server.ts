@@ -19,7 +19,7 @@ import { patientEndpoints } from '../smart/sync.ts';
 import { smartDir } from '../smart/store.ts';
 import { renderInactive } from '../share/page.ts';
 import { HEADERS, type ShareDeps, TooLarge, clientIp, failLimiter, readBody, send, shareHandler } from '../share/server.ts';
-import { shareDeps } from '../share/cli.ts';
+import { llmFromEnv, shareDeps } from '../share/cli.ts';
 import { appName, createProvider, disconnectClient, sweepClients } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
@@ -27,6 +27,7 @@ import { ack, pending } from '../notify/outbox.ts';
 import { notifyDir, readSettings, readState, writeState } from '../notify/settings.ts';
 import { inSleep } from '../notify/select.ts';
 import { tick } from '../notify/tick.ts';
+import { createReplier } from '../notify/reply.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
 import { sweepExpired } from './adapter.ts';
@@ -41,7 +42,7 @@ export type GatewayDeps = {
   completeLogin: (search: string) => Promise<unknown>;
   calendar?: (id: string, userAgent?: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
   // iMessage bridge exchange; absent means POST /notify/exchange is 404. client: logs each acked send (kind only, never text).
-  notify?: { dir: string; client?: MedplumClient; now?: () => Date; onIncoming?: (m: { from: string; text: string; at: string }) => Promise<void> };
+  notify?: { dir: string; client?: MedplumClient; now?: () => Date; onIncoming?: (m: { from: string; text: string; at: string }) => Promise<void>; onSent?: (text: string) => void };
   verifyPasskey?: (response: AuthenticationResponseJSON, expectedChallenge: string) => Promise<boolean>;
 };
 
@@ -131,6 +132,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     const failures = (Array.isArray(b.failed) ? b.failed : []).filter((f: any) => typeof f?.id === 'string').map((f: any) => ({ id: f.id, error: String(f.error ?? '').slice(0, 200) }));
     const acked = pending(n.dir).filter((o) => sent.includes(o.id));
     ack(n.dir, sent, failures, new Date());
+    for (const o of acked) if (o.kind !== 'reply') n.onSent?.(o.text); // replies are already in the thread
     for (const o of acked) if (n.client) logRemote(n.client, `sent ${o.kind}`, 'iMessage').catch(() => {});
     for (const m of Array.isArray(b.incoming) ? b.incoming : []) {
       if (typeof m?.from !== 'string' || typeof m?.text !== 'string') continue;
@@ -378,9 +380,10 @@ export async function serveGateway(): Promise<void> {
   const nd = notifyDir();
   const ns = readSettings(nd);
   const notifyOn = !!ns && !ns.off;
+  const replier = notifyOn ? createReplier({ client, cfg, patientId: cfg.patientId, dir: nd, publicUrl, ...llmFromEnv() }) : undefined;
   const server = createGateway({
     publicUrl,
-    notify: notifyOn ? { dir: nd, client } : undefined,
+    notify: replier ? { dir: nd, client, onIncoming: replier.onIncoming, onSent: replier.remember } : undefined,
     dir: gatewayDir(),
     tools: remoteTools(client, cfg, cfg.patientId),
     share: shareDeps(client),

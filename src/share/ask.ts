@@ -1,22 +1,19 @@
 // Ask: an LLM (any OpenAI-compatible Chat Completions API) answers a recipient's question from the share's records only. Every tool reads the Scoped lists,
 // never Medplum, so nothing in the question or record text can widen the scope. Never logs question or answer text.
-import OpenAI from 'openai';
 import type { Resource } from '@medplum/fhirtypes';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cardiovascularRisk10yr } from '../cardiovascular-risk.ts';
-import { GaError } from '../config.ts';
+import { chatLoop, type Llm } from '../llm-chat.ts';
+export { BUDGET_USED, SORRY } from '../llm-chat.ts';
+export type { Llm } from '../llm-chat.ts';
 import { currency, currencyContext, type Ctx } from '../current.ts';
 import { readable, slim } from '../mcp.ts';
 import { dateOf, inScope } from './scope.ts';
 import type { Scoped } from './scope.ts';
 import type { Share } from './store.ts';
 
-export const SORRY = 'Sorry, that question needs more than I can look up here.';
-const MAX_TOOL_TURNS = 8;
 
-// The slice of the OpenAI SDK ask uses; tests pass a scripted fake.
-export type Llm = { chat: { completions: { create: (p: any) => Promise<any> } } };
 
 // Steps 1-9 of the /ga skill, adapted to the share's tools (step 0, portal status, needs Endpoints, which are never shared).
 // Transformed line by line so the skill stays the single source of truth for everything else.
@@ -50,9 +47,6 @@ export function instructions(vaccines: boolean): string {
 type Any = Record<string, any>;
 const names = (c?: Any): string[] => [c?.text, ...(c?.coding ?? []).map((x: Any) => x?.display)].filter((x): x is string => typeof x === 'string');
 
-const MAX_RESULT = 50_000;
-const MAX_TOTAL = 200_000; // tool-result characters per question, across all turns
-export const BUDGET_USED = 'tool budget for this question used up; answer with what you have';
 const SNIPPET = 500;
 // Attachments and Binary: search shows a text snippet and never base64; read shows full text but never base64.
 const trimContent = (x: unknown, full: boolean): unknown => {
@@ -163,43 +157,5 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; 
   ].join('\n\n');
   const tools = [TOOLS.search_records, TOOLS.read_record, ...(vaccines ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr].map((f) => ({ type: 'function', function: f }));
   const messages: Any[] = [{ role: 'system', content: system }, { role: 'user', content: q }];
-  let used = 0;
-
-  for (let turn = 0; ; turn++) {
-    let msg: Any, finish: string | undefined;
-    try {
-      const res = await deps.llm.chat.completions.create({ model: deps.model, max_completion_tokens: 4000, tools, messages });
-      ({ message: msg, finish_reason: finish } = res.choices?.[0] ?? {});
-    } catch (e) {
-      // Status and error code only: bodies can echo record content.
-      if (e instanceof OpenAI.APIError) throw new GaError(`LLM API error: ${e.status ?? 'connection'} ${e.code ?? e.type ?? ''}`.trim());
-      throw e;
-    }
-    // Some servers send tool calls with finish_reason 'stop': branch on the calls themselves.
-    const calls: Any[] = (msg?.tool_calls ?? []).filter((c: Any) => c?.function?.name);
-    if (!calls.length) {
-      const text = typeof msg?.content === 'string' ? msg.content.trim() : '';
-      if (!text) return SORRY;
-      return finish === 'length' ? `${text}\n(answer cut short)` : text;
-    }
-    if (turn >= MAX_TOOL_TURNS) return SORRY;
-    messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: calls });
-    for (const c of calls) {
-      let content: string;
-      if (used >= MAX_TOTAL) content = BUDGET_USED;
-      else {
-        let v: unknown;
-        try {
-          // Arguments are model output: malformed JSON becomes an error result, not a crash.
-          v = await run(c.function.name, (JSON.parse(c.function.arguments || '{}') ?? {}) as Any);
-        } catch (e) {
-          v = `error: ${e instanceof Error ? e.message : String(e)}`;
-        }
-        const json = JSON.stringify(v) ?? 'null';
-        content = json.length > MAX_RESULT ? `${json.slice(0, MAX_RESULT)} [truncated]` : json;
-        used += content.length;
-      }
-      messages.push({ role: 'tool', tool_call_id: c.id, content });
-    }
-  }
+  return chatLoop(deps, messages, tools, run);
 }
