@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
-import { labResults, labRow } from '../src/labs.ts';
+import { labResults, labRow, summarizeLabs, type LabRow } from '../src/labs.ts';
 
 describe('labRow', () => {
   it('keeps the comparator, unit, one-sided ranges and flags; omits empty fields', () => {
@@ -35,7 +35,7 @@ describe('labResults', () => {
     pages = [[obs(0, { effectiveDateTime: undefined }), obs(1), obs(2, { category: [{ coding: [{ code: 'vital-signs' }] }] })], [obs(3), obs(4)]];
     const r = await labResults(fake(seen), 'p', { name: 'a1c', since: '2024-01-01', until: '2024-12-31', limit: 2 });
     expect(r).toMatchObject({ total: 2, truncated: true });
-    expect(r.rows.map((x) => x.id)).toEqual(['id1', 'id3']);
+    expect((r.rows as LabRow[]).map((x) => x.id)).toEqual(['id1', 'id3']);
     const q = new URLSearchParams(seen[0]);
     expect(q.getAll('date')).toEqual(['ge2024-01-01', 'lt2025-01-01']);
     expect(q.get('code:text')).toBe('a1c');
@@ -48,5 +48,40 @@ describe('labResults', () => {
     expect(r.truncated).toBe(true);
     expect(r.total).toBeLessThan(1000);
     expect(JSON.stringify(r).length).toBeLessThan(150_000);
+  });
+});
+
+describe('summarizeLabs', () => {
+  const lab = (text: string, date: string | undefined, value: number, extra: Partial<Observation> = {}): Observation =>
+    ({ resourceType: 'Observation', status: 'final', code: { text }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' }, ...extra });
+  const loinc = { coding: [{ system: 'urn:local', code: 'L1' }, { system: 'http://loinc.org', code: '13457-7' }] };
+  it('groups by LOINC, else by case/space-insensitive name; an uncoded result joins the LOINC group of its name', () => {
+    const s = summarizeLabs([
+      lab('LDL Cholesterol', '2024-01-01', 120, { code: { ...loinc, text: 'LDL Cholesterol' } }),
+      lab('LDL  cholesterol', '2025-01-01', 100), // PDF, no code
+      lab('LDL calc', '2023-01-01', 130, { code: { ...loinc, text: 'LDL calc' } }),
+      lab('Glucose', undefined, 90),
+      lab('glucose', '2022-05-01', 99),
+    ]);
+    expect(s.map((x) => [x.name, x.loinc, x.count])).toEqual([['LDL  cholesterol', '13457-7', 3], ['glucose', undefined, 2]]);
+    expect(s[0]).toMatchObject({ latest: { date: '2025-01-01', value: 100 }, previous: { date: '2024-01-01', value: 120 }, change: -20, first: '2023-01-01' });
+    expect(s[1]).toMatchObject({ latest: { date: '2022-05-01', value: 99 }, first: '2022-05-01' }); // undated last
+    expect(s[1].previous).toBeUndefined();
+  });
+  it('change only for same-unit numbers; out of range by interpretation, else by the reference range', () => {
+    const range = { referenceRange: [{ low: { value: 3.5 }, high: { value: 5.1 } }] };
+    const [k] = summarizeLabs([
+      lab('Potassium', '2024-03-01', 5.6, { ...range, interpretation: [{ coding: [{ code: 'N' }] }] }), // interpretation wins over the range
+      lab('Potassium', '2024-02-01', 5.4, { ...range, valueQuantity: { value: 5.4, unit: 'mmol/L' } }),
+      lab('Potassium', '2024-01-01', 3.0, range),
+      lab('Potassium', '2023-01-01', 4, { interpretation: [{ text: 'High' }] }),
+    ]);
+    expect(k).toMatchObject({ count: 4, outOfRange: 3, previous: { value: 5.4 } });
+    expect(k.latest.flag).toBeUndefined();
+    expect(k.change).toBeUndefined(); // mg/dL vs mmol/L
+    const [c] = summarizeLabs([lab('CRP', '2024-02-01', 5.6), lab('CRP', '2024-01-01', 5.4, { valueQuantity: { comparator: '<', value: 5.4, unit: 'mg/dL' } })]);
+    expect(c.change).toBeUndefined();
+    expect(c.previous?.value).toBe('<5.4 mg/dL');
+    expect(summarizeLabs([lab('A', '2024-01-01', 6.1), lab('A', '2023-01-01', 5.4)])[0].change).toBe(0.7);
   });
 });
