@@ -43,18 +43,18 @@ const day = (d: string) => d.replaceAll('-', '');
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ACTIONABLE = new Set(['overdue', 'due', 'due soon', 'done']); // not discuss (eligibility open), postponed, not for you
 
-// One all-day event per item still on the person's list (dismissed: never). Overdue, and due with no date, sit on asOf so the most urgent stay
-// visible; others on their due date. A partial or malformed date is skipped, never fatal to the feed.
+// One all-day event per item still on the list (dismissed: never); overdue, and due with no date, span a week from asOf so they stay visible
+// until the app's next refresh (hours to a day). A malformed date skips that item, never the feed.
 export function toIcs(items: Item[], asOf: string, id: string, now = new Date()): string {
   const stamp = `${now.toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   const events = items.filter((i) => ACTIONABLE.has(i.status) && i.nextMention !== null).flatMap((i) => {
     const onToday = i.status === 'overdue' || (i.status === 'due' && !i.dueDate);
     const date = onToday ? asOf : i.dueDate;
     if (!date || !DAY.test(date)) return [];
-    const next = new Date(Date.parse(`${date}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+    const end = new Date(Date.parse(`${date}T00:00:00Z`) + (onToday ? 7 : 1) * 864e5).toISOString().slice(0, 10);
     return ['BEGIN:VEVENT', `UID:${hash(i.topic).slice(0, 16)}-${id}@ga-server`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${day(date)}`,
-      `DTEND;VALUE=DATE:${day(next)}`, `SUMMARY:${text(`${i.name} ${i.status === 'overdue' ? 'overdue' : 'due'}`)}`, 'TRANSP:TRANSPARENT', 'END:VEVENT'];
+      `DTEND;VALUE=DATE:${day(end)}`, `SUMMARY:${text(`GA: ${i.name} ${i.status === 'overdue' ? 'overdue' : 'due'}`)}`, 'TRANSP:TRANSPARENT', 'END:VEVENT'];
   });
-  return [...['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//GA//Health maintenance//EN', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:GA health maintenance',
+  return [...['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//GA//Health maintenance//EN', 'CALSCALE:GREGORIAN', 'NAME:GA health maintenance', 'X-WR-CALNAME:GA health maintenance',
     'REFRESH-INTERVAL;VALUE=DURATION:PT12H', 'X-PUBLISHED-TTL:PT12H'], ...events, 'END:VCALENDAR'].map(fold).join('\r\n') + '\r\n';
 }
