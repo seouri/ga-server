@@ -20,21 +20,22 @@ test('one all-day event per item still on the list, topic names only', () => {
   expect(s.endsWith('END:VCALENDAR\r\n')).toBe(true);
   expect(s).not.toMatch(/[^\r]\n/); // CRLF only
   expect(events(s)).toHaveLength(1);
-  expect(s).toMatch(/UID:[0-9a-f]{16}-abc123@ga-server\r\nDTSTAMP:20261107T120000Z\r\nDTSTART;VALUE=DATE:20270201\r\nDTEND;VALUE=DATE:20270202\r\nSUMMARY:Colorectal cancer screening due/);
+  expect(s).toMatch(/UID:[0-9a-f]{16}-abc123@ga-server\r\nDTSTAMP:20261107T120000Z\r\nDTSTART;VALUE=DATE:20270201\r\nDTEND;VALUE=DATE:20270202\r\nSUMMARY:GA: Colorectal cancer screening due/);
   expect(s).not.toMatch(/DESCRIPTION|AAA|Zoster|Prostate|Lung|Partial/);
 });
 
 test('overdue items, and due items with no date, sit on today; UIDs differ per topic', () => {
   const s = ics([item('a', 'Hep B', 'overdue', '2026-01-01'), item('b', 'Hep-B', 'overdue'), item('c', 'HIV', 'due')]);
   expect(events(s).map((e) => /DTSTART;VALUE=DATE:(\d+)/.exec(e)?.[1])).toEqual(['20261107', '20261107', '20261107']);
-  expect(s).toContain('SUMMARY:Hep B overdue');
-  expect(s).toContain('SUMMARY:HIV due');
+  expect(s).toContain('SUMMARY:GA: Hep B overdue');
+  expect(s).toContain('SUMMARY:GA: HIV due');
+  expect(events(s)[0]).toContain('DTEND;VALUE=DATE:20261114'); // a week, so it stays visible until the next refresh
   expect(new Set(events(s).map((e) => /UID:(\S+)/.exec(e)?.[1])).size).toBe(3);
 });
 
 test('text is escaped and long lines are folded at 75 octets', () => {
   const s = ics([item('x', `Pap, HPV; co-test\\ ${'long name é '.repeat(10)}`, 'done', '2027-01-01')]);
-  expect(s).toContain('SUMMARY:Pap\\, HPV\\; co-test\\\\ ');
+  expect(s).toContain('SUMMARY:GA: Pap\\, HPV\\; co-test\\\\ ');
   for (const line of s.split('\r\n')) expect(Buffer.byteLength(line)).toBeLessThanOrEqual(75);
   expect(s.split('\r\n').some((l) => l.startsWith(' '))).toBe(true);
 });

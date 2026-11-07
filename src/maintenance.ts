@@ -5,7 +5,7 @@ import { GaError } from './config.ts';
 import { evaluateScreenings, loadRules, SOON_DAYS } from './screenings.ts';
 import { SRC_DATE } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
-import { addDays, addMonths, vaccineGaps } from './vaccines.ts';
+import { addDays, addMonths, loadSchedule, vaccineGaps } from './vaccines.ts';
 
 export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, followup
 const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote' };
@@ -27,18 +27,20 @@ const VACCINE_EPIC: Record<string, string[]> = {
 // Whole-word match of an upper-case fragment in a topic name, punctuation as spaces; a plural last word counts.
 const words = (s: string) => ` ${s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()} `;
 const hasWord = (name: string, frag: string) => { const n = words(name), f = words(frag); return n.includes(f) || n.includes(`${f.trimEnd()}S `); };
-const cleanName = (t: string) => t.replace(/^\*\s*/, '').replace(/"/g, '').trim(); // Epic marks some topics "* NAME" or quotes a word
+// Epic marks some topics "* NAME", quotes a word, or appends a note to clinicians (': UPDATE W "EDIT MODIFIERS"', an Epic workflow step).
+const cleanName = (t: string) => t.replace(/^\*\s*/, '').replace(/"/g, '').replace(/\s*:\s*UPDATE W\b.*$/i, '').trim();
 
 const val = (e?: Extension) => (e?.valueDate ?? e?.valueDateTime ?? e?.valueString ?? '').slice(0, 10);
 const text = (e?: Extension) => e?.valueString;
 
 export function vaccineItems(v: Awaited<ReturnType<typeof vaccineGaps>>): Item[] {
   const map = { complete: 'done', immune: 'done', due: 'due', overdue: 'overdue', 'not-recommended': 'not for you', 'not-evaluated': 'discuss' } as const;
+  const names = new Map(loadSchedule().vaccines.map((x) => [x.id, `${x.name} vaccine`]));
   return v.results.map((r): Item => {
     const status = map[r.status];
     const importance = status === 'overdue' && r.records.length ? 'high' : status === 'overdue' || status === 'due' ? 'medium' : 'low';
     return {
-      topic: r.vaccine, name: r.vaccine, kind: 'vaccine', status, importance, why: r.reason,
+      topic: r.vaccine, name: names.get(r.vaccine) ?? r.vaccine, kind: 'vaccine', status, importance, why: r.reason,
       guideline: { citation: `CDC adult immunization schedule, ${v.edition}`, reason: r.reason },
       evidence: r.records.map((x) => ({ date: x.date, by: r.vaccine, source: x.source })),
     };

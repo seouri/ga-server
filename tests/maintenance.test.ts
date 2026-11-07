@@ -184,3 +184,7 @@ test('upcoming lists items due within the window, soonest first', () => {
   expect(upcoming(items, '2026-11-03').map((i) => [i.name, i.dueDate])).toEqual([['LIPID PANEL - YEARLY', '2026-12-01'], ['colorectal', '2027-02-01']]);
   expect(upcoming(items, '2026-11-03', 1).map((i) => i.name)).toEqual(['LIPID PANEL - YEARLY']);
 });
+
+test("Epic's note to clinicians is dropped from topic names", () => {
+  expect(epicPlans([hm('PSA SCREEN DECISION: UPDATE W "EDIT MODIFIERS"', '2027-01-01', 'Not Due')])[0].topic).toBe('PSA SCREEN DECISION');
+});
