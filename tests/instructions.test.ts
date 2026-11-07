@@ -16,6 +16,8 @@ describe('chatInstructions', () => {
     expect(t).toContain('upload_link');
     expect(t).toContain('fileId');
     expect(t).toContain('`confirm` code');
+    expect(t).toContain('record_followup');
+    expect(t).toContain('health_maintenance');
   });
   it('has no CLI or repo-only references', () => {
     for (const s of ['ga share', '/ga-import', 'AGENTS.md', 'ga connect', 'ga sync', 'sourceFile']) expect(t).not.toContain(s);
@@ -41,8 +43,11 @@ describe('remote output cap and logging', () => {
     expect(r.content[0].text).toMatch(/^.{150000}\[truncated: narrow the search, e\.g\. _count, _elements or a date range\]$/s);
     expect(logs).toEqual(['fhir_search']);
   });
-  it('whats_new is registered on stdio and remote', async () => {
-    for (const remote of [false, true]) expect((await (await connect(remote)).listTools()).tools.some((t) => t.name === 'whats_new')).toBe(true);
+  it('whats_new and the maintenance tools are registered on stdio and remote', async () => {
+    for (const remote of [false, true]) {
+      const names = (await (await connect(remote)).listTools()).tools.map((t) => t.name);
+      for (const n of ['whats_new', 'health_maintenance', 'postpone', 'record_followup']) expect(names).toContain(n);
+    }
   });
   it('stdio is untouched', async () => {
     expect((await search(await connect(false))).content[0].text.length).toBeGreaterThan(200_000);

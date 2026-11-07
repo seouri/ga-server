@@ -41,7 +41,7 @@ Or use `connected_apps` and `disconnect_app` in chat. Every remote call is logge
 
 ## What you can do in chat
 
-Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `concepts_to_review`, `whats_new`) plus:
+Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `concepts_to_review`, `health_maintenance`, `whats_new`) plus:
 
 | Area | Tools |
 |---|---|
@@ -50,8 +50,9 @@ Read tools (`health_summary`, `lab_results`, `current_medications`, `current_pro
 | Imports | `upload_link`, `import_file`, `import_status`, `ga_import` |
 | Apps | `connected_apps`, `disconnect_app` |
 | Concepts | `map_concept` (maps a source term to a standard code; corrections are another call) |
+| Health maintenance | `postpone` (not now, until a date, or dismiss), `record_followup` (a follow-up from a note; preview first) |
 
-Creating a share and enabling a hospital's record types are two steps: a preview first, then the action after your yes. The agent carries that yes: see [SECURITY.md](../SECURITY.md).
+Creating a share, enabling a hospital's record types and recording a follow-up are two steps: a preview first, then the action after your yes. The agent carries that yes: see [SECURITY.md](../SECURITY.md).
 
 **Importing files.** The chat app can't hand GA a file, so ask it to import one: `upload_link` returns a link (single use, 15 minutes). Open it, sign in with your passkey, and pick the file. For a PDF or photo you pick it in the chat too, so the agent can read it. Apple Health, Epic EHI and C-CDA exports go up as a zip and import in the background; ask for the status. ChatGPT attachments are off until a file host is added to `config/chat-apps.json` (`fileHosts`, empty now), so use the upload link there too.
 

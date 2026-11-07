@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `health_summary` (one-call snapshot: call it first), `lab_results` (lab results as compact rows: name, date range, newest first; `summary: true` for one trend entry per test), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `notes_search` (text search in notes and MyChart messages), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`, `whats_new` (what arrived since the person last looked; offer it once per conversation), `concepts_to_review` (source terms with no standard code, or only a suggested one), `map_concept` (map one term to a validated code; after `ga_import`, map its `unmapped` terms).
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `health_summary` (one-call snapshot: call it first), `lab_results` (lab results as compact rows: name, date range, newest first; `summary: true` for one trend entry per test), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `notes_search` (text search in notes and MyChart messages), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`, `health_maintenance` (screenings, vaccines and doctor-planned follow-ups with status, importance and why), `postpone` (not now, until a date, or dismiss), `record_followup` (a follow-up found in a note; two-step confirm), `whats_new` (what arrived since the person last looked; offer it once per conversation), `concepts_to_review` (source terms with no standard code, or only a suggested one), `map_concept` (map one term to a validated code; after `ga_import`, map its `unmapped` terms).
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
@@ -25,7 +25,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 
 ## What's new
 
-`whats_new` (CLI `ga whats-new [--since YYYY-MM-DD]`, which never marks seen) lists records that arrived since the last time the person saw it (`.ga/whats-new.json`), else the last 90 days (`firstRun`): counts by kind and source, out-of-range labs, new medications with FDA label sections (`medicationCheck`; only the RxNorm code leaves the machine), status changes, vaccine and health-maintenance follow-ups, and current medications and problems as context. Pass `markSeen: true` only on the call whose summary you showed; `since` never marks seen. Label text: "From the FDA label; not a full interaction screen. Ask your pharmacist." Report only what the sections say, quoting section and label date.
+`whats_new` (CLI `ga whats-new [--since YYYY-MM-DD]`, which never marks seen) lists records that arrived since the last time the person saw it (`.ga/whats-new.json`), else the last 90 days (`firstRun`): counts by kind and source, out-of-range labs, new medications with FDA label sections (`medicationCheck`; only the RxNorm code leaves the machine), status changes, overdue or due-soon `health_maintenance` items not held back by `postpone`, and current medications and problems as context. Pass `markSeen: true` only on the call whose summary you showed; `since` never marks seen. Label text: "From the FDA label; not a full interaction screen. Ask your pharmacist." Report only what the sections say, quoting section and label date.
 
 ## Epic EHI data
 
@@ -37,7 +37,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
 - Current medications = `active` MedicationStatement plus `active` MedicationRequest, each confirmed by the medication currency rule (see "Hospital portals (SMART)"); `current_medications` (and `current_problems`, `allergies`) return them with the rule applied.
-- Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Show Epic health maintenance as a second opinion, labelled as of the export date.
+- Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Epic health maintenance is the doctor's plan inside `health_maintenance` (below), labelled as of the export date.
 
 ## Hospital portals (SMART)
 
@@ -45,6 +45,15 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 
 - Medication currency rule (also problems and allergies): a record with `urn:ga-server:ext:last-seen` is current only if it is `active` and its `last-seen` equals the `smart-last-success` of the Endpoint whose identifier value is the `<key>` of its `urn:ga-server:id:smart:<key>` identifier (sync writes both from one timestamp). A record linked from several SMART sources (several such identifiers) is current if `last-seen` equals the newest sync of any of them. Otherwise it is unconfirmed: the portal stopped returning it, so it may have been stopped. A record without `last-seen` keeps the source-date rule: `active` with `urn:ga-server:ext:source-date` older than the newest Epic import (C-CDA, EHI or portal sync) is unconfirmed.
 - Stale sources: see the status check at the top.
+
+## Health maintenance
+
+`health_maintenance` (CLI `ga maintenance [--as-of YYYY-MM-DD]`; optional `asOf`) lists screenings (shipped USPSTF rules), vaccines (`vaccine_gaps`) and doctor-planned follow-ups: status, importance, the guideline date and the doctor's plan (Epic health maintenance or a recorded follow-up) each with its label and as-of date, evidence, `why` and `cost` quoted from the guideline source, and `nextMention` (`null`: never raise again).
+
+- Relay what it says; never judge a guideline or add advice. Raise only items whose `nextMention` is absent or past. Grade C: "worth discussing with your doctor". `discuss` means GA cannot tell eligibility (sex or history): say so.
+- `postpone {topic, until?, dismiss?, reason?}`: when the person says not now, until a date, or never (dismiss is refused unless the item is low importance). No confirm. It writes a `Basic` (code system `urn:ga-server:reminder`: `not-now`, `postpone`, `dismiss`) with Provenance.
+- `record_followup {topic, due, quote, documentRef}`: a follow-up the doctor planned, found in a note, with the note's own words (it must appear in the document). Preview first; call again with `confirm` only after the user's yes. Writes a `Basic` `followup`. Never infer one.
+- `Basic` is never shared.
 
 ## Apple Health data
 

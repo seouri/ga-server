@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
+import type { Item } from '../src/maintenance.ts';
 import { expect, test } from 'vitest';
 import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, statusItems, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
 
@@ -92,18 +93,31 @@ test('medicationItems: new only when no earlier record shares the code or name',
   expect(medicationItems([newN], [oldN, newN], since, '2026-11-07')).toEqual([]);
 });
 
-const vac = (vaccine: string, status: string, n: number) => ({ vaccine, status, reason: 'r', records: Array.from({ length: n }, () => ({ date: '2020-01-01', source: 's' })) });
-const hm = (topic: string, status: string, next?: string) => obs({
-  id: topic, code: { text: `Health maintenance: ${topic}` }, valueString: status,
-  extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-06-01' }],
-  ...(next && { component: [{ code: { text: 'Next due date' }, valueDateTime: next }] }),
-}) as Observation;
+const item = (topic: string, status: string, extra: object = {}) => ({ topic, name: topic, kind: 'screening', status, importance: 'high', evidence: [], ...extra }) as Item;
 
-test('followUpItems: started vaccine series and Epic health maintenance', () => {
-  const v = { edition: 'x', asOf: '2026-11-07', unmatched: [], possibleDuplicates: [], results: [vac('zoster', 'due', 1), vac('flu', 'due', 0), vac('mmr', 'complete', 2)] } as unknown as Parameters<typeof followUpItems>[0];
-  const items = followUpItems(v, [hm('Colonoscopy', 'Overdue', '1900-01-01'), hm('Mammogram', 'Not Due', '2026-11-08')], '2026-11-07', '1970-01-01');
-  expect(items.map((i) => [i.kind, i.title])).toEqual([['vaccine follow-up', 'zoster'], ['health maintenance', 'Colonoscopy']]);
-  expect(items[1].detail).toEqual({ status: 'Overdue', nextDue: undefined, asOfExport: '2026-06-01' });
+test('followUpItems: overdue or due soon engine items not held back by nextMention', () => {
+  const got = followUpItems([
+    item('colorectal', 'overdue', { dueDate: '2026-01-01', why: 'w' }),
+    item('lung', 'due soon', { nextMention: '2026-11-07' }),
+    item('breast', 'overdue', { nextMention: '2026-11-08' }),
+    item('prostate', 'overdue', { nextMention: null }),
+    item('zoster', 'due', { importance: 'low' }),
+    item('mmr', 'done'),
+  ], '2026-11-07');
+  expect(got.map((i) => [i.kind, i.title])).toEqual([['health maintenance', 'colorectal'], ['health maintenance', 'lung']]);
+  expect(got[0]).toMatchObject({ date: '2026-01-01', detail: { topic: 'colorectal', status: 'overdue', importance: 'high', why: 'w' } });
+});
+
+test('followUpItems: due raised for high or medium, not low; evidence, source and id carried', () => {
+  const got = followUpItems([
+    item('zoster', 'due', { kind: 'vaccine', importance: 'medium', evidence: [{ date: '2020-01-01', by: 'zoster', source: 'a.xml', id: 'Immunization/1' }, { date: '2024-01-01', by: 'zoster', source: 'b.xml' }] }),
+    item('rsv', 'discuss', { importance: 'low' }),
+    item('mmr', 'due', { importance: 'low' }),
+    item('lung', 'overdue', { doctorsPlan: { asOf: '2026-06-01', from: 'epic', id: 'Observation/9' } }),
+  ], '2026-11-07');
+  expect(got.map((i) => i.title)).toEqual(['zoster', 'lung']);
+  expect(got[0]).toMatchObject({ source: 'b.xml', detail: { evidence: [{ date: '2020-01-01' }, { date: '2024-01-01' }] } });
+  expect(got[1].id).toBe('Observation/9');
 });
 
 test('medicationItems resolves a referenced Medication for RxNorm and name', () => {
@@ -126,7 +140,7 @@ test('whatsNew: first run, markSeen and since', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ga-wn-'));
   const run = (o: object) => whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', dir, ...o });
   const first = await run({});
-  expect(first).toMatchObject({ since: '2026-08-09', firstRun: true, items: [], medicationCheck: [], tally: { total: 0 } });
+  expect(first).toMatchObject({ since: '2026-08-09', firstRun: true, medicationCheck: [], tally: { total: 0 } });
   expect(first.note).toContain('not a full interaction screen');
   expect(readLastSeen(dir)).toBeUndefined();
   await run({ since: '2026-11-01', markSeen: true });
@@ -161,7 +175,7 @@ test('whatsNew: the whole result stays under the remote cap, note and labels kep
   expect(r.items.length).toBeGreaterThan(10);
   expect(r.items.filter((i) => i.kind === 'new medication')).toHaveLength(4);
   expect(r.truncated).toBe(true);
-  expect(r.itemsTotal).toBe(1004);
+  expect(r.itemsTotal).toBeGreaterThanOrEqual(1004); // plus any due vaccines of the empty record
   expect(r.seen).toBeUndefined();
   const mc = r.medicationCheck as { label: { status: string } }[];
   expect(mc.length).toBe(4);

@@ -56,12 +56,12 @@ const NEGATED = /\bnon|\bnot\b|\bneg|\bno\b|equivocal|indeterminate|unknown|unce
 // A bare disease name (Measles, VZV) also names infection tests (IgM, PCR): immunity needs an antibody term; IgM never counts.
 const BARE = new Set(['measles', 'mumps', 'rubella', 'varicella', 'vzv']);
 const ANTIBODY = /\b(antibod\w*|ab|igg|immun\w*|titer|titre)\b/;
-const addMonths = (date: string, n: number) => {
+export const addMonths = (date: string, n: number) => {
   const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
   d.setUTCMonth(d.getUTCMonth() + n);
   return d.toISOString().slice(0, 10);
 };
-const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+export const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 export const ageOn = (birth: string, asOf: string) => Number(asOf.slice(0, 4)) - Number(birth.slice(0, 4)) - (asOf.slice(5, 10) < birth.slice(5, 10) ? 1 : 0);
 
 export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: string) {

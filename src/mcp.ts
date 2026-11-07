@@ -26,6 +26,8 @@ import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
 import { registerShareTools } from './tools/shares.ts';
 import { registerConceptTools } from './tools/concepts.ts';
+import { registerMaintenanceTools } from './tools/maintenance.ts';
+import { healthMaintenance } from './maintenance.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -420,6 +422,21 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     read(({ asOf }) => vaccineGaps(client, patientId, asOf)),
   );
+  server.registerTool(
+    'health_maintenance',
+    {
+      description:
+        'Screenings, vaccines and the doctor\'s planned follow-ups for the user, from GA: per item its status (overdue, due, due soon, discuss, postponed, done, not for you), importance, ' +
+        'the guideline (USPSTF grade or CDC schedule, with citation and its due date) and the doctor\'s plan (Epic health maintenance or a recorded follow-up, with its own as-of date) side by side, the evidence used, ' +
+        'why it matters and what it costs (quoted from the guideline source) and nextMention (null: never raise again). Relay status, both dates with their labels, and why and cost with the citation. ' +
+        'Never judge the guideline yourself or add advice; show both dates when they differ. Raise only items whose nextMention is absent or has passed; the person can defer one with postpone. ' +
+        'Low importance (grade C): say "worth discussing with your doctor". asOf defaults to today (YYYY-MM-DD).',
+      inputSchema: { asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() },
+      annotations: { readOnlyHint: true },
+    },
+    read(({ asOf }) => healthMaintenance(client, patientId, asOf)),
+  );
+  registerMaintenanceTools(server, deps);
   registerConceptTools(server, deps);
   // Remote ga_import (by fileId) is in tools/imports.ts.
   if (!remote) server.registerTool(

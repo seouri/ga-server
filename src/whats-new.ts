@@ -2,17 +2,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Condition, Endpoint, Extension, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
 import { hasTag } from './engine.ts';
-import { arrivedAt, SRC_DATE, TAG } from './identity.ts';
+import { arrivedAt, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
 import { concept, listRows, loadLists } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
-import { vaccineGaps } from './vaccines.ts';
+import { healthMaintenance, type Item } from './maintenance.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -95,7 +95,7 @@ export function writeLastSeen(at: string, dir: string = dirname(defaultConfigPat
 }
 
 export type ReviewItem = {
-  kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'vaccine follow-up' | 'health maintenance';
+  kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'health maintenance';
   title: string; date?: string; detail: Record<string, unknown>; source?: string; id?: string;
 };
 
@@ -175,23 +175,19 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
   return changed.map(({ type, r, kind, from, to }) => ({ kind, title: concept(r.resourceType === 'Condition' ? (r as Condition).code : medCode(r, meds).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id }));
 }
 
-export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>, hm: Observation[], asOf: string, birthDate?: string): ReviewItem[] {
-  const items: ReviewItem[] = vaccines.results.filter((v) => (v.status === 'due' || v.status === 'overdue') && v.records.length).map((v) => ({
-    kind: 'vaccine follow-up', title: v.vaccine, date: v.records.map((x) => x.date).sort().at(-1), detail: { status: v.status, reason: v.reason, records: v.records }, source: [...new Set(v.records.map((x) => x.source))].join(', ') || undefined,
-  }));
-  for (const o of hm) {
-    const topic = o.code?.text?.match(/^Health maintenance: (.+)$/)?.[1];
-    if (!topic) continue;
-    const next = o.component?.find((c) => /next due/i.test(c.code?.text ?? ''))?.valueDateTime?.slice(0, 10);
-    const due = next && !(birthDate && next < birthDate) ? next : undefined; // a due date before birth is a bad record
-    if (!/^(overdue|due)$/i.test(o.valueString ?? '') && !(due && due <= asOf)) continue;
-    const asOfExport = (o.extension as Extension[] | undefined)?.find((e) => e.url === SRC_DATE)?.valueDateTime;
-    items.push({ kind: 'health maintenance', title: topic, detail: { status: o.valueString, nextDue: due, asOfExport }, date: asOfExport?.slice(0, 10), source: sourceOf(o), id: o.id });
-  }
-  return items;
+// Engine items worth raising now: overdue, due soon, or due with high or medium importance, and not held back by a postponement (nextMention null: never).
+export function followUpItems(items: Item[], asOf: string): ReviewItem[] {
+  const raise = (i: Item) => i.status === 'overdue' || i.status === 'due soon' || (i.status === 'due' && i.importance !== 'low');
+  return items.filter((i) => raise(i) && i.nextMention !== null && (!i.nextMention || i.nextMention <= asOf)).map((i) => {
+    const newest = [...i.evidence].sort((a, b) => b.date.localeCompare(a.date))[0];
+    return {
+      kind: 'health maintenance', title: i.name, date: i.dueDate, source: newest?.source ?? i.doctorsPlan?.source, id: i.doctorsPlan?.id ?? newest?.id,
+      detail: { topic: i.topic, itemKind: i.kind, status: i.status, importance: i.importance, guideline: i.guideline, doctorsPlan: i.doctorsPlan, evidence: i.evidence, why: i.why, cost: i.cost },
+    };
+  });
 }
 
-const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'vaccine follow-up', 'health maintenance'];
+const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'health maintenance'];
 const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
 
 // A failed section becomes {error} in its place, trimmed like sectionErrors; the rest still returns.
@@ -227,14 +223,12 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const subject = `Patient/${patientId}`;
   const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
   const listsP = eps.then((e) => loadLists(client, patientId, e));
-  const [arrived, lists, labs, hm, status, patient, vaccines] = await Promise.all([
+  const [arrived, lists, labs, status, upkeep] = await Promise.all([
     part(arrivedSince(client, patientId, since)),
     part(listsP),
     part(q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]])),
-    part(q([['code:text', 'Health maintenance']])),
     part(statusItems(client, patientId, since, listsP.then((l) => l.all, () => []))), // names of referenced drugs come from the lists
-    part(client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>),
-    part(vaccineGaps(client, patientId, asOf)),
+    part(healthMaintenance(client, patientId, asOf)),
   ]);
   const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
   const errors: Record<string, string> = {};
@@ -246,7 +240,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
     ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
     ...run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since, asOf)),
     ...run('status changes', () => get(status)),
-    ...run('follow-ups', () => followUpItems(get(vaccines), get(hm), asOf, failed(patient) ? undefined : patient.birthDate)),
+    ...run('follow-ups', () => followUpItems(get(upkeep).items, asOf)),
   ];
   const kept = fit(interleave(all), 200, false, ITEMS);
   const items = kept.rows.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
@@ -268,7 +262,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   let seen: { seen: boolean; seenReason?: string } | undefined;
   if (opts.markSeen) {
     const reason = opts.since ? 'a since date was given'
-      : [arrived, lists, labs, hm, status, patient, vaccines, checked].some(failed) || Object.keys(errors).length ? 'a section failed'
+      : [arrived, lists, labs, status, upkeep, checked].some(failed) || Object.keys(errors).length ? 'a section failed'
         : Array.isArray(checked) && checked.some((c) => c.label.status === 'unavailable') ? 'a drug label was unavailable'
           : truncated ? 'the summary was cut' : undefined;
     if (!reason) writeLastSeen(now.toISOString(), opts.dir);

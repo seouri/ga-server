@@ -51,6 +51,7 @@ test('dateOf takes the first present field, sliced to a day', () => {
 const archive = (system: string) => r({ resourceType: 'DocumentReference', identifier: [{ system, value: 'a' }], date: '2025-02-01' });
 test.each([
   r({ resourceType: 'Endpoint' }),
+  r({ resourceType: 'Basic' }),
   r({ resourceType: 'Provenance' }),
   r({ resourceType: 'AuditEvent' }),
   r({ resourceType: 'Patient', id: 'p' }),
