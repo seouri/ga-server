@@ -266,11 +266,14 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"); since/until: YYYY-MM-DD, inclusive. ' +
         'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
-        'truncated: more results exist; narrow by name or dates.',
+        'truncated: more results exist; narrow by name or dates. summary: true returns one entry per test instead (trends, "how has X changed"), ' +
+        'over every matching result: name, loinc, unit, latest {date, value, flag high/low/...}, previous {date, value}, change (latest − previous, same unit), ' +
+        'count, outOfRange (results flagged high or low), first (date), source and flags of the latest.',
       inputSchema: {
         name: z.string().min(1).optional(),
         ...dates,
         limit: z.number().int().min(1).max(1000).default(200),
+        summary: z.boolean().default(false),
       },
       annotations: { readOnlyHint: true },
     },

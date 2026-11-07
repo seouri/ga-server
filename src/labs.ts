@@ -74,11 +74,56 @@ export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; tot
   return { rows: out, total: out.length, ...(truncated ? { truncated: true as const } : {}) };
 }
 
+const LOINC = 'http://loinc.org';
+const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOINC)?.code;
+const norm = (s = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
+const num = (o: Observation) => (o.valueQuantity?.comparator ? undefined : o.valueQuantity?.value);
+const unitOf = (o: Observation) => o.valueQuantity?.unit ?? o.valueQuantity?.code;
+
+// Out of range: by interpretation when there is one (H/HH/High..., L/LL/Low...), else the value against the reference range.
+export function highLow(o: Observation): 'high' | 'low' | undefined {
+  const i = o.interpretation?.[0];
+  const code = i?.coding?.[0]?.code ?? i?.text;
+  if (code) return /^h/i.test(code) ? 'high' : /^l/i.test(code) ? 'low' : undefined;
+  const v = o.valueQuantity?.value, r = o.referenceRange?.[0];
+  return v === undefined ? undefined : r?.high?.value !== undefined && v > r.high.value ? 'high' : r?.low?.value !== undefined && v < r.low.value ? 'low' : undefined;
+}
+
+export type LabTrend = {
+  name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string }; previous?: { date?: string; value?: string | number };
+  change?: number; count: number; outOfRange: number; first?: string; source?: string; flags?: string[];
+};
+
+// One entry per test: grouped by LOINC, else by name (case/space-insensitive); an uncoded result joins the LOINC group of the same name.
+export function summarizeLabs(obs: Observation[]): LabTrend[] {
+  const rows = obs.map((o) => ({ o, r: labRow(o) }));
+  const coded = new Map(rows.flatMap(({ o, r }) => { const l = loincOf(o); return l ? [[norm(r.name), l] as const] : []; }));
+  const groups = new Map<string, typeof rows>();
+  for (const x of rows) {
+    const k = loincOf(x.o) ?? coded.get(norm(x.r.name)) ?? norm(x.r.name);
+    groups.set(k, [...(groups.get(k) ?? []), x]);
+  }
+  return [...groups.values()].map((g): LabTrend => {
+    g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '')); // undated last
+    const [l] = g;
+    const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
+    const a = num(l.o), b = p && num(p.o);
+    const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
+    return {
+      name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
+      latest: { date: l.r.date, value: a ?? l.r.value, flag },
+      previous: p && { date: p.r.date, value: b ?? p.r.value },
+      change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
+      count: g.length, outOfRange: g.filter((x) => highLow(x.o)).length, first: g.findLast((x) => x.r.date)?.r.date, source: l.r.source, flags: l.r.flags,
+    };
+  }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
+}
+
 export async function labResults(
   client: MedplumClient,
   patientId: string,
-  { name, since, until, limit = 200 }: { name?: string; since?: string; until?: string; limit?: number },
-): Promise<{ rows: LabRow[]; total: number; truncated?: true }> {
+  { name, since, until, limit = 200, summary = false }: { name?: string; since?: string; until?: string; limit?: number; summary?: boolean },
+): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const q = new URLSearchParams([
     ['subject', `Patient/${patientId}`],
@@ -90,8 +135,14 @@ export async function labResults(
   if (name) q.append('code:text', name);
   dateRange(q, 'date', since, until);
   // An extracted result with some other category (e.g. a vital sign) is not a lab.
-  const lab = (o: Observation) => (!o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')) ? labRow(o) : undefined);
-  const { rows } = await collect(client, 'Observation', q, lab, limit);
+  const isLab = (o: Observation) => !o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory'));
+  if (summary) {
+    // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); summarizeLabs orders by date.
+    q.set('_sort', '_lastUpdated');
+    q.set('_count', '1000');
+    return fit(summarizeLabs((await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? o : undefined), Infinity)).rows), limit);
+  }
+  const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
   // Medplum sorts undated results first on -date; a latest-value question wants them last.
   // shortcut: only within the fetched pages, fine unless a patient has over a page of undated labs.
   rows.sort((a, b) => Number(!a.date) - Number(!b.date));

@@ -234,6 +234,9 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
       expect((await labs({ since: '2024-01-01', until: '2024-12-31' })).rows.map((r: { name: string }) => r.name)).toEqual(['HEMOGLOBIN A1C', 'Glucose']);
       expect((await labs({ until: '2024-02-29', name: 'a1c' })).rows.map((r: { date: string }) => r.date)).toEqual(['2023-06-01']);
       expect(await labs({ limit: 2 })).toMatchObject({ total: 2, truncated: true });
+      // summary: one entry per test over every page (cursor paging), case-insensitive names grouped.
+      expect((await labs({ summary: true, limit: 1000 })).total).toBe(112);
+      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ name: 'HEMOGLOBIN A1C', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', flags: ['possible-duplicate'] }]);
       const bad = await sub.callTool({ name: 'lab_results', arguments: { since: '2024' } });
       expect(bad.isError).toBe(true);
     } finally {
