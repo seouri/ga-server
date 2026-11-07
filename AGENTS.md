@@ -8,6 +8,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `fh
 
 - Claude Code: `.mcp.json` registers it; Claude Code launches project MCP servers with the project directory as cwd, and `ga mcp` finds its config via `GA_CONFIG` or the package root regardless of cwd. If your agent starts it elsewhere, use the absolute path to `src/cli.ts`.
 - Codex/Hermes: register `node /absolute/path/to/ga-server/src/cli.ts mcp` as a stdio MCP server.
+- GA's Medplum login is an ordinary member of its own `GA` project and cannot read Medplum admin records. If a command says "run ga migrate", the install predates that: tell the user to follow docs/operations.md ("GA's own project"); `ga migrate` is CLI only; run it only when the user asks.
 
 ## Epic EHI data
 

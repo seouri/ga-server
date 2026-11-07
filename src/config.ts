@@ -10,6 +10,7 @@ export type GaConfig = {
   clientId: string;
   clientSecret: string;
   patientId: string;
+  projectId?: string; // GA's own Medplum project; absent on installs from before it (ga migrate)
   converterUrl: string;
   adminPassword?: string; // rotated by ga setup; also the Medplum app (http://localhost:3000) login for admin@example.com
 };

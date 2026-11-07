@@ -45,6 +45,9 @@ try {
       const cfg = loadConfig();
       console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz })));
     }
+  } else if (process.argv[2] === 'migrate' && (process.argv.length === 3 || (process.argv.length === 4 && process.argv[3] === '--delete-old'))) {
+    const { deleteOld, migrate } = await import('./migrate.ts');
+    await (process.argv[3] ? deleteOld() : migrate());
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
@@ -65,7 +68,7 @@ try {
       console.log(`disconnected ${id}`);
     }
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {
