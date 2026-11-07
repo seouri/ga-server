@@ -1,9 +1,8 @@
 // Backfill and review for the concept layer (spec "Backfill"): applyAll re-codes stored records, reviewList lists what needs a mapping.
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { Observation, Provenance, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Observation, Provenance, Resource } from '@medplum/fhirtypes';
 import { isDeepStrictEqual } from 'node:util';
 import { basename } from 'node:path';
-import type { DocumentReference } from '@medplum/fhirtypes';
 import { codeRecord, countUnmapped, learner, TARGET, type Unmapped } from './concept-apply.ts';
 import { custodian } from './ccda.ts';
 import { GaError } from './config.ts';

@@ -3,7 +3,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Provenance, Resource } from '@medplum/fhirtypes';
 import { z } from 'zod';
-import { TARGET } from '../concept-apply.ts';
+import { field, TARGET } from '../concept-apply.ts';
 import { validate, wellFormed } from '../concept-validate.ts';
 import { agentMappings, applyAll, reviewList } from '../concepts-cli.ts';
 import { inScope, termKey, upsertEntry } from '../conceptmap.ts';
@@ -17,8 +17,7 @@ const TYPES = Object.keys(TARGET) as [string, ...string[]];
 const termOf = (type: string, name: string, unit?: string): Resource => {
   const cc = { text: name };
   if (type === 'Observation') return { resourceType: 'Observation', status: 'final', code: cc, category: [{ coding: [{ code: 'laboratory' }] }], ...(unit && { valueQuantity: { unit } }) };
-  const field = type === 'Immunization' ? 'vaccineCode' : type.startsWith('Medication') ? 'medicationCodeableConcept' : 'code';
-  return { resourceType: type, [field]: cc } as unknown as Resource;
+  return { resourceType: type, [field(type)]: cc } as unknown as Resource;
 };
 
 export function registerConceptTools(server: McpServer, deps: ToolDeps): void {

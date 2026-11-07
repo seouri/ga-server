@@ -182,7 +182,6 @@ export const custodian = (xml: string): string | undefined => {
 };
 
 // The header effectiveTime precedes any body effectiveTime in CDA, so the first match is the document's.
-
 export function ccdaDate(xml: string): string {
   const m = xml.match(/<effectiveTime\s[^>]*?value="(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?(?:\.\d+)?)?([+-]\d{4})?"/);
   if (!m) throw new GaError('ClinicalDocument has no effectiveTime');
