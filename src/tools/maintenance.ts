@@ -4,12 +4,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Basic, DocumentReference, Extension, Provenance } from '@medplum/fhirtypes';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
+import { validDay } from '../labs.ts';
 import { CONFIRM_ON_PAGE, preview, previewLink, takeConfirmed } from '../confirm.ts';
 import { healthMaintenance, REMINDER } from '../maintenance.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { noteText } from '../notes.ts';
 
-const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d), 'not a calendar date');
+const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(validDay, 'not a calendar date');
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
 export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): void {

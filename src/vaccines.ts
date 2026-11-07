@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
-import { searchAll } from './labs.ts';
+import { searchAll, validDay } from './labs.ts';
 import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
 import { TAG } from './engine.ts';
@@ -143,7 +143,7 @@ export function doseOf(i: Immunization): Dose {
 
 // Reads the patient's own GA data so values never pass through the agent.
 export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf)) || !new Date(asOf).toISOString().startsWith(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
+  if (!validDay(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
