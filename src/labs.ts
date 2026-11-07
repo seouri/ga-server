@@ -90,7 +90,7 @@ export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; tot
 const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOINC)?.code;
 // The sources a stored result came from, as the importer stamped them: src-<kind> tags, with the organisation of
 // ehi/smart identifiers and the C-CDA file's folder. shortcut: stricter than the concept map's source key (several C-CDA
-// folders of one custodian count apart), which only ever stops a join.
+// folders of one custodian count apart), which only ever stops a join; upgrade if same-custodian C-CDA joins are missed.
 function sourcesOf(o: Observation): string[] {
   const kinds = (o.meta?.tag ?? []).flatMap((t) => (t.system === TAG && t.code?.startsWith('src-') ? [t.code.slice(4)] : []));
   const ids = [o.identifier ?? []].flat().map((i) => i.system ?? '');

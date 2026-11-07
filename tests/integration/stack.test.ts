@@ -1,18 +1,17 @@
-import { randomUUID } from 'node:crypto';
 import type { AuditEvent, DocumentReference, Resource, ResourceType } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { setup } from '../../src/setup.ts';
-import { cleanupTestPatient, createTestPatient, expungeProject, throwawayConfig } from './helpers.ts';
+import { cleanupTestPatient, createTestPatient, emptyTestProject, testProject } from './helpers.ts';
 
-// Runs ga setup against a throwaway project (temp GA_CONFIG), never the user's own.
+// Runs ga setup against the long-lived ga-test project (temp GA_CONFIG), never the user's own; emptied before and after.
 test('setup is idempotent, and the GA client reads clinical records but no Medplum admin records', async () => {
   const realPatient = loadConfig().patientId;
-  const { baseUrl, session } = await throwawayConfig();
-  const projectName = `ga-test-${randomUUID().slice(0, 8)}`;
-  const a = await setup(baseUrl, undefined, { projectName });
+  const { baseUrl, cfg: a } = await testProject();
+  const empty = async () => emptyTestProject(await getClient(a));
   try {
-    const b = await setup(baseUrl, undefined, { projectName });
+    await empty(); // an earlier run that stopped half-way
+    const b = await setup(baseUrl, undefined, { projectName: 'ga-test' });
     expect([b.projectId, b.patientId, b.clientId]).toEqual([a.projectId, a.patientId, a.clientId]);
     expect(loadConfig().projectId).toBe(a.projectId);
     const client = await getClient(loadConfig());
@@ -41,8 +40,8 @@ test('setup is idempotent, and the GA client reads clinical records but no Medpl
     await client.createResource({ resourceType: 'Endpoint', status: 'active', connectionType: { code: 'hl7-fhir-rest' }, payloadType: [{ text: 'x' }], address: 'https://example.org/fhir' } as Resource);
     expect((await client.search('Observation', { _compartment: `Patient/${a.patientId}`, _summary: 'count' }, { cache: 'no-cache' })).total).toBe(1);
   } finally {
+    await empty();
     delete process.env.GA_CONFIG;
-    await expungeProject(session, a.projectId as string);
   }
 });
 
