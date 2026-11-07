@@ -1,6 +1,6 @@
 import type { Condition, ConceptMap, Immunization, Observation, Resource } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
-import { carryConcept, CONCEPT_SRC, codeRecord, stripConcept } from '../src/concept-apply.ts';
+import { addUnmapped, carryConcept, CONCEPT_SRC, codeRecord, learnable, stripConcept, type Unmapped } from '../src/concept-apply.ts';
 import type { Maps } from '../src/conceptmap.ts';
 import { decide, fillFrom } from '../src/engine.ts';
 import { stamp, type SourceInfo } from '../src/identity.ts';
@@ -129,4 +129,22 @@ test('carryConcept keeps the existing GA coding when the incoming record has non
   expect(out.valueQuantity?.value).toBe(100);
   const own = withId(lab({ coding: [{ system: LOINC, code: '2089-1' }], text: 'LDL' }));
   expect(carryConcept(existing, own)).toBe(own); // a source code now: nothing carried
+});
+
+test('learnable: one code per new term, grouped by source; a term coded two ways, or already mapped, is not learned', () => {
+  const ldl = (code: string, org = 'syn') => withId(lab({ coding: [{ system: LOINC, code }], text: 'LDL' }), org);
+  const hdl = withId(lab({ coding: [{ system: LOINC, code: '2085-9' }], text: 'HDL' }));
+  const got = learnable([ldl('13457-7'), ldl('13457-7'), hdl, ldl('13457-7', 'other')], EHI, none);
+  expect([...got.keys()]).toEqual(['ehi:syn', 'ehi:other']);
+  expect(got.get('ehi:syn')?.map((e) => [e.key, e.target?.code, e.equivalence, e.confident])).toEqual([['ldl|mg/dl', '13457-7', 'equivalent', true], ['hdl|mg/dl', '2085-9', 'equivalent', true]]);
+  expect(learnable([ldl('13457-7'), ldl('18262-6')], EHI, none).size).toBe(0); // two codes under one name: no confident entry
+  expect(learnable([ldl('18262-6')], EHI, map('ehi:syn', 'ldl|mg/dl', '13457-7', 'equivalent', true, 'agent')).size).toBe(0);
+  expect(learnable([{ ...ldl('13457-7'), meta: { tag: [{ system: TAG, code: 'extracted-by-llm' }] } }], pdf, none).size).toBe(0);
+});
+
+test('addUnmapped merges review lines on source, type and term key', () => {
+  const u = (name: string, key: string, count = 1): Unmapped => ({ source: 'pdf', type: 'Observation', key, name, unit: 'mg/dL', count });
+  const list: Unmapped[] = [];
+  addUnmapped(list, [u('LDL chol.', 'ldl chol|mg/dl'), u('ldl  chol', 'ldl chol|mg/dl', 2), u('LDL chol', 'ldl chol|mg/dl|urine')]);
+  expect(list).toEqual([u('LDL chol.', 'ldl chol|mg/dl', 3), u('LDL chol', 'ldl chol|mg/dl|urine')]);
 });
