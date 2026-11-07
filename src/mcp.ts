@@ -164,12 +164,22 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
   }
   server.registerTool(
     'fhir_search',
-    { description: "Search the user's personal health record (GA) by FHIR resource type and search params.", inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) }, annotations: { readOnlyHint: true } },
+    {
+      description:
+        "Search the user's personal health record (GA) by FHIR resource type and search params. A param given as a list is repeated, " +
+        'e.g. a date range {"date": ["ge2024-01-01", "lt2025-01-01"]}; dates need full YYYY-MM-DD (not "2024"). Newest first: "_sort": "-date". ' +
+        'Results read from PDFs may lack a category, so also search without "category" before concluding a result is missing.',
+      inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.union([z.string(), z.array(z.string())])).default({}) },
+      annotations: { readOnlyHint: true },
+    },
     async ({ resourceType, params }) => {
       const no = refuseAdmin(resourceType);
       if (no) return no;
       try {
-        const b = await client.search(resourceType as 'Observation', { ...params, _count: String(Math.min(Number(params._count) || 20, 1000)) }, { cache: 'no-cache' });
+        // Medplum's client joins arrays with commas (FHIR OR); repeated params (AND, e.g. date ranges) need URLSearchParams.
+        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => (k === '_count' ? [] : [v].flat().map((x) => [k, x]))));
+        q.set('_count', String(Math.min(Number([params._count].flat()[0]) || 20, 1000)));
+        const b = await client.search(resourceType as 'Observation', q, { cache: 'no-cache' });
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
         return text(readable(b));
