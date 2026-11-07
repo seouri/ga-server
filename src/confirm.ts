@@ -49,13 +49,13 @@ export function previewLink(publicUrl: string, page: Page, now = new Date()): { 
 }
 
 // Showing the page does not use the code (link previews); confirming does.
-export function confirmPage(code: string, now = new Date()): Page | undefined {
+export function findConfirmPage(code: string, now = new Date()): Page | undefined {
   const e = links.get(code);
   return e && e.expires > now.getTime() ? e : undefined;
 }
 
 export function takeConfirmPage(code: string, now = new Date()): Page | undefined {
-  const e = confirmPage(code, now);
+  const e = findConfirmPage(code, now);
   links.delete(code);
   return e;
 }

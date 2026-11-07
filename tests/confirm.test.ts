@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmPage, preview, previewLink, takeConfirmPage, takeConfirmed } from '../src/confirm.ts';
+import { findConfirmPage, preview, previewLink, takeConfirmPage, takeConfirmed } from '../src/confirm.ts';
 
 const t0 = new Date('2026-11-06T12:00:00Z');
 
@@ -33,11 +33,11 @@ describe('confirm', () => {
     const p = previewLink('https://x.example', page, t0);
     const code = /^https:\/\/x\.example\/confirm\/([A-Za-z0-9_-]{43})$/.exec(p.confirmUrl)![1];
     for (const k of ['share', 'enable', 'followup'] as const) expect(() => takeConfirmed(k, code, t0)).toThrow('unknown or expired');
-    expect(confirmPage(code, t0)?.view).toEqual({ a: 1 });
-    expect(confirmPage(code, t0)).toBeDefined();
+    expect(findConfirmPage(code, t0)?.view).toEqual({ a: 1 });
+    expect(findConfirmPage(code, t0)).toBeDefined();
     expect(await takeConfirmPage(code, t0)!.run()).toEqual({ done: 'ok' });
     expect(takeConfirmPage(code, t0)).toBeUndefined();
     const q = previewLink('https://x.example', page, t0);
-    expect(confirmPage(q.confirmUrl.split('/').pop()!, new Date(t0.getTime() + 15 * 60_000))).toBeUndefined();
+    expect(findConfirmPage(q.confirmUrl.split('/').pop()!, new Date(t0.getTime() + 15 * 60_000))).toBeUndefined();
   });
 });

@@ -9,7 +9,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { GaError, getClient, loadConfig } from '../config.ts';
-import { confirmPage, takeConfirmPage } from '../confirm.ts';
+import { findConfirmPage, takeConfirmPage } from '../confirm.ts';
 import type { ToolDeps } from '../mcp.ts';
 import { completeLogin } from '../smart/actions.ts';
 import { smartDir } from '../smart/store.ts';
@@ -212,7 +212,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
 
   // A chat app's preview: the owner reviews it and confirms here; GET never uses the code (link previews), only the owner's POST does.
   async function confirm(req: Req, res: Res, ip: string, code: string, action: string): Promise<void> {
-    const page = confirmPage(code);
+    const page = findConfirmPage(code);
     if (!page) return failed(res, ip, () => send(res, 404, pages.confirmInvalid()));
     const path = `/confirm/${code}`;
     const owner = isOwner(deps.dir, req.headers.cookie);
