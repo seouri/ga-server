@@ -317,4 +317,20 @@ describe('purpose-built read tools', () => {
     expect((await tool('vitals', { name: 'weight', until: '2025-02-28' })).rows).toEqual([]);
     expect(await tool('vitals', { limit: 1 })).toMatchObject({ truncated: true, hint: expect.stringContaining('daily: true') });
   });
+  test('notes_search: text inside notes and messages; archives and source files skipped', async () => {
+    const subject = { reference: `Patient/${p}` };
+    const b64 = (t: string) => Buffer.from(t).toString('base64');
+    const note = (body: string, extra: object = {}) => ({ resourceType: 'DocumentReference', status: 'current', subject, date: '2025-02-01T09:00:00Z', type: { text: 'Progress note' }, content: [{ attachment: { contentType: 'text/plain', data: b64(body) } }], ...extra });
+    const entry = [
+      note('Synthetic visit: patient mentions zebrafinch symptoms.'),
+      note('zebrafinch inside an archive', { identifier: [{ system: 'urn:ga-server:id:ehi-archive', value: randomUUID() }] }),
+      { resourceType: 'Communication', status: 'completed', subject, sent: '2025-03-01T10:00:00Z', sender: { display: 'Synthetic clinic' }, payload: [{ contentString: 'About your ZEBRAFINCH question' }] },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const r = await tool('notes_search', { text: 'zebrafinch' });
+    expect(r.rows.map((x: { kind: string; date: string }) => [x.kind, x.date])).toEqual([['message', '2025-03-01'], ['Progress note', '2025-02-01']]);
+    expect(r.rows[1].snippet).toContain('zebrafinch symptoms');
+    expect((await tool('notes_search', { text: 'zebrafinch', until: '2025-02-15' })).rows).toHaveLength(1);
+    expect((await tool('notes_search', { since: '2025' })).error).toMatch(/since must be/);
+  });
 });
