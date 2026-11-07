@@ -43,9 +43,8 @@ const day = (d: string) => d.replaceAll('-', '');
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ACTIONABLE = new Set(['overdue', 'due', 'due soon', 'done']); // not discuss (eligibility open), postponed, not for you
 
-// One all-day event per item still on the person's list (dismissed: never). Overdue, and due with no date, run from asOf for a week, so they stay
-// visible until the calendar app's next refresh moves them on (apps refresh every few hours to a day); others sit on their due date.
-// A partial or malformed date is skipped, never fatal to the feed.
+// One all-day event per item still on the list (dismissed: never); overdue, and due with no date, span a week from asOf so they stay visible
+// until the app's next refresh (hours to a day). A malformed date skips that item, never the feed.
 export function toIcs(items: Item[], asOf: string, id: string, now = new Date()): string {
   const stamp = `${now.toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   const events = items.filter((i) => ACTIONABLE.has(i.status) && i.nextMention !== null).flatMap((i) => {
