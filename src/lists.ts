@@ -15,9 +15,11 @@ const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'Me
 export const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
 const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].indexOf(r.currency);
 
+export const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
+
 // all: every fetched resource (all four covered types, any status, plus included Medications); the context needs them all.
 export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all'): ListRow[] {
-  const meds = new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m as Any]));
+  const meds = medMap(all);
   const rows = all.flatMap((res): ListRow[] => {
     const r = res as Any;
     if (!TYPES[kind].includes(r.resourceType)) return [];

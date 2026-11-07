@@ -10,9 +10,10 @@ import { hasTag } from './engine.ts';
 import { arrivedAt, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
-import { concept, listRows, loadLists } from './lists.ts';
+import { concept, listRows, loadLists, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
+import { addDays } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -41,10 +42,9 @@ export function clinicalDate(r: Resource): string | undefined {
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 }
 
-const daysBefore = (asOf: string, n: number) => new Date(Date.parse(asOf) - n * 864e5).toISOString().slice(0, 10);
 
 export function tally(arrived: Resource[], asOf: string) {
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const byKind: Partial<Record<Kind, number>> = {};
   const sources = new Set<string>();
   let historical = 0, noRangeGiven = 0;
@@ -104,7 +104,7 @@ export type ReviewItem = {
 };
 
 export function labItems(arrived: Observation[], allLabs: Observation[], asOf: string): ReviewItem[] {
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const groups = groupLabs(allLabs);
   return arrived.flatMap((o): ReviewItem[] => {
     const flag = highLow(o), date = clinicalDate(o);
@@ -132,7 +132,6 @@ const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
   return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
 };
 const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);
-const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
 // all: every medication record (any source) plus the Medication resources they reference.
 // A first-import burst lists only active drugs or ones dated within a year; older ones stay in the tally.
@@ -140,7 +139,7 @@ export function medicationItems(arrived: Resource[], all: Resource[], since: str
   const meds = medMap(all);
   const keysOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKeys(cc, owner); };
   const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).flatMap(keysOf));
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
     const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
@@ -224,7 +223,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const now = new Date();
   const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
   const stored = opts.since ? undefined : readLastSeen(opts.dir);
-  const since = opts.since ?? stored ?? daysBefore(asOf, 90);
+  const since = opts.since ?? stored ?? addDays(asOf, -90);
   const subject = `Patient/${patientId}`;
   const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
   const listsP = eps.then((e) => loadLists(client, patientId, e));
