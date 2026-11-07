@@ -7,7 +7,7 @@ type Currency = 'current' | 'unconfirmed';
 export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
 const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
-const SMART_ID = 'urn:ga-server:id:smart:';
+export const SMART_ID = 'urn:ga-server:id:smart:';
 const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
 
 type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] } };
