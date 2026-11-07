@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
@@ -19,7 +19,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `la
 - Family history: `FamilyMemberHistory`. Social history, vitals: `Observation`. Questionnaires: `QuestionnaireResponse`.
 - Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
-- Current medications = `active` MedicationStatement plus `active` MedicationRequest, each confirmed by the medication currency rule (see "Hospital portals (SMART)").
+- Current medications = `active` MedicationStatement plus `active` MedicationRequest, each confirmed by the medication currency rule (see "Hospital portals (SMART)"); `current_medications` (and `current_problems`, `allergies`) return them with the rule applied.
 - Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Show Epic health maintenance as a second opinion, labelled as of the export date.
 
 ## Hospital portals (SMART)

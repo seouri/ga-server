@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Observation } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import type { Bundle, Endpoint, Medication, Observation } from '@medplum/fhirtypes';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
@@ -242,4 +242,61 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
   } finally {
     await cleanupTestPatient(client, p);
   }
+});
+
+// One throwaway patient and one MCP process for the purpose-built read tools (each process logs in; Medplum rate-limits logins).
+describe('purpose-built read tools', () => {
+  const T = '2026-11-01T00:00:00.000Z';
+  let p: string;
+  let ep: Endpoint;
+  let sub: Client;
+  const tool = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await sub.callTool({ name, arguments: args });
+    const t = (r.content as { text: string }[])[0].text;
+    return r.isError ? { error: t } : JSON.parse(t);
+  };
+  beforeAll(async () => {
+    p = await createTestPatient(client);
+    // Endpoints are in no patient compartment: deleted in afterAll. status error: also a stale source.
+    ep = await client.createResource<Endpoint>({
+      resourceType: 'Endpoint', status: 'error', connectionType: { code: 'hl7-fhir-rest' }, payloadType: [{ text: 'x' }], address: 'https://hosp.example/fhir',
+      identifier: [{ system: 'urn:ga-server:id:smart-source', value: `test-${randomUUID()}` }],
+      extension: [
+        { url: 'urn:ga-server:ext:smart-last-success', valueDateTime: T },
+        { url: 'urn:ga-server:ext:smart-patient', valueReference: { reference: `Patient/${p}` } },
+      ],
+    });
+    sub = new Client({ name: 'test', version: '0' });
+    await sub.connect(new StdioClientTransport({ command: 'node', args: [CLI, 'mcp'], env: { ...process.env, GA_PATIENT_ID: p } as Record<string, string> }));
+  });
+  afterAll(async () => {
+    await sub?.close();
+    if (ep?.id) await client.deleteResource('Endpoint', ep.id);
+    if (p) await cleanupTestPatient(client, p);
+  });
+
+  test('current_medications, current_problems, allergies apply the currency rule', async () => {
+    const key = ep.identifier?.[0].value as string;
+    const subject = { reference: `Patient/${p}` };
+    const seen = (t: string) => ({ identifier: [{ system: `urn:ga-server:id:smart:${key}`, value: 'x' }], extension: [{ url: 'urn:ga-server:ext:last-seen', valueDateTime: t }] });
+    const med = await client.createResource<Medication>({ resourceType: 'Medication', code: { text: 'Synthetic drug A' } });
+    const entry = [
+      { resourceType: 'MedicationRequest', status: 'active', intent: 'order', subject, medicationReference: { reference: `Medication/${med.id}` }, ...seen(T) },
+      { resourceType: 'MedicationStatement', status: 'active', subject, medicationCodeableConcept: { text: 'Synthetic drug B' }, ...seen('2026-10-01T00:00:00.000Z') },
+      { resourceType: 'MedicationStatement', status: 'stopped', subject, medicationCodeableConcept: { text: 'Synthetic drug C' } },
+      { resourceType: 'Condition', subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }], code: { text: 'Synthetic problem' } },
+      { resourceType: 'Condition', subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'encounter-diagnosis' }] }], code: { text: 'Synthetic visit dx' } },
+      { resourceType: 'AllergyIntolerance', patient: subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] }, code: { text: 'Synthetic allergen' } },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    try {
+      await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+      const meds = await tool('current_medications');
+      expect(meds.rows.map((r: { name: string; currency: string }) => [r.name, r.currency])).toEqual([['Synthetic drug A', 'current'], ['Synthetic drug B', 'unconfirmed']]);
+      expect((await tool('current_medications', { include: 'all' })).rows[2]).toMatchObject({ name: 'Synthetic drug C', currency: 'inactive' });
+      expect((await tool('current_problems')).rows.map((r: { name: string }) => r.name)).toEqual(['Synthetic problem']);
+      expect((await tool('allergies')).rows).toMatchObject([{ name: 'Synthetic allergen', currency: 'current' }]);
+    } finally {
+      await client.deleteResource('Medication', med.id as string);
+    }
+  });
 });

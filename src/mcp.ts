@@ -14,6 +14,7 @@ import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
+import { currentList, type Kind } from './lists.ts';
 import { chatInstructions } from './instructions.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
@@ -146,7 +147,8 @@ const STDIO_INSTRUCTIONS =
         'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
-        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed.';
+        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
+        'current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
@@ -228,6 +230,30 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       }
     },
   );
+  const lists: [string, Kind, string][] = [
+    ['current_medications', 'medications', "The user's current medications from GA (active MedicationStatement and MedicationRequest, every source): use this for \"what am I taking\" instead of fhir_search."],
+    ['current_problems', 'problems', "The user's problem list from GA (active Conditions in the problem list, not one-visit diagnoses): use this instead of fhir_search."],
+    ['allergies', 'allergies', "The user's allergies and intolerances from GA (active, plus any with no clinical status recorded): use this instead of fhir_search."],
+  ];
+  for (const [name, kind, what] of lists)
+    server.registerTool(
+      name,
+      {
+        description:
+          `${what} The hospital currency rule is already applied: currency "current", or "unconfirmed" (the hospital no longer lists it, so it may have ` +
+          'been stopped; say so, never present it as current), with the reason. One row each: name, status, currency, reason, since, source, flags, id ' +
+          '(for fhir_read). include "all" adds inactive and stopped ones (currency "inactive"). Flag "read from a document by AI": check against the original.',
+        inputSchema: { include: z.enum(['all']).optional() },
+        annotations: { readOnlyHint: true },
+      },
+      async ({ include }) => {
+        try {
+          return text(await currentList(client, patientId, kind, include));
+        } catch (e) {
+          return fail(e);
+        }
+      },
+    );
   server.registerTool(
     'cardiovascular_risk_10yr',
     {
