@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FileAdapter, sweepExpired } from '../src/gateway/adapter.ts';
-import { allowedRedirect, appName, createProvider, disconnectClient, listClients } from '../src/gateway/oauth.ts';
+import { allowedRedirect, appName, createProvider, disconnectClient, listClients, sweepClients } from '../src/gateway/oauth.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const RESOURCE = `${PUBLIC}/mcp`;
@@ -228,6 +228,20 @@ describe('provider', () => {
     expect(listClients(dir).map((c) => c.clientId)).not.toContain(t.clientId);
     expect(await provider.AccessToken.find(t.access_token)).toBeUndefined();
     expect((await token({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: t.clientId })).status).toBe(401);
+  });
+
+  it('a registration the owner never allowed is not listed, and is swept after a day', async () => {
+    const c = await (await register('https://claude.ai/api/mcp/auth_callback')).json();
+    const t = await connect('https://grok.com/connectors/oauth/callback');
+    const ids = () => listClients(dir).map((x) => x.clientId);
+    expect(ids()).toContain(t.clientId);
+    expect(ids()).not.toContain(c.client_id);
+    const has = async (id: string) => !!(await provider.Client.adapter.find(id));
+    sweepClients(dir);
+    expect(await has(c.client_id)).toBe(true); // may still be mid-consent
+    sweepClients(dir, Date.now() + 25 * 3600_000);
+    expect(await has(c.client_id)).toBe(false);
+    expect(await has(t.clientId)).toBe(true);
   });
 
   it('reuses keys across restarts', () => {

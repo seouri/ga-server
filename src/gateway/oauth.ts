@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Provider, { errors } from 'oidc-provider';
 import { FileAdapter } from './adapter.ts';
@@ -112,13 +112,26 @@ export function createProvider(opts: { publicUrl: string; dir: string }) {
 
 export type GaProvider = ReturnType<typeof createProvider>;
 
-// Name comes from the redirect URI, not the self-asserted client_name.
+const granted = (dir: string): Set<unknown> => new Set(new FileAdapter('Grant', dir).scan(['Grant']).map(([, g]) => g.clientId));
+
+// Connected = the owner allowed it (a Grant): registration alone is open. Name comes from the redirect URI, not the self-asserted client_name.
 export function listClients(dir: string): { clientId: string; name: string; created: string }[] {
-  return new FileAdapter('Client', dir).scan(['Client']).map(([, c]) => ({
+  const ok = granted(dir);
+  return new FileAdapter('Client', dir).scan(['Client']).filter(([, c]) => ok.has(c.client_id)).map(([, c]) => ({
     clientId: c.client_id as string,
     name: appName((c.redirect_uris as string[])[0]),
     created: new Date((c.client_id_issued_at as number) * 1000).toISOString(),
   }));
+}
+
+// Registrations never allowed (no Grant) a day after registering; a younger one may still be mid-consent. Never throws (runs on an interval).
+export function sweepClients(dir: string, now = Date.now()): void {
+  try {
+    const ok = granted(dir);
+    for (const [f, c] of new FileAdapter('Client', dir).scan(['Client'])) {
+      if (!ok.has(c.client_id) && (c.client_id_issued_at as number) * 1000 < now - DAY * 1000) rmSync(f, { force: true });
+    }
+  } catch {}
 }
 
 export async function disconnectClient(provider: GaProvider, dir: string, clientId: string): Promise<void> {

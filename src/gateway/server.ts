@@ -16,7 +16,7 @@ import { smartDir } from '../smart/store.ts';
 import { renderInactive } from '../share/page.ts';
 import { HEADERS, type ShareDeps, TooLarge, clientIp, failLimiter, readBody, send, shareHandler } from '../share/server.ts';
 import { shareDeps } from '../share/cli.ts';
-import { appName, createProvider, disconnectClient } from './oauth.ts';
+import { appName, createProvider, disconnectClient, sweepClients } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
@@ -336,6 +336,7 @@ export async function serveGateway(): Promise<void> {
       cleanUploads(gatewayDir());
     } catch {} // must not skip sweepExpired or crash the interval
     sweepExpired(gatewayDir());
+    sweepClients(gatewayDir());
   };
   sweep();
   setInterval(sweep, 3600_000).unref();

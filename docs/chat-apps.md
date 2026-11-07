@@ -37,7 +37,7 @@ ga apps
 ga apps disconnect <clientId>
 ```
 
-Or use `connected_apps` and `disconnect_app` in chat. Every remote call is logged locally (tool, app, time; never the content).
+Or use `connected_apps` and `disconnect_app` in chat. Only apps you approved are listed; a registration never approved is deleted after a day. Every remote call is logged locally (tool, app, time; never the content).
 
 ## What you can do in chat
 
