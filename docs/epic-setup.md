@@ -107,7 +107,7 @@ Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redir
 
 Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel, in `ga-gateway`, the same service that serves share links and chat apps (see [Sharing](sharing.md)). `ga connect` with an https redirect needs `ga-gateway` running (`docker compose up -d`). The gateway accepts only a callback for a login that is waiting; any other time `/callback` answers nothing useful.
 
-1. Your Funnel address is `https://<machine>.<tailnet>.ts.net`: `tailscale status --json | grep DNSName` (drop the trailing dot), or the Tailscale app's machine name. With the Mac App Store app, `tailscale` is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
+1. Install Tailscale ([tailscale.com/download](https://tailscale.com/download)) and turn on Funnel as in [Sharing](sharing.md#turning-on-links). Your Funnel address is `https://<machine>.<tailnet>.ts.net`: `tailscale status --json | grep DNSName` (drop the trailing dot), or the Tailscale app's machine name. With the Mac App Store app, `tailscale` is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
 2. Route Funnel to the gateway (once; it stays across restarts). One route `/` serves `/callback` too:
 
    ```sh

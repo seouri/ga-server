@@ -29,7 +29,7 @@ Then bring in your records and ask:
 > Share my labs from the last 2 years with Dr. Kim for a week.
 ```
 
-Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/chat-apps.md).
+Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/chat-apps.md). Share links, chat apps and hospital portal logins also need [Tailscale](https://tailscale.com/download) (free for personal use) to reach GA over the internet.
 
 ## How it works
 

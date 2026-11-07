@@ -6,7 +6,7 @@ Back to the [README](../README.md).
 
 ## One-time setup
 
-1. Tailscale: turn on MagicDNS and HTTPS certificates and allow Funnel, as in [Sharing](sharing.md#turning-on-links).
+1. Tailscale: install it from [tailscale.com/download](https://tailscale.com/download), then turn on MagicDNS and HTTPS certificates and allow Funnel, as in [Sharing](sharing.md#turning-on-links).
 2. Put your public address in `.env` (gitignored), then restart:
 
    ```sh
