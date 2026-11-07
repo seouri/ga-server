@@ -9,7 +9,7 @@ const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
 // Names that have such a summary; weight, BP, SpO2 and clinic vitals are readings only.
 const HAS_DAILY = /heart|respirat|step|distance|flight|sleep|activ|ring/i;
 
-export type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' };
+type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' };
 
 export function vitalRow(o: Observation): VitalRow {
   const { source, ...row } = labRow(o);

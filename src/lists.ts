@@ -2,13 +2,13 @@
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Resource } from '@medplum/fhirtypes';
-import { currencyContext, explain, SMART_ID, type Ctx } from './current.ts';
+import { currencyContext, explain, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
 import { collect, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
-export type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string };
+type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string };
 
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
@@ -27,7 +27,7 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     // An allergy without a clinical status is still listed: leaving out a real allergy is the worse mistake.
     const unstated = kind === 'allergies' && !status && !['refuted', 'entered-in-error'].includes(r.verificationStatus?.coding?.[0]?.code);
     if (!e && !unstated && include !== 'all') return [];
-    const keys = (r.identifier ?? []).filter((i: Any) => i.system?.startsWith(SMART_ID)).map((i: Any) => i.system.slice(SMART_ID.length));
+    const keys = smartKeys(res);
     const tags = new Set(r.meta?.tag?.filter((t: Any) => t.system === TAG).map((t: Any) => t.code));
     const row: ListRow = {
       name: concept(r.medicationCodeableConcept) ?? concept(meds.get(r.medicationReference?.reference)?.code) ?? r.medicationReference?.display ?? concept(r.code),

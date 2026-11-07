@@ -7,7 +7,7 @@ type Currency = 'current' | 'unconfirmed';
 export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
 const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
-export const SMART_ID = 'urn:ga-server:id:smart:';
+const SMART_ID = 'urn:ga-server:id:smart:';
 export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
 
 type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] } };
@@ -41,6 +41,10 @@ export function isActive(r: Resource): boolean {
   return COVERED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 
+// The <key>s of a record's urn:ga-server:id:smart:<key> identifiers.
+export const smartKeys = (r: Resource): string[] =>
+  ((r as { identifier?: { system?: string }[] }).identifier ?? []).filter((i) => i.system?.startsWith(SMART_ID)).map((i) => i.system!.slice(SMART_ID.length));
+
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 // currency plus the reason in plain words.
@@ -48,10 +52,7 @@ export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: st
   if (!isActive(r)) return undefined;
   const seen = extDate(r, LAST_SEEN);
   if (seen !== undefined) {
-    const keys = ((r as { identifier?: { system?: string; value?: string }[] }).identifier ?? [])
-      .filter((i) => i.system?.startsWith(SMART_ID))
-      .map((i) => i.system!.slice(SMART_ID.length));
-    const k = keys.find((k) => ctx.lastSuccess.get(k) === seen);
+    const k = smartKeys(r).find((k) => ctx.lastSuccess.get(k) === seen);
     return k
       ? { currency: 'current', reason: `on the list at the latest ${k} portal sync` }
       : { currency: 'unconfirmed', reason: `the hospital portal stopped returning it (last returned ${day(seen)}); it may have been stopped` };
