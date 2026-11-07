@@ -11,10 +11,10 @@ const rules = { edition: 't', topics: [
 ] } as unknown as Rules;
 const g = (topic: string, grade: string, status: Status, dueDate?: string): GuidelineItem =>
   ({ topic, name: topic, grade, status, ...(dueDate && { dueDate }), reason: 'r', why: 'w', cost: 'c', citation: 'USPSTF' });
-const hm = (topic: string, next: string | undefined, valueString: string): Observation => ({
+const hm = (topic: string, next: string | undefined, valueString: string, last?: string, src = '2026-10-15'): Observation => ({
   resourceType: 'Observation', status: 'final', id: 'o1', code: { text: `Health maintenance: ${topic}` }, valueString,
-  extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-10-15' }],
-  ...(next && { component: [{ code: { text: 'Next due date' }, valueDateTime: next }] }),
+  extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: src }],
+  ...((next || last) && { component: [...(next ? [{ code: { text: 'Next due date' }, valueDateTime: next }] : []), ...(last ? [{ code: { text: 'Last completed date' }, valueDateTime: last }] : [])] }),
 });
 const rem = (code: string, topic: string, created: string, ext: Basic['extension'] = []): Basic => ({
   resourceType: 'Basic', created, code: { coding: [{ system: REMINDER, code }] },
@@ -33,6 +33,23 @@ test('an Epic topic with no rule is its own follow-up', () => {
   expect(out).toHaveLength(1);
   expect(out[0].name).toBe('LIPID PANEL - YEARLY');
   expect(out[0]).toMatchObject({ kind: 'follow-up', importance: 'medium', status: 'done' });
+});
+
+test('Epic Not Due with next due on or before the export is a placeholder; last completed is evidence', () => {
+  const [i] = run([], epicPlans([hm('PSA SCREENING DECISION', '2026-11-04', 'Not Due', '2026-11-03', '2026-11-04')]), [], '2026-11-07');
+  expect(i.doctorsPlan?.due).toBeUndefined();
+  expect(i.status).toBe('done');
+  expect(i.dueDate).toBeUndefined();
+  expect(i.evidence).toEqual([{ date: '2026-11-03', by: "completed (doctor's plan)", id: 'Observation/o1' }]);
+});
+
+test('Epic Not Due with a future next due keeps its date; Overdue/Due are unaffected', () => {
+  const [a] = run([], epicPlans([hm('X', '2026-11-20', 'Not Due', '2026-11-03', '2026-11-04')]), [], '2026-11-07');
+  expect(a).toMatchObject({ dueDate: '2026-11-20', status: 'due soon' });
+  const [b] = run([], epicPlans([hm('Y', '2026-11-04', 'Overdue', undefined, '2026-11-04')]), [], '2026-11-07');
+  expect(b).toMatchObject({ dueDate: '2026-11-04', status: 'overdue' });
+  const [c] = run([], epicPlans([hm('Z', '2026-11-04', 'Due', undefined, '2026-11-04')]), [], '2026-11-07');
+  expect(c).toMatchObject({ dueDate: '2026-11-04', status: 'overdue' });
 });
 
 test('Epic date before birth is not a date', () => {

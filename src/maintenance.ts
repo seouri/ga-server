@@ -12,7 +12,7 @@ export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes no
 const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote', doneDate: 'urn:ga-server:ext:done-date', method: 'urn:ga-server:ext:method', where: 'urn:ga-server:ext:where' };
 export const fullDay = (d: string) => `${d}${'-01-01'.slice(d.length - 4)}`; // 'YYYY' and 'YYYY-MM' count from their first day
 
-export type Plan = { topic?: string; due?: string; status?: string; asOf: string; from: 'epic' | 'agent'; source?: string; id?: string; quote?: string };
+export type Plan = { topic?: string; due?: string; status?: string; asOf: string; from: 'epic' | 'agent'; source?: string; id?: string; quote?: string; last?: string };
 type Importance = 'high' | 'medium' | 'low';
 export type Item = {
   topic: string; name: string; kind: 'screening' | 'vaccine' | 'follow-up'; status: Status; importance: Importance; dueDate?: string;
@@ -55,9 +55,11 @@ export function epicPlans(hm: Observation[], birthDate?: string): Plan[] {
     const t = o.code?.text;
     if (!t?.startsWith(P)) return [];
     const next = o.component?.find((c) => c.code?.text === 'Next due date')?.valueDateTime?.slice(0, 10);
-    const due = next && !(birthDate && next <= birthDate) ? next : undefined; // a date on or before birth is a placeholder (Epic uses the birth date)
     const asOf = val(o.extension?.find((e) => e.url === SRC_DATE));
-    return [{ topic: cleanName(t.slice(P.length)), asOf, from: 'epic', ...(due && { due }), ...(o.valueString && { status: o.valueString }), ...(o.id && { id: `Observation/${o.id}` }) } as Plan];
+    const last = o.component?.find((c) => c.code?.text === 'Last completed date')?.valueDateTime?.slice(0, 10);
+    // a date on or before birth is a placeholder (Epic uses the birth date); so is a "Not Due" date on or before the export
+    const due = next && !(birthDate && next <= birthDate) && !(/^not due$/i.test(o.valueString ?? '') && next <= asOf) ? next : undefined;
+    return [{ topic: cleanName(t.slice(P.length)), asOf, from: 'epic', ...(due && { due }), ...(last && { last }), ...(o.valueString && { status: o.valueString }), ...(o.id && { id: `Observation/${o.id}` }) } as Plan];
   });
 }
 
@@ -96,6 +98,7 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
       item = { topic, name: topic, kind: 'follow-up', status: 'done', importance: 'medium', evidence: [] };
       items.push(item);
     }
+    if (plan.last && !item.evidence.some((e) => e.date === plan.last)) item.evidence.push({ date: plan.last, by: "completed (doctor's plan)", ...(plan.id && { id: plan.id }) });
     if (!item.doctorsPlan || (when(plan) && (!when(item.doctorsPlan) || when(plan)! < when(item.doctorsPlan)!))) item.doctorsPlan = plan;
   }
 
