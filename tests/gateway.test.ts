@@ -185,6 +185,27 @@ test('interaction and enroll pages refuse strangers', async () => {
   expect((await fetch(`${base}/enroll/nope`, { method: 'POST', body: '{}' })).status).toBe(400);
 });
 
+test('the consent page names the redirect host, the registration age and warns', async () => {
+  await start();
+  const redirect = 'https://claude.ai/api/mcp/auth_callback';
+  const reg = await (await fetch(`${base}/reg`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: [redirect] }) })).json();
+  const q = new URLSearchParams({ client_id: reg.client_id, response_type: 'code', redirect_uri: redirect, scope: 'ga', resource: RESOURCE, code_challenge: 'x'.repeat(43), code_challenge_method: 'S256' });
+  const jar = new Map<string, string>([['ga_owner', ownerCookie(dir).split(';')[0].slice(9)]]); // signed in: login skipped, consent shown
+  let url = `${base}/auth?${q}`;
+  let html = '';
+  for (let i = 0; i < 6 && !html; i++) {
+    const r = await fetch(url, { redirect: 'manual', headers: { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') } });
+    for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const k = kv.slice(0, kv.indexOf('=')); jar.set(k, kv.slice(k.length + 1)); }
+    const loc = r.headers.get('location');
+    if (loc) url = base + new URL(loc, base).pathname + new URL(loc, base).search;
+    else html = await r.text();
+  }
+  expect(html).toContain('claude.ai wants to use your GA record');
+  expect(html).toContain('Access goes to <strong>claude.ai</strong>');
+  expect(html).toContain('registered with GA 0 minutes ago');
+  expect(html).toContain('Only allow if you just clicked Connect in this app.');
+});
+
 test('a valid enroll link shows the registration page and keeps its token', async () => {
   await start();
   const link = enrollLink(dir, PUBLIC);

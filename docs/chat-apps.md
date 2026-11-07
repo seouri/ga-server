@@ -28,7 +28,7 @@ Back to the [README](../README.md).
    GA_PUBLIC_URL=https://<machine>.<tailnet>.ts.net ga passkey link
    ```
 
-5. In the chat app, add a custom connector with the URL `https://<machine>.<tailnet>.ts.net/mcp`. The app sends you to GA's login page: sign in with your passkey and approve the app by name.
+5. In the chat app, add a custom connector with the URL `https://<machine>.<tailnet>.ts.net/mcp`. The app sends you to GA's login page: sign in with your passkey and approve the app. The page names the app, where access goes and when it registered: allow only right after you clicked Connect yourself.
 
 Only you get in: every call needs your login. See which apps are connected and cut one off:
 

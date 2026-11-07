@@ -140,10 +140,11 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (action === '' && req.method === 'GET') {
       if (prompt === 'consent') {
         // The code goes to this redirect, so it names the app (a client may register redirects of several apps).
-        const origin = new URL(details.params.redirect_uri).origin;
+        const redirect = new URL(details.params.redirect_uri);
         // Chrome applies form-action to the redirects after the post, which end at the app.
-        const csp = { 'Content-Security-Policy': HEADERS['Content-Security-Policy'].replace("form-action 'self'", `form-action 'self' ${origin}`) };
-        return send(res, 200, pages.consentPage(appName(details.params.redirect_uri), uid), undefined, csp);
+        const csp = { 'Content-Security-Policy': HEADERS['Content-Security-Policy'].replace("form-action 'self'", `form-action 'self' ${redirect.origin}`) };
+        const issued = (await provider.Client.adapter.find(details.params.client_id))?.client_id_issued_at ?? 0;
+        return send(res, 200, pages.consentPage(appName(details.params.redirect_uri), uid, redirect.host, Date.now() - issued * 1000), undefined, csp);
       }
       if (prompt !== 'login') return send(res, 400, pages.interactionExpired());
       // A signed-in owner skips the passkey, never the consent.
