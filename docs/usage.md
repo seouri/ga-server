@@ -12,7 +12,7 @@ To use GA from any folder instead, register it once for your user:
 claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cli.ts mcp
 ```
 
-The server tells Claude that GA is your health record, so plain questions work. Claude reads lab results with `lab_results`, medications, problems and allergies with `current_medications`, `current_problems` and `allergies`, vital signs with `vitals`, note and message text with `notes_search`, and everything else with `fhir_search`/`fhir_read`, and cites the records it used.
+The server tells Claude that GA is your health record, so plain questions work. Claude starts with `health_summary` (a one-call snapshot), reads lab results with `lab_results`, medications, problems and allergies with `current_medications`, `current_problems` and `allergies`, vital signs with `vitals`, note and message text with `notes_search`, and everything else with `fhir_search`/`fhir_read`, and cites the records it used.
 
 **Slash commands** (shipped in `.claude/skills/`; anyone who clones the repo gets them):
 
@@ -71,7 +71,7 @@ Answers support a conversation with your clinician; they don't replace one.
 
 ### Other agents
 
-The stdio MCP server exposes `lab_results` (lab results as compact rows, filtered by test name and dates, newest first), `current_medications`, `current_problems` and `allergies` (active records, each marked current or unconfirmed by the hospital currency rule, with the reason), `vitals` (clinic and Apple Health readings marked home or clinic; Apple daily summaries with `daily: true`), `notes_search` (text search in clinical notes and MyChart messages, with snippets), `fhir_search`, `fhir_read`, `ga_import`, `vaccine_gaps` (adult vaccination status against the CDC 2025 schedule) and `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
+The stdio MCP server exposes `health_summary` (a one-call snapshot: age and sex, current lists, key labs, latest vitals, vaccines due, last visit, imported sources), `lab_results` (lab results as compact rows, filtered by test name and dates, newest first; `summary: true` gives one trend entry per test), `current_medications`, `current_problems` and `allergies` (active records, each marked current or unconfirmed by the hospital currency rule, with the reason), `vitals` (clinic and Apple Health readings marked home or clinic; Apple daily summaries with `daily: true`), `notes_search` (text search in clinical notes and MyChart messages, with snippets), `fhir_search`, `fhir_read`, `ga_import`, `vaccine_gaps` (adult vaccination status against the CDC 2025 schedule) and `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations, tested against the preventr R package).
 
 Codex, Hermes or any MCP client: register a stdio MCP server with command `node /absolute/path/to/ga-server/src/cli.ts mcp`, and point the agent at [AGENTS.md](../AGENTS.md) (PDF extraction rules, how to read GA's records) and `.claude/skills/<name>/SKILL.md` for the slash-command procedures.
 
