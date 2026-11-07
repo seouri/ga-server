@@ -154,7 +154,7 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
     return out;
   };
   const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
-  const obs = ((await all('Observation', { subject: `Patient/${patientId}` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
+  const obs = ((await all('Observation', { subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
   const immunizations = imms.map(doseOf);
   const immunity = obs.flatMap((o) => {
     const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;

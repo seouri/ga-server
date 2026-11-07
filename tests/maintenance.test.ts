@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import type { Basic, Observation } from '@medplum/fhirtypes';
-import { byTheWay, combine, epicPlans, REMINDER, upcoming, vaccineItems } from '../src/maintenance.ts';
+import type { MedplumClient } from '@medplum/core';
+import { byTheWay, healthMaintenance, combine, epicPlans, REMINDER, upcoming, vaccineItems } from '../src/maintenance.ts';
 import type { Item } from '../src/maintenance.ts';
 import { loadRules } from '../src/screenings.ts';
 import type { GuidelineItem, Rules, Status } from '../src/screenings.ts';
@@ -187,4 +188,15 @@ test('upcoming lists items due within the window, soonest first', () => {
 
 test("Epic's note to clinicians is dropped from topic names", () => {
   expect(epicPlans([hm('PSA SCREEN DECISION: UPDATE W "EDIT MODIFIERS"', '2027-01-01', 'Not Due')])[0].topic).toBe('PSA SCREEN DECISION');
+});
+
+test('no Observation read of a health maintenance check includes Apple Health data', async () => {
+  const qs: Record<string, string>[] = [];
+  const client = {
+    readResource: async () => ({ resourceType: 'Patient', birthDate: '1970-01-01', gender: 'female' }),
+    searchResourcePages: async function* (type: string, q: Record<string, string>) { if (type === 'Observation') qs.push(q); yield []; },
+  } as unknown as MedplumClient;
+  await healthMaintenance(client, 'p', '2026-11-07');
+  expect(qs.filter((q) => q['code:text'] !== 'Health maintenance').every((q) => q['_tag:not'] === 'urn:ga-server:tag|src-apple-health')).toBe(true);
+  expect(qs.length).toBeGreaterThanOrEqual(4);
 });

@@ -3,7 +3,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Basic, Condition, Extension, Observation, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
 import { evaluateScreenings, loadRules, SOON_DAYS } from './screenings.ts';
-import { SRC_DATE } from './identity.ts';
+import { SRC_DATE, TAG } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
 import { addDays, addMonths, loadSchedule, vaccineGaps } from './vaccines.ts';
 
@@ -148,10 +148,11 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
     return out;
   };
   const ref = `Patient/${patientId}`;
-  // Apple Health readings are numerous and never evidence: ask the server only for lab, vital-sign, uncategorised and Epic plan Observations.
+  // Apple Health readings are numerous and never evidence: leave them out of every Observation read (vaccineGaps does the same).
+  const noApple = { '_tag:not': `${TAG}|src-apple-health` };
   const [procedures, reports, labs, uncategorised, hm, conditions, basics] = await Promise.all([
     all('Procedure', { subject: ref }), all('DiagnosticReport', { subject: ref }),
-    all('Observation', { subject: ref, category: 'laboratory,vital-signs' }), all('Observation', { subject: ref, 'category:missing': 'true' }),
+    all('Observation', { subject: ref, category: 'laboratory,vital-signs', ...noApple }), all('Observation', { subject: ref, 'category:missing': 'true', ...noApple }),
     all('Observation', { subject: ref, 'code:text': 'Health maintenance' }), all('Condition', { subject: ref }), all('Basic', { subject: ref, code: `${REMINDER}|` }),
   ]) as [Resource[], Resource[], Observation[], Observation[], Observation[], Condition[], Basic[]];
   const planIds = new Set(hm.map((o) => o.id));
