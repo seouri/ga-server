@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Encounter, Endpoint, Observation, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
 import { collect, labResults, type LabTrend } from './labs.ts';
-import { type Kind, listRows, loadLists } from './lists.ts';
+import { concept, type Kind, listRows, loadLists } from './lists.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
 import { vitalRow } from './vitals.ts';
@@ -41,7 +41,6 @@ export function keyLabs(trends: LabTrend[]): (LabTrend & { test: string })[] {
 
 const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
-const concept = (c?: { text?: string; coding?: { display?: string; code?: string }[] }) => c?.text ?? c?.coding?.find((x) => x.display)?.display ?? c?.coding?.[0]?.code;
 const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
 
 export async function healthSummary(client: MedplumClient, patientId: string, eps: Promise<Endpoint[]>) {
@@ -55,7 +54,7 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
     const { rows } = await collect(client, 'Observation', q, vitalRow, Infinity, 1);
     return rows.filter((r, i) => i === 0 || (r.date === rows[0].date && r.name !== rows[0].name));
   };
-  // shortcut: a source counts when it left an Observation; a source with none (e.g. a medication-only PDF) is not listed.
+  // shortcut: a source counts only when it left an Observation (a medication-only PDF is not listed); check DocumentReferences too if that matters.
   const imported = async ([tag, source]: [string, string]) => {
     const o = await client.searchOne('Observation', { subject, _tag: `${TAG}|${tag}`, _sort: '-_lastUpdated', _elements: 'meta' }, opts);
     return o ? [{ source, lastImport: o.meta?.lastUpdated?.slice(0, 10) }] : [];
