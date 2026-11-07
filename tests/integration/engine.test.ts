@@ -6,7 +6,7 @@ import { getClient, loadConfig } from '../../src/config.ts';
 import { CONCEPT_SRC } from '../../src/concept-apply.ts';
 import { loadMaps, lookup, mapUrl, sourceKey, upsertEntry } from '../../src/conceptmap.ts';
 import { importResources } from '../../src/engine.ts';
-import { APPLE, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
+import { APPLE, ARRIVED, arrivedAt, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -798,4 +798,44 @@ test('one source: its coded Condition "Synthetic flu" never codes its Immunizati
   const [stored] = await client.searchResources('Immunization', { identifier: `urn:test:src|${iid}`, patient: `Patient/${pid}` }, { cache: 'no-cache' });
   expect(stored.vaccineCode.coding).toBeUndefined();
   expect(lookup(await loadMaps(client, true), mapOf(s.org as string), 'Condition|synthetic flu')?.target?.code).toBe('J11.1');
+});
+
+test('a created record carries its arrival instant', async () => {
+  const id = uid('obs');
+  const t0 = Date.now();
+  await importResources(client, [chol(id, 150, '2023-09-23')], ccda('2024-01-01'), pid, 'h');
+  const [o] = await client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: '2023-09-23' });
+  expect(o.extension?.filter((e) => e.url === ARRIVED)).toHaveLength(1);
+  const at = Date.parse(arrivedAt(o) ?? '');
+  expect(at).toBeGreaterThanOrEqual(t0);
+  expect(at).toBeLessThanOrEqual(Date.now());
+});
+
+test('arrival survives update, merge, skip and possible-duplicate', async () => {
+  const find = async (day: string) => client.searchResources('Observation', { subject: `Patient/${pid}`, code: 'http://loinc.org|2093-3', date: day });
+  // update (MedicationStatement status change), keep-path skip
+  const mid = uid('med');
+  const m = med(mid, 'active');
+  await importResources(client, [m], ccda('2024-01-01'), pid, 'h');
+  const medAt = async () => arrivedAt((await client.searchOne('MedicationStatement', { identifier: key('MedicationStatement', mid) }, { cache: 'no-cache' })) as Resource);
+  const first = await medAt();
+  expect(first).toBeDefined();
+  expect(await importResources(client, [{ ...m, status: 'stopped' }], ccda('2024-06-01'), pid, 'h')).toMatchObject({ updated: 1 });
+  expect(await medAt()).toBe(first);
+  // merge, skip, possible-duplicate
+  const a = chol(uid('obs'), 170, '2023-08-17');
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  const arrival = arrivedAt((await find('2023-08-17'))[0]);
+  expect(arrival).toBeDefined();
+  const b = chol(uid('obs'), 170, '2023-08-17');
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ merged: 1 });
+  expect(arrivedAt((await find('2023-08-17'))[0])).toBe(arrival);
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ skipped: 1 });
+  expect(arrivedAt((await find('2023-08-17'))[0])).toBe(arrival);
+  const c = chol(uid('obs'), 230, '2023-08-17');
+  expect(await importResources(client, [c], ccda('2024-03-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 1 });
+  const both = await find('2023-08-17');
+  expect(both).toHaveLength(2);
+  expect(both.every((o) => arrivedAt(o))).toBe(true);
+  expect(both.map(arrivedAt)).toContain(arrival);
 });
