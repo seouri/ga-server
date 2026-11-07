@@ -5,11 +5,11 @@ import type { Encounter, Endpoint, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
 import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
+import { SOURCES } from './whats-new.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
 import { newestFirst, vitalRow, vitalSearches } from './vitals.ts';
 
-const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
 const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
 
