@@ -61,7 +61,7 @@ describe('answering texts', () => {
     const b = setup([call('share_create', { audience: 'family', label: 'Mom', scope: ['labs'] }), say('done')], { publicUrl: 'https://x.example' });
     await b.text('share my labs with mom');
     expect(names(b.seen[0])).toEqual(expect.arrayContaining(['share_create', 'hospital_enable']));
-    const result = JSON.parse(JSON.parse(b.seen[1].messages.at(-1).content));
+    const result = JSON.parse(b.seen[1].messages.at(-1).content);
     const code = /\/confirm\/([A-Za-z0-9_-]{43})$/.exec(result.confirmUrl)![1];
     expect(findConfirmPage(code)).toBeDefined();
   });
@@ -99,5 +99,20 @@ describe('answering texts', () => {
     expect(msgs.slice(1)).toEqual([{ role: 'assistant', content: 'Due soon: Colonoscopy. Reply done or not now.' }, { role: 'user', content: 'done' }]);
     expect(seen[1].messages.at(-1).content).not.toContain('tool not available');
     expect(audits.map((a) => a.entity[0].what.display)).toContain('postpone');
+  });
+
+  it('without publicUrl record_followup and the confirm tools are hidden and refused, also under a case variant; whats_new loses markSeen', async () => {
+    const { text, seen } = setup([call('record_followup', { topic: 't' }, 'a'), call('hospital_enable', {}, 'b'), call('Hospital_Sync', {}, 'c'), say('no')]);
+    await text('hi');
+    expect(names(seen[0])).not.toContain('record_followup');
+    for (const i of [1, 2, 3]) expect(seen[i].messages.at(-1).content).toContain('tool not available by text');
+  });
+
+  it('whats_new is called without markSeen', async () => {
+    const { text, seen } = setup([call('whats_new', { markSeen: true, since: '2026-11-01' }), say('ok')]);
+    await text('what is new');
+    expect(seen[1].messages.at(-1).content).not.toContain('error');
+    const ids = seen[1].messages.find((m: Msg) => m.role === 'assistant' && m.tool_calls).tool_calls;
+    expect(ids).toBeDefined();
   });
 });
