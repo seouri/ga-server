@@ -12,6 +12,7 @@ import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
+import { noteText, snippet } from './notes.ts';
 import { addDays } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
@@ -98,7 +99,7 @@ export function writeLastSeen(at: string, dir: string = dirname(defaultConfigPat
 }
 
 export type ReviewItem = {
-  kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'health maintenance';
+  kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'note or message' | 'health maintenance';
   title: string; date?: string; detail: Record<string, unknown>; source?: string; id?: string;
 };
 
@@ -190,7 +191,20 @@ export function followUpItems(items: Item[], asOf: string): ReviewItem[] {
   });
 }
 
-const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'health maintenance'];
+// New clinical notes and MyChart messages, newest first, with their opening text: a clinician's plan ("repeat labs in 6 weeks") often
+// lives only here, so the agent reads them and offers record_followup. Source files and archives have no note text and are skipped.
+export function noteItems(arrived: Resource[]): ReviewItem[] {
+  return arrived.flatMap((r): ReviewItem[] => {
+    const isMsg = r.resourceType === 'Communication';
+    const body = isMsg ? r.payload?.map((p) => p.contentString).filter(Boolean).join('\n') : r.resourceType === 'DocumentReference' ? noteText(r) : undefined;
+    if (!body) return [];
+    const date = (isMsg ? r.sent ?? r.received : r.resourceType === 'DocumentReference' ? r.date : undefined)?.slice(0, 10);
+    const title = isMsg ? `Message${r.sender?.display ? ` from ${r.sender.display}` : ''}` : concept((r as { type?: CodeableConcept }).type) ?? 'Clinical note';
+    return [{ kind: 'note or message', title, date, detail: { text: snippet(body) }, source: sourceOf(r), id: `${r.resourceType}/${r.id}` }];
+  }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+}
+
+const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'note or message', 'health maintenance'];
 const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
 
 // A failed section becomes {error} in its place, trimmed like sectionErrors; the rest still returns.
@@ -243,6 +257,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
     ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
     ...run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since, asOf)),
     ...run('status changes', () => get(status)),
+    ...run('notes and messages', () => noteItems(get(arrived))),
     ...run('follow-ups', () => followUpItems(get(upkeep).items, asOf)),
   ];
   const kept = fit(interleave(all), 200, false, ITEMS);

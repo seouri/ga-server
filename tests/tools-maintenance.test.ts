@@ -14,6 +14,7 @@ const setup = async (remote = true) => {
     readResource: async (type: string, id: string) => {
       if (type === 'Patient') return { resourceType: 'Patient', birthDate: '1970-01-01', gender: 'female' };
       if (id === 'd1') return doc('Patient/p');
+      if (type === 'Communication' && id === 'm1') return { resourceType: 'Communication', id: 'm1', status: 'completed', subject: { reference: 'Patient/p' }, payload: [{ contentString: 'Started the new medicine. We will repeat your lab panel in 6 weeks.' }] };
       if (id === 'other') return doc('Patient/q');
       throw new Error('not found');
     },
@@ -89,6 +90,15 @@ describe('record_followup', () => {
     expect((await takeConfirmPage(code)!.run()).done).toContain('recorded');
     expect(created.map((x) => x.resourceType)).toEqual(['Basic', 'Provenance']);
     expect(created[1].agent[0].who.display).toBe('chat app');
+  });
+  it('accepts a MyChart message as the source, checking the quote against its text', async () => {
+    const { created, call } = await setup(false);
+    const m = { ...args, topic: 'Repeat lab panel', quote: 'repeat your lab panel in 6 weeks', documentRef: 'Communication/m1' };
+    const p = await call('record_followup', m);
+    expect(p.json.confirm).toBeTruthy();
+    expect((await call('record_followup', { ...m, quote: 'in 3 months' })).error).toBe(true);
+    await call('record_followup', { ...m, confirm: p.json.confirm });
+    expect(created[1]).toMatchObject({ resourceType: 'Provenance', entity: [{ what: { reference: 'Communication/m1' } }] });
   });
   it('an impossible date fails validation cleanly', async () => {
     const { created, call } = await setup();

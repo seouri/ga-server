@@ -50,7 +50,7 @@ Read tools (`health_summary`, `lab_results`, `current_medications`, `current_pro
 | Imports | `upload_link`, `import_file`, `import_status`, `ga_import` |
 | Apps | `connected_apps`, `disconnect_app` |
 | Concepts | `map_concept` (maps a source term to a standard code; corrections are another call) |
-| Health maintenance | `postpone` (not now, until a date, or dismiss), `record_followup` (a follow-up from a note; preview first) |
+| Health maintenance | `postpone` (not now, until a date, or dismiss), `record_followup` (a follow-up from a note or MyChart message; preview first) |
 
 Creating a share, enabling a hospital's record types and recording a follow-up are two steps: the chat shows a preview and a link to GA's confirm page; you open it, sign in with your passkey, check the details and press Confirm. The chat cannot confirm for you: see [SECURITY.md](../SECURITY.md). A new share's link and QR code show on that page.
 
