@@ -1,6 +1,6 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
-import { addUnmapped, carryConcept, codeRecord, countUnmapped, learnable, onSource, stripConcept, type Unmapped } from './concept-apply.ts';
+import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
 import { APPLE, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
@@ -389,20 +389,34 @@ export async function importResources(
           new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
         ).then((ms) => ms.filter((m) => stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
+    // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
+    // Not a person's record, and never by a map other than its own: a record another GA source already coded keeps that coding,
+    // and a coded record is never stripped to unmapped. Returns ex itself when nothing would change.
+    const recode = (ex: R): R => {
+      if (personEdited(ex)) return ex;
+      const hasGa = gaCodings(ex).length > 0;
+      const others = idList(ex).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== ident.system);
+      if (hasGa && others) return ex;
+      const out = codeRecord(ex, source, maps);
+      return (hasGa && out.status === 'unmapped') || sameConcept(out.resource, ex) ? ex : (out.resource as R);
+    };
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
-    const fillOnto = async (ex: R): Promise<void> => {
+    const fillOnto = async (ex: R): Promise<R> => {
       if (personEdited(ex)) {
         report.skipped++;
-        return;
+        return ex;
       }
       const bases = new Set(Object.keys(ex).map(choiceBase));
       const add = Object.entries(coded).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
       const have = new Set(idList(ex).map(idKey));
       const ids = idList(incoming).filter((i) => !have.has(idKey(i)));
       const added = add.length + ids.length > 0;
-      await keep({ ...ex, ...Object.fromEntries(add), identifier: [...idList(ex), ...ids] } as R, added);
+      const filled = { ...ex, ...Object.fromEntries(add), identifier: [...idList(ex), ...ids] } as R;
+      const out = recode(filled);
+      await keep(out, added || out !== filled);
       if (added) report.merged++;
       else report.skipped++;
+      return out;
     };
     // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF) wrote, on every sync.
     const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
@@ -425,17 +439,20 @@ export async function importResources(
         } else if (d === 'conflict') {
           if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
           report.conflicts++;
-        } else if (fillOnly(existing)) await fillOnto(existing);
+        } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (d === 'update') {
           target = await unionUpdate(client, existing, filled);
           report.updated++;
         } else if (linked) {
           // Equal or older source: only record its identifiers, so the next import finds it by stable identifier.
           const have = new Set(idList(existing).map(idKey));
-          await keep({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] }, true);
+          target = recode({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] });
+          await keep(target as R, true);
           report.merged++;
         } else {
-          await keep(existing, false);
+          const out = recode(existing);
+          await keep(out, out !== existing); // a concept write only: still a skip
+          target = out;
           report.skipped++;
         }
       } else {

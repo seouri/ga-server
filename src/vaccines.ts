@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
+import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
 import { TAG } from './engine.ts';
 
@@ -132,6 +133,13 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
 const CVX = ['http://hl7.org/fhir/sid/cvx', 'urn:oid:2.16.840.1.113883.12.292'];
 const src = (r: { meta?: { source?: string } }) => (r.meta?.source ? basename(r.meta.source) : '');
 
+// One dose as the evaluator reads it: the first CVX coding GA trusts (a GA-suggested one is a guess; NDC codings are ignored).
+export function doseOf(i: Immunization): Dose {
+  const cvx = trusted(i, i.vaccineCode?.coding).find((c) => CVX.includes(c.system ?? ''))?.code;
+  const name = i.vaccineCode?.text ?? i.vaccineCode?.coding?.find((c) => c.display)?.display;
+  return { date: (i.occurrenceDateTime ?? '').slice(0, 10), ...(cvx && { cvx }), ...(name && { name }), source: src(i) };
+}
+
 // Reads the patient's own GA data so values never pass through the agent.
 export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf)) || !new Date(asOf).toISOString().startsWith(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
@@ -147,11 +155,7 @@ export async function vaccineGaps(client: MedplumClient, patientId: string, asOf
   };
   const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
   const obs = ((await all('Observation', { subject: `Patient/${patientId}` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
-  const immunizations = imms.map((i) => {
-    const cvx = i.vaccineCode?.coding?.find((c) => CVX.includes(c.system ?? ''))?.code; // NDC codings are ignored
-    const name = i.vaccineCode?.text ?? i.vaccineCode?.coding?.find((c) => c.display)?.display;
-    return { date: (i.occurrenceDateTime ?? '').slice(0, 10), ...(cvx && { cvx }), ...(name && { name }), source: src(i) };
-  });
+  const immunizations = imms.map(doseOf);
   const immunity = obs.flatMap((o) => {
     const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;
     const value = o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.find((c) => c.display)?.display;

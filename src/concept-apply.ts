@@ -5,7 +5,7 @@ import { inScope, lookup, type MapEntry, type Maps, sourceKey, termKey } from '.
 import { type SourceInfo, TAG } from './identity.ts';
 
 export const CONCEPT_SRC = 'urn:ga-server:ext:concept-source';
-const CONCEPT_TAGS = ['concept-suggested', 'concept-unmapped'];
+const CONCEPT_TAGS = ['concept-suggested', 'concept-unmapped', 'concept-unmatched']; // unmatched: its map says it has no standard code
 export const TARGET: Record<string, string[]> = {
   Observation: [LOINC], Immunization: [CVX], MedicationStatement: [RXNORM], MedicationRequest: [RXNORM],
   Condition: [SNOMED, ICD10CM], Procedure: [SNOMED, CPT, HCPCS],
@@ -20,8 +20,16 @@ export type Unmapped = { source: string; type: string; key: string; name: string
 const field = (type: string) => (type === 'Immunization' ? 'vaccineCode' : type.startsWith('Medication') ? 'medicationCodeableConcept' : 'code');
 const cc = (r: Resource) => (r as unknown as Record<string, CodeableConcept | undefined>)[field(r.resourceType)];
 const isGa = (c: Coding) => !!c.extension?.some((e) => e.url === CONCEPT_SRC);
-const gaCodings = (r: Resource) => cc(r)?.coding?.filter(isGa) ?? [];
-const own = (r: Resource) => cc(r)?.coding?.find((c) => !isGa(c) && c.code && TARGET[r.resourceType]?.includes(c.system ?? ''));
+export const gaCodings = (r: Resource) => cc(r)?.coding?.filter(isGa) ?? [];
+const ALIAS: Record<string, string> = { 'urn:oid:2.16.840.1.113883.12.292': CVX }; // CVX by its HL7 OID
+const sys = (s?: string) => (s && ALIAS[s]) ?? s ?? '';
+const own = (r: Resource) => cc(r)?.coding?.find((c) => !isGa(c) && c.code && TARGET[r.resourceType]?.includes(sys(c.system)));
+const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
+// The codings a matcher may trust: on a record tagged concept-suggested, GA's own coding is only a guess.
+export const trusted = (r: Resource, codings: Coding[] = []): Coding[] => (hasTag(r, 'concept-suggested') ? codings.filter((c) => !isGa(c)) : codings);
+// Same GA codings and concept tags (order-insensitive): whether re-coding would change a stored record.
+const tagSet = (r: Resource) => (r.meta?.tag ?? []).filter(isConceptTag).map((t) => t.code).sort().join();
+export const sameConcept = (a: Resource, b: Resource): boolean => JSON.stringify(gaCodings(a)) === JSON.stringify(gaCodings(b)) && tagSet(a) === tagSet(b);
 const isConceptTag = (t: Coding) => t.system === TAG && CONCEPT_TAGS.includes(t.code ?? '');
 const nameOf = (c?: CodeableConcept) => c?.text ?? c?.coding?.find((x) => x.display)?.display;
 const tagged = <T extends Resource>(r: T, tags: Coding[]): T => (tags.length ? { ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), ...tags] } } : r);
@@ -73,7 +81,7 @@ export function codeRecord(r: Resource, src: SourceInfo, maps: Maps): { resource
   const mine = own(base);
   if (mine) {
     const learn = source && key && LEARNS.has(src.kind)
-      ? { source, entry: { key, target: { system: mine.system, code: mine.code, ...(mine.display && { display: mine.display }) }, equivalence: 'equivalent', confident: true, by: 'source' } as MapEntry }
+      ? { source, entry: { key, target: { system: sys(mine.system), code: mine.code, ...(mine.display && { display: mine.display }) }, equivalence: 'equivalent', confident: true, by: 'source' } as MapEntry }
       : undefined;
     return { resource: base, status: 'source', ...(learn && { learn }) };
   }
@@ -84,8 +92,10 @@ export function codeRecord(r: Resource, src: SourceInfo, maps: Maps): { resource
   if (spec) return { resource: mark(spec, 'spec'), status: 'spec' };
   if (!source || !key) return { resource: base, status: 'excluded' }; // nothing to look up or review by
   const entry = lookup(maps, source, key);
-  if (entry?.equivalence === 'unmatched') return { resource: base, status: 'excluded' }; // has no standard code: out of review
-  if (entry?.target) {
+  // Has no standard code: out of review, and tagged so matchers never pair it with a coded twin.
+  if (entry?.equivalence === 'unmatched') return { resource: tagged(base, [{ system: TAG, code: 'concept-unmatched' }]), status: 'excluded' };
+  // A target outside the type's vocabularies (a legacy untyped key, a bad entry) is no mapping.
+  if (entry?.target && TARGET[base.resourceType]?.includes(entry.target.system ?? '')) {
     const coded = mark(entry.target, entry.by === 'agent' ? 'agent' : 'source-map');
     if (entry.equivalence === 'equivalent' && entry.confident) return { resource: coded, status: 'source-map' };
     return { resource: tagged(coded, [{ system: TAG, code: 'concept-suggested' }]), status: 'suggested' };
@@ -94,20 +104,30 @@ export function codeRecord(r: Resource, src: SourceInfo, maps: Maps): { resource
 }
 
 // What records teach their source maps, grouped by source: terms the map lacks whose records all carry one code. A term
-// coded two ways is ambiguous and is not learned (its uncoded copies stay up for review). `add` feeds records, `entries` reads the result.
+// coded two ways is ambiguous and is not learned (its uncoded copies stay up for review). A confident source-learned entry
+// the source now codes another way is demoted to confident:false (suggested, back in review). `add` feeds records, `entries` reads the result.
 export function learner(maps: Maps): { add: (r: Resource, src: SourceInfo) => void; entries: () => Map<string, MapEntry[]> } {
   const seen = new Map<string, { source: string; entry: MapEntry; codes: Set<string> }>();
+  const demote = new Map<string, { source: string; entry: MapEntry }>();
   return {
     add(r, src) {
       const l = LEARNS.has(src.kind) ? codeRecord(r, src, maps).learn : undefined;
-      if (!l || lookup(maps, l.source, l.entry.key)) return;
+      if (!l) return;
       const id = `${l.source}\n${l.entry.key}`;
+      const have = lookup(maps, l.source, l.entry.key);
+      if (have) {
+        if (have.by === 'source' && have.confident && `${have.target?.system}|${have.target?.code}` !== `${l.entry.target?.system}|${l.entry.target?.code}`) {
+          demote.set(id, { source: l.source, entry: { ...have, confident: false } });
+        }
+        return;
+      }
       const s = seen.get(id) ?? seen.set(id, { ...l, codes: new Set() }).get(id);
       s?.codes.add(`${l.entry.target?.system}|${l.entry.target?.code}`);
     },
     entries() {
       const out = new Map<string, MapEntry[]>();
       for (const { source, entry, codes } of seen.values()) if (codes.size === 1) out.set(source, [...(out.get(source) ?? []), entry]);
+      for (const { source, entry } of demote.values()) out.set(source, [...(out.get(source) ?? []), entry]);
       return out;
     },
   };

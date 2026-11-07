@@ -5,7 +5,7 @@ import type { Provenance, Resource } from '@medplum/fhirtypes';
 import { z } from 'zod';
 import { TARGET } from '../concept-apply.ts';
 import { validate, wellFormed } from '../concept-validate.ts';
-import { applyAll, reviewList } from '../concepts-cli.ts';
+import { agentMappings, applyAll, reviewList } from '../concepts-cli.ts';
 import { inScope, termKey, upsertEntry } from '../conceptmap.ts';
 import { GaError } from '../config.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
@@ -28,12 +28,14 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
     {
       description:
         'Source terms in GA with no standard code (status "unmapped", default) or only a suggested one ("suggested"): source, name, unit, record type, ' +
-        'how many records and up to three example dates, most frequent first. No values. Map one with map_concept. type: a record type to narrow to.',
-      inputSchema: { status: z.enum(['unmapped', 'suggested']).default('unmapped'), type: z.string().optional() },
+        'how many records and up to three example dates, most frequent first. No values. Map one with map_concept. type: a record type to narrow to. ' +
+        'status "agent": the mappings agents made (source, type, term, code, display, confident, when), newest first, for the user to review; since: YYYY-MM-DD.',
+      inputSchema: { status: z.enum(['unmapped', 'suggested', 'agent']).default('unmapped'), type: z.string().optional(), since: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
-    async ({ status, type }) => {
+    async ({ status, type, since }) => {
       try {
+        if (status === 'agent') return text({ mappings: (await agentMappings(client, since)).filter((m) => !type || m.type === type) });
         return text({ terms: await reviewList(client, patientId, status, type) });
       } catch (e) {
         return fail(e);
@@ -66,6 +68,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
       annotations: { destructiveHint: true },
     },
     async ({ source, name, unit, key: given, type, system, code, display, equivalence, confident }) => {
+      const who = remote?.clientName ?? server.server.getClientVersion()?.name ?? 'Claude Code'; // the client is known only after initialize
       try {
         // Refusals first: nothing is sent or written for them.
         const term = termOf(type, name, unit);
@@ -90,7 +93,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
           target: [{ reference: `ConceptMap/${map?.id}` }],
           recorded: new Date().toISOString(),
           activity: { coding: [{ system: 'urn:ga-server:activity', code: 'map_concept' }] },
-          agent: [{ who: { display: remote?.clientName ?? 'Claude Code' } }],
+          agent: [{ who: { display: who } }],
           reason: [{ text: `${source} "${key}" (${type}): ${unmatched ? 'unmatched' : `${system}|${code} ${equivalence}${sure ? '' : ', suggested'}`}` }],
         });
         const { changed, matched } = await applyAll(client, patientId, { source, key, type });

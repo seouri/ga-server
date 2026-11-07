@@ -5,6 +5,7 @@ Extract health records from a local PDF or image into GA through the `ga-server`
    - `code.coding` with a LOINC code (`system: http://loinc.org`) only when confident, otherwise `code.text` only.
    - `valueQuantity` with a UCUM unit (`system: http://unitsofmeasure.org`, `code`).
    - `effectiveDateTime` = specimen collection date (`YYYY-MM-DD`), not the report date.
+   - Specimen: whenever it is not blood, serum or plasma (e.g. urine), set `specimen.display` (or put it in the name, "Glucose, urine"), so the result never maps to the blood test.
    - `referenceRange` when printed; `status: final`.
    - `category` (`system: http://terminology.hl7.org/CodeSystem/observation-category`): `laboratory` for lab tests, `vital-signs` for height, weight, BMI and blood pressure, `exam` for other measurements (vision, hearing, spirometry, body composition), `social-history` for smoking and alcohol. Agents filter by it, so set it whenever the kind is clear.
 3. Emit `Condition` and `MedicationStatement` resources only when the document explicitly states them.

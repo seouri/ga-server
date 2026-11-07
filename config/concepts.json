@@ -10,7 +10,7 @@
    "glycated haemoglobin",
    "glycohemoglobin"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 4549-2 \"Hemoglobin A1c/Hemoglobin.total in Blood by Electrophoresis\"",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 4549-2 \"Hemoglobin A1c/Hemoglobin.total in Blood by Electrophoresis\"; 59261-8 (IFCC, substance fraction mmol/mol) is not equivalent to these mass-fraction (%) codes: omitted",
   "members": [
    {
     "system": "http://loinc.org",
@@ -149,7 +149,7 @@
    "glomerular filtration rate",
    "estimated glomerular filtration rate"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 77147-7 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (MDRD)/1.73 sq M\"; 69405-9 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by based on 1.73 sq M\"",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 77147-7 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (MDRD)/1.73 sq M\"; 69405-9 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by based on 1.73 sq M\"; 88293-6 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (CKD-EPI)/1.73 sq M among black population\"; 88294-4 \"... (CKD-EPI)/1.73 sq M among non black population\"",
   "members": [
    {
     "system": "http://loinc.org",
@@ -185,6 +185,16 @@
     "system": "http://loinc.org",
     "code": "69405-9",
     "label": "method unspecified"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "88293-6",
+    "label": "race-based (CKD-EPI 2009)"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "88294-4",
+    "label": "race-based (CKD-EPI 2009)"
    }
   ]
  },
@@ -438,7 +448,7 @@
  {
   "name": "colorectal cancer screening",
   "kind": "procedure",
-  "_source": "SNOMED CT displays checked on tx.fhir.org (73761001 Colonoscopy, 444783004 Screening colonoscopy, 418714002 Virtual CT colonoscopy, 441579003 Measurement of occult blood in stool specimen using immunoassay). CPT 45378, 82274, 81528 descriptors per NLM VSAC value sets via FHIR XIG (Colonoscopy; FOBT_Lab, Colorectal Screening 2.16.840.1.113762.1.4.1206.57); CPT 74263 per VSAC CT Colonography_CPT (2.16.840.1.113762.1.4.1235.291). HCPCS G0105, G0121, G0328 per NLM clinicaltables hcpcs and Noridian JF Part B colorectal screening page. No SNOMED procedure for FIT-DNA verified: omitted.",
+  "_source": "SNOMED CT displays checked on tx.fhir.org (73761001 Colonoscopy, 444783004 Screening colonoscopy, 418714002 Virtual CT colonoscopy, 441579003 Measurement of occult blood in stool specimen using immunoassay). CPT 45378, 82274, 81528 descriptors per NLM VSAC value sets via FHIR XIG (Colonoscopy; FOBT_Lab, Colorectal Screening 2.16.840.1.113762.1.4.1206.57); CPT 74263 per VSAC CT Colonography_CPT (2.16.840.1.113762.1.4.1235.291). HCPCS G0105, G0121, G0328 per NLM clinicaltables hcpcs and Noridian JF Part B colorectal screening page. No SNOMED procedure for FIT-DNA verified: omitted. CPT 45380, 45384, 45385 (colonoscopy with biopsy; polyp removal by hot biopsy forceps; by snare) per VSAC Colonoscopy (2.16.840.1.113883.3.464.1003.108.12.1020); CPT 45330 per VSAC Flexible Sigmoidoscopy (2.16.840.1.113883.3.464.1003.198.12.1010), both via the Preventive Care Guidelines IG (chronic-care.github.io/preventive-care); HCPCS G0104 \"Colorectal cancer screening; flexible sigmoidoscopy\" per NLM clinicaltables hcpcs.",
   "members": [
    {
     "system": "http://snomed.info/sct",
@@ -463,6 +473,21 @@
    {
     "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
     "code": "G0121",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45380",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45384",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45385",
     "label": "colonoscopy"
    },
    {
@@ -504,6 +529,16 @@
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "74262",
     "label": "CT colonography"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45330",
+    "label": "flexible sigmoidoscopy"
+   },
+   {
+    "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+    "code": "G0104",
+    "label": "flexible sigmoidoscopy"
    }
   ]
  }

@@ -160,3 +160,8 @@ The concept layer gives every record a standard code, so every tool and rule ask
 - HCPCS is accepted for procedures.
 - Labels corrected: eGFR 62238-1 is CKD-EPI; LDL 2089-1 is unlabelled.
 - The C-CDA source key is the custodian. Backfill recovers it from the stored source file.
+- Map keys carry the record type for every type but Observation (`Condition|influenza`), and a target outside the type's vocabularies is never applied: one source's Condition "Influenza" (ICD-10) no longer codes its Immunization "Influenza". `ga concepts apply --migrate-keys` converts older keys once (type from the target system, else from the source's records; still ambiguous: dropped, back in review).
+- An uncoded lab joins a coded twin of its name and unit only from the same source, never one its map calls unmatched (tagged `concept-unmatched`).
+- A source that later codes a learned term another way demotes the entry to not confident (suggested, back in review).
+- A re-import re-codes the records it skips or links with this batch's maps (a concept write, not counted as updated).
+- Review of agent mappings: `concepts_to_review {status: 'agent', since?}`, `ga concepts --agent [--since]`.
