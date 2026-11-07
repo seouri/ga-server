@@ -10,7 +10,7 @@ const ADMIN = 'admin@example.com';
 const DEFAULT_PASSWORD = 'medplum_admin'; // Medplum's seeded admin password; setup rotates it away on first run
 
 // GA's own ordinary project: Medplum gives every login in the Super Admin project super-admin powers.
-const PROJECT = 'GA';
+const PROJECT = 'Guardian Angel'; // Medplum requires 4-72 characters
 // What the GA client may touch: the patient compartment plus the shared records the importers and sync write.
 // Everything else (ClientApplication, User, Login, Project, ProjectMembership, AccessPolicy, Bot...) is denied.
 const GA_TYPES = [...PATIENT_COMPARTMENT, 'Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device', 'Binary', 'Endpoint'];

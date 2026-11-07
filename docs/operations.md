@@ -61,7 +61,7 @@ The FHIR server's admin app runs at http://localhost:3000. Log in as `admin@exam
 
 ## GA's own project
 
-GA keeps your record in its own Medplum project, `GA`. Its login (`ga-server-cli`) is an ordinary member limited by an access policy to health records: it cannot read logins, secrets or other projects. The admin account is only for the admin app; choose the `GA` project there to see your record.
+GA keeps your record in its own Medplum project, `Guardian Angel`. Its login (`ga-server-cli`) is an ordinary member limited by an access policy to health records: it cannot read logins, secrets or other projects. The admin account is only for the admin app; choose the `Guardian Angel` project there to see your record.
 
 Installs set up before this change kept everything in Medplum's Super Admin project, where every login is a super admin; `ga setup` then stops with "run ga migrate". To move:
 
