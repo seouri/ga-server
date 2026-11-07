@@ -18,16 +18,26 @@ git clone https://github.com/seouri/ga-server.git && cd ga-server
 claude          # start Claude Code in this folder; approve the ga-server MCP server once
 ```
 
-Then bring in your records and ask:
+Then bring in your records and ask, in plain words:
 
 ```
 > /ga-import ~/Downloads/apple_health_export
-> /ga-import ~/Downloads/checkup-2024.pdf
-> /ga Is starting Atorvastatin 40 mg the right decision?
-> /ga Did I miss any vaccinations for my age?
-> /ga-lipids since 2019
+> What were my last three LDL results, and where did each come from?
+> Anything due for my health?
 > Share my labs from the last 2 years with Dr. Kim for a week.
 ```
+
+## What GA does
+
+- **One record from every source:** Epic patient portals (MyChart, synced daily), Epic and C-CDA exports, Apple Health, and lab PDFs or photos, with duplicates caught and the same test under different names counted as one ([one test, one name](docs/concepts.md)).
+- **Answers with citations:** labs and trends, current medications and problems, vitals, notes and messages, each value with its date and source.
+- **What's new:** what arrived since you last looked, from out-of-range labs to new medications with their FDA label.
+- **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates.
+- **Decision support:** 10-year cardiovascular risk (PREVENT and Pooled Cohort Equations) and charts such as your lipid trend.
+- **Sharing:** private, expiring links for a doctor or family, approved by you.
+- **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet.
+
+More examples: [Using GA](docs/usage.md).
 
 Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/chat-apps.md). Share links, chat apps and hospital portal logins also need [Tailscale](https://tailscale.com/download) (free for personal use) to reach GA over the internet.
 
@@ -36,14 +46,14 @@ Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/cha
 ```mermaid
 flowchart LR
   you([You]) --> agent["Claude Code or any MCP agent<br/>/ga, /ga-import, /ga-lipids"]
-  agent -- "stdio MCP: health_summary, lab_results, vitals, current meds/problems/allergies,<br/>notes_search, fhir_search, fhir_read, ga_import, vaccine_gaps, whats_new, risk" --> mcp["ga mcp"]
+  agent -- "stdio MCP: health_summary, lab_results, vitals, current meds/problems/allergies,<br/>notes_search, fhir_search, ga_import, whats_new, health_maintenance, cardiovascular risk" --> mcp["ga mcp"]
   apps(["claude.ai, ChatGPT,<br/>Gemini, Grok"]) -- "Tailscale Funnel, /mcp" --> gateway
   agent -- "runs CLI: ga import, ga share" --> cli["ga CLI"]
   mcp --> fhir[("FHIR server<br/>Docker, local Postgres")]
   cli -- "dedup engine" --> fhir
   files["C-CDA, Epic EHI,<br/>Apple Health, PDFs"] --> cli
   epic["Epic portals<br/>(SMART on FHIR, read-only)"] -- "daily" --> sync["ga-sync"] --> fhir
-  fhir --> gateway["ga-gateway<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family"])
+  fhir --> gateway["ga-gateway<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family,<br/>your calendar"])
 ```
 
 Everything runs on your computer. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent or chat app you connect, and share-link questions if you turn them on). The agent never talks to the FHIR server directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.

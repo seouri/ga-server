@@ -41,6 +41,18 @@ The server tells Claude that GA is your health record, so plain questions work. 
 > Did my blood pressure change after I lost weight?
 ```
 
+**Stay on top of your health**
+
+```
+> Anything due for my health?
+> What's new in my record since I last looked?
+> What's due in the next 6 months?
+> Not now for the colorectal screening; remind me after March.
+> Record the lipid recheck my doctor asked for in her Nov 3 message.
+```
+
+`health_maintenance` lists screenings (USPSTF) and vaccines (CDC) with the guideline's reasons and source, and your doctor's own plan (Epic health maintenance, or a follow-up recorded from a note or message) next to it. `whats_new` shows what arrived since you last looked: out-of-range labs, new medications with their FDA label, status changes, new notes and messages. After answering a health question the agent may add one "By the way" line about the most important item due. `ga calendar` gives a private calendar link of the due dates ([chat apps](chat-apps.md#calendar-feed)).
+
 **Import documents**
 
 ```
@@ -93,7 +105,7 @@ An Apple Health export brings per-reading vitals, daily summaries (heart rate, s
 
 ## Review flags and limits
 
-- `possible-duplicate`: the same test on the same day with a different value, unit or time. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
+- `possible-duplicate`: the same test on the same day, at the same moment with a different value, at another time with the same number (two sources' times for one result), or with no time of day on one side. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
 - `source-conflict`: a newer import differs from a record a person or agent changed; GA kept the existing record and never overwrites it. Same search with `source-conflict`.
 - `person-edited`: a person changed this record and GA later wrote only its own bookkeeping onto it (a portal sync's last-seen, a second source's identifier). Nothing differs; the tag keeps the edit protected, and a later source that does differ adds `source-conflict`.
 - A PDF/image is imported once; importing the same file again is refused.
