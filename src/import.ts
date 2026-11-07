@@ -16,8 +16,8 @@ export function detectKind(path: string): ImportKind {
   return 'ccda';
 }
 
-// opts.tz: EHI export zone (already validated by the caller); opts.name is reserved for the gateway upload.
-export async function importAny(client: MedplumClient, cfg: GaConfig, path: string, opts: { tz?: string; name?: string } = {}): Promise<unknown> {
+// opts.tz: EHI export zone (already validated by the caller).
+export async function importAny(client: MedplumClient, cfg: GaConfig, path: string, opts: { tz?: string } = {}): Promise<unknown> {
   const kind = detectKind(path);
   if (kind === 'pdf') throw new GaError(`PDFs are extracted by your agent: ask it to import ${path}, or pass --llm api`);
   if (kind === 'ehi') return importEhi(client, cfg, path, cfg.patientId, opts.tz);

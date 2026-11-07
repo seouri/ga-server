@@ -104,18 +104,11 @@ export async function unzipSafe(zip: string, into: string, limits = { entries: 2
   let z: yauzl.ZipFile | undefined;
   try {
     mkdirSync(base, { recursive: true, mode: 0o700 });
-    // yauzl itself refuses absolute paths, ".." and backslashes (decodeStrings) and entries whose data overruns their declared size.
+    // yauzl itself refuses absolute paths, ".." and backslashes (decodeStrings) and entries whose data differs from their declared size (validateEntrySizes),
+    // so the declared total below bounds the bytes written.
     z = await yauzl.openPromise(zip, { lazyEntries: true });
     if (z.entryCount > limits.entries) throw reject(`too many entries (over ${limits.entries})`);
     let declared = 0;
-    let actual = 0;
-    const counter = (): Transform =>
-      new Transform({
-        transform(c: Buffer, _e, cb) {
-          actual += c.length;
-          cb(actual > limits.bytes ? reject('too large uncompressed') : null, c);
-        },
-      });
     const zf = z;
     await new Promise<void>((ok, fail) => {
       const entry = async (e: yauzl.Entry): Promise<void> => {
@@ -125,13 +118,13 @@ export async function unzipSafe(zip: string, into: string, limits = { entries: 2
         if (type === 0o120000) throw reject('symbolic link');
         if (type && type !== 0o100000 && type !== 0o040000) throw reject('not a regular file');
         const dest = resolve(base, name);
-        if (!dest.startsWith(base + sep) || name.startsWith('/') || name.split('/').includes('..')) throw reject('entry outside the folder');
+        if (!dest.startsWith(base + sep)) throw reject('entry outside the folder');
         tops.add(name.split('/')[0]);
         if (name.endsWith('/')) return void mkdirSync(dest, { recursive: true, mode: 0o700 });
         declared += e.uncompressedSize;
         if (declared > limits.bytes) throw reject('too large uncompressed');
         mkdirSync(dirname(dest), { recursive: true, mode: 0o700 });
-        await pipeline(await zf.openReadStreamPromise(e), counter(), createWriteStream(dest, { flags: 'wx', mode: 0o600 }));
+        await pipeline(await zf.openReadStreamPromise(e), createWriteStream(dest, { flags: 'wx', mode: 0o600 }));
       };
       zf.on('error', fail);
       zf.on('end', ok);

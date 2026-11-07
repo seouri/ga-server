@@ -25,11 +25,6 @@ type Args = { audience: 'doctor' | 'family'; label: string; scope?: string[] | '
 export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shareDir()): void {
   const { client, patientId, remote } = deps;
   if (!remote) throw new GaError('share tools need a remote server');
-  const find = (id: string) => {
-    const s = listShares(dir).find((x) => x.id === id);
-    if (!s) throw new GaError(`no share ${id} (see share_list)`);
-    return s;
-  };
 
   server.registerTool(
     'share_create',
@@ -52,7 +47,7 @@ export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shar
         const expires = parseExpiry(rest.expires ?? (rest.audience === 'doctor' ? '7d' : 'never'), now) ?? 'never'; // also rejects a bad value
         if (!confirm) {
           const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? defaultGroups(rest.audience) }), since, until, expires };
-          return text({ ...view, ...preview('share', { args: structuredClone(rest), now: now.toISOString() }) });
+          return text({ ...view, ...preview('share', { args: rest, now: now.toISOString() }) });
         }
         const prev = takeConfirmed<{ args: typeof rest; now: string }>('share', confirm);
         if (!isDeepStrictEqual(prev.args, rest)) throw new GaError('arguments changed since the preview; ask for a new preview');
@@ -97,7 +92,7 @@ export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shar
     { description: 'Access log of share links (views, downloads, questions), newest first; for one share when id is given.', inputSchema: { id: z.string().optional() }, annotations: { readOnlyHint: true } },
     async ({ id }) => {
       try {
-        if (id) find(id);
+        if (id && !listShares(dir).some((x) => x.id === id)) throw new GaError(`no share ${id} (see share_list)`);
         return text(await readLog(client, id));
       } catch (e) {
         return fail(e);

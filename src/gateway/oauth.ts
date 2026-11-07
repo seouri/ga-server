@@ -56,10 +56,10 @@ function validateClient(_ctx: unknown, key: string, value: unknown, metadata: Re
   if (key === 'grant_types') metadata.grant_types = ['authorization_code', 'refresh_token'];
 }
 
-export function createProvider(opts: { publicUrl: string; dir: string; now?: () => number }) {
+export function createProvider(opts: { publicUrl: string; dir: string }) {
   const resource = `${opts.publicUrl}/mcp`;
   const provider = new Provider(opts.publicUrl, {
-    adapter: (model: string) => new FileAdapter(model, opts.dir, opts.now),
+    adapter: (model: string) => new FileAdapter(model, opts.dir),
     cookies: { keys: [cookieKey(opts.dir)] },
     jwks: jwks(opts.dir),
     findAccount: (_ctx: unknown, id: string) => (id === 'owner' ? { accountId: 'owner', claims: () => ({ sub: 'owner' }) } : undefined),
@@ -98,7 +98,6 @@ export function createProvider(opts: { publicUrl: string; dir: string; now?: () 
     },
     ttl: {
       AccessToken: 3600,
-      AuthorizationCode: 60,
       IdToken: 3600,
       RefreshToken: REFRESH_TTL,
       Grant: REFRESH_TTL,
