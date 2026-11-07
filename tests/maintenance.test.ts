@@ -102,9 +102,14 @@ test('Epic vaccine topics join the vaccine items; Haemophilus is not flu and Age
   expect(out.find((i) => i.topic === 'covid-19')!.doctorsPlan?.due).toBe('2027-10-15');
 });
 
-test('Epic Overdue without a date makes a future-dated guideline item overdue', () => {
-  const [i] = run([g('colorectal', 'A', 'done', '2034-01-01')], epicPlans([hm('COLORECTAL SCREENING: FIT TESTING', undefined, 'Overdue')]));
-  expect(i.status).toBe('overdue');
+test('Epic Overdue without a date: a dated record GA holds keeps the guideline status; without one, overdue', () => {
+  const last = { date: '2024-01-01', by: 'colonoscopy' };
+  const [held] = run([{ ...g('colorectal', 'A', 'done', '2034-01-01'), last }], epicPlans([hm('COLORECTAL SCREENING: FIT TESTING', undefined, 'Overdue')]));
+  expect(held).toMatchObject({ status: 'done', dueDate: '2034-01-01', doctorsPlan: { status: 'Overdue' } });
+  const [none] = run([g('colorectal', 'A', 'done', '2034-01-01')], epicPlans([hm('COLORECTAL SCREENING: FIT TESTING', undefined, 'Overdue')]));
+  expect(none.status).toBe('overdue');
+  const [dated] = run([{ ...g('colorectal', 'A', 'done', '2034-01-01'), last }], epicPlans([hm('CRCS', '2026-01-01', 'Overdue')]));
+  expect(dated.status).toBe('overdue'); // an Epic plan with its own date still wins
 });
 
 test('a dateless guideline status keeps its meaning against a plan date', () => {
