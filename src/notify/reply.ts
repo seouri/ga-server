@@ -77,8 +77,8 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
   return {
     remember: (text) => add('assistant', text),
     async onIncoming(m) {
-      const to = readSettings(d.dir)?.to;
-      if (!to || handle(to) !== handle(m.from)) return void (await logRemote(d.client, 'ignored sender', 'iMessage').catch(() => {}));
+      const s = readSettings(d.dir);
+      if (!s || ![s.to, ...(s.also ?? [])].some((h) => handle(h) === handle(m.from))) return void (await logRemote(d.client, 'ignored sender', 'iMessage').catch(() => {}));
       await logRemote(d.client, 'received', 'iMessage').catch(() => {});
       let out: string;
       const history = thread.filter((t) => t.at > now() - THREAD_MS);

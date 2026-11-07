@@ -43,6 +43,13 @@ describe('answering texts', () => {
     expect(audits.map((a) => a.entity[0].what.display)).toEqual(['ignored sender']);
   });
 
+  it('answers a message from an also handle', async () => {
+    const { text, dir } = setup([say('ok')]);
+    writeJson(dir, 'settings.json', { to: '+15550100000', also: ['owner@example.com'], digestAt: '08:00', sleep: ['22:00', '07:00'], setupAt: '2026-11-01T00:00:00Z' });
+    await text('hello', 'Owner@Example.com');
+    expect(pending(dir)).toHaveLength(1);
+  });
+
   it('owner handles match after stripping spaces, dashes, parentheses and a leading +', async () => {
     const { text, dir, audits } = setup([say('ok')]);
     await text('hello', '15550100000');

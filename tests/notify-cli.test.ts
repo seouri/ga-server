@@ -15,6 +15,13 @@ const setupEnv = () => {
 };
 
 describe('ga notify', () => {
+  it('setup stores repeated --also normalized and rejects an invalid one', async () => {
+    const e = setupEnv();
+    await notifyCommand(['setup', '--to', '+15551230000', '--also', 'Owner@Example.com', '--also', '+1 (555) 123-4567'], e.deps);
+    expect(readSettings(e.dir)).toMatchObject({ to: '+15551230000', also: ['owner@example.com', '+15551234567'] });
+    await expect(notifyCommand(['setup', '--to', '+15551230000', '--also', 'nope'], setupEnv().deps)).rejects.toThrow(/usage/);
+  });
+
   it('setup writes settings, 0600 token, plist, bootstraps', async () => {
     const e = setupEnv();
     await notifyCommand(['setup', '--to', '+1 (555) 123-0000', '--digest', '08:30', '--sleep', '22:00-07:00'], e.deps);

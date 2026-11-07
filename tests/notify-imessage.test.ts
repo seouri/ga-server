@@ -55,6 +55,25 @@ describe('readSince', () => {
   });
 });
 
+describe('readSince with also handles', () => {
+  it('takes is_from_me rows on an also handle, skips GA phone-handle send and other handles', () => {
+    const p = join(mkdtempSync(join(tmpdir(), 'chat-')), 'chat.db');
+    const db = new DatabaseSync(p);
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer)');
+    db.prepare('insert into handle values (1, ?), (2, ?), (3, ?)').run('+15551230000', 'Owner@Example.com', 'other@example.com');
+    const ins = db.prepare('insert into message values (?, ?, ?, ?, ?, ?)');
+    const d = 700_000_000_000_000_000n;
+    ins.run(1, null, blob('GA: digest'), 1, 1, d); // GA's own send to the phone handle
+    ins.run(2, 'iphone reply', null, 1, 2, d); // owner's iPhone reply, email handle
+    ins.run(3, 'nope', null, 1, 3, d);
+    db.close();
+    const { rows, scanned } = readSince(p, 0, ['+15551230000', 'owner@example.com'], ['GA: digest']);
+    expect(scanned).toBe(3);
+    expect(rows.map((r) => [r.rowId, r.text, r.from])).toEqual([[2, 'iphone reply', 'owner@example.com']]);
+    expect(readSince(p, 0, '+15551230000').rows.map((r) => r.rowId)).toEqual([1]);
+  });
+});
+
 describe('normalizeHandle', () => {
   it('phone to +digits, email lowercased', () => {
     expect(normalizeHandle('+1 (555) 123-0000')).toBe('+15551230000');

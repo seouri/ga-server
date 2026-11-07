@@ -14,7 +14,7 @@ import { inSleep } from './select.ts';
 import { notifyDir, readSettings, readState } from './settings.ts';
 
 const LABEL = 'org.ga.notify-bridge';
-const USAGE = 'usage: ga notify setup --to <phone or email> [--digest HH:MM] [--sleep HH:MM-HH:MM] | ga notify test | ga notify status | ga notify off';
+const USAGE = 'usage: ga notify setup --to <phone or email> [--also <handle>]... [--digest HH:MM] [--sleep HH:MM-HH:MM] | ga notify test | ga notify status | ga notify off';
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export type NotifyDeps = { cfgPath?: string; plistDir?: string; uid?: number; launchctl?: (args: string[]) => Promise<boolean>; log?: (s: string) => void; now?: () => Date };
@@ -32,12 +32,14 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
   if (cmd === 'setup') {
     const raw = rest.indexOf('--to') < 0 ? undefined : rest[rest.indexOf('--to') + 1];
     const opt = (k: string) => { const i = rest.indexOf(k); return i < 0 ? undefined : rest[i + 1]; };
+    const valid = (v?: string) => v && /^(\+[\d\s\-().]{7,20}|[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+)$/.test(v) && (v.includes('@') || normalizeHandle(v).length >= 8) ? normalizeHandle(v) : undefined;
+    const alsoRaw = rest.flatMap((a, i) => (a === '--also' ? [rest[i + 1]] : [])), also = alsoRaw.map(valid);
     const to = raw && /^(\+[\d\s\-().]{7,20}|[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+)$/.test(raw) ? normalizeHandle(raw) : undefined, digest = opt('--digest') ?? '09:00', sleep = (opt('--sleep') ?? '22:00-07:00').split('-');
-    const known = rest.every((a, i) => a.startsWith('--') ? ['--to', '--digest', '--sleep'].includes(a) : i > 0 && rest[i - 1].startsWith('--'));
+    const known = rest.every((a, i) => a.startsWith('--') ? ['--to', '--also', '--digest', '--sleep'].includes(a) : i > 0 && rest[i - 1].startsWith('--'));
     if (to && !to.includes('@') && to.length < 8) throw new GaError(USAGE); // +, then at least 7 digits
-    if (!to || !known || !HHMM.test(digest) || sleep.length !== 2 || !sleep.every((s) => HHMM.test(s))) throw new GaError(USAGE);
+    if (!to || !known || also.includes(undefined) || !HHMM.test(digest) || sleep.length !== 2 || !sleep.every((s) => HHMM.test(s))) throw new GaError(USAGE);
     if (inSleep(new Date(2000, 0, 1, ...(digest.split(':').map(Number) as [number, number])), sleep as [string, string])) throw new GaError('the digest time is inside the sleep window; choose another time or sleep hours');
-    writeJson(dir, 'settings.json', { to, digestAt: digest, sleep, setupAt: (deps.now?.() ?? new Date()).toISOString() });
+    writeJson(dir, 'settings.json', { to, ...(also.length ? { also: also as string[] } : {}), digestAt: digest, sleep, setupAt: (deps.now?.() ?? new Date()).toISOString() });
     if (!existsSync(join(dir, 'token'))) writeAtomic(join(dir, 'token'), randomBytes(32).toString('hex'), 0o600);
     const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
     const env = `<key>GA_CONFIG</key><string>${esc(cfgPath)}</string>`;
@@ -55,7 +57,7 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
     const s = readSettings(dir);
     if (!s) return log('notify is not set up: ga notify setup --to <handle>');
     const st = readState(dir), running = await launchctl(['print', `${domain}/${LABEL}`]);
-    log([`to: ${s.to}${s.off ? ' (off)' : ''}`, `digest: ${s.digestAt}`, `sleep: ${s.sleep.join('-')}`, `last send: ${st.lastSend ?? 'never'}`, `last error: ${st.lastError ?? 'none'}`, `outbox: ${pending(dir).length}`, `bridge running: ${running ? 'yes' : 'no'}`].join('\n'));
+    log([`to: ${s.to}${s.off ? ' (off)' : ''}`, ...(s.also?.length ? [`also (owner handles): ${s.also.join(', ')}`] : []), `digest: ${s.digestAt}`, `sleep: ${s.sleep.join('-')}`, `last send: ${st.lastSend ?? 'never'}`, `last error: ${st.lastError ?? 'none'}`, `outbox: ${pending(dir).length}`, `bridge running: ${running ? 'yes' : 'no'}`].join('\n'));
   } else if (cmd === 'off' && !rest.length) {
     const s = readSettings(dir);
     if (s) writeJson(dir, 'settings.json', { ...s, off: true });
@@ -66,6 +68,6 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
     const s = readSettings(dir);
     if (!s || s.off) throw new GaError('notify is not set up or is off');
     const { bridge } = await import('./imessage.ts');
-    await bridge({ url: 'http://127.0.0.1:8110', token: readFileSync(join(dir, 'token'), 'utf8').trim(), dbPath: join(homedir(), 'Library', 'Messages', 'chat.db'), owner: s.to, every: 5000, dir });
+    await bridge({ url: 'http://127.0.0.1:8110', token: readFileSync(join(dir, 'token'), 'utf8').trim(), dbPath: join(homedir(), 'Library', 'Messages', 'chat.db'), owner: s.to, also: s.also, every: 5000, dir });
   } else throw new GaError(USAGE);
 }

@@ -32,23 +32,24 @@ export function decodeBody(b: Buffer): string | undefined {
 
 type Row = { rowId: number; from: string; text: string; at: string };
 
-// Owner's replies: any row unless its text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
+// Owner's replies (the send handle plus `also` handles, e.g. the Apple ID email iPhone replies are recorded under): any row unless its text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
 // (owner's Apple ID on this Mac), pending the spike. Other handles are skipped. `scanned` is the highest ROWID looked at, skipped rows included.
-export function readSince(dbPath: string, afterRowId: number, owner: string, recent: string[] = []): { rows: Row[]; scanned: number } {
+export function readSince(dbPath: string, afterRowId: number, owner: string | string[], recent: string[] = []): { rows: Row[]; scanned: number } {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const st = db.prepare('select h.id hid, m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? order by m.ROWID');
     st.setReadBigInts(true); // ns dates exceed 2^53
     const rows = st.all(afterRowId) as { hid: string; r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint }[];
-    const out: Row[] = [], me = normalizeHandle(owner);
+    const out: Row[] = [], mine = [owner].flat().map(normalizeHandle);
     let scanned = afterRowId;
     for (const x of rows) {
       scanned = Math.max(scanned, Number(x.r));
-      if (normalizeHandle(x.hid) !== me) continue;
+      const from = normalizeHandle(x.hid);
+      if (!mine.includes(from)) continue;
       const text = x.t ?? (x.b ? decodeBody(Buffer.from(x.b)) : undefined);
       if (!text || recent.includes(text)) continue; // GA's own sends can come back either way
       const d = Number(x.d), ms = Math.abs(d) > 1e12 ? d / 1e6 : d * 1e3; // ns on recent macOS, seconds before
-      out.push({ rowId: Number(x.r), from: me, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
+      out.push({ rowId: Number(x.r), from, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
     }
     return { rows: out, scanned };
   } finally { db.close(); }
@@ -56,7 +57,7 @@ export function readSince(dbPath: string, afterRowId: number, owner: string, rec
 
 type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }> };
 const BACKOFF = [1, 5, 30].map((m) => m * 60_000); // a failed id is retried after 1, 5, then 30 minutes
-export type BridgeDeps = { url: string; token: string; dbPath: string; owner: string; every: number; dir: string; send?: typeof sendText; fetch?: typeof fetch; now?: () => number };
+export type BridgeDeps = { url: string; token: string; dbPath: string; owner: string; also?: string[]; every: number; dir: string; send?: typeof sendText; fetch?: typeof fetch; now?: () => number };
 
 const maxRowId = (dbPath: string): number => {
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -72,7 +73,7 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   try {
     if (st.lastRowId === undefined) { st.lastRowId = maxRowId(d.dbPath); writeJson(d.dir, 'bridge.json', st); } // first run: do not replay history
     else {
-      const r = readSince(d.dbPath, st.lastRowId, d.owner, st.recent.map((x) => x.text));
+      const r = readSince(d.dbPath, st.lastRowId, [d.owner, ...(d.also ?? [])], st.recent.map((x) => x.text));
       incoming = r.rows; scanned = r.scanned;
     }
   } catch (e) { log(`cannot read Messages database: ${(e as Error).message}; grant Full Disk Access to node (System Settings > Privacy & Security)`); }

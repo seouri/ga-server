@@ -46,7 +46,7 @@ Your text, and the records needed to answer it, go to the AI provider you chose.
 
 ## Setup
 
-1. `ga notify setup --to <+phone or email> [--digest HH:MM] [--sleep HH:MM-HH:MM]`
+1. `ga notify setup --to <+phone or email> [--also <handle>]... [--digest HH:MM] [--sleep HH:MM-HH:MM]`. `--to` is the number your iPhone gets notifications on (sending to your own email Apple ID gives no iPhone notification); add `--also <your Apple ID email>` because iPhone replies to yourself are recorded under it.
 2. In System Settings > Privacy & Security, give `node` (the path the command prints) Full Disk Access (to read your replies) and Automation > Messages (to send).
 3. `docker compose restart ga-gateway`
 4. `ga notify test`, then check your phone.
