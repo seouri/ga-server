@@ -152,3 +152,11 @@ The concept layer gives every record a standard code, so every tool and rule ask
 - How `decide()` ignores GA-added codings.
 - Whether ConceptMap lookups use `$translate` or GA's own lookup.
 - Batch sizes for re-applying.
+
+## Changes during build
+
+- Map entries are written even when not confident: stored `confident: false` and applied as suggested.
+- Validation sends only the code. A code the validator says does not exist is refused and nothing is written.
+- HCPCS is accepted for procedures.
+- Labels corrected: eGFR 62238-1 is CKD-EPI; LDL 2089-1 is unlabelled.
+- The C-CDA source key is the custodian. Backfill recovers it from the stored source file.

@@ -10,6 +10,19 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `he
 - Codex/Hermes: register `node /absolute/path/to/ga-server/src/cli.ts mcp` as a stdio MCP server.
 - GA's Medplum login is an ordinary member of its own `Guardian Angel` project and cannot read Medplum admin records. If a command says "run ga migrate", the install predates that: tell the user to follow docs/operations.md ("GA's own project"); `ga migrate` is CLI only; run it only when the user asks.
 
+## Concept layer
+
+GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED CT, ICD-10-CM, CPT, HCPCS) so one test or drug reads as one concept.
+
+- Ask tools for a concept or test name ("ldl", "a1c"): they match the standard codes, not each source's spelling.
+- A flag "possibly <concept> (suggested mapping)" means GA is unsure of the mapping. Say so.
+- `concepts_to_review`: terms with no standard code (`status` `unmapped`, default) or only a suggested one (`suggested`); optional `type`.
+- `map_concept`: map one term. Call it right after `ga_import` returns `unmapped`, and for terms from `concepts_to_review`. Pass `source`, `name`, `unit`, `key` and `type` as given there.
+- Set `confident: true` only when name, unit and specimen all agree with the code (for LOINC, its long name). Otherwise `false`: the code is applied as suggested.
+- ICD-10-CM codes are dotted and uppercase (`E11.9`).
+- No standard code exists: `equivalence: "unmatched"`. That clears the term from review.
+- A second `map_concept` for the same term replaces the first (corrections).
+
 ## Epic EHI data
 
 `ga import <ehi-folder> [--tz <IANA zone>]` (CLI only; MCP cannot import it) loads an Epic EHI export. Identifiers use `urn:ga-server:id:ehi:<org>`; re-import is a no-op. Where it lives:
