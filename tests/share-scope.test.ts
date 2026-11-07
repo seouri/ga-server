@@ -176,8 +176,12 @@ test('scopedCache shares one load per share until the TTL passes, and drops fail
   await cached(c, share({ tokenHash: 'other' }));
   expect(load).toHaveBeenCalledTimes(4);
   vi.advanceTimersByTime(1001);
+  const del = vi.spyOn(Map.prototype, 'delete');
   await cached(c, share());
   expect(load).toHaveBeenCalledTimes(5);
+  expect(del.mock.calls.map(([k]) => k).sort()).toEqual(['s1:h', 's1:other', 's2:h']); // every expired entry evicted
+  del.mockRestore();
+  vi.useRealTimers();
 });
 
 test('selectScoped: a source-file DocumentReference is dropped and its Binary never followed; an inline note stays', () => {

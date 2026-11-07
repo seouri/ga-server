@@ -191,6 +191,7 @@ export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof lo
     const key = `${share.id}:${share.tokenHash}`;
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < ttlMs) return hit.p;
+    for (const [k, v] of cache) if (Date.now() - v.at >= ttlMs) cache.delete(k); // expired loads hold a whole record each
     const p = load(client, share);
     cache.set(key, { at: Date.now(), p });
     p.catch(() => cache.get(key)?.p === p && cache.delete(key));
