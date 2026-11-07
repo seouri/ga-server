@@ -299,4 +299,22 @@ describe('purpose-built read tools', () => {
       await client.deleteResource('Medication', med.id as string);
     }
   });
+  test('vitals: clinic and home readings by default, Apple daily summaries only with daily', async () => {
+    const cat = (code: string) => [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code }] }];
+    const apple = { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] };
+    const o = (text: string, date: string, extra: Partial<Observation>): Observation =>
+      ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 70, unit: 'kg' }, ...extra });
+    const entry = [
+      o('Body weight', '2025-03-01', { category: cat('vital-signs') }),
+      o('Body weight', '2025-03-01T20:00:00Z', { category: cat('vital-signs'), meta: apple }),
+      o('Steps, daily total (Apple Health)', '2025-03-01', { category: cat('activity'), meta: apple }),
+      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory') }),
+    ].map((resource) => ({ resource, request: { method: 'POST', url: 'Observation' } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const v = await tool('vitals');
+    expect(v.rows.map((r: { setting: string; kind: string }) => [r.setting, r.kind])).toEqual([['home', 'reading'], ['clinic', 'reading']]);
+    expect((await tool('vitals', { daily: true })).rows).toMatchObject([{ name: 'Steps, daily total (Apple Health)', kind: 'daily total', setting: 'home' }]);
+    expect((await tool('vitals', { name: 'weight', until: '2025-02-28' })).rows).toEqual([]);
+    expect(await tool('vitals', { limit: 1 })).toMatchObject({ truncated: true, hint: expect.stringContaining('daily: true') });
+  });
 });

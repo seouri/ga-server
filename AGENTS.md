@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
@@ -33,7 +33,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `la
 
 `ga import <unzipped apple_health_export folder>` (CLI only; no extra args, unzip `export.zip` first). Identifiers use `urn:ga-server:id:apple-health`; tag `src-apple-health`; re-import is a no-op, a newer export updates changed records (its last day is partial).
 
-- Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each.
+- Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each. The `vitals` tool applies the rules below (readings by default, summaries with `daily: true`).
 - Records coded "daily mean" or "daily total" are summaries, not readings. Steps and distance take the largest single source per day.
 - Sleep is one Observation per night (stage components).
 - "Activity rings, daily (Apple Health)" is Apple's own per-day ring totals: components Active energy burned (kcal), Exercise minutes, Stand hours.
