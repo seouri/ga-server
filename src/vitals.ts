@@ -46,7 +46,7 @@ export function pairBloodPressure(obs: Observation[]): Observation[] {
   const used = new Set<Observation>();
   const out = obs.map((o) => {
     const d = o.effectiveDateTime && part(o, '8480-6', SYS) && o.valueQuantity ? dias.get(key(o)) : undefined;
-    if (!d || used.has(d)) return o;
+    if (!d || d === o || used.has(d)) return o;
     used.add(d);
     return { ...o, code: { text: 'Blood pressure' }, valueQuantity: undefined, component: [{ code: { text: 'Systolic' }, valueQuantity: o.valueQuantity }, { code: { text: 'Diastolic' }, valueQuantity: d.valueQuantity }] } as Observation;
   });

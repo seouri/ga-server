@@ -204,3 +204,9 @@ test('no Observation read of a health maintenance check includes Apple Health da
 test('an Epic due date on the birth date is a placeholder, not a date', () => {
   expect(epicPlans([hm('CRCS', '1976-05-21', 'Overdue')], '1976-05-21')[0].due).toBeUndefined();
 });
+
+test('two reminders on the same day: the later save wins', () => {
+  const nn = { ...rem('not-now', 'colorectal', '2026-11-01'), meta: { lastUpdated: '2026-11-01T09:00:00Z' } };
+  const pp = { ...rem('postpone', 'colorectal', '2026-11-01', [{ url: 'urn:ga-server:ext:until', valueDate: '2027-06-01' }]), meta: { lastUpdated: '2026-11-01T15:00:00Z' } };
+  for (const order of [[nn, pp], [pp, nn]]) expect(run([g('colorectal', 'A', 'overdue', '2026-03-01')], epicPlans([]), order)[0].status).toBe('postponed');
+});

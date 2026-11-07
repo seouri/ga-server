@@ -121,7 +121,8 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     const code = b.code?.coding?.[0]?.code;
     const topic = cleanName(text(b.extension?.find((e) => e.url === X.topic)) ?? '').toLowerCase();
     if (!topic || (code !== 'not-now' && code !== 'postpone' && code !== 'dismiss')) continue;
-    if (!newest.has(topic) || (b.created ?? '') > (newest.get(topic)!.created ?? '')) newest.set(topic, b);
+    const when = (x: Basic) => `${x.created ?? ''}|${x.meta?.lastUpdated ?? ''}`; // created is a date: the save time breaks same-day ties
+    if (!newest.has(topic) || when(b) > when(newest.get(topic)!)) newest.set(topic, b);
   }
   for (const i of out) {
     const b = newest.get(i.topic.toLowerCase());

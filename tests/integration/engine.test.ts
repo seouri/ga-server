@@ -191,6 +191,17 @@ test('same day, different times and different values are separate readings, not 
   expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 0, created: 1 });
 });
 
+test('same day, different times: the same number in another unit spelling, or the same BP panel, is still a possible duplicate', async () => {
+  const a = chol(uid('obs'), 231, '2023-10-04T08:00:00Z');
+  const b = { ...chol(uid('obs'), 231, '2023-10-04T14:00:00Z'), valueQuantity: { value: 231, unit: 'mg/dl' } };
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 1 });
+  const bp = (id: string, t: string) => ({ resourceType: 'Observation', id, identifier: src(id), status: 'final', subject: me(), effectiveDateTime: t,
+    code: { coding: [{ system: 'http://loinc.org', code: '85354-9' }] }, component: [8480, 8462].map((c, i) => ({ code: { coding: [{ system: 'http://loinc.org', code: `${c}-${c === 8480 ? 6 : 4}` }] }, valueQuantity: { value: i ? 80 : 120, unit: 'mm[Hg]' } })) }) as Observation;
+  await importResources(client, [bp(uid('obs'), '2023-10-05T08:00:00Z')], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [bp(uid('obs'), '2023-10-05T08:01:00Z')], ccda('2024-02-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 1 });
+});
+
 test('agent value equal to an importer record only adds its identifier; the hospital body stays', async () => {
   const a = { ...chol(uid('obs'), 240, '2023-11-01'), interpretation: [{ text: 'hospital' }] };
   await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
