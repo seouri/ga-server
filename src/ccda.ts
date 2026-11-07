@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { type GaConfig, GaError } from './config.ts';
-import { importResources, type ImportReport } from './engine.ts';
+import { addReport, importResources, type ImportReport } from './engine.ts';
 import { storeDocument } from './document.ts';
 
 export async function convertCcda(xml: string, converterUrl: string): Promise<Resource[]> {
@@ -174,7 +174,11 @@ const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', 
 export const custodian = (xml: string): string | undefined => {
   const body = /<(?:\w+:)?representedCustodianOrganization\b[^>]*>([\s\S]*?)<\/(?:\w+:)?representedCustodianOrganization>/.exec(xml)?.[1];
   const name = body && /<(?:\w+:)?name\b[^>]*>([^<]*)<\/(?:\w+:)?name>/.exec(body)?.[1];
-  return name?.replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (m, d, h, n) => (d ? String.fromCodePoint(+d) : h ? String.fromCodePoint(parseInt(h, 16)) : (ENTITY[n] ?? m))).trim() || undefined;
+  try {
+    return name?.replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (m, d, h, n) => (d ? String.fromCodePoint(+d) : h ? String.fromCodePoint(parseInt(h, 16)) : (ENTITY[n] ?? m))).trim() || undefined;
+  } catch {
+    return undefined; // a code point out of range: the folder name keys the source instead
+  }
 };
 
 // The header effectiveTime precedes any body effectiveTime in CDA, so the first match is the document's.
@@ -201,13 +205,13 @@ export function ccdaFiles(path: string): string[] {
 }
 
 export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId): Promise<ImportReport> {
-  const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
+  const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   for (const file of ccdaFiles(path)) {
     const xml = readFileSync(file, 'utf8');
     const resources = await convertCcda(xml, cfg.converterUrl);
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
     const r = await importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
-    for (const k of Object.keys(total) as Exclude<keyof ImportReport, 'seen' | 'byType'>[]) total[k] += r[k];
+    addReport(total, r);
   }
   return total;
 }

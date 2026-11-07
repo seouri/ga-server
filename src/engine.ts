@@ -1,5 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import { addUnmapped, carryConcept, codeRecord, countUnmapped, LEARNS, onSource, stripConcept, type Unmapped } from './concept-apply.ts';
+import { loadMaps, lookup, type MapEntry, type Maps, upsertEntry } from './conceptmap.ts';
 import { GaError } from './config.ts';
 import { APPLE, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
@@ -15,7 +17,14 @@ export type ImportReport = {
   invalid: number;
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
+  unmapped: Unmapped[]; // in-scope terms of this batch with no standard code, for review (src/concept-apply.ts)
 };
+const COUNTS = ['created', 'updated', 'skipped', 'merged', 'conflicts', 'possibleDuplicates', 'invalid'] as const;
+// Adds one importResources report into a running total (several files or batches of one import).
+export function addReport(total: ImportReport, r: ImportReport): void {
+  for (const k of COUNTS) total[k] += r[k];
+  addUnmapped(total.unmapped, r.unmapped);
+}
 type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
@@ -60,10 +69,10 @@ const canon = (x: unknown) =>
     v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
   );
 
-// Equality ignores id, meta, our bookkeeping extensions and identifiers; identifiers only need incoming ⊆ existing,
-// because existing accumulates extra identifiers from merges.
+// Equality ignores id, meta, our bookkeeping extensions, identifiers and GA-added codings; identifiers only need
+// incoming ⊆ existing, because existing accumulates extra identifiers from merges.
 function body(r: R): unknown {
-  const { id: _i, meta: _m, identifier: _id, extension, ...rest } = r;
+  const { id: _i, meta: _m, identifier: _id, extension, ...rest } = stripConcept(r);
   const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN);
   return ext.length ? { ...rest, extension: ext } : rest;
 }
@@ -104,6 +113,9 @@ function merge(ex: unknown, inc: unknown): unknown {
 }
 export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
   if (s.kind !== 'ehi' && s.kind !== 'smart') return incomingRes;
+  return onSource(existing, incomingRes, fillSource);
+}
+function fillSource<T extends Resource>(existing: T, incomingRes: T): T {
   // R21: a text-only medication never replaces a coded one (a Medication reference, or a concept with codings).
   const ex = existing as unknown as Record<string, { coding?: unknown[] } | undefined>;
   const med = (incomingRes as unknown as Record<string, { coding?: unknown[] } | undefined>).medicationCodeableConcept;
@@ -220,7 +232,8 @@ export function sameValue(a: Observation, b: Observation): boolean {
 }
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
-async function unionUpdate(client: MedplumClient, existing: R, incoming: R): Promise<void> {
+async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promise<void> {
+  const incoming = carryConcept(existing, coded);
   const ids = idList(existing);
   for (const i of idList(incoming)) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
   const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
@@ -245,6 +258,7 @@ export async function importResources(
     created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0,
     ...(source.seenAt && { seen: 0 }),
     ...(source.kind === 'smart' && { byType: {} }),
+    unmapped: [],
   };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
@@ -325,6 +339,26 @@ export async function importResources(
     return { dups: source.kind === 'ccda' ? [] : found };
   };
 
+  // Concepts: the batch's own codes teach the source maps first, so learning doesn't depend on record order. An entry is
+  // only added, never replaced: a source never overrides an agent's correction, and conflicting batches can't flip-flop.
+  // An install whose access policy predates ConceptMap (ga setup re-run) still imports, uncoded.
+  let maps = await loadMaps(client).catch((e: Error): Maps => {
+    console.error(`concept maps not read: ${e.message}`);
+    return new Map();
+  });
+  if (LEARNS.has(source.kind)) {
+    const learned = new Map<string, { source: string; entry: MapEntry }>();
+    for (const r of ordered) {
+      const l = codeRecord(r, source, maps).learn;
+      if (l && !lookup(maps, l.source, l.entry.key) && !learned.has(`${l.source}\n${l.entry.key}`)) learned.set(`${l.source}\n${l.entry.key}`, l);
+    }
+    for (const l of learned.values()) {
+      // Serially (upsertEntry is a read-modify-write); a failed map write never fails the import.
+      await upsertEntry(client, l.source, l.entry).catch((e: Error) => console.error(`concept map ${l.source} not updated: ${e.message}`));
+    }
+    if (learned.size) maps = await loadMaps(client).catch(() => maps);
+  }
+
   const idMap = new Map<string, string>();
   for (const src of ordered) {
     const before = { ...report };
@@ -336,6 +370,10 @@ export async function importResources(
     const incoming = stamp(r, source, ident) as R;
     delete incoming.id;
     const type = incoming.resourceType;
+    // Identity and matching use the record as the source sent it; what is written carries GA's coding.
+    const concept = codeRecord(incoming, source, maps);
+    const coded = concept.resource as R;
+    if (concept.status === 'unmapped') countUnmapped(report.unmapped, coded, source);
     // Searches stay outside the try: only a write's validation failure is tolerated.
     // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
     const field = COMPARTMENT[type];
@@ -362,7 +400,7 @@ export async function importResources(
         return;
       }
       const bases = new Set(Object.keys(ex).map(choiceBase));
-      const add = Object.entries(incoming).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
+      const add = Object.entries(coded).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
       const have = new Set(idList(ex).map(idKey));
       const ids = idList(incoming).filter((i) => !have.has(idKey(i)));
       const added = add.length + ids.length > 0;
@@ -380,7 +418,7 @@ export async function importResources(
       let target: Resource;
       if (existing) {
         target = existing;
-        const filled = fillFrom(existing, incoming, source);
+        const filled = fillFrom(existing, coded, source);
         const d = decide(existing, filled, author);
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
@@ -409,7 +447,7 @@ export async function importResources(
         const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
-          const filled = fillFrom(same, incoming, source);
+          const filled = fillFrom(same, coded, source);
           const d = decide(same, filled, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
@@ -425,7 +463,7 @@ export async function importResources(
         } else if (matches.length) {
           const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
-            withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+            withTag({ ...coded, extension: [...(coded.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
@@ -433,7 +471,7 @@ export async function importResources(
           }
           report.possibleDuplicates++;
         } else {
-          target = await client.createResource(incoming as Resource);
+          target = await client.createResource(coded as Resource);
           report.created++;
         }
       }

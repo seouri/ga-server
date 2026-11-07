@@ -16,7 +16,7 @@ import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
 import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 // Synthetic fixtures sharing order 9000001 (C-CDA organizer id under an Epic order root, org number 99).
 const CCDA = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
@@ -35,6 +35,7 @@ beforeAll(async () => {
 
 // Same cleanup as ccda.test.ts: stable identifiers are global, delete what the fixture wrote (plus the patient compartment).
 afterAll(async () => {
+  await cleanupTestMaps(client);
   for (const r of await convertCcda(readFileSync(CCDA, 'utf8'), cfg.converterUrl)) {
     const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
 const fileHash = createHash('sha256').update(readFileSync(FIXTURE)).digest('hex');
@@ -24,6 +24,7 @@ beforeAll(async () => {
 // Stable identifiers are deterministic and identifier search is global: delete everything the fixture produced,
 // including Practitioner/Organization/Medication and the Binary, which $everything doesn't reach.
 afterAll(async () => {
+  await cleanupTestMaps(client);
   for (const r of await convertCcda(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
     const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
