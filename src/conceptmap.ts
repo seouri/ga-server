@@ -1,7 +1,7 @@
-import { basename, dirname } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { conceptMapTranslate, getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { CodeableConcept, Coding, ConceptMap, ConceptMapGroup, Observation, Resource } from '@medplum/fhirtypes';
+import type { CodeableConcept, Coding, ConceptMap, ConceptMapGroup, ConceptMapGroupElementTarget, Observation, Resource } from '@medplum/fhirtypes';
 import { type SourceInfo, TAG } from './identity.ts';
 import { SUMMARY } from './vitals.ts';
 
@@ -30,8 +30,9 @@ export function inScope(r: Resource): boolean {
   return hasCode(o, 'laboratory') || hasCode(o, 'vital-signs') || (!o.category?.length && !!o.meta?.tag?.some((t) => t.system === TAG && t.code === 'extracted-by-llm'));
 }
 
-// Labs and vitals: name|unit(|specimen), normalised. Medications: the name as written. Others: normalised name.
-// Unit and specimen stay in the key, so a urine glucose is never answered by the serum glucose entry.
+// Labs and vitals: name|unit(|specimen), normalised. Other types: Type|name (medications as written, others normalised).
+// Unit and specimen stay in the key, so a urine glucose is never answered by the serum glucose entry; the type keeps a
+// Condition "Influenza" (ICD-10) from coding an Immunization "Influenza". norm lowercases, so a Type| prefix never meets a lab key.
 export function termKey(r: Resource): string | undefined {
   const name = (c?: CodeableConcept) => c?.text ?? c?.coding?.find((x) => x.display)?.display;
   if (r.resourceType === 'Observation') {
@@ -42,18 +43,23 @@ export function termKey(r: Resource): string | undefined {
   }
   if (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') {
     const m = r as { medicationCodeableConcept?: CodeableConcept; medicationReference?: { display?: string } };
-    return (name(m.medicationCodeableConcept) ?? m.medicationReference?.display)?.trim() || undefined;
+    const n = (name(m.medicationCodeableConcept) ?? m.medicationReference?.display)?.trim();
+    return n ? `${r.resourceType}|${n}` : undefined;
   }
   const c = r as { code?: CodeableConcept; vaccineCode?: CodeableConcept };
-  return norm(name(c.code ?? c.vaccineCode)) || undefined;
+  const n = norm(name(c.code ?? c.vaccineCode));
+  return n ? `${r.resourceType}|${n}` : undefined;
 }
+
+// A map key written before keys carried the record type (non-Observation keys had no '|').
+export const untyped = (key: string): boolean => !key.includes('|');
 
 // C-CDA identifiers carry no organisation (system is the fixed urn:ga-server:id:ccda), so the key uses the document
 // custodian name (SourceInfo.org, set by the C-CDA importer), else the export folder name.
 export function sourceKey(src: SourceInfo, r: Resource): string {
   if (src.kind === 'pdf' || src.kind === 'apple-health') return src.kind;
   if (src.kind === 'ccda') {
-    const org = norm(src.org) || norm(basename(dirname(src.file)));
+    const org = norm(src.org) || (src.file && norm(basename(dirname(resolve(src.file))))); // resolve: './doc.xml' gets its real folder
     if (!org) throw new Error('no organisation for a C-CDA source'); // never one catch-all map
     return `ccda:${org}`;
   }
@@ -91,15 +97,21 @@ export function lookup(maps: Maps, source: string, key: string): MapEntry | unde
 }
 
 // Creates or updates the source's map in one read-modify-write: an agent entry replaces any earlier entry for its key;
-// a learned (by 'source') entry is only added, never replacing one, judged on the map as just read. One group per target system.
+// a learned (by 'source') entry is only added, or demotes a confident source-learned entry to confident:false (the
+// source now codes the term another way), never touching an agent entry; judged on the map as just read. One group per target system.
 // Versioned: If-Match on update, If-None-Exist on create; a write that lost a race re-reads and retries once, so concurrent
 // writers (an import and an agent's map_concept) never drop each other's entries. Returns the written map (undefined: nothing to add).
 export async function upsertEntries(client: MedplumClient, source: string, entries: MapEntry[], retry = true): Promise<ConceptMap | undefined> {
   const url = mapUrl(source);
   const map: ConceptMap = (await client.searchOne('ConceptMap', { url }, { cache: 'no-cache' })) ?? { resourceType: 'ConceptMap', status: 'active', url, meta: { tag: [{ system: TAG, code: MAP_TAG }] } };
   let groups: ConceptMapGroup[] = map.group ?? [];
-  const has = (key: string) => groups.some((g) => g.element?.some((e) => e.code === key));
-  const todo = entries.filter((e) => e.by !== 'source' || !has(e.key));
+  const cur = (key: string) => groups.flatMap((g) => g.element?.filter((e) => e.code === key).flatMap((e) => e.target ?? []) ?? [])[0];
+  const ext = (t: ConceptMapGroupElementTarget, url: string) => t.extension?.find((x) => x.url === url);
+  const todo = entries.filter((e) => {
+    if (e.by !== 'source') return true;
+    const t = cur(e.key);
+    return !t || (!e.confident && ext(t, BY)?.valueCode !== 'agent' && ext(t, CONFIDENT)?.valueBoolean !== false);
+  });
   if (!todo.length) return undefined;
   for (const entry of todo) {
     const target = entry.target?.code ? entry.target.system : UNMATCHED;
@@ -133,3 +145,23 @@ export async function upsertEntries(client: MedplumClient, source: string, entri
 }
 
 export const upsertEntry = (client: MedplumClient, source: string, entry: MapEntry): Promise<ConceptMap | undefined> => upsertEntries(client, source, [entry]);
+
+// Rewrites the keys of one map in a versioned write: rename returns the new key(s) of an element, [] to drop it, or
+// undefined to keep it. A new key already in the map keeps that entry (it is newer). Returns how many elements changed.
+export async function rekey(client: MedplumClient, map: ConceptMap, rename: (key: string) => string[] | undefined): Promise<number> {
+  let n = 0;
+  const all = new Set(map.group?.flatMap((g) => g.element?.map((e) => e.code) ?? []));
+  const group = (map.group ?? []).map((g) => ({
+    ...g,
+    element: (g.element ?? []).flatMap((e) => {
+      const to = rename(e.code as string);
+      if (!to) return [e];
+      n++;
+      return to.filter((k) => !all.has(k)).map((k) => (all.add(k), { ...e, code: k }));
+    }),
+  })).filter((g) => g.element.length);
+  if (!n) return 0;
+  cache = undefined;
+  await client.updateResource({ ...map, group }, { headers: { 'If-Match': `W/"${map.meta?.versionId}"` } });
+  return n;
+}

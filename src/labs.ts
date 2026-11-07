@@ -1,8 +1,8 @@
 // lab_results: the patient's lab Observations as compact rows, encoding what GA knows about where labs live.
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@medplum/fhirtypes';
-import { CONCEPT_SRC } from './concept-apply.ts';
+import { trusted } from './concept-apply.ts';
 import { termKey } from './conceptmap.ts';
 import { type Concept, codesFor, concepts, conceptNamed, conceptOf, LOINC } from './concepts.ts';
 import { GaError } from './config.ts';
@@ -24,9 +24,9 @@ export function flagsOf(meta?: { tag?: { code?: string }[] }): string[] | undefi
 // The record's concept and member label. suggested: only through a GA-added coding on a record tagged concept-suggested.
 function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
   const codings = o.code?.coding ?? [];
-  const unsure = o.meta?.tag?.some((t) => t.system === TAG && t.code === 'concept-suggested');
-  const sure = conceptOf(unsure ? codings.filter((c) => !c.extension?.some((e) => e.url === CONCEPT_SRC)) : codings);
-  const guess = !sure && unsure ? conceptOf(codings) : undefined;
+  const mine = trusted(o, codings);
+  const sure = conceptOf(mine);
+  const guess = !sure && mine.length < codings.length ? conceptOf(codings) : undefined;
   return sure ?? (guess && { ...guess, suggested: true });
 }
 
@@ -88,6 +88,17 @@ export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; tot
 }
 
 const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOINC)?.code;
+// The sources a stored result came from, as the importer stamped them: src-<kind> tags, with the organisation of
+// ehi/smart identifiers and the C-CDA file's folder. shortcut: stricter than the concept map's source key (several C-CDA
+// folders of one custodian count apart), which only ever stops a join.
+function sourcesOf(o: Observation): string[] {
+  const kinds = (o.meta?.tag ?? []).flatMap((t) => (t.system === TAG && t.code?.startsWith('src-') ? [t.code.slice(4)] : []));
+  const ids = [o.identifier ?? []].flat().map((i) => i.system ?? '');
+  return kinds.flatMap((k) => {
+    if (k === 'ehi' || k === 'smart') return ids.filter((s) => s.startsWith(`urn:ga-server:id:${k}:`));
+    return [k === 'ccda' ? `ccda:${dirname(o.meta?.source ?? '')}` : k];
+  });
+}
 const norm = (s = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
 const num = (o: Observation) => (o.valueQuantity?.comparator ? undefined : o.valueQuantity?.value);
@@ -109,8 +120,9 @@ export type LabTrend = {
 };
 
 // One entry per test: a concept (any member code, its own or GA-added and not suggested) is one group, labelled by the member (method);
-// others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen) when
-// there is exactly one. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
+// others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen)
+// from the same source when there is exactly one; never across sources (a PDF "Glucose" is not the hospital's), never one its
+// source map calls unmatched. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
 export function summarizeLabs(obs: Observation[]): LabTrend[] {
   const rows = obs.map((o) => {
     const m = conceptMatch(o);
@@ -118,13 +130,18 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
   });
   const keyOf = (x: (typeof rows)[number]) => (x.m ? `concept:${x.m.concept.name}` : x.guess ? undefined : loincOf(x.o));
   const twins = new Map<string, Set<string>>();
+  const ids = (o: Observation) => {
+    const t = termKey(o);
+    return t ? sourcesOf(o).map((s) => `${s}\n${t}`) : [];
+  };
   for (const x of rows) {
-    const k = keyOf(x), t = termKey(x.o);
-    if (k && t) twins.set(t, (twins.get(t) ?? new Set()).add(k));
+    const k = keyOf(x);
+    if (k) for (const id of ids(x.o)) twins.set(id, (twins.get(id) ?? new Set()).add(k));
   }
+  const unmatched = (o: Observation) => !!o.meta?.tag?.some((t) => t.system === TAG && t.code === 'concept-unmatched');
   const groups = new Map<string, typeof rows>();
   for (const x of rows) {
-    const twin = x.guess ? undefined : twins.get(termKey(x.o) ?? '');
+    const twin = x.guess || unmatched(x.o) ? undefined : new Set(ids(x.o).flatMap((id) => [...(twins.get(id) ?? [])]));
     const k = keyOf(x) ?? (twin?.size === 1 ? [...twin][0] : norm(x.r.name));
     if (!k) continue; // nothing to group by
     groups.set(k, [...(groups.get(k) ?? []), x]);

@@ -1,6 +1,7 @@
+import { basename } from 'node:path';
 import type { Observation } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
-import { inScope, sourceKey, termKey } from '../src/conceptmap.ts';
+import { inScope, sourceKey, termKey, untyped } from '../src/conceptmap.ts';
 import type { SourceInfo } from '../src/identity.ts';
 
 const lab = (text: string, unit: string, specimen?: string): Observation => ({
@@ -22,9 +23,12 @@ test('termKey keeps unit and specimen apart and ignores case, spacing and punctu
   expect(ldl).not.toBe(urine);
 });
 
-test('termKey: medications keep the name as written, other kinds are name only', () => {
-  expect(termKey({ resourceType: 'MedicationStatement', status: 'active', subject: {}, medicationCodeableConcept: { text: ' Lisinopril 10 MG ' } })).toBe('Lisinopril 10 MG');
-  expect(termKey({ resourceType: 'Condition', subject: {}, code: { text: 'Essential  Hypertension' } })).toBe('essential hypertension');
+test('termKey: other types are Type|name, medications as written', () => {
+  expect(termKey({ resourceType: 'MedicationStatement', status: 'active', subject: {}, medicationCodeableConcept: { text: ' Lisinopril 10 MG ' } })).toBe('MedicationStatement|Lisinopril 10 MG');
+  expect(termKey({ resourceType: 'Condition', subject: {}, code: { text: 'Essential  Hypertension' } })).toBe('Condition|essential hypertension');
+  expect(termKey({ resourceType: 'Immunization', status: 'completed', patient: {}, vaccineCode: { text: 'Influenza' } })).toBe('Immunization|influenza');
+  expect(untyped('influenza')).toBe(true);
+  expect(untyped('Immunization|influenza') || untyped('glucose|mg/dl')).toBe(false);
   expect(termKey({ resourceType: 'Observation', status: 'final', code: {} })).toBeUndefined();
 });
 
@@ -52,5 +56,6 @@ test('sourceKey per kind', () => {
   expect(() => sourceKey(src('ehi'), lab('a', 'b'))).toThrow();
   expect(sourceKey(src('ccda', { org: 'Synthetic Clinic' }), lab('a', 'b'))).toBe('ccda:synthetic clinic');
   expect(sourceKey(src('ccda', { file: '/in/Acme Export/doc1.xml' }), lab('a', 'b'))).toBe('ccda:acme export');
-  expect(() => sourceKey(src('ccda', { file: 'doc1.xml' }), lab('a', 'b'))).toThrow(); // no organisation: no catch-all map
+  expect(sourceKey(src('ccda', { file: './doc1.xml' }), lab('a', 'b'))).toBe(`ccda:${basename(process.cwd()).toLowerCase().replace(/[^\p{L}\p{N}%/]+/gu, ' ').trim()}`); // relative: its real folder
+  expect(() => sourceKey(src('ccda', { file: '/doc1.xml' }), lab('a', 'b'))).toThrow(); // no organisation: no catch-all map
 });

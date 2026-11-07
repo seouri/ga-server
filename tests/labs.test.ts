@@ -54,7 +54,7 @@ describe('labResults', () => {
 
 describe('summarizeLabs', () => {
   const lab = (text: string, date: string | undefined, value: number, extra: Partial<Observation> = {}): Observation =>
-    ({ resourceType: 'Observation', status: 'final', code: { text }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' }, ...extra });
+    ({ resourceType: 'Observation', status: 'final', code: { text }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }] }, ...extra });
   const loinc = { coding: [{ system: 'urn:local', code: 'L1' }, { system: 'http://loinc.org', code: '13457-7' }] };
   it('groups by LOINC, else by case/space-insensitive name; an uncoded result joins the LOINC group of its name', () => {
     const s = summarizeLabs([
@@ -101,7 +101,7 @@ describe('concepts: one test under different names and codes', () => {
   const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
   const ga = (code: string) => ({ system: L, code, extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] });
   const lab = (text: string, date: string, loinc?: string, extra: Partial<Observation> = {}): Observation =>
-    ({ resourceType: 'Observation', id: `${text}${date}`, status: 'final', code: { text, ...(loinc && { coding: [{ system: L, code: loinc }] }) }, effectiveDateTime: date, valueQuantity: { value: 1, unit: 'mg/dL' }, ...extra });
+    ({ resourceType: 'Observation', id: `${text}${date}`, status: 'final', code: { text, ...(loinc && { coding: [{ system: L, code: loinc }] }) }, effectiveDateTime: date, valueQuantity: { value: 1, unit: 'mg/dL' }, meta: tag('src-pdf'), ...extra });
   const mapped = (text: string, date: string, code: string, suggested = false): Observation =>
     lab(text, date, undefined, { code: { text, coding: [ga(code)] }, meta: tag('extracted-by-llm', ...(suggested ? ['concept-suggested'] : [])) });
   const hospital = lab('LOW DENSITY LIPOPROTEIN CHOL', '2022-01-01', '13457-7');
@@ -131,6 +131,17 @@ describe('concepts: one test under different names and codes', () => {
       ['A1c', 'hemoglobin  a1c', 2, undefined], ['Glucose', 'Glucose', 1, undefined], ['LDL', 'LDL direct', 2, 'direct'], ['TSH', 'TSH', 1, undefined],
     ]);
     expect(s.filter((x) => !x.test).map((x) => [x.name, x.count])).toEqual(expect.arrayContaining([['Glucose', 1], ['Glucose', 1], ['TSH receptor antibody', 1], ['Thyrotropin receptor Ab', 1], ['LDL-P', 1]]));
+  });
+  it('an uncoded result joins a coded twin only from its own source, and never when its map says unmatched', () => {
+    const ehi = (o: Observation): Observation => ({ ...o, identifier: [{ system: 'urn:ga-server:id:ehi:hosp', value: 'X|1' }], meta: tag('src-ehi') });
+    const pdfGlucose = { ...lab('Glucose', '2025-06-01'), valueQuantity: { value: 300, unit: 'mg/dL' } };
+    const s = summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), pdfGlucose]);
+    expect(keyLabs(s).map((x) => [x.test, x.latest.date, x.count])).toEqual([['Glucose', '2024-01-01', 1]]);
+    expect(s.find((x) => !x.test)?.latest.value).toBe(300);
+    // the same source: joins
+    expect(keyLabs(summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), ehi(lab('Glucose', '2025-06-01'))]))[0].count).toBe(2);
+    const unmatched = { ...ehi(lab('Glucose', '2025-06-01')), meta: tag('src-ehi', 'concept-unmatched') };
+    expect(keyLabs(summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), unmatched]))[0].count).toBe(1);
   });
   it('eGFR: race-free and race-based stay one trend, each value with its method', () => {
     const [e] = summarizeLabs([lab('eGFR', '2024-01-01', '98979-8'), lab('eGFR non-Afr. American', '2021-01-01', '48642-3')]);

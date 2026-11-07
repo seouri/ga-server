@@ -66,7 +66,9 @@ test('inexact, or not confident, is suggested; an agent entry is marked agent; u
   expect(agent.status).toBe('suggested');
   expect(codings(agent.resource)[0].extension).toEqual([{ url: CONCEPT_SRC, valueCode: 'agent' }]);
   const unmatched = codeRecord(r, EHI, new Map([['ehi:syn', { resourceType: 'ConceptMap', status: 'active', url: 'u', group: [{ source: 'urn:ga-server:termkey', target: 'urn:ga-server:unmatched', element: [{ code: 'ldl|mg/dl', target: [{ equivalence: 'unmatched' }] }] }] } as ConceptMap]]));
-  expect(unmatched).toEqual({ resource: r, status: 'excluded' });
+  expect(unmatched.status).toBe('excluded');
+  expect(tags(unmatched.resource)).toEqual(['concept-unmatched']); // out of review, and never a lab twin
+  expect(stripConcept(unmatched.resource)).toEqual({ ...r, meta: { tag: [] } });
 });
 
 test('spec tables: clinic vitals and vaccine names', () => {
@@ -112,7 +114,7 @@ test('EHI fill: a text-only problem with a GA coding never replaces the C-CDA SN
   const snomed = { system: 'http://snomed.info/sct', code: '38341003' };
   const existing = { ...withId({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { coding: [snomed], text: 'Hypertension' } } as Condition), id: 'e1' };
   const incoming = codeRecord(withId({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { text: 'Hypertension' } } as Condition), EHI,
-    new Map([['ehi:syn', { resourceType: 'ConceptMap', status: 'active', url: 'u', group: [{ source: 'urn:ga-server:termkey', target: 'http://hl7.org/fhir/sid/icd-10-cm', element: [{ code: 'hypertension', target: [{ code: 'I10', equivalence: 'equivalent' }] }] }] } as ConceptMap]])).resource;
+    new Map([['ehi:syn', { resourceType: 'ConceptMap', status: 'active', url: 'u', group: [{ source: 'urn:ga-server:termkey', target: 'http://hl7.org/fhir/sid/icd-10-cm', element: [{ code: 'Condition|hypertension', target: [{ code: 'I10', equivalence: 'equivalent' }] }] }] } as ConceptMap]])).resource;
   const filled = fillFrom(existing, incoming, EHI) as Condition;
   expect(filled.code?.coding).toEqual([snomed]); // a source code kept: no GA coding, no concept tag
   expect(filled.meta?.tag ?? []).toEqual([]);
@@ -147,4 +149,38 @@ test('addUnmapped merges review lines on source, type and term key', () => {
   const list: Unmapped[] = [];
   addUnmapped(list, [u('LDL chol.', 'ldl chol|mg/dl'), u('ldl  chol', 'ldl chol|mg/dl', 2), u('LDL chol', 'ldl chol|mg/dl|urine')]);
   expect(list).toEqual([u('LDL chol.', 'ldl chol|mg/dl', 3), u('LDL chol', 'ldl chol|mg/dl|urine')]);
+});
+
+const icd = (key: string, code: string): Maps => new Map([['ehi:syn', { resourceType: 'ConceptMap', status: 'active', url: 'u', group: [{ source: 'urn:ga-server:termkey', target: 'http://hl7.org/fhir/sid/icd-10-cm', element: [{ code: key, target: [{ code, equivalence: 'equivalent' }] }] }] } as ConceptMap]]);
+
+test('a Condition and an Immunization of the same name from one source stay apart: keys carry the type, targets the type vocabulary', () => {
+  const cond = withId({ resourceType: 'Condition', subject: {}, code: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'J11.1' }], text: 'Influenza' } } as Condition);
+  const learned = learnable([cond], EHI, none).get('ehi:syn');
+  expect(learned?.map((e) => e.key)).toEqual(['Condition|influenza']);
+  const maps = icd('Condition|influenza', 'J11.1');
+  const imm = withId({ resourceType: 'Immunization', status: 'completed', patient: {}, vaccineCode: { text: 'Influenza' } } as Immunization);
+  const out = codeRecord(imm, EHI, maps);
+  expect(out.status).toBe('unmapped');
+  expect((out.resource as Immunization).vaccineCode.coding).toBeUndefined();
+  // a legacy untyped entry, or a typed one whose system the type doesn't take, codes nothing
+  expect(codeRecord(imm, EHI, icd('influenza', 'J11.1')).status).toBe('unmapped');
+  expect(codeRecord(imm, EHI, icd('Immunization|influenza', 'J11.1')).status).toBe('unmapped');
+  expect(codeRecord(withId({ resourceType: 'Condition', subject: {}, code: { text: 'Influenza' } } as Condition), EHI, maps).status).toBe('source-map');
+});
+
+test('a CVX coding under its OID is the source code, learned under the CVX system', () => {
+  const imm = withId({ resourceType: 'Immunization', status: 'completed', patient: {}, vaccineCode: { coding: [{ system: 'urn:oid:2.16.840.1.113883.12.292', code: '187' }], text: 'Shingrix' } } as Immunization);
+  const out = codeRecord(imm, EHI, none);
+  expect(out.status).toBe('source');
+  expect(out.learn?.entry.target).toEqual({ system: 'http://hl7.org/fhir/sid/cvx', code: '187' });
+});
+
+test('learner: a source now coding a source-learned term another way demotes the entry to confident:false; an agent entry is left', () => {
+  const ldl = (code: string) => withId(lab({ coding: [{ system: LOINC, code }], text: 'LDL' }));
+  const got = learnable([ldl('18262-6')], EHI, map('ehi:syn', 'ldl|mg/dl', '13457-7', 'equivalent'));
+  expect(got.get('ehi:syn')).toEqual([{ key: 'ldl|mg/dl', target: { system: LOINC, code: '13457-7' }, equivalence: 'equivalent', confident: false, by: 'source' }]);
+  expect(learnable([ldl('13457-7')], EHI, map('ehi:syn', 'ldl|mg/dl', '13457-7', 'equivalent')).size).toBe(0); // agrees
+  expect(learnable([ldl('18262-6')], EHI, map('ehi:syn', 'ldl|mg/dl', '13457-7', 'equivalent', false)).size).toBe(0); // already demoted
+  // demoted: uncoded copies come out suggested
+  expect(codeRecord(withId(lab({ text: 'LDL' })), EHI, map('ehi:syn', 'ldl|mg/dl', '13457-7', 'equivalent', false)).status).toBe('suggested');
 });
