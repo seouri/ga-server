@@ -6,7 +6,7 @@ import { basename } from 'node:path';
 import { codeRecord, countUnmapped, learner, TARGET, type Unmapped } from './concept-apply.ts';
 import { custodian } from './ccda.ts';
 import { GaError } from './config.ts';
-import { loadMaps, lookup, type Maps, rekey, sourceKey, termKey, untyped, upsertEntries } from './conceptmap.ts';
+import { loadMaps, lookup, type Maps, sourceKey, termKey, upsertEntries } from './conceptmap.ts';
 import { COMPARTMENT } from './engine.ts';
 import { effective, type SourceInfo, TAG } from './identity.ts';
 
@@ -152,53 +152,6 @@ export async function reviewList(client: MedplumClient, patientId: string, statu
     }
   }
   return rows.sort((a, b) => b.count - a.count).map(({ dates, ...u }) => ({ ...u, examples: [...dates].sort().reverse().slice(0, 3) }));
-}
-
-// One-off: map entries written before keys carried the record type (`ga concepts apply --migrate-keys`). An entry's type comes
-// from its target system when only one kind of record takes it (CVX: Immunization, ICD-10-CM: Condition, CPT/HCPCS: Procedure,
-// RxNorm: both medication types); otherwise (SNOMED CT, unmatched) from which types of that source carry the term. Still
-// ambiguous: dropped, so its records re-enter review. Idempotent: typed keys are left. Run applyAll after it.
-export async function migrateKeys(client: MedplumClient, patientId: string): Promise<{ maps: number; entries: number }> {
-  const maps = await loadMaps(client, true);
-  const infoOf = sourceResolver(client, patientId, () => maps);
-  const types = TYPES.filter((t) => t !== 'Observation');
-  const kind = (t: string) => (t.startsWith('Medication') ? 'Medication' : t); // RxNorm fits both medication types
-  let carried: Set<string> | undefined; // source \n typed term key of every stored record, read once when needed
-  const carriers = async () => {
-    if (carried) return carried;
-    carried = new Set();
-    for await (const page of scan(client, patientId, types)) {
-      for (const r of page) {
-        const info = await infoOf(r);
-        const k = info && keyOf(r, info);
-        if (k) carried.add(`${k}\n${termKey(r)}`);
-      }
-    }
-    return carried;
-  };
-  const out = { maps: 0, entries: 0 };
-  for (const [source, map] of maps) {
-    const plan = new Map<string, string[]>();
-    for (const g of map.group ?? []) {
-      for (const e of g.element ?? []) {
-        const key = e.code as string;
-        if (!untyped(key)) continue;
-        const takers = types.filter((t) => TARGET[t].includes(g.target ?? ''));
-        const can = takers.length ? takers : types; // no vocabulary (unmatched): any type
-        let to = can;
-        if (new Set(can.map(kind)).size > 1) {
-          const have = await carriers();
-          to = can.filter((t) => have.has(`${source}\n${t}|${key}`));
-          if (new Set(to.map(kind)).size !== 1) to = [];
-        }
-        plan.set(key, to.map((t) => `${t}|${key}`));
-      }
-    }
-    const n = plan.size ? await rekey(client, map, (key) => plan.get(key)) : 0;
-    if (n) out.maps++;
-    out.entries += n;
-  }
-  return out;
 }
 
 export type AgentMapping = { source: string; type: string; term: string; system?: string; code?: string; display?: string; equivalence: string; confident: boolean; when?: string };
