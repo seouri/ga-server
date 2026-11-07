@@ -81,6 +81,15 @@ describe('record_followup', () => {
     expect(created[1]).toMatchObject({ resourceType: 'Provenance', entity: [{ what: { reference: 'DocumentReference/d1' } }] });
     expect((await call('record_followup', { ...args, confirm: p2.json.confirm })).error).toBe(true); // used
   });
+  it('no due: previews as now, records today with due-stated false', async () => {
+    const { created, call } = await setup(false);
+    const { due: _d, ...nd } = args;
+    const today = new Date().toLocaleDateString('en-CA');
+    const p = await call('record_followup', nd);
+    expect(p.json.due).toBe('now (no date given)');
+    expect((await call('record_followup', { ...nd, confirm: p.json.confirm })).json.due).toBe(today);
+    expect(created[0].extension).toEqual(expect.arrayContaining([{ url: 'urn:ga-server:ext:due', valueDate: today }, { url: 'urn:ga-server:ext:due-stated', valueBoolean: false }]));
+  });
   it('remote: the preview links to the confirm page; the agent cannot confirm, the page writes', async () => {
     const { created, call } = await setup();
     const p = await call('record_followup', args);

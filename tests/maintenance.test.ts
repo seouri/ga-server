@@ -86,6 +86,13 @@ test('agent follow-up joins an engine topic and not-for-you drops without a plan
   expect(out[0]).toMatchObject({ dueDate: '2026-12-01', status: 'due soon', doctorsPlan: { from: 'agent', quote: 'repeat in 6 weeks', asOf: '2026-10-01' } });
 });
 
+test('a follow-up with no stated due date is due on the day recorded, overdue the next day, until done', () => {
+  const q = [rem('followup', 'Repeat BP check', '2026-11-03', [{ url: 'urn:ga-server:ext:due', valueDate: '2026-11-03' }, { url: 'urn:ga-server:ext:due-stated', valueBoolean: false }])];
+  expect(run([], [], q, '2026-11-03')[0]).toMatchObject({ kind: 'follow-up', dueDate: '2026-11-03', status: 'due soon' });
+  expect(run([], [], q, '2026-11-04')[0]).toMatchObject({ status: 'overdue', importance: 'high' });
+  expect(run([], [], [...q, rem('done', 'Repeat BP check', '2026-11-05')], '2026-11-06')[0]?.status).not.toBe('overdue');
+});
+
 test('vaccine statuses map', () => {
   const rec = [{ date: '2020-01-01', source: 's' }];
   const v = { edition: '2025', results: [
