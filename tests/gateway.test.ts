@@ -26,6 +26,7 @@ let base: string;
 let calls: { publicUrl: string; clientName: string }[];
 let logins: string[];
 let passkeyOk = false;
+const calendarAgents: (string | undefined)[] = [];
 
 function start(publicUrl: string | null = PUBLIC): Promise<void> {
   server = createGateway({
@@ -45,7 +46,7 @@ function start(publicUrl: string | null = PUBLIC): Promise<void> {
       return {};
     },
     verifyPasskey: async () => passkeyOk,
-    calendar: async () => 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
+    calendar: async (_id, ua) => { calendarAgents.push(ua); return 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n'; },
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; ok(); }));
 }
@@ -279,11 +280,12 @@ test('an upload over 2 GB is refused with 413 before the link is used', async ()
 test('calendar link: valid token serves the feed, a wrong or revoked one is 404, and it needs remote access', async () => {
   await start();
   const token = newCalendarToken(dir);
-  const ok = await fetch(`${base}/cal/${token}.ics`);
+  const ok = await fetch(`${base}/cal/${token}.ics`, { headers: { 'user-agent': 'Google-Calendar-Importer' } });
   expect(ok.status).toBe(200);
   expect(ok.headers.get('content-type')).toMatch(/^text\/calendar/);
   expect(await ok.text()).toContain('BEGIN:VCALENDAR');
   expect((await fetch(`${base}/cal/${token}.ics`, { method: 'HEAD' })).status).toBe(200);
+  expect(calendarAgents).toEqual(['Google-Calendar-Importer']); // the fetching app is passed on for the access log; HEAD builds nothing
   expect((await fetch(`${base}/cal/${'x'.repeat(43)}.ics`)).status).toBe(404);
   newCalendarToken(dir); // a new link replaces the old one
   expect((await fetch(`${base}/cal/${token}.ics`)).status).toBe(404);
