@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { GaConfig } from '../config.ts';
+import { GaError, type GaConfig } from '../config.ts';
 import { logRemote, remoteTools } from '../gateway/remote-log.ts';
 import { chatLoop, type Llm } from '../llm-chat.ts';
 import { enqueue } from './outbox.ts';
@@ -85,8 +85,10 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
       add('user', m.text); // before the model runs, so a digest acked mid-answer lands after it
       try {
         out = await answer(m.text, history);
-      } catch {
+      } catch (e) {
         out = FAILED;
+        // Content-free: GaError text is status and code only; anything else, the error name.
+        writeState(d.dir, { ...readState(d.dir), lastError: `reply failed: ${e instanceof GaError ? e.message : e instanceof Error ? e.name : 'unknown'}` });
       }
       reply(out);
     },

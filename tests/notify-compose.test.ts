@@ -12,7 +12,9 @@ describe('notify compose', () => {
     const m = resultMessage([lab('LDL', { date: '2026-05-01', value: '150 mg/dL' }), lab('A1c')]);
     const lines = m.split('\n');
     expect(lines[0]).toBe('GA: 2 new results');
+    expect(lines[1]).toBe('');
     for (const s of ['LDL', '190 mg/dL', '<100', 'high', '2026-11-04', 'Clinic', '150 mg/dL', '2026-05-01']) expect(m).toContain(s);
+    expect(lines.at(-2)).toBe('');
     expect(lines.at(-1)).toBe('Reply with a question about it. Not medical advice.');
     expect(resultMessage([lab('LDL')]).split('\n')[0]).toBe('GA: 1 new result');
   });
@@ -23,10 +25,22 @@ describe('notify compose', () => {
     expect(m.endsWith('Reply "done" if you already had one, "not now", or ask a question. Not medical advice.')).toBe(true);
     expect(digestMessage([med], [])).not.toContain('FDA');
   });
+  it('digest layout: headings, bullets, indented details, blank lines between items', () => {
+    const m = digestMessage([med], [due(1), due(2)], [{ drug: 'Atorvastatin', label: { status: 'ok' } }]);
+    expect(m).toBe([
+      'GA: 3 items for you', '',
+      'New medications:', '• Atorvastatin', '',
+      'Due:', '• Screen 1 — overdue since 2026-10-01', "  Why: Finds it early.", "  Your doctor's plan: repeat in a year", '',
+      '• Screen 2 — overdue since 2026-10-01', "  Why: Finds it early.", "  Your doctor's plan: repeat in a year", '',
+      'From the FDA label; not a full interaction screen. Ask your pharmacist.', '',
+      'Reply "done" if you already had one, "not now", or ask a question. Not medical advice.',
+    ].join('\n'));
+    expect(resultMessage([lab('LDL'), lab('A1c')])).toContain('\n\n• A1c: ');
+  });
   it('caps at 1500 chars keeping whole items', () => {
     const m = digestMessage([], Array.from({ length: 30 }, (_, i) => due(i)));
     expect(m.length).toBeLessThanOrEqual(1500);
-    expect(m).toMatch(/…and \d+ more: ask GA\nReply "done"/);
+    expect(m).toMatch(/…and \d+ more: ask GA\n\nReply "done"/);
     expect(m).toContain('Screen 0');
   });
 });

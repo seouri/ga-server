@@ -1,6 +1,7 @@
 import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import OpenAI from 'openai';
 import { describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import { findConfirmPage } from '../src/confirm.ts';
@@ -13,7 +14,7 @@ type Msg = Record<string, any>;
 const call = (name: string, args: object = {}, id = 'c1') => ({ choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] } }] });
 const say = (content: string) => ({ choices: [{ finish_reason: 'stop', message: { content } }] });
 
-const setup = (script: unknown[], opts: { publicUrl?: string; model?: string | null; fail?: boolean } = {}) => {
+const setup = (script: unknown[], opts: { publicUrl?: string; model?: string | null; fail?: Error | boolean } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), 'ga-reply-'));
   writeJson(dir, 'settings.json', { to: '+1 (555) 010-0000', digestAt: '08:00', sleep: ['22:00', '07:00'], setupAt: '2026-11-01T00:00:00Z' });
   const audits: any[] = [];
@@ -26,7 +27,7 @@ const setup = (script: unknown[], opts: { publicUrl?: string; model?: string | n
     readResource: async () => ({ resourceType: 'Patient', birthDate: '1980-01-01' }),
   } as unknown as MedplumClient;
   const seen: Msg[] = [];
-  const llm = { chat: { completions: { create: async (p: Msg) => { seen.push(structuredClone(p)); if (opts.fail) throw new Error('boom'); return script.shift(); } } } };
+  const llm = { chat: { completions: { create: async (p: Msg) => { seen.push(structuredClone(p)); if (opts.fail) throw opts.fail === true ? new Error('boom') : opts.fail; return script.shift(); } } } };
   const r = createReplier({ client, cfg: {} as never, patientId: 'p', dir, publicUrl: opts.publicUrl, ...(opts.model === null ? {} : { llm, model: opts.model ?? 'm' }) });
   const text = (t: string, from = '+15550100000') => r.onIncoming({ from, text: t, at: '2026-11-07T12:00:00Z' });
   return { r, dir, audits, seen, text };
@@ -88,6 +89,13 @@ describe('answering texts', () => {
     const b = setup([], { fail: true });
     await b.text('hi');
     expect(pending(b.dir)[0].text).toBe("GA couldn't answer just now. Try again later.");
+    expect(readState(b.dir).lastError).toBe('reply failed: Error'); // name only, never the message ('boom')
+  });
+
+  it('an API error is recorded with status and code only', async () => {
+    const b = setup([], { fail: new OpenAI.APIError(404, { code: 'model_not_found', message: 'secret record text' }, 'secret record text', new Headers()) });
+    await b.text('hi');
+    expect(readState(b.dir).lastError).toBe('reply failed: LLM API error: 404 model_not_found');
   });
 
   it('long replies are cut', async () => {

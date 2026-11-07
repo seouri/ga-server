@@ -55,7 +55,7 @@ export function readSince(dbPath: string, afterRowId: number, owner: string | st
   } finally { db.close(); }
 }
 
-type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }> };
+type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }>; hintAt?: number };
 const BACKOFF = [1, 5, 30].map((m) => m * 60_000); // a failed id is retried after 1, 5, then 30 minutes
 export type BridgeDeps = { url: string; token: string; dbPath: string; owner: string; also?: string[]; every: number; dir: string; send?: typeof sendText; fetch?: typeof fetch; now?: () => number };
 
@@ -76,7 +76,9 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
       const r = readSince(d.dbPath, st.lastRowId, [d.owner, ...(d.also ?? [])], st.recent.map((x) => x.text));
       incoming = r.rows; scanned = r.scanned;
     }
-  } catch (e) { log(`cannot read Messages database: ${(e as Error).message}; grant Full Disk Access to node (System Settings > Privacy & Security)`); }
+  } catch (e) {
+    if (!st.hintAt || now - st.hintAt >= 10 * 60_000) { st.hintAt = now; writeJson(d.dir, 'bridge.json', st); log(`cannot read Messages database: ${(e as Error).message}; grant Full Disk Access to node (System Settings > Privacy & Security)`); }
+  }
   let res: Response;
   try {
     res = await (d.fetch ?? fetch)(`${d.url}/notify/exchange`, { method: 'POST', headers: { authorization: `Bearer ${d.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ incoming: incoming.map(({ from, text, at }) => ({ from, text, at })), sent: st.sent, failed: st.failed }) });

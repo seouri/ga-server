@@ -148,4 +148,21 @@ describe('round', () => {
     }
     expect(logs.filter((l) => /failed 1/.test(l))).toHaveLength(4);
   });
+
+  it('without a readable Messages database it still exchanges and sends; the hint is logged once per 10 minutes', async () => {
+    const e = setup();
+    const logs: string[] = [];
+    const deps = (now: number) => ({ ...e.deps(now), dbPath: join(e.dir, 'missing', 'chat.db') });
+    e.setOut([{ id: 'a', text: 'A' }]);
+    const sent: string[] = [];
+    await round({ ...deps(T0), send: async (_t: string, x: string) => { sent.push(x); } }, (s) => logs.push(s));
+    expect(sent).toEqual(['A']);
+    expect(e.bodies[0].incoming).toEqual([]);
+    await round(deps(T0 + 5000), (s) => logs.push(s));
+    await round(deps(T0 + 5 * 60_000), (s) => logs.push(s));
+    expect(logs.filter((l) => /Full Disk Access/.test(l))).toHaveLength(1);
+    await round(deps(T0 + 11 * 60_000), (s) => logs.push(s));
+    expect(logs.filter((l) => /Full Disk Access/.test(l))).toHaveLength(2);
+    expect(e.bodies).toHaveLength(4);
+  });
 });
