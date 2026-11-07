@@ -283,7 +283,9 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         'name: part of the name, case-insensitive (e.g. "blood pressure", "weight"); since/until: YYYY-MM-DD, inclusive. Newest first; one row per result: ' +
         'date, name, value, kind, setting (home/clinic), source, flags, id (for fhir_read). Default: individual readings. daily: true returns only Apple Health ' +
         'daily summaries instead (kind "daily mean", "daily total", "daily" activity rings, "nightly" sleep): use it for long-range trends, steps and sleep; ' +
-        'never mix summaries with readings. truncated: more results exist; use daily: true or narrow the dates.',
+        'never mix summaries with readings. Daily summaries exist for heart rate, heart rate variability, respiratory rate (means), steps, distance, ' +
+        'flights climbed (totals), activity rings and sleep; weight, blood pressure, SpO2, BMI, resting heart rate and clinic vitals are readings only ' +
+        '(daily: true then returns the readings, with a hint saying so). truncated: more results exist; use daily: true or narrow the dates.',
       inputSchema: {
         name: z.string().min(1).optional(),
         since: z.string().optional(),

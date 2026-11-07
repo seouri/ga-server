@@ -35,6 +35,11 @@ export async function vitals(
   if (name) q.append('code:text', name);
   dateRange(q, 'date', since, until);
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+  // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".
+  if (daily && !rows.length) {
+    const r = await vitals(client, patientId, { name, since, until, limit });
+    return { ...r, hint: `no daily summaries for this; these are readings${r.hint ? `; ${r.hint}` : ''}` };
+  }
   const out = fit(rows, limit);
   return out.truncated ? { ...out, hint: daily ? 'narrow the dates or the name' : 'more readings: use daily: true for long-range trends, or narrow the dates or the name' } : out;
 }
