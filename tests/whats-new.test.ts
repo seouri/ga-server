@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import { expect, test } from 'vitest';
-import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
+import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, statusItems, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
 
 const TAG = 'urn:ga-server:tag';
 const tag = (code: string) => ({ tag: [{ system: TAG, code }] });
@@ -38,7 +38,7 @@ test('tally splits historical at 365 days and lists sources', () => {
     obs({ effectiveDateTime: '2025-11-07', ...smart }),
     { resourceType: 'Condition' } as Resource,
   ], '2026-11-07');
-  expect(t).toEqual({ total: 3, historical: 1, byKind: { 'lab results': 2, problems: 1 }, sources: ['PDF or photo', 'portal-a'] });
+  expect(t).toEqual({ total: 3, historical: 1, noRangeGiven: 2, byKind: { 'lab results': 2, problems: 1 }, sources: ['PDF or photo', 'portal-a'] });
 });
 
 test('last-seen file: missing, then round trip with mode 0600', () => {
@@ -83,13 +83,13 @@ test('medicationItems: new only when no earlier record shares the code or name',
   const since = '2026-11-01T00:00:00Z';
   const coded = (id: string, at: string) => med(id, { medicationCodeableConcept: { coding: [{ system: RX, code: '1234' }], text: 'Drug A' }, ...arrivedExt(at) });
   const earlier = coded('e', '2026-01-01T00:00:00Z'), fresh = coded('f', '2026-11-02T00:00:00Z');
-  expect(medicationItems([fresh], [earlier, fresh], since)).toEqual([]);
-  const items = medicationItems([fresh], [fresh], since);
+  expect(medicationItems([fresh], [earlier, fresh], since, '2026-11-07')).toEqual([]);
+  const items = medicationItems([fresh], [fresh], since, '2026-11-07');
   expect(items).toHaveLength(1);
   expect(items[0]).toMatchObject({ kind: 'new medication', title: 'Drug A', detail: { rxnorm: '1234', status: 'active' } });
   const named = (id: string, text: string, ext: object) => med(id, { medicationCodeableConcept: { text }, ...ext });
   const oldN = named('o', 'Drug  B', {}), newN = named('n', 'drug b', arrivedExt('2026-11-02T00:00:00Z'));
-  expect(medicationItems([newN], [oldN, newN], since)).toEqual([]);
+  expect(medicationItems([newN], [oldN, newN], since, '2026-11-07')).toEqual([]);
 });
 
 const vac = (vaccine: string, status: string, n: number) => ({ vaccine, status, reason: 'r', records: Array.from({ length: n }, () => ({ date: '2020-01-01', source: 's' })) });
@@ -111,9 +111,9 @@ test('medicationItems resolves a referenced Medication for RxNorm and name', () 
   const m = { resourceType: 'Medication', id: 'm1', code: { coding: [{ system: RX, code: '999' }], text: 'Drug C' } } as Resource;
   const ref = (id: string, ext: object) => med(id, { medicationReference: { reference: 'Medication/m1' }, meta: { source: '/x/clinic.xml' }, ...ext });
   const fresh = ref('f', arrivedExt('2026-11-02T00:00:00Z'));
-  const [item] = medicationItems([fresh], [m, fresh], since);
+  const [item] = medicationItems([fresh], [m, fresh], since, '2026-11-07');
   expect(item).toMatchObject({ title: 'Drug C', source: 'clinic.xml', id: 'f', detail: { rxnorm: '999' } });
-  expect(medicationItems([fresh], [m, fresh, ref('e', {})], since)).toEqual([]);
+  expect(medicationItems([fresh], [m, fresh, ref('e', {})], since, '2026-11-07')).toEqual([]);
 });
 
 test('whatsNew: first run, markSeen and since', async () => {
@@ -139,11 +139,12 @@ test('whatsNew: first run, markSeen and since', async () => {
 });
 
 const ARRIVED_EXT = { url: 'urn:ga-server:ext:arrived', valueInstant: '2026-11-05T00:00:00Z' };
-const big = (patient: object = { resourceType: 'Patient', birthDate: '1980-01-01' }) => {
+const big = (patient: object = { resourceType: 'Patient', birthDate: '1980-01-01' }, longMeds = 0) => {
   const labs = Array.from({ length: 1000 }, (_, i) => ({ resourceType: 'Observation', id: `o${i}`, status: 'final', code: { text: `Test number ${i}` }, effectiveDateTime: '2026-11-01', valueQuantity: { value: 9, unit: 'mg' }, interpretation: [{ coding: [{ code: 'H' }] }], extension: [ARRIVED_EXT] }));
   const meds = Array.from({ length: 4 }, (_, i) => ({ resourceType: 'MedicationStatement', id: `m${i}`, status: 'active', medicationCodeableConcept: { text: `Drug ${i}`, coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: `${100 + i}` }] }, effectiveDateTime: '2026-11-02', extension: [ARRIVED_EXT] }));
+  const old = Array.from({ length: longMeds }, (_, i) => ({ resourceType: 'MedicationStatement', id: `l${i}`, status: 'active', medicationCodeableConcept: { text: `Long drug ${i} ${'y'.repeat(100)}` } }));
   const client = {
-    search: async () => ({ resourceType: 'Bundle', entry: labs.map((resource) => ({ resource })) }), searchOne: async () => undefined, searchResources: async () => [],
+    search: async (type: string) => ({ resourceType: 'Bundle', entry: (type === 'MedicationStatement' ? [...meds, ...old] : labs).map((resource) => ({ resource })) }), searchOne: async () => undefined, searchResources: async () => [],
     searchResourcePages: async function* (type: string) { yield type === 'Observation' ? labs : type === 'MedicationStatement' ? meds : []; },
     readResource: async () => patient, readHistory: async () => ({ entry: [] }),
   } as unknown as MedplumClient;
@@ -158,6 +159,10 @@ test('whatsNew: the whole result stays under the remote cap, note and labels kep
   expect(JSON.stringify(r).length).toBeLessThan(150_000);
   expect(JSON.stringify(r).startsWith('{"note":')).toBe(true);
   expect(r.items.length).toBeGreaterThan(10);
+  expect(r.items.filter((i) => i.kind === 'new medication')).toHaveLength(4);
+  expect(r.truncated).toBe(true);
+  expect(r.itemsTotal).toBe(1004);
+  expect(r.seen).toBeUndefined();
   const mc = r.medicationCheck as { label: { status: string } }[];
   expect(mc.length).toBe(4);
   expect(mc[0].label.status).toBe('ok');
@@ -170,4 +175,69 @@ test('whatsNew: a failed section is {error} or sectionErrors and the rest return
   expect(r.sectionErrors?.['follow-ups']).toMatch(/birthDate/);
   expect(r.items.some((i) => i.kind === 'lab')).toBe(true);
   expect((r.tally as { total: number }).total).toBeGreaterThan(0);
+});
+
+test('whatsNew: markSeen is refused when the summary was cut or a section failed', async () => {
+  const cutOne = big();
+  const r = await whatsNew(cutOne.client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch: cutOne.fetch, dir: cutOne.dir, markSeen: true });
+  expect(r).toMatchObject({ seen: false, seenReason: expect.stringContaining('cut') });
+  expect(readLastSeen(cutOne.dir)).toBeUndefined();
+  const bad = big({ resourceType: 'Patient' });
+  expect(await whatsNew(bad.client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch: bad.fetch, dir: bad.dir, markSeen: true })).toMatchObject({ seen: false, seenReason: expect.stringContaining('failed') });
+  expect(readLastSeen(bad.dir)).toBeUndefined();
+});
+
+test('whatsNew: large current lists and many errors still fit the cap', async () => {
+  const { client, fetch, dir } = big(undefined, 600);
+  const r = await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir });
+  const meds = (r.context.currentMedications as { rows: unknown[]; total: number; truncated?: true });
+  expect(meds.truncated).toBe(true);
+  expect(meds.total).toBe(604);
+  expect(JSON.stringify(r).length).toBeLessThan(150_000);
+});
+
+test('whatsNew: markSeen writes when everything succeeded and nothing was cut', async () => {
+  const { client, fetch, dir } = big(undefined, 0);
+  const small = { ...client, search: async () => ({ resourceType: 'Bundle', entry: [] }), searchResourcePages: async function* () { yield []; } } as unknown as MedplumClient;
+  expect(await whatsNew(small, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir, markSeen: true })).toMatchObject({ seen: true });
+  expect(readLastSeen(dir)).toBeDefined();
+});
+
+test('whatsNew: tally counts labs with no range given', () => {
+  const noRange = obs({ id: 'n', valueQuantity: { value: 1 } }), ranged = obs({ id: 'r', referenceRange: [{ high: { value: 5 } }] });
+  expect(tally([noRange, ranged], '2026-11-07').noRangeGiven).toBe(1);
+});
+
+test('medicationItems: first-import burst, uncoded copies and name-only matches', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const fresh = (id: string, over: object) => med(id, { ...arrivedExt('2026-11-02T00:00:00Z'), ...over });
+  const stoppedOld = fresh('s', { status: 'stopped', medicationCodeableConcept: { text: 'Old drug' }, effectiveDateTime: '2019-01-01' });
+  const stoppedRecent = fresh('r', { status: 'stopped', medicationCodeableConcept: { text: 'Recent drug' }, effectiveDateTime: '2026-06-01' });
+  const activeOld = fresh('a', { medicationCodeableConcept: { text: 'Active drug' }, effectiveDateTime: '2019-01-01' });
+  expect(medicationItems([stoppedOld, stoppedRecent, activeOld], [stoppedOld, stoppedRecent, activeOld], since, '2026-11-07').map((i) => i.id)).toEqual(['r', 'a']);
+  const earlierUncoded = med('e', { medicationCodeableConcept: { text: 'Drug A' } });
+  const coded = fresh('c', { medicationCodeableConcept: { text: 'Drug A', coding: [{ system: RX, code: '1234' }] } });
+  expect(medicationItems([coded], [earlierUncoded, coded], since, '2026-11-07')).toEqual([]);
+});
+
+test('statusItems: names referenced drugs and reads history in small pages', async () => {
+  const stmt = { resourceType: 'MedicationStatement', id: 's1', status: 'stopped', medicationReference: { reference: 'Medication/m1' }, meta: { lastUpdated: '2026-11-05T00:00:00Z' } };
+  const versions = Array.from({ length: 45 }, (_, i) => ({ resource: { ...stmt, status: i < 30 ? 'stopped' : 'active', meta: { lastUpdated: i < 30 ? `2026-11-0${(i % 4) + 2}T00:00:00Z` : '2026-10-01T00:00:00Z' } } }));
+  const calls: unknown[] = [];
+  const client = {
+    searchResourcePages: async function* (type: string) { yield type === 'MedicationStatement' ? [stmt] : []; },
+    readHistory: async (_t: string, _id: string, o: { count: number; offset: number }) => (calls.push(o), { entry: versions.slice(o.offset, o.offset + o.count) }),
+  } as unknown as MedplumClient;
+  const m = { resourceType: 'Medication', id: 'm1', code: { text: 'Drug D' } } as Resource;
+  const items = await statusItems(client, 'p', '2026-11-01T00:00:00Z', [m]);
+  expect(items).toMatchObject([{ title: 'Drug D', detail: { from: 'active', to: 'stopped' } }]);
+  expect(calls).toHaveLength(2);
+});
+
+test('whatsNew: label lookups run at most 3 at a time', async () => {
+  const { client, fetch, dir } = big();
+  let now = 0, max = 0;
+  const slow = (async (...a: Parameters<typeof fetch>) => { max = Math.max(max, ++now); await new Promise((r) => setTimeout(r, 10)); now--; return fetch(...a); }) as typeof fetch;
+  await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch: slow, dir });
+  expect(max).toBe(3);
 });

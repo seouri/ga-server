@@ -46,18 +46,19 @@ export function tally(arrived: Resource[], asOf: string) {
   const cutoff = new Date(Date.parse(asOf) - 365 * 864e5).toISOString().slice(0, 10);
   const byKind: Partial<Record<Kind, number>> = {};
   const sources = new Set<string>();
-  let historical = 0;
+  let historical = 0, noRangeGiven = 0;
   for (const r of arrived) {
     const k = kindOf(r);
     byKind[k] = (byKind[k] ?? 0) + 1;
     const d = clinicalDate(r);
     if (d && d < cutoff) historical++;
+    if (k === 'lab results' && r.resourceType === 'Observation' && !r.interpretation?.length && !r.referenceRange?.length) noRangeGiven++; // listed, never judged
     for (const [tag, label] of SOURCES) if (hasTag(r, tag)) sources.add(label);
     for (const i of (r as { identifier?: { system?: string }[] }).identifier ?? []) {
       if (i.system?.startsWith('urn:ga-server:id:smart:')) sources.add(i.system.slice('urn:ga-server:id:smart:'.length));
     }
   }
-  return { total: arrived.length, historical, byKind, sources: [...sources] };
+  return { total: arrived.length, historical, noRangeGiven, byKind, sources: [...sources] };
 }
 
 // Types the engine creates, with their patient search parameter.
@@ -121,40 +122,54 @@ const medCode = (r: Resource, meds: Map<string, Resource>): { cc?: CodeableConce
   if ((m as Record<string, any> | undefined)?.code) return { cc: (m as Record<string, any>).code, owner: m! };
   return { cc: ref?.display ? { text: ref.display } : undefined, owner: r };
 };
-const medKey = (cc?: CodeableConcept, owner?: Resource): string | undefined => {
+// Both keys of a drug (its RxNorm code and its name), so an uncoded copy of a coded drug is the same drug.
+const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
   const rx = (owner ? trusted(owner, cc?.coding) : cc?.coding ?? []).find((c) => c.system === RXNORM)?.code;
   const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
-  return rx ? `rx:${rx}` : name ? `name:${name}` : undefined;
+  return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
 };
 const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);
+const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
 // all: every medication record (any source) plus the Medication resources they reference.
-export function medicationItems(arrived: Resource[], all: Resource[], since: string): ReviewItem[] {
-  const meds = new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
-  const keyOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKey(cc, owner); };
-  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).map(keyOf));
+// A first-import burst lists only active drugs or ones dated within a year; older ones stay in the tally.
+export function medicationItems(arrived: Resource[], all: Resource[], since: string, asOf: string): ReviewItem[] {
+  const meds = medMap(all);
+  const keysOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKeys(cc, owner); };
+  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).flatMap(keysOf));
+  const cutoff = daysBefore(asOf, 365);
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
-    const k = keyOf(r);
-    if (!k || before.has(k) || seen.has(k)) return [];
-    seen.add(k);
-    const rxnorm = k.startsWith('rx:') ? k.slice(3) : undefined;
-    return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date: clinicalDate(r), detail: { rxnorm, status: (r as { status?: string }).status }, source: sourceOf(r), id: r.id }];
+    const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
+    if (!keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
+    keys.forEach((k) => seen.add(k));
+    const rx = keys.find((k) => k.startsWith('rx:'));
+    return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date, detail: { rxnorm: rx?.slice(3), status }, source: sourceOf(r), id: r.id }];
   });
 }
 
 const statusOf = (r: Resource) => { const x = r as Record<string, any>; return (x.status ?? x.clinicalStatus?.coding?.[0]?.code) as string | undefined; };
 
-// A status that changed since `since`, against the last stored version before it.
-export async function statusItems(client: MedplumClient, patientId: string, since: string): Promise<ReviewItem[]> {
+// The last stored version before `since`: history is newest first, read in small pages until one is older.
+async function versionBefore(client: MedplumClient, type: 'Condition', id: string, since: string): Promise<Resource | undefined> {
+  const count = 20;
+  for (let offset = 0; ; offset += count) {
+    const entries = ((await client.readHistory(type, id, { count, offset })) as Bundle).entry ?? [];
+    const prev = entries.map((e) => e.resource as Resource).find((v) => (v.meta?.lastUpdated ?? '') < since);
+    if (prev || entries.length < count) return prev;
+  }
+}
+
+// A status that changed since `since`, against the last stored version before it. all: the loaded lists (for referenced Medication names).
+export async function statusItems(client: MedplumClient, patientId: string, since: string, all: Resource[] = []): Promise<ReviewItem[]> {
   const out: ReviewItem[] = [];
+  const meds = medMap(all);
   for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
     for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
       for (const r of page) {
-        const history = await client.readHistory(type as 'Condition', r.id as string, { count: 1000 }) as Bundle;
-        const prev = history.entry?.map((e) => e.resource as Resource).find((v) => (v.meta?.lastUpdated ?? '') < since);
+        const prev = await versionBefore(client, type as 'Condition', r.id as string, since);
         const from = prev && statusOf(prev), to = statusOf(r);
-        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r, new Map()).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id });
+        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r, meds).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id });
       }
     }
   }
@@ -185,7 +200,24 @@ export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.cat
 const failed = (v: unknown): v is { error: string } => typeof v === 'object' && v !== null && !Array.isArray(v) && 'error' in v;
 
 // Budgets (characters) that together stay under the remote 150k tool-result cap, so `note` and the label quotes are never cut.
-const ITEMS = 40_000, LABELS = 60_000, OUT_OF_RANGE = 20_000;
+const ITEMS = 30_000, LABELS = 50_000, OUT_OF_RANGE = 15_000, LISTS = 6_000, OMITTED_NAMES = 25, ERROR = 200;
+
+// At most 200 rows and `budget` characters; total is the count before the cut.
+const cut = <R,>(all: R[], budget: number) => { const { rows, truncated } = fit(all, 200, false, budget); return { rows, total: all.length, ...(truncated && { truncated: true as const }) }; };
+
+// One kind after another in turn, so many labs cannot crowd out medications, status changes or follow-ups.
+const interleave = (items: ReviewItem[]): ReviewItem[] => {
+  const queues = ORDER.map((k) => items.filter((i) => i.kind === k));
+  return Array.from({ length: Math.max(0, ...queues.map((q) => q.length)) }, (_, n) => queues.flatMap((q) => q[n] ?? [])).flat();
+};
+
+// f over items, at most n at a time.
+async function pool<T, R>(items: T[], n: number, f: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; out[i] = await f(items[i]); } }));
+  return out;
+}
 
 export async function whatsNew(client: MedplumClient, patientId: string, eps: Promise<Endpoint[]>, opts: { since?: string; markSeen?: boolean; asOf?: string; fetch?: typeof fetch; dir?: string } = {}) {
   const now = new Date();
@@ -194,46 +226,58 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const since = opts.since ?? stored ?? daysBefore(asOf, 90);
   const subject = `Patient/${patientId}`;
   const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
+  const listsP = eps.then((e) => loadLists(client, patientId, e));
   const [arrived, lists, labs, hm, status, patient, vaccines] = await Promise.all([
     part(arrivedSince(client, patientId, since)),
-    part(eps.then((e) => loadLists(client, patientId, e))),
+    part(listsP),
     part(q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]])),
     part(q([['code:text', 'Health maintenance']])),
-    part(statusItems(client, patientId, since)),
+    part(listsP.catch(() => undefined).then((l) => statusItems(client, patientId, since, l?.all))), // names of referenced drugs come from the lists
     part(client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>),
     part(vaccineGaps(client, patientId, asOf)),
   ]);
   const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
   const errors: Record<string, string> = {};
+  const fail = (name: string, e: unknown) => { errors[name] = (e instanceof Error ? e.message : String(e)).slice(0, ERROR); };
   const get = <T,>(v: T | { error: string }): T => { if (failed(v)) throw new Error(v.error); return v; };
   const run = (name: string, f: () => ReviewItem[]): ReviewItem[] => {
-    try { return f(); } catch (e) { errors[name] = e instanceof Error ? e.message : String(e); return []; }
+    try { return f(); } catch (e) { fail(name, e); return []; }
   };
-  const newMeds = run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since));
-  const items = [
+  const all = [
     ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
-    ...newMeds,
+    ...run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since, asOf)),
     ...run('status changes', () => get(status)),
     ...run('follow-ups', () => followUpItems(get(vaccines), get(hm), asOf, failed(patient) ? undefined : patient.birthDate)),
-  ].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
+  ];
+  const kept = fit(interleave(all), 200, false, ITEMS);
+  const items = kept.rows.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
   const dir = opts.dir && join(opts.dir, 'labels');
-  const checked = await part(Promise.all(newMeds.map(async (m) => ({
+  const checked = await part(pool(items.filter((i) => i.kind === 'new medication'), 3, async (m) => ({
     drug: m.title,
     label: (m.detail.rxnorm ? await drugLabel(m.detail.rxnorm as string, { fetch: opts.fetch, dir }) : { status: 'no code' }) as LabelSections,
-  }))));
+  })));
   // Whole entries only, so a label quote is never cut; the rest are named without their sections.
-  let size = 0;
-  const medicationCheck = failed(checked) ? checked : checked.map((c) => (size += JSON.stringify(c).length) > LABELS ? { drug: c.drug, label: { status: 'omitted: too large' } } : c);
-  const names = (kind: 'medications' | 'problems') => failed(lists) ? lists : listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name).slice(0, 200);
-  const result = {
-    note: NOTE, since, ...(!opts.since && !stored && { firstRun: true as const }),
-    tally: failed(arrived) ? arrived : tally(arrived, asOf), items: fit(items, 200, false, ITEMS).rows, ...(Object.keys(errors).length && { sectionErrors: errors }),
-    medicationCheck,
-    context: {
-      currentMedications: names('medications'), activeProblems: names('problems'),
-      recentOutOfRange: failed(labs) ? labs : fit(labItems(labs, labs, asOf), 200, false, OUT_OF_RANGE).rows,
-    },
+  let size = 0, omitted = 0;
+  const medicationCheck = failed(checked) ? checked : checked.flatMap((c) => {
+    if ((size += JSON.stringify(c).length) <= LABELS) return [c];
+    return ++omitted <= OMITTED_NAMES ? [{ drug: c.drug, label: { status: 'omitted: too large' } }] : [];
+  });
+  const names = (kind: 'medications' | 'problems') => failed(lists) ? lists : cut(listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name), LISTS);
+  const outOfRange = failed(labs) ? labs : cut(labItems(labs, labs, asOf), OUT_OF_RANGE);
+  const context = { currentMedications: names('medications'), activeProblems: names('problems'), recentOutOfRange: outOfRange };
+  const truncated = !!kept.truncated || omitted > 0 || [context.currentMedications, context.activeProblems, outOfRange].some((c) => 'truncated' in c);
+  let seen: { seen: boolean; seenReason?: string } | undefined;
+  if (opts.markSeen) {
+    const reason = opts.since ? 'a since date was given'
+      : [arrived, lists, labs, hm, status, patient, vaccines, checked].some(failed) || Object.keys(errors).length ? 'a section failed'
+        : Array.isArray(checked) && checked.some((c) => c.label.status === 'unavailable') ? 'a drug label was unavailable'
+          : truncated ? 'the summary was cut' : undefined;
+    if (!reason) writeLastSeen(now.toISOString(), opts.dir);
+    seen = { seen: !reason, ...(reason && { seenReason: `not marked seen: ${reason}` }) };
+  }
+  return {
+    note: NOTE, since, ...(!opts.since && !stored && { firstRun: true as const }), ...seen,
+    tally: failed(arrived) ? arrived : tally(arrived, asOf), items, itemsTotal: all.length, ...(kept.truncated && { truncated: true as const }),
+    ...(Object.keys(errors).length && { sectionErrors: errors }), medicationCheck, ...(omitted > OMITTED_NAMES && { medicationCheckOmitted: omitted }), context,
   };
-  if (opts.markSeen && !opts.since) writeLastSeen(now.toISOString(), opts.dir);
-  return result;
 }

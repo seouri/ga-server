@@ -11,12 +11,12 @@ export type LabelSections =
 
 const TTL = 30 * 86_400_000;
 const MAX = 4000;
-type Label = Record<string, unknown> & { set_id?: string; effective_time?: string; openfda?: { generic_name?: string[] } };
+type Label = Record<string, unknown> & { set_id?: string; effective_time?: string; openfda?: { generic_name?: string[]; substance_name?: string[] } };
 
 // null = openFDA has nothing for these codes (404); other failures throw.
 async function query(f: typeof fetch, codes: string[]): Promise<Label[] | null> {
   const search = codes.length === 1 ? `"${codes[0]}"` : `(${codes.map((c) => `"${c}"`).join('+OR+')})`;
-  const r = await f(`https://api.fda.gov/drug/label.json?search=openfda.rxcui:${search}+AND+_exists_:drug_interactions&sort=effective_time:desc&limit=1`, { signal: AbortSignal.timeout(10_000) });
+  const r = await f(`https://api.fda.gov/drug/label.json?search=openfda.rxcui:${search}+AND+_exists_:drug_interactions&sort=effective_time:desc&limit=5`, { signal: AbortSignal.timeout(10_000) });
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return ((await r.json()) as { results?: Label[] }).results ?? [];
@@ -25,13 +25,16 @@ async function query(f: typeof fetch, codes: string[]): Promise<Label[] | null> 
 async function related(f: typeof fetch, rxcui: string): Promise<string[]> {
   const r = await f(`https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/related.json?tty=SCD+SBD`, { signal: AbortSignal.timeout(10_000) });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const groups = ((await r.json()) as { relatedGroup?: { conceptGroup?: { conceptProperties?: { rxcui: string }[] }[] } }).relatedGroup?.conceptGroup ?? [];
-  const codes = groups.flatMap((g) => g.conceptProperties ?? []).map((p) => p.rxcui).filter((c) => /^\d{1,10}$/.test(c));
+  const groups = ((await r.json()) as { relatedGroup?: { conceptGroup?: { conceptProperties?: { rxcui: string; name?: string }[] }[] } }).relatedGroup?.conceptGroup ?? [];
+  const codes = groups.flatMap((g) => g.conceptProperties ?? []).filter((p) => !p.name?.includes(' / ')).map((p) => p.rxcui).filter((c) => /^\d{1,10}$/.test(c));
   return [...new Set(codes)].slice(0, 20);
 }
 
 function pick(rxcui: string, labels: Label[]): LabelSections {
-  const best = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s]))).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
+  const withSections = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s])));
+  // A combination product's label can carry the ingredient's code too: prefer single-substance labels.
+  const single = withSections.filter((l) => l.openfda?.substance_name?.length === 1);
+  const best = (single.length ? single : withSections).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
   if (!best?.set_id || !best.effective_time) return { status: 'no label', rxcui };
   const sections: Partial<Record<(typeof SECTIONS)[number], string>> = {};
   for (const s of SECTIONS) {
