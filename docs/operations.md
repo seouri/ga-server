@@ -57,7 +57,7 @@ Then delete the repo folder, which includes `.ga/` with your keys and tokens. Al
 
 ## Concept layer
 
-Run `node src/cli.ts concepts apply` after an upgrade (and `--migrate-keys` once first on maps that predate typed keys). The learned maps are in the FHIR server, so backup and restore cover them. Details: [One test, one name](concepts.md).
+Run `node src/cli.ts concepts apply` after an upgrade. The learned maps are in the FHIR server, so backup and restore cover them. Details: [One test, one name](concepts.md).
 
 ## Admin app
 
