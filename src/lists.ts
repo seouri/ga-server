@@ -12,7 +12,7 @@ type ListRow = { name?: string; status?: string; currency?: string; reason?: str
 
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
-const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
+export const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
 const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].indexOf(r.currency);
 
 // all: every fetched resource (all four covered types, any status, plus included Medications); the context needs them all.
@@ -48,8 +48,8 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
   return rows.sort((a, b) => rank(a) - rank(b) || (b.since ?? '').localeCompare(a.since ?? ''));
 }
 
-// eps: the patient's source Endpoints (the caller reads them once for the stale-source warning too).
-export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include: 'all' | undefined, eps: Endpoint[]): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {
+// Every covered record and the currency context, fetched once. eps: the patient's source Endpoints (read once, also for the stale-source warning).
+export async function loadLists(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<{ all: Resource[]; ctx: Ctx }> {
   const all = (type: string, q: string[][]) => collect(client, type as 'Observation', new URLSearchParams([...q, ['_count', '1000']]), (r: Resource) => r, Infinity).then((x) => x.rows);
   const subject = ['subject', `Patient/${patientId}`];
   const [ms, mr, cond, alg, newest] = await Promise.all([
@@ -59,5 +59,10 @@ export async function currentList(client: MedplumClient, patientId: string, kind
     all('AllergyIntolerance', [['patient', `Patient/${patientId}`]]),
     newestEpicImport(client, patientId),
   ]);
-  return fit(listRows([...ms, ...mr, ...cond, ...alg], currencyContext([], eps, newest), kind, include), 1000);
+  return { all: [...ms, ...mr, ...cond, ...alg], ctx: currencyContext([], eps, newest) };
+}
+
+export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include: 'all' | undefined, eps: Endpoint[]): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {
+  const { all, ctx } = await loadLists(client, patientId, eps);
+  return fit(listRows(all, ctx, kind, include), 1000);
 }
