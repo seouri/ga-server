@@ -58,3 +58,58 @@ test('applyAll codes the uncoded same-source term, is idempotent, leaves exclude
   expect(gaCode(await client.readResource('Observation', same.id as string))?.code).toBe('2339-0');
   expect((await client.readResource('Observation', same.id as string)).meta?.tag?.some((t) => t.code === 'src-smart')).toBe(true);
 });
+
+const ehiKey = () => `synthetic-fill-${randomUUID().slice(0, 8)}`;
+const withSrc = (o: Observation, tags: string[], source: string, ids: string[]): Observation => ({
+  ...o,
+  identifier: ids.map((system) => ({ system, value: `Observation/${randomUUID()}` })),
+  meta: { source, tag: tags.map((code) => ({ system: 'urn:ga-server:tag', code: `src-${code}` })) },
+});
+const agentGlucose = (source: string, code: string) => upsertEntries(client, source, [{ key: 'glucose|mg/dl', target: { system: LOINC, code }, equivalence: 'equivalent', confident: true, by: 'agent' }]);
+
+test('C-CDA records are keyed by the custodian read from the stored source file; an unresolvable one is left untouched', async () => {
+  const org = `Synthetic Clinic ${randomUUID()}`;
+  const name = `HS-${randomUUID().slice(0, 8)}.xml`;
+  const file = `/nowhere/folder-${randomUUID().slice(0, 8)}/${name}`;
+  const bin = await client.createBinary({ data: `<ClinicalDocument><custodian><assignedCustodian><representedCustodianOrganization><name>${org}</name></representedCustodianOrganization></assignedCustodian></custodian></ClinicalDocument>`, contentType: 'application/xml', filename: name });
+  await client.createResource({
+    resourceType: 'DocumentReference', status: 'current', subject: { reference: `Patient/${pid}` },
+    identifier: [{ system: 'urn:ga-server:id:file', value: randomUUID() }],
+    content: [{ attachment: { contentType: 'application/xml', url: `Binary/${bin.id}`, title: name } }],
+  });
+  await agentGlucose(`ccda:${org.toLowerCase().replaceAll('-', ' ')}`, '2345-7');
+  const a = await client.createResource(withSrc(lab('Glucose', '2024-04-01'), ['ccda'], file, []));
+  // A file with no stored copy: its key can't be derived, so nothing is written.
+  const lost = await client.createResource(withSrc(lab('Glucose', '2024-04-02'), ['ccda'], '/nowhere/lost/gone.xml', []));
+  await applyAll(client, pid);
+  expect(gaCode(await client.readResource('Observation', a.id as string))?.code).toBe('2345-7');
+  const l = await client.readResource('Observation', lost.id as string);
+  expect(gaCode(l)).toBeUndefined();
+  expect(l.meta?.tag?.some((t) => t.code?.startsWith('concept-'))).toBe(false);
+  await client.deleteResource('Binary', bin.id as string);
+});
+
+test('a record last changed by someone else is left alone', async () => {
+  const k = `good-${randomUUID()}`;
+  await agentGlucose(`smart:${k}`, '2345-7');
+  const r = await client.createResource(withSrc(lab('Glucose', '2024-05-01'), ['smart'], 'https://example.org/fhir', [`urn:ga-server:id:smart:${k}`]));
+  expect(r.meta?.author?.reference).toBeTruthy();
+  const other = new Proxy(client, { get: (t, p) => (p === 'getProfile' ? () => ({ resourceType: 'ClientApplication', id: 'someone-else' }) : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)) });
+  expect((await applyAll(other, pid, { source: `smart:${k}`, key: 'glucose|mg/dl' })).changed).toBe(0);
+  expect((await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl' })).changed).toBe(1);
+});
+
+test('a record with several source tags takes the one whose key has a map, else is skipped', async () => {
+  const k = `good-${randomUUID()}`;
+  await agentGlucose(`smart:${k}`, '2345-7');
+  const ids = (s: string, h: string) => [`urn:ga-server:id:smart:${s}`, `urn:ga-server:id:ehi:${h}`];
+  const hit = await client.createResource(withSrc(lab('Glucose', '2024-06-01'), ['smart', 'ehi'], 'x', ids(k, ehiKey())));
+  const none = await client.createResource(withSrc(lab('Glucose', '2024-06-02'), ['smart', 'ehi'], 'x', ids(`good-${randomUUID()}`, ehiKey())));
+  await applyAll(client, pid);
+  expect(gaCode(await client.readResource('Observation', hit.id as string))?.code).toBe('2345-7');
+  expect((await client.readResource('Observation', none.id as string)).meta?.tag?.some((t) => t.code?.startsWith('concept-'))).toBe(false);
+});
+
+test('reviewList rejects an unknown type', async () => {
+  await expect(reviewList(client, pid, 'unmapped', 'Patient')).rejects.toThrow(/type must be/);
+});
