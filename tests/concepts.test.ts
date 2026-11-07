@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { codesFor, conceptOf, concepts, cvxFor, vitalSpecCode } from '../src/concepts.ts';
 
-const LOINC = 'http://loinc.org';
 
 describe('concepts', () => {
   it('matches by code with the member label', () => {
     expect(conceptOf([{ system: LOINC, code: '13457-7' }])).toMatchObject({ concept: { name: 'LDL' }, label: 'calculated' });
     expect(conceptOf([{ system: LOINC, code: '48642-3' }])).toMatchObject({ concept: { name: 'eGFR' }, label: 'race-based' });
-    expect(conceptOf([{ system: 'x', code: 'nope' }, { system: LOINC, code: '98979-8' }])?.label).toBe('race-free');
+    expect(conceptOf([{ system: 'x', code: 'nope' }, { system: LOINC, code: '98979-8' }])?.label).toBe('race-free (CKD-EPI 2021)');
+    expect(conceptOf([{ system: LOINC, code: '62238-1' }])?.label).toBe('CKD-EPI');
+    expect(conceptOf([{ system: LOINC, code: '33914-3' }])?.label).toBe('MDRD');
+    expect(conceptOf([{ system: LOINC, code: '18262-6' }])?.label).toBe('direct');
+    expect(conceptOf([{ system: LOINC, code: '2089-1' }])).toMatchObject({ concept: { name: 'LDL' }, label: undefined });
   });
   it('does not match a urine glucose to blood glucose, or a code in another system', () => {
     expect(conceptOf([{ system: LOINC, code: '5792-7' }])).toBeUndefined();
@@ -27,7 +30,7 @@ describe('concepts', () => {
     expect(vitalSpecCode('LDL')).toBeUndefined();
   });
   it('looks up CVX by short description', () => {
-    expect(cvxFor('TDAP')).toMatchObject({ system: 'http://hl7.org/fhir/sid/cvx', code: '115' });
+    expect(cvxFor('TDAP')).toMatchObject({ system: CVX, code: '115' });
     expect(cvxFor('no such vaccine')).toBeUndefined();
   });
   it('has the colorectal screening procedure concept', () => {

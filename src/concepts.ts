@@ -1,6 +1,14 @@
 import { readFileSync } from 'node:fs';
 import type { Coding } from '@medplum/fhirtypes';
 
+export const LOINC = 'http://loinc.org';
+export const CVX = 'http://hl7.org/fhir/sid/cvx';
+export const RXNORM = 'http://www.nlm.nih.gov/research/umls/rxnorm';
+export const SNOMED = 'http://snomed.info/sct';
+export const ICD10CM = 'http://hl7.org/fhir/sid/icd-10-cm';
+export const CPT = 'http://www.ama-assn.org/go/cpt';
+export const HCPCS = 'http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets';
+
 export type Concept = { name: string; kind: 'lab' | 'vital' | 'vaccine' | 'procedure' | 'medication' | 'condition'; members: { system: string; code: string; label?: string }[] };
 
 const load = <T>(file: string): T => JSON.parse(readFileSync(new URL(`../config/${file}`, import.meta.url), 'utf8')) as T;
@@ -28,5 +36,5 @@ export const vitalSpecCode = (name: string, _unit?: string): Coding | undefined 
 
 export const cvxFor = (name: string): Coding | undefined => {
   const v = cvx.find((x) => x.short.toLowerCase() === name.trim().toLowerCase());
-  return v && { system: 'http://hl7.org/fhir/sid/cvx', code: v.code, display: v.short };
+  return v && { system: CVX, code: v.code, display: v.short };
 };
