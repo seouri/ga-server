@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Identifier, Observation, Resource } from '@medplum/fhirtypes';
+import type { Extension, Identifier, Observation, Resource } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
 
 export type SourceInfo = {
@@ -14,6 +14,9 @@ export type SourceInfo = {
   seenAt?: string; // stamp/refresh LAST_SEEN on every record this import touches or skips
 };
 export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
+// The instant GA first stored a record; set on create only and kept by every later write.
+export const ARRIVED = 'urn:ga-server:ext:arrived';
+export const arrivedAt = (r: Resource): string | undefined => (r as Resource & { extension?: Extension[] }).extension?.find((e) => e.url === ARRIVED)?.valueInstant;
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 export const APPLE = 'urn:ga-server:id:apple-health';

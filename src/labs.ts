@@ -79,9 +79,9 @@ export async function collect<T extends Resource, R>(
 }
 
 // At most `limit` rows and BUDGET characters, so the remote cap never cuts JSON mid-row.
-export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; total: number; truncated?: true } {
+export function fit<R>(rows: R[], limit: number, more = false, budget = BUDGET): { rows: R[]; total: number; truncated?: true } {
   let size = 0;
-  const cut = rows.slice(0, limit).findIndex((r) => (size += JSON.stringify(r).length + 1) > BUDGET);
+  const cut = rows.slice(0, limit).findIndex((r) => (size += JSON.stringify(r).length + 1) > budget);
   const truncated = more || rows.length > limit || cut >= 0;
   const out = rows.slice(0, cut >= 0 ? cut : limit);
   return { rows: out, total: out.length, ...(truncated ? { truncated: true as const } : {}) };
@@ -123,7 +123,7 @@ export type LabTrend = {
 // others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen)
 // from the same source when there is exactly one; never across sources (a PDF "Glucose" is not the hospital's), never one its
 // source map calls unmatched. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
-export function summarizeLabs(obs: Observation[]): LabTrend[] {
+function grouped(obs: Observation[]) {
   const rows = obs.map((o) => {
     const m = conceptMatch(o);
     return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested };
@@ -146,9 +146,14 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     if (!k) continue; // nothing to group by
     groups.set(k, [...(groups.get(k) ?? []), x]);
   }
-  return [...groups.values()].map((g): LabTrend => {
-    // Undated last; the same day: the newest written first.
-    g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? ''));
+  // Undated last; the same day: the newest written first.
+  return [...groups.values()].map((g) => g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? '')));
+}
+
+export const groupLabs = (obs: Observation[]): Observation[][] => grouped(obs).map((g) => g.map((x) => x.o));
+
+export function summarizeLabs(obs: Observation[]): LabTrend[] {
+  return grouped(obs).map((g): LabTrend => {
     const [l] = g;
     const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
     const a = num(l.o), b = p && num(p.o);
