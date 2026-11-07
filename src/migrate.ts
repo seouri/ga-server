@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { AuditEvent, Binary, Bundle, BundleEntry, ConceptMap, DocumentReference, Extension, Provenance, Resource, ResourceType } from '@medplum/fhirtypes';
+import { searchAll } from './labs.ts';
 import { importAppleHealth } from './apple/import.ts';
 import { manifestHash } from './archive.ts';
 import { MAP_TAG } from './conceptmap.ts';
@@ -36,12 +37,6 @@ const paths = () => {
   return { cfg, next: join(dirname(cfg), 'config.next.json'), backup: join(dirname(cfg), 'config.super-admin.json') };
 };
 
-// _sort=_lastUpdated pages by cursor: Medplum caps _offset at 10000.
-async function all(c: MedplumClient, type: ResourceType, q: Record<string, string>): Promise<Resource[]> {
-  const out: Resource[] = [];
-  for await (const page of c.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
-  return out;
-}
 const count = async (c: MedplumClient, type: ResourceType, q: Record<string, string>) =>
   (await c.search(type, { ...q, _summary: 'count' }, { cache: 'no-cache' })).total ?? 0;
 const projectOf = async (c: MedplumClient) => ((await c.get('auth/me', { cache: 'no-cache' })) as { project: { id: string } }).project.id;
@@ -139,7 +134,7 @@ async function sourcePaths(old: MedplumClient, project: string): Promise<Map<str
 }
 
 async function plan(old: MedplumClient, project: string, oldPid: string, newClient: () => Promise<[MedplumClient, GaConfig]>, tmp: string): Promise<Job[]> {
-  const files = (await all(old, 'DocumentReference', { identifier: `${FILE}|`, subject: `Patient/${oldPid}`, _project: project })) as DocumentReference[];
+  const files = (await searchAll(old, 'DocumentReference', { identifier: `${FILE}|`, subject: `Patient/${oldPid}`, _project: project })) as DocumentReference[];
   const byId = (system: string, value: string) => files.find((d) => d.identifier?.some((i) => i.system === system && i.value === value));
   const sources = await sourcePaths(old, project);
   if ([...sources.values()].some((s) => s.tag === 'src-smart')) throw new GaError('hospital portal (SMART) records are not migrated: disconnect the portals (ga disconnect) first, or migrate by hand');
@@ -186,7 +181,7 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
   const groups = new Map<string, Resource[]>();
   const orphans = new Map<string, number>();
   for (const type of EXTRACT_TYPES) {
-    for (const r of await all(old, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${oldPid}`, _project: project })) {
+    for (const r of await searchAll(old, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${oldPid}`, _project: project })) {
       const id = sourceDoc(r, docsByTitle);
       const name = basename(r.meta?.source ?? '(no file name)');
       if (!id) orphans.set(name, (orphans.get(name) ?? 0) + 1);
@@ -221,7 +216,7 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
           // Done on an earlier run only if its records made it too; a failed run left the file alone (importExtracted's hint).
           const mine = new Map([[name, [docId]]]);
           for (const type of EXTRACT_TYPES) {
-            const rs = await all(c, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${cfg.patientId}` });
+            const rs = await searchAll(c, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${cfg.patientId}` });
             if (rs.some((r) => sourceDoc(r, mine) === docId)) return 'already imported';
           }
           throw new GaError(`${name}: stored in the GA project by an earlier run, but none of its records (${(e as Error).message})`);
@@ -268,12 +263,12 @@ const vaccines = async (c: MedplumClient, pid: string, asOf: string) => {
 async function copyConceptMaps(old: MedplumClient, project: string, nc: MedplumClient): Promise<{ maps: number; provenance: number }> {
   const n = { maps: 0, provenance: 0 };
   const key = (p: Provenance) => `${p.recorded}|${p.reason?.[0]?.text}`;
-  for (const m of (await all(old, 'ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _project: project })) as ConceptMap[]) {
+  for (const m of (await searchAll(old, 'ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _project: project })) as ConceptMap[]) {
     const { id, meta, ...body } = m;
     const made = await nc.createResourceIfNoneExist<ConceptMap>({ ...body, meta: { tag: meta?.tag } }, `url=${encodeURIComponent(m.url as string)}`);
     n.maps++;
-    const have = new Set(((await all(nc, 'Provenance', { target: `ConceptMap/${made.id}` })) as Provenance[]).map(key));
-    for (const p of (await all(old, 'Provenance', { target: `ConceptMap/${id}`, _project: project })) as Provenance[]) {
+    const have = new Set(((await searchAll(nc, 'Provenance', { target: `ConceptMap/${made.id}` })) as Provenance[]).map(key));
+    for (const p of (await searchAll(old, 'Provenance', { target: `ConceptMap/${id}`, _project: project })) as Provenance[]) {
       if (have.has(key(p))) continue;
       const { id: _i, meta: _m, ...rest } = p;
       await nc.createResource<Provenance>({ ...rest, target: [{ reference: `ConceptMap/${made.id}` }] });
@@ -316,8 +311,8 @@ export async function migrate({ projectName, accept = false }: { projectName?: s
     const [nc] = await newClient();
 
     // Access logs, patient references rewritten; only those not copied yet, so a re-run picks up late events.
-    const have = new Set(((await all(nc, 'AuditEvent', { _tag: GA_LOG })) as AuditEvent[]).map(auditKey));
-    const copies = ((await all(old, 'AuditEvent', { _tag: GA_LOG, _project: project })) as AuditEvent[])
+    const have = new Set(((await searchAll(nc, 'AuditEvent', { _tag: GA_LOG })) as AuditEvent[]).map(auditKey));
+    const copies = ((await searchAll(old, 'AuditEvent', { _tag: GA_LOG, _project: project })) as AuditEvent[])
       .map(({ id: _id, meta, ...e }) => {
         walkReferences(e, (ref) => (ref === `Patient/${oldCfg.patientId}` ? `Patient/${newCfg.patientId}` : undefined));
         return { ...e, meta: { tag: meta?.tag } } as AuditEvent;
@@ -371,10 +366,10 @@ export async function deleteOld({ accept = false }: { accept?: boolean } = {}): 
   console.log('listing the old copy...');
   const doomed = new Map<string, Resource>();
   const add = (rs: Resource[]) => rs.forEach((r) => doomed.set(`${r.resourceType}/${r.id}`, r));
-  for (const t of COMPARTMENT) add(await all(old, t, { _compartment: `Patient/${oldCfg.patientId}`, _project: project }));
-  for (const t of SHARED) add(await all(old, t, { _tag: SRC_TAGS, _project: project }));
-  add(await all(old, 'Endpoint', { identifier: 'urn:ga-server:id:smart-source|', _project: project }));
-  add(await all(old, 'AuditEvent', { _tag: GA_LOG, _project: project }));
+  for (const t of COMPARTMENT) add(await searchAll(old, t, { _compartment: `Patient/${oldCfg.patientId}`, _project: project }));
+  for (const t of SHARED) add(await searchAll(old, t, { _tag: SRC_TAGS, _project: project }));
+  add(await searchAll(old, 'Endpoint', { identifier: 'urn:ga-server:id:smart-source|', _project: project }));
+  add(await searchAll(old, 'AuditEvent', { _tag: GA_LOG, _project: project }));
   const patient = await old.searchOne('Patient', { _id: oldCfg.patientId, _project: project }, { cache: 'no-cache' });
   if ([...doomed.values(), ...(patient ? [patient] : [])].some((r) => r.meta?.project !== project)) throw new GaError('a record outside the old project was selected: refusing');
   // Each record goes with its Binaries in one transaction: an interrupted run strands none (they are found only through records).

@@ -2,14 +2,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
 import { hasTag } from './engine.ts';
 import { arrivedAt, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
+import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
 import { concept, listRows, loadLists } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
@@ -76,11 +76,9 @@ export async function arrivedSince(client: MedplumClient, patientId: string, sin
   const out: Resource[] = [];
   const apple = `${TAG}|src-apple-health`;
   for (const [type, param] of TYPES) {
-    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' };
+    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}` };
     const qs = type === 'Observation' ? [{ ...base, '_tag:not': apple }, { ...base, _tag: apple, _elements: APPLE_FIELDS }] : [base];
-    for (const q of qs) {
-      for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
-    }
+    for (const q of qs) out.push(...(await searchAll(client, type as ResourceType, q)).filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
   }
   return out;
 }

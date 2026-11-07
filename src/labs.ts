@@ -59,6 +59,13 @@ export function dateRange(q: URLSearchParams, param: string, since?: string, unt
 
 // Reads pages until more than `limit` rows are kept (row() returns undefined to skip) or `scan` records were read.
 // more: rows or pages were left unread.
+// Every page of a search. _sort=_lastUpdated (ascending, _count >= 20) makes Medplum page by _cursor: it caps _offset at 10000.
+export async function searchAll(client: MedplumClient, type: ResourceType, q: Record<string, string>): Promise<Resource[]> {
+  const out: Resource[] = [];
+  for await (const page of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
+  return out;
+}
+
 export async function collect<T extends Resource, R>(
   client: MedplumClient, type: ResourceType, q: URLSearchParams, row: (r: T) => R | undefined, limit: number, scan = Infinity,
 ): Promise<{ rows: R[]; more: boolean }> {
