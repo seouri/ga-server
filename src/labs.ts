@@ -5,7 +5,6 @@ import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@med
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
 
-const PAGE = 100;
 const BUDGET = 140_000; // stays under the remote 150k tool-result cap, so rows are never cut mid-JSON
 
 export type LabRow = { date?: string; name?: string; value?: string; range?: string; interpretation?: string; source?: string; flags?: string[]; id?: string };
@@ -86,7 +85,7 @@ export async function labResults(
     ['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`],
     ['_tag:not', `${TAG}|src-apple-health`],
     ['_sort', '-date,_id'],
-    ['_count', String(PAGE)],
+    ['_count', '100'],
   ]);
   if (name) q.append('code:text', name);
   dateRange(q, 'date', since, until);

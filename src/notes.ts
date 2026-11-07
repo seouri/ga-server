@@ -7,7 +7,7 @@ import { NEVER_DOCS } from './share/scope.ts';
 const SCAN = 5000; // records read per type per call: a text match reads every record in the range
 const SNIP = 300;
 
-export type NoteRow = { date?: string; kind: string; author?: string; snippet: string; type: 'DocumentReference' | 'Communication'; id?: string };
+type NoteRow = { date?: string; kind: string; author?: string; snippet: string; type: 'DocumentReference' | 'Communication'; id?: string };
 
 // A note is an inline text/plain attachment; that also skips RTF originals (linked by relatesTo), PDFs and Binary-backed files.
 // Archives, imported source files and Apple's ECG CSVs (the only Apple DocumentReferences) are not notes.
