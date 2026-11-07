@@ -6,6 +6,7 @@ import type { Bundle, CodeableConcept, Condition, Endpoint, Extension, Observati
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
+import { hasTag } from './engine.ts';
 import { arrivedAt, SRC_DATE, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
@@ -16,8 +17,6 @@ import { vaccineGaps } from './vaccines.ts';
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
 export type Kind = 'lab results' | 'vital signs' | 'Apple Health readings' | 'medications' | 'problems' | 'allergies' | 'vaccines' | 'procedures' | 'visits' | 'notes and messages' | 'other';
-
-const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 
 export function kindOf(r: Resource): Kind {
   switch (r.resourceType) {
@@ -42,8 +41,10 @@ export function clinicalDate(r: Resource): string | undefined {
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 }
 
+const daysBefore = (asOf: string, n: number) => new Date(Date.parse(asOf) - n * 864e5).toISOString().slice(0, 10);
+
 export function tally(arrived: Resource[], asOf: string) {
-  const cutoff = new Date(Date.parse(asOf) - 365 * 864e5).toISOString().slice(0, 10);
+  const cutoff = daysBefore(asOf, 365);
   const byKind: Partial<Record<Kind, number>> = {};
   const sources = new Set<string>();
   let historical = 0, noRangeGiven = 0;
@@ -97,8 +98,6 @@ export type ReviewItem = {
   kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'vaccine follow-up' | 'health maintenance';
   title: string; date?: string; detail: Record<string, unknown>; source?: string; id?: string;
 };
-
-const daysBefore = (asOf: string, n: number) => new Date(Date.parse(asOf) - n * 864e5).toISOString().slice(0, 10);
 
 export function labItems(arrived: Observation[], allLabs: Observation[], asOf: string): ReviewItem[] {
   const cutoff = daysBefore(asOf, 365);
@@ -196,7 +195,8 @@ const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status
 const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
 
 // A failed section becomes {error} in its place, trimmed like sectionErrors; the rest still returns.
-export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: (e instanceof Error ? e.message : String(e)).slice(0, ERROR) }));
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, ERROR);
+export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: message(e) }));
 const failed = (v: unknown): v is { error: string } => typeof v === 'object' && v !== null && !Array.isArray(v) && 'error' in v;
 
 // Budgets (characters) that together stay under the remote 150k tool-result cap, so `note` and the label quotes are never cut.
@@ -238,10 +238,9 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   ]);
   const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
   const errors: Record<string, string> = {};
-  const fail = (name: string, e: unknown) => { errors[name] = (e instanceof Error ? e.message : String(e)).slice(0, ERROR); };
   const get = <T,>(v: T | { error: string }): T => { if (failed(v)) throw new Error(v.error); return v; };
   const run = (name: string, f: () => ReviewItem[]): ReviewItem[] => {
-    try { return f(); } catch (e) { fail(name, e); return []; }
+    try { return f(); } catch (e) { errors[name] = message(e); return []; }
   };
   const all = [
     ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
