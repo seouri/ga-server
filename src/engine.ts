@@ -21,6 +21,7 @@ type TypeCounts = { created: number; linked: number; updated: number; flagged: n
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 export const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
+const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
@@ -166,9 +167,14 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource,
   if (ed && id && Date.parse(id) <= Date.parse(ed)) return 'skip';
   const have = new Set(idList(existing).map(idKey));
   const subset = idList(incoming).every((i) => have.has(idKey(i)));
-  if (subset && canon(body(existing)) === canon(body(incoming))) return 'skip';
-  // Only a write that would actually happen is a conflict. The source-conflict tag sticks: tagging it made GA the author.
+  // Unchanged content skips, except that a newer source re-confirms an importer-owned medication, problem or allergy: the currency rule
+  // reads its source date, and a stale one would call an item still on the latest list "unconfirmed".
   const lastBy = existing.meta?.author?.reference;
+  const importerOwned = hasTag(existing, 'writer-importer') && !hasTag(existing, 'source-conflict') && !(author && lastBy && lastBy !== author);
+  // Portal-synced records are confirmed by last-seen instead (advanced separately), so only file imports need the refresh.
+  const dated = DATED.has(incoming.resourceType) && !existing.extension?.some((e) => e.url === LAST_SEEN);
+  if (subset && canon(body(existing)) === canon(body(incoming))) return id && importerOwned && dated ? 'update' : 'skip';
+  // Only a write that would actually happen is a conflict. The source-conflict tag sticks: tagging it made GA the author.
   if ((author && lastBy && lastBy !== author) || hasTag(existing, 'source-conflict')) return 'conflict';
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
