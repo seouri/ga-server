@@ -20,6 +20,7 @@ describe('allowedRedirect', () => {
     expect(allowedRedirect('http://127.0.0.1:9/cb')).toBe(true);
     expect(allowedRedirect('https://chatgpt.com/connector/oauth/abc')).toBe(true);
     expect(allowedRedirect('https://oauth-redirect.googleusercontent.com/r/x')).toBe(true);
+    expect(allowedRedirect('https://oauth-redirect-test.googleusercontent.com/a/user_bound_x')).toBe(true); // Gemini also registers /a/ on each host
   });
   it('rejects lookalikes, downgrades and strays', () => {
     for (const r of [
