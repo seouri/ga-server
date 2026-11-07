@@ -55,6 +55,20 @@ tailscale funnel reset       # stops exposing GA to the internet
 
 Then delete the repo folder, which includes `.ga/` with your keys and tokens. Also remove GA's access in each hospital's MyChart (or `ga disconnect <source>` first).
 
+## Concept layer
+
+GA maps each source's test, drug and vaccine names to standard codes. Review what has none, from the repo folder:
+
+```sh
+node src/cli.ts concepts              # terms with no standard code
+node src/cli.ts concepts --suggested  # terms with only a suggested code
+node src/cli.ts concepts apply        # backfill: code stored records and re-apply every map
+```
+
+Run `concepts apply` after an upgrade or after editing a map. If your maps predate typed keys (`Condition|…`), run `node src/cli.ts concepts apply --migrate-keys` once first: a plain apply before that strips the codes older entries added (the migration restores them). Your agent maps terms with `map_concept`.
+
+Learned maps live in the FHIR server as ConceptMaps, one per source, so they are in the nightly backup and restore with the database.
+
 ## Admin app
 
 The FHIR server's admin app runs at http://localhost:3000. Log in as `admin@example.com` with the `adminPassword` from `.ga/config.json`: `ga setup` replaces the seeded default with a random password and stores it there (mode 0600). Re-running setup reuses it. **Back up `.ga/config.json`**: it holds the only copy of the admin password and client secret, and losing it locks you out of the admin account.

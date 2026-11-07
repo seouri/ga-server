@@ -7,7 +7,7 @@ import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
-import { vitalRow } from './vitals.ts';
+import { newestFirst, vitalRow, vitalSearches } from './vitals.ts';
 
 const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
@@ -18,11 +18,14 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
   const tomorrow = new Date(Date.parse(asOf) + 864e5).toISOString().slice(0, 10);
   const opts = { cache: 'no-cache' as const };
   const subject = `Patient/${patientId}`;
-  // Newest reading per setting; a second one the same day under another name pairs a separate systolic and diastolic.
+  // Newest reading per setting, by name and by concept code; a second one the same day under another name pairs a separate systolic
+  // and diastolic (found by text: "blood pressure" as a concept is only the panel).
   const vital = async (name: string, home: boolean) => {
-    const q = new URLSearchParams([['subject', subject], ['category', 'vital-signs'], ['code:text', name], [home ? '_tag' : '_tag:not', `${TAG}|src-apple-health`], ['_sort', '-date,_id'], ['_count', '2']]);
-    const { rows } = await collect(client, 'Observation', q, vitalRow, Infinity, 1);
-    return rows.filter((r, i) => i === 0 || (r.date === rows[0].date && r.name !== rows[0].name));
+    const found = await Promise.all(vitalSearches(name).map((p) => collect(client, 'Observation', new URLSearchParams([
+      ['subject', subject], ['category', 'vital-signs'], p, [home ? '_tag' : '_tag:not', `${TAG}|src-apple-health`], ['_sort', '-date,_id'], ['_count', '2'],
+    ]), vitalRow, Infinity, 1)));
+    const rows = newestFirst(found.flatMap((f) => f.rows));
+    return rows.filter((r, i) => i === 0 || (r.date === rows[0].date && r.name !== rows[0].name)).slice(0, 2);
   };
   // shortcut: a source counts only when it left an Observation (a medication-only PDF is not listed); check DocumentReferences too if that matters.
   const imported = async ([tag, source]: [string, string]) => {

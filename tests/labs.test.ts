@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
+import { CONCEPT_SRC } from '../src/concept-apply.ts';
 import { keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
 
 describe('labRow', () => {
@@ -53,7 +54,7 @@ describe('labResults', () => {
 
 describe('summarizeLabs', () => {
   const lab = (text: string, date: string | undefined, value: number, extra: Partial<Observation> = {}): Observation =>
-    ({ resourceType: 'Observation', status: 'final', code: { text }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' }, ...extra });
+    ({ resourceType: 'Observation', status: 'final', code: { text }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }] }, ...extra });
   const loinc = { coding: [{ system: 'urn:local', code: 'L1' }, { system: 'http://loinc.org', code: '13457-7' }] };
   it('groups by LOINC, else by case/space-insensitive name; an uncoded result joins the LOINC group of its name', () => {
     const s = summarizeLabs([
@@ -63,7 +64,7 @@ describe('summarizeLabs', () => {
       lab('Glucose', undefined, 90),
       lab('glucose', '2022-05-01', 99),
     ]);
-    expect(s.map((x) => [x.test, x.name, x.loinc, x.count])).toEqual([['LDL', 'LDL  cholesterol', '13457-7', 3], ['Glucose', 'glucose', undefined, 2]]);
+    expect(s.map((x) => [x.test, x.name, x.loinc, x.count])).toEqual([['LDL', 'LDL  cholesterol', '13457-7', 3], [undefined, 'glucose', undefined, 2]]);
     expect(s[0]).toMatchObject({ latest: { date: '2025-01-01', value: 100 }, previous: { date: '2024-01-01', value: 120 }, change: -20, first: '2023-01-01' });
     expect(s[1]).toMatchObject({ latest: { date: '2022-05-01', value: 99 }, first: '2022-05-01' }); // undated last
     expect(s[1].previous).toBeUndefined();
@@ -95,28 +96,73 @@ describe('summarizeLabs', () => {
   });
 });
 
-describe('key labs: one test under different names and codes', () => {
-  const lab = (text: string, date: string, loinc?: string): Observation =>
-    ({ resourceType: 'Observation', id: text, status: 'final', code: { text, ...(loinc && { coding: [{ system: 'http://loinc.org', code: loinc }] }) }, effectiveDateTime: date, valueQuantity: { value: 1, unit: 'mg/dL' } });
-  it('lab_results name "ldl" finds the hospital-coded and the uncoded PDF result; summary groups them', async () => {
+describe('concepts: one test under different names and codes', () => {
+  const L = 'http://loinc.org';
+  const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
+  const ga = (code: string) => ({ system: L, code, extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] });
+  const lab = (text: string, date: string, loinc?: string, extra: Partial<Observation> = {}): Observation =>
+    ({ resourceType: 'Observation', id: `${text}${date}`, status: 'final', code: { text, ...(loinc && { coding: [{ system: L, code: loinc }] }) }, effectiveDateTime: date, valueQuantity: { value: 1, unit: 'mg/dL' }, meta: tag('src-pdf'), ...extra });
+  const mapped = (text: string, date: string, code: string, suggested = false): Observation =>
+    lab(text, date, undefined, { code: { text, coding: [ga(code)] }, meta: tag('extracted-by-llm', ...(suggested ? ['concept-suggested'] : [])) });
+  const hospital = lab('LOW DENSITY LIPOPROTEIN CHOL', '2022-01-01', '13457-7');
+  const pdf = mapped('LDL cholesterol', '2024-07-26', '13457-7');
+
+  it('lab_results name "ldl": concept codes (incl. GA-added) plus literal text, no code:text query; summary groups by concept only', async () => {
     const seen: string[] = [];
-    pages = [[lab('LOW DENSITY LIPOPROTEIN CHOL', '2022-01-01', '13457-7'), lab('LDL cholesterol', '2024-07-26'), lab('HIGH DENSITY LIPOPROTEIN CHOL', '2024-01-01', '2085-9')]];
+    pages = [[hospital, pdf, lab('HIGH DENSITY LIPOPROTEIN CHOL', '2024-01-01', '2085-9'), lab('LDL-P', '2023-01-01')]];
     const r = await labResults(fake(seen), 'p', { name: 'ldl' });
-    expect((r.rows as LabRow[]).map((x) => x.name)).toEqual(['LDL cholesterol', 'LOW DENSITY LIPOPROTEIN CHOL']);
+    expect((r.rows as LabRow[]).map((x) => x.name)).toEqual(['LDL cholesterol', 'LDL-P', 'LOW DENSITY LIPOPROTEIN CHOL']);
     expect(new URLSearchParams(seen[0]).get('code:text')).toBeNull();
-    const [s] = (await labResults(fake(), 'p', { name: 'ldl', summary: true })).rows as LabTrend[];
-    expect(s).toMatchObject({ test: 'LDL', count: 2, latest: { date: '2024-07-26' }, previous: { date: '2022-01-01' } });
+    pages = [[mapped('LDL chol (est)', '2025-01-01', '13457-7', true)]];
+    expect(((await labResults(fake(), 'p', { name: 'ldl' })).rows as LabRow[])[0].flags).toContain('possibly LDL (suggested mapping)');
+    pages = [[hospital, pdf, lab('HIGH DENSITY LIPOPROTEIN CHOL', '2024-01-01', '2085-9'), lab('LDL-P', '2023-01-01')]];
+    const s = (await labResults(fake(), 'p', { name: 'ldl', summary: true })).rows as LabTrend[];
+    expect(s.map((x) => [x.test, x.name, x.count])).toEqual([['LDL', 'LDL cholesterol', 2], [undefined, 'LDL-P', 1]]);
+    expect(s[0]).toMatchObject({ latest: { date: '2024-07-26' }, previous: { date: '2022-01-01', method: 'calculated' } });
   });
-  it('look-alikes stay out; keyLabs keeps table order', () => {
+  it('look-alikes never join the concept: urine glucose (urine LOINC, same name and unit), TSH receptor antibody, LDL-P; keyLabs in concept order', () => {
     const s = summarizeLabs([
-      lab('Hemoglobin A1c', '2024-01-01'), lab('Hemoglobin', '2024-01-01'), lab('Glucose, urine', '2025-01-01'), lab('Glucose', '2024-01-01'),
-      lab('Non-HDL cholesterol', '2024-01-01'), lab('Cholesterol/HDL ratio', '2024-01-01'), lab('HDL Cholesterol', '2024-01-01'), lab('Cholesterol', '2024-01-01'),
-      lab('Platelet mean volume', '2024-01-01'), lab('LDL calc', '2023-01-01', '13457-7'), lab('LDL direct', '2024-02-01', '18262-6'),
-      lab('Creatinine, urine', '2025-01-01'), lab('Sodium [Moles/volume] in Serum or Plasma', '2024-01-01', '2951-2'),
+      lab('Glucose', '2025-01-01', '5792-7'), lab('Glucose', '2024-01-01', '2345-7'), lab('Glucose', '2023-01-01'), // uncoded: two coded twins, joins neither
+      lab('TSH receptor antibody', '2025-01-01'), lab('Thyrotropin receptor Ab', '2025-02-01', '5385-0'), lab('TSH', '2024-01-01', '3016-3'),
+      lab('LDL-P', '2025-01-01'), lab('LDL calc', '2023-01-01', '13457-7'), lab('LDL direct', '2024-02-01', '18262-6'),
+      lab('Hemoglobin A1c', '2024-01-01', '4548-4'), lab('hemoglobin  a1c', '2024-06-01'), // uncoded, one coded twin of its name and unit: joins
     ]);
-    expect(keyLabs(s).map((x) => [x.test, x.name, x.count])).toEqual([
-      ['A1c', 'Hemoglobin A1c', 1], ['Glucose', 'Glucose', 1], ['LDL', 'LDL direct', 2], ['HDL', 'HDL Cholesterol', 1], ['Total cholesterol', 'Cholesterol', 1],
-      ['Hemoglobin', 'Hemoglobin', 1], ['Sodium', 'Sodium [Moles/volume] in Serum or Plasma', 1],
+    expect(keyLabs(s).map((x) => [x.test, x.name, x.count, x.latest.method])).toEqual([
+      ['A1c', 'hemoglobin  a1c', 2, undefined], ['Glucose', 'Glucose', 1, undefined], ['LDL', 'LDL direct', 2, 'direct'], ['TSH', 'TSH', 1, undefined],
     ]);
+    expect(s.filter((x) => !x.test).map((x) => [x.name, x.count])).toEqual(expect.arrayContaining([['Glucose', 1], ['Glucose', 1], ['TSH receptor antibody', 1], ['Thyrotropin receptor Ab', 1], ['LDL-P', 1]]));
+  });
+  it('an uncoded result joins a coded twin only from its own source, and never when its map says unmatched', () => {
+    const ehi = (o: Observation): Observation => ({ ...o, identifier: [{ system: 'urn:ga-server:id:ehi:hosp', value: 'X|1' }], meta: tag('src-ehi') });
+    const pdfGlucose = { ...lab('Glucose', '2025-06-01'), valueQuantity: { value: 300, unit: 'mg/dL' } };
+    const s = summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), pdfGlucose]);
+    expect(keyLabs(s).map((x) => [x.test, x.latest.date, x.count])).toEqual([['Glucose', '2024-01-01', 1]]);
+    expect(s.find((x) => !x.test)?.latest.value).toBe(300);
+    // the same source: joins
+    expect(keyLabs(summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), ehi(lab('Glucose', '2025-06-01'))]))[0].count).toBe(2);
+    const unmatched = { ...ehi(lab('Glucose', '2025-06-01')), meta: tag('src-ehi', 'concept-unmatched') };
+    expect(keyLabs(summarizeLabs([ehi(lab('Glucose', '2024-01-01', '2345-7')), unmatched]))[0].count).toBe(1);
+  });
+  it('eGFR: race-free and race-based stay one trend, each value with its method', () => {
+    const [e] = summarizeLabs([lab('eGFR', '2024-01-01', '98979-8'), lab('eGFR non-Afr. American', '2021-01-01', '48642-3')]);
+    expect(e).toMatchObject({ test: 'eGFR', count: 2, latest: { method: 'race-free (CKD-EPI 2021)' }, previous: { method: 'race-based' } });
+  });
+  it('a group coded only 13457-7 reports latest.method calculated', () => {
+    const [t] = summarizeLabs([lab('LDL', '2024-01-01', '13457-7'), lab('LDL', '2023-01-01', '13457-7')]);
+    expect(t).toMatchObject({ test: 'LDL', latest: { method: 'calculated' }, previous: { method: 'calculated' } });
+  });
+  it('a match only through a concept-suggested coding is flagged "possibly", and stays out of the concept and keyLabs', () => {
+    const guess = mapped('LDL chol (est)', '2025-01-01', '13457-7', true);
+    expect(labRow(guess).flags).toEqual(['read from a document by AI', 'possibly LDL (suggested mapping)']);
+    expect(labRow(pdf).flags).toEqual(['read from a document by AI']);
+    // the record's own LOINC is never suggested, whatever the tag says
+    expect(labRow({ ...guess, code: { coding: [{ system: L, code: '2085-9' }, ga('13457-7')] } }).flags).toEqual(['read from a document by AI']);
+    // keyed by its own name only: the GA-suggested LOINC neither sets loinc nor pulls in an uncoded twin
+    const twin = lab('LDL chol (est)', '2024-01-01');
+    expect(summarizeLabs([guess, twin, lab('Other', '2020-01-01', '13457-7')]).map((x) => [x.name, x.count, x.loinc])).toEqual([['LDL chol (est)', 2, undefined], ['Other', 1, '13457-7']]);
+    expect(summarizeLabs([guess, lab('LDL chol (est)', '2020-01-01', '13457-7')]).map((x) => [x.name, x.count])).toEqual([['LDL chol (est)', 1], ['LDL chol (est)', 1]]);
+    const s = summarizeLabs([hospital, guess]);
+    expect(s.map((x) => [x.test, x.name, x.count, x.flags])).toEqual([[undefined, 'LDL chol (est)', 1, ['read from a document by AI', 'possibly LDL (suggested mapping)']], ['LDL', 'LOW DENSITY LIPOPROTEIN CHOL', 1, undefined]]);
+    expect(keyLabs(s).map((x) => x.name)).toEqual(['LOW DENSITY LIPOPROTEIN CHOL']);
   });
 });

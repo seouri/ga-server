@@ -13,7 +13,7 @@ const DEFAULT_PASSWORD = 'medplum_admin'; // Medplum's seeded admin password; se
 const PROJECT = 'Guardian Angel'; // Medplum requires 4-72 characters
 // What the GA client may touch: the patient compartment plus the shared records the importers and sync write.
 // Everything else (ClientApplication, User, Login, Project, ProjectMembership, AccessPolicy, Bot...) is denied.
-const GA_TYPES = [...PATIENT_COMPARTMENT, 'Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device', 'Binary', 'Endpoint'];
+const GA_TYPES = [...PATIENT_COMPARTMENT, 'Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device', 'Binary', 'Endpoint', 'ConceptMap'];
 
 // Logs in as admin with the stored rotated password, else the seeded default; rotates the default away.
 // out: where the config is written (ga migrate writes config.next.json); projectName: tests use throwaway projects.

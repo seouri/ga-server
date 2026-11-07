@@ -1,15 +1,25 @@
 // vitals: clinic and Apple Health vital signs as compact rows; Apple's daily summaries only on request (AGENTS.md "Apple Health data").
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
+import { codesFor, conceptNamed } from './concepts.ts';
 import { TAG } from './identity.ts';
 import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
 
 // Apple's per-day (and per-night) summaries are stored with these words in code.text (src/apple/daily.ts).
-const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
+export const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
 // Names that have such a summary; weight, BP, SpO2 and clinic vitals are readings only.
 const HAS_DAILY = /heart|respirat|step|distance|flight|sleep|activ|ring/i;
 
 type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' };
+
+// The searches for a vital name: its text, plus its concept's member codes ("weight": 29463-7). Two searches: Medplum can't OR code and code:text.
+export const vitalSearches = (name: string): [string, string][] => {
+  const c = conceptNamed(name);
+  return [['code:text', name], ...(c?.kind === 'vital' ? [['code', codesFor(c.name).map((x) => `${x.system}|${x.code}`).join(',')] as [string, string]] : [])];
+};
+// Merged searches: one row per record, newest first, undated last.
+export const newestFirst = <R extends { id?: string; date?: string }>(rows: R[]): R[] =>
+  [...new Map(rows.map((r) => [r.id, r])).values()].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 
 export function vitalRow(o: Observation): VitalRow {
   const { source, ...row } = labRow(o);
@@ -34,15 +44,21 @@ export async function vitals(
   const q = new URLSearchParams([['subject', `Patient/${patientId}`], ['_sort', '-date,_id'], ['_count', '100']]);
   if (daily) q.append('_tag', `${TAG}|src-apple-health`);
   q.append('category', daily ? 'activity' : 'vital-signs');
-  if (name) q.append('code:text', name);
   dateRange(q, 'date', since, until);
-  const { rows } = await collect(client, 'Observation', q, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+  // Daily summaries carry no vital concept code: by text only.
+  const by = !name ? [] : daily ? [['code:text', name] as [string, string]] : vitalSearches(name);
+  const found = await Promise.all((by.length ? by : [undefined]).map((p) => {
+    const s = new URLSearchParams(q);
+    if (p) s.append(...p);
+    return collect(client, 'Observation', s, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+  }));
+  const rows = newestFirst(found.flatMap((f) => f.rows));
   // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".
   if (daily && !rows.length) {
     const r = await vitals(client, patientId, { name, since, until, limit });
     return { ...r, hint: `no daily summaries for this; these are readings${r.hint ? `; ${r.hint}` : ''}` };
   }
-  const out = fit(rows, limit);
+  const out = fit(rows, limit, found.some((f) => f.more));
   const longRange = !daily && (!name || HAS_DAILY.test(name)) ? 'use daily: true for long-range trends, or ' : '';
   return out.truncated ? { ...out, hint: `more results: ${longRange}narrow the dates or the name` } : out;
 }

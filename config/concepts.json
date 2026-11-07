@@ -1,0 +1,545 @@
+[
+ {
+  "name": "A1c",
+  "kind": "lab",
+  "synonyms": [
+   "hba1c",
+   "hemoglobin a1c",
+   "haemoglobin a1c",
+   "glycated hemoglobin",
+   "glycated haemoglobin",
+   "glycohemoglobin"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 4549-2 \"Hemoglobin A1c/Hemoglobin.total in Blood by Electrophoresis\"; 59261-8 (IFCC, substance fraction mmol/mol) is not equivalent to these mass-fraction (%) codes: omitted",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "4548-4"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "17856-6"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "4549-2"
+   }
+  ]
+ },
+ {
+  "name": "Glucose",
+  "kind": "lab",
+  "synonyms": [
+   "blood sugar",
+   "fasting glucose"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 1549-5 \"Glucose [Mass/volume] in Serum or Plasma --pre 100 g glucose PO\"",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2345-7"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "2339-0"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "1558-6",
+    "label": "fasting"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "1549-5",
+    "label": "fasting (before a 100 g glucose load)"
+   }
+  ]
+ },
+ {
+  "name": "LDL",
+  "kind": "lab",
+  "synonyms": [
+   "ldl c",
+   "ldl cholesterol",
+   "low density lipoprotein"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "13457-7",
+    "label": "calculated"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "18262-6",
+    "label": "direct"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "2089-1"
+   }
+  ]
+ },
+ {
+  "name": "HDL",
+  "kind": "lab",
+  "synonyms": [
+   "hdl c",
+   "hdl cholesterol",
+   "high density lipoprotein"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2085-9"
+   }
+  ]
+ },
+ {
+  "name": "Total cholesterol",
+  "kind": "lab",
+  "synonyms": [
+   "cholesterol total"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2093-3"
+   }
+  ]
+ },
+ {
+  "name": "Triglycerides",
+  "kind": "lab",
+  "synonyms": [
+   "triglyceride"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2571-8"
+   }
+  ]
+ },
+ {
+  "name": "Creatinine",
+  "kind": "lab",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 38483-4 \"Creatinine [Mass/volume] in Blood\"",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2160-0"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "38483-4"
+   }
+  ]
+ },
+ {
+  "name": "eGFR",
+  "kind": "lab",
+  "synonyms": [
+   "gfr",
+   "estimated gfr",
+   "glomerular filtration rate",
+   "estimated glomerular filtration rate"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 77147-7 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (MDRD)/1.73 sq M\"; 69405-9 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by based on 1.73 sq M\"; 88293-6 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (CKD-EPI)/1.73 sq M among black population\"; 88294-4 \"... (CKD-EPI)/1.73 sq M among non black population\"",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "62238-1",
+    "label": "CKD-EPI"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "98979-8",
+    "label": "race-free (CKD-EPI 2021)"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "48642-3",
+    "label": "race-based"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "48643-1",
+    "label": "race-based"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "33914-3",
+    "label": "MDRD"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "77147-7",
+    "label": "MDRD"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "69405-9",
+    "label": "method unspecified"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "88293-6",
+    "label": "race-based, Black (CKD-EPI 2009)"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "88294-4",
+    "label": "race-based, non-Black (CKD-EPI 2009)"
+   }
+  ]
+ },
+ {
+  "name": "ALT",
+  "kind": "lab",
+  "synonyms": [
+   "sgpt",
+   "alanine aminotransferase"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "1742-6"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "1743-4"
+   }
+  ]
+ },
+ {
+  "name": "AST",
+  "kind": "lab",
+  "synonyms": [
+   "sgot",
+   "aspartate aminotransferase"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 30239-8 \"Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma by With P-5'-P\"",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "1920-8"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "30239-8"
+   }
+  ]
+ },
+ {
+  "name": "Hemoglobin",
+  "kind": "lab",
+  "synonyms": [
+   "hgb",
+   "haemoglobin"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "718-7"
+   }
+  ]
+ },
+ {
+  "name": "Platelets",
+  "kind": "lab",
+  "synonyms": [
+   "platelet",
+   "platelet count",
+   "plt"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "777-3"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "26515-7"
+   }
+  ]
+ },
+ {
+  "name": "Potassium",
+  "kind": "lab",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2823-3"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "6298-4"
+   }
+  ]
+ },
+ {
+  "name": "Sodium",
+  "kind": "lab",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2951-2"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "2947-0"
+   }
+  ]
+ },
+ {
+  "name": "TSH",
+  "kind": "lab",
+  "synonyms": [
+   "thyrotropin",
+   "thyroid stimulating hormone"
+  ],
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "3016-3"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "11580-8"
+   }
+  ]
+ },
+ {
+  "name": "Blood pressure panel",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "85354-9"
+   }
+  ]
+ },
+ {
+  "name": "Systolic blood pressure",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "8480-6"
+   }
+  ]
+ },
+ {
+  "name": "Diastolic blood pressure",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "8462-4"
+   }
+  ]
+ },
+ {
+  "name": "Body weight",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "29463-7"
+   }
+  ]
+ },
+ {
+  "name": "Body height",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "8302-2"
+   }
+  ]
+ },
+ {
+  "name": "Body mass index",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "39156-5"
+   }
+  ]
+ },
+ {
+  "name": "Heart rate",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "8867-4"
+   }
+  ]
+ },
+ {
+  "name": "Respiratory rate",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "9279-1"
+   }
+  ]
+ },
+ {
+  "name": "Oxygen saturation",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "2708-6"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "59408-5"
+   }
+  ]
+ },
+ {
+  "name": "Body temperature",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "8310-5"
+   }
+  ]
+ },
+ {
+  "name": "Head circumference",
+  "kind": "vital",
+  "_source": "FHIR R4 Vital Signs profile, https://hl7.org/fhir/R4/observation-vitalsigns.html; code displays checked against NLM Clinical Table Search Service loinc_items",
+  "members": [
+   {
+    "system": "http://loinc.org",
+    "code": "9843-4"
+   }
+  ]
+ },
+ {
+  "name": "colorectal cancer screening",
+  "kind": "procedure",
+  "_source": "SNOMED CT displays checked on tx.fhir.org (73761001 Colonoscopy, 444783004 Screening colonoscopy, 418714002 Virtual CT colonoscopy, 441579003 Measurement of occult blood in stool specimen using immunoassay). CPT 45378, 82274, 81528 descriptors per NLM VSAC value sets via FHIR XIG (Colonoscopy; FOBT_Lab, Colorectal Screening 2.16.840.1.113762.1.4.1206.57); CPT 74263 per VSAC CT Colonography_CPT (2.16.840.1.113762.1.4.1235.291). HCPCS G0105, G0121, G0328 per NLM clinicaltables hcpcs and Noridian JF Part B colorectal screening page. No SNOMED procedure for FIT-DNA verified: omitted. CPT 45380, 45384, 45385 (colonoscopy with biopsy; polyp removal by hot biopsy forceps; by snare) per VSAC Colonoscopy (2.16.840.1.113883.3.464.1003.108.12.1020); CPT 45330 per VSAC Flexible Sigmoidoscopy (2.16.840.1.113883.3.464.1003.198.12.1010), both via the Preventive Care Guidelines IG (chronic-care.github.io/preventive-care); HCPCS G0104 \"Colorectal cancer screening; flexible sigmoidoscopy\" per NLM clinicaltables hcpcs.",
+  "members": [
+   {
+    "system": "http://snomed.info/sct",
+    "code": "73761001",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://snomed.info/sct",
+    "code": "444783004",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45378",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+    "code": "G0105",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+    "code": "G0121",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45380",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45384",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45385",
+    "label": "colonoscopy"
+   },
+   {
+    "system": "http://snomed.info/sct",
+    "code": "441579003",
+    "label": "FIT"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "82274",
+    "label": "FIT"
+   },
+   {
+    "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+    "code": "G0328",
+    "label": "FIT"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "81528",
+    "label": "FIT-DNA"
+   },
+   {
+    "system": "http://snomed.info/sct",
+    "code": "418714002",
+    "label": "CT colonography"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "74263",
+    "label": "CT colonography"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "74261",
+    "label": "CT colonography"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "74262",
+    "label": "CT colonography"
+   },
+   {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "45330",
+    "label": "flexible sigmoidoscopy"
+   },
+   {
+    "system": "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets",
+    "code": "G0104",
+    "label": "flexible sigmoidoscopy"
+   }
+  ]
+ }
+]
