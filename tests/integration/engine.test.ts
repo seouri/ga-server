@@ -184,6 +184,13 @@ test('same day but different time of day flags possible-duplicate, not a merge',
   expect(found.every((o) => tagged(o, 'possible-duplicate'))).toBe(true);
 });
 
+test('same day, different times and different values are separate readings, not possible duplicates', async () => {
+  const a = chol(uid('obs'), 230, '2023-10-03T08:00:00Z');
+  const b = chol(uid('obs'), 205, '2023-10-03T17:30:00Z');
+  await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
+  expect(await importResources(client, [b], ccda('2024-02-01'), pid, 'h')).toMatchObject({ possibleDuplicates: 0, created: 1 });
+});
+
 test('agent value equal to an importer record only adds its identifier; the hospital body stays', async () => {
   const a = { ...chol(uid('obs'), 240, '2023-11-01'), interpretation: [{ text: 'hospital' }] };
   await importResources(client, [a], ccda('2024-01-01'), pid, 'h');
