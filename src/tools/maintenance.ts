@@ -20,7 +20,7 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
   async function write(code: string, topic: string, ext: Extension[], reason: string, source?: string) {
     const who = remote?.clientName ?? server.server.getClientVersion()?.name ?? 'Claude Code'; // the client is known only after initialize
     const basic = await client.createResource<Basic>({
-      resourceType: 'Basic', subject, created: new Date().toISOString(), code: { coding: [{ system: REMINDER, code }] },
+      resourceType: 'Basic', subject, created: new Date().toLocaleDateString('en-CA'), code: { coding: [{ system: REMINDER, code }] }, // Basic.created is a FHIR date, not a dateTime
       extension: [{ url: 'urn:ga-server:ext:topic', valueString: topic }, ...ext],
     });
     await client.createResource<Provenance>({
