@@ -24,6 +24,7 @@ import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
 import { registerShareTools } from './tools/shares.ts';
+import { registerConceptTools } from './tools/concepts.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -150,6 +151,7 @@ export type ToolDeps = {
   client: MedplumClient;
   cfg: GaConfig;
   patientId: string;
+  fetch?: typeof fetch; // code validation (NLM); tests inject one
   // dir: the gateway's state directory (uploads); default gatewayDir().
   remote?: { publicUrl: string; clientName: string; dir?: string; disconnect?: (clientId: string) => Promise<void>; log: (tool: string) => Promise<void> };
 };
@@ -395,6 +397,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     read(({ asOf }) => vaccineGaps(client, patientId, asOf)),
   );
+  registerConceptTools(server, deps);
   // Remote ga_import (by fileId) is in tools/imports.ts.
   if (!remote) server.registerTool(
     'ga_import',

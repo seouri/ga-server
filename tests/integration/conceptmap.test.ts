@@ -50,3 +50,18 @@ test('upsertEntry then lookup round-trips; a second upsert replaces; the serum e
   const groups = maps.get(source)?.group ?? [];
   expect(groups.flatMap((g) => g.element ?? []).filter((e) => e.code === 'glucose|mg/dl|serum')).toHaveLength(1);
 });
+
+test('a write from a stale read gets 412 and retries on a fresh read: neither writer loses its entry', async () => {
+  const stale = await client.searchOne('ConceptMap', { url: MAP_URL + source }, { cache: 'no-cache' });
+  await upsertEntry(client, source, entry('sodium|mmol/l', '2951-2')); // the other writer, after our read
+  let reads = 0;
+  const racing = new Proxy(client, {
+    get: (c, k) => (k === 'searchOne' ? async (...a: unknown[]) => (reads++ ? (c.searchOne as (...x: unknown[]) => unknown)(...a) : stale) : Reflect.get(c, k, c)),
+  });
+  const written = await upsertEntry(racing, source, entry('potassium|mmol/l', '2823-3'));
+  expect(reads).toBe(2);
+  expect(written?.id).toBe(stale?.id);
+  const maps = await loadMaps(client, true);
+  expect(lookup(maps, source, 'sodium|mmol/l')?.target?.code).toBe('2951-2');
+  expect(lookup(maps, source, 'potassium|mmol/l')?.target?.code).toBe('2823-3');
+});

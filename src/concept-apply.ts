@@ -6,7 +6,7 @@ import { type SourceInfo, TAG } from './identity.ts';
 
 export const CONCEPT_SRC = 'urn:ga-server:ext:concept-source';
 const CONCEPT_TAGS = ['concept-suggested', 'concept-unmapped'];
-const TARGET: Record<string, string[]> = {
+export const TARGET: Record<string, string[]> = {
   Observation: [LOINC], Immunization: [CVX], MedicationStatement: [RXNORM], MedicationRequest: [RXNORM],
   Condition: [SNOMED, ICD10CM], Procedure: [SNOMED, CPT, HCPCS],
 };

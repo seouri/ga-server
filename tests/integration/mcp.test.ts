@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Endpoint, Medication, Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { buildMcpServer } from '../../src/mcp.ts';
 
 const PDF = join(import.meta.dirname, '..', 'fixtures', 'labs-synthetic.pdf');
 const CLI = join(import.meta.dirname, '..', '..', 'src', 'cli.ts');
@@ -407,5 +409,117 @@ describe('purpose-built read tools', () => {
     expect(s.lastVisit).toMatchObject({ date: '2025-06-01', type: 'Office visit', class: 'ambulatory' });
     expect(s.imports.sources.map((x: { source: string }) => x.source)).toEqual(expect.arrayContaining(['Epic EHI export', 'Apple Health', 'PDF or photo', expect.stringMatching(/^hospital portal/)]));
     expect(s.imports.newest).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('concept tools', () => {
+  const key = `sync-${randomUUID()}`; // throwaway SMART source: cleanupTestMaps matches its map
+  const source = `smart:${key}`;
+  const LOCAL = 'urn:test:local-code';
+  let inproc: Client;
+  let offline: Client;
+  const seed = async (name: string, n: number) => {
+    const obs = (i: number): Observation => ({
+      resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${pid}` },
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
+      code: { coding: [{ system: LOCAL, code: name, display: name }], text: name },
+      valueQuantity: { value: i, unit: 'mg/dL' }, effectiveDateTime: '2024-01-02',
+      identifier: [{ system: `urn:ga-server:id:smart:${key}`, value: `Observation/${randomUUID()}` }],
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-smart' }, { system: 'urn:ga-server:tag', code: 'concept-unmapped' }] },
+    });
+    const b = await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry: Array.from({ length: n }, (_, i) => ({ resource: obs(i), request: { method: 'POST', url: 'Observation' } })) });
+    expect(b.entry?.every((e) => e.response?.status?.startsWith('201'))).toBe(true);
+  };
+  const records = async (name: string) => client.searchResources('Observation', { subject: `Patient/${pid}`, code: `${LOCAL}|${name}`, _count: '1000' }, { cache: 'no-cache' });
+  const ga = (o: Observation) => o.code?.coding?.filter((c) => c.extension?.some((e) => e.url === 'urn:ga-server:ext:concept-source')) ?? [];
+  const tags = (o: Observation) => o.meta?.tag?.map((t) => t.code) ?? [];
+  const inCall = async (c: Client, name: string, args: Record<string, unknown>) => {
+    const r = await c.callTool({ name, arguments: args });
+    return { isError: !!r.isError, text: (r.content as { text: string }[])[0].text };
+  };
+  const loincOk = (async () => new Response(JSON.stringify([1, ['2345-7'], null, [['Glucose [Mass/volume] in Serum or Plasma']]]))) as unknown as typeof fetch;
+  const map = (name: string, extra: object = {}) => ({ source, name, unit: 'mg/dL', type: 'Observation', system: 'http://loinc.org', code: '2345-7', display: 'Glucose', equivalence: 'equivalent', confident: true, ...extra });
+  const connect = async (f: typeof fetch) => {
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([buildMcpServer({ client, cfg, patientId: pid, fetch: f, remote: { publicUrl: 'https://ga.invalid', clientName: 'Test Chat', log: async () => {} } }).connect(a), c.connect(b)]);
+    return c;
+  };
+
+  beforeAll(async () => {
+    await seed('Zeta many', 510);
+    await seed('Zeta fix', 3);
+    await seed('Zeta offline', 2);
+    inproc = await connect(loincOk);
+    offline = await connect((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
+  }, 120_000);
+  afterAll(async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    if (!m) return;
+    for (const p of await client.searchResources('Provenance', { target: `ConceptMap/${m.id}` }, { cache: 'no-cache' })) await client.deleteResource('Provenance', p.id as string);
+    await cleanupTestMaps(client);
+  });
+
+  test('both tools are on stdio; concepts_to_review lists a seeded unmapped term, most frequent first, without values', async () => {
+    const names = (await mcp.listTools()).tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['concepts_to_review', 'map_concept']));
+    const r = await call('concepts_to_review', { type: 'Observation' });
+    expect(r.isError).toBe(false);
+    const terms = JSON.parse(r.text).terms.filter((t: { source: string }) => t.source === source);
+    expect(terms.map((t: { name: string; count: number }) => [t.name, t.count])).toEqual([['Zeta many', 510], ['Zeta fix', 3], ['Zeta offline', 2]]);
+    expect(terms[0]).toMatchObject({ unit: 'mg/dL', type: 'Observation', examples: ['2024-01-02'] });
+    expect(r.text).not.toContain('"value"');
+    expect((await call('concepts_to_review', { type: 'Patient' })).isError).toBe(true);
+  });
+
+  test('map_concept confident and equivalent codes every matching record (more than one page) and empties its review entry; Provenance per mapping', async () => {
+    const r = await inCall(inproc, 'map_concept', map('Zeta many'));
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.text)).toEqual({ changed: 510, status: 'mapped' });
+    const rs = await records('Zeta many');
+    expect(rs).toHaveLength(510);
+    for (const o of rs) {
+      expect(ga(o).map((c) => [c.system, c.code, c.display])).toEqual([['http://loinc.org', '2345-7', 'Glucose [Mass/volume] in Serum or Plasma']]);
+      expect(tags(o)).not.toContain('concept-unmapped');
+      expect(tags(o)).not.toContain('concept-suggested');
+    }
+    const left = JSON.parse((await inCall(inproc, 'concepts_to_review', {})).text).terms.map((t: { name: string }) => t.name);
+    expect(left).not.toContain('Zeta many');
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    const provs = await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' });
+    expect(provs).toHaveLength(1);
+    expect(provs[0]).toMatchObject({ agent: [{ who: { display: 'Test Chat' } }], activity: { coding: [{ code: 'map_concept' }] } });
+  }, 300_000);
+
+  test('a second map_concept with another code moves every record to it; the source coding is untouched (Review Focus 3)', async () => {
+    await inCall(inproc, 'map_concept', map('Zeta fix'));
+    const fixOk = (async () => new Response(JSON.stringify([1, ['2339-0'], null, [['Glucose [Mass/volume] in Blood']]]))) as unknown as typeof fetch;
+    const r = await inCall(await connect(fixOk), 'map_concept', map('Zeta fix', { code: '2339-0', display: 'Glucose blood' }));
+    expect(JSON.parse(r.text)).toEqual({ changed: 3, status: 'mapped' });
+    for (const o of await records('Zeta fix')) {
+      expect(ga(o).map((c) => c.code)).toEqual(['2339-0']);
+      expect(o.code?.coding?.[0]).toEqual({ system: LOCAL, code: 'Zeta fix', display: 'Zeta fix' });
+      expect(o.code?.text).toBe('Zeta fix');
+    }
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    expect(await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' })).toHaveLength(3);
+  });
+
+  test('validation unavailable: applied as suggested with the reason (Review Focus 4)', async () => {
+    const r = await inCall(offline, 'map_concept', map('Zeta offline'));
+    expect(JSON.parse(r.text)).toEqual({ changed: 2, status: 'suggested', reason: 'validation unavailable' });
+    for (const o of await records('Zeta offline')) {
+      expect(ga(o).map((c) => c.code)).toEqual(['2345-7']);
+      expect(tags(o)).toContain('concept-suggested');
+    }
+  });
+
+  test('an Apple daily summary term, or a system wrong for the type, is refused without writing (Review Focus 5)', async () => {
+    const r = await inCall(inproc, 'map_concept', map('Heart rate, daily mean (Apple Health)', { source: 'apple-health', unit: 'count/min' }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/not in the concept layer's scope/);
+    const w = await inCall(inproc, 'map_concept', map('Zeta fix', { system: 'http://www.nlm.nih.gov/research/umls/rxnorm' }));
+    expect(w.isError).toBe(true);
+    expect((await records('Zeta fix')).every((o) => ga(o)[0]?.code === '2339-0')).toBe(true);
   });
 });
