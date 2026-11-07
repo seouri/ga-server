@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -108,11 +108,17 @@ describe('answering texts', () => {
     for (const i of [1, 2, 3]) expect(seen[i].messages.at(-1).content).toContain('tool not available by text');
   });
 
-  it('whats_new is called without markSeen', async () => {
-    const { text, seen } = setup([call('whats_new', { markSeen: true, since: '2026-11-01' }), say('ok')]);
-    await text('what is new');
-    expect(seen[1].messages.at(-1).content).not.toContain('error');
-    const ids = seen[1].messages.find((m: Msg) => m.role === 'assistant' && m.tool_calls).tool_calls;
-    expect(ids).toBeDefined();
+  it('whats_new is called without markSeen: nothing is marked seen (temp config dir)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ga-seen-'));
+    const old = process.env.GA_CONFIG;
+    process.env.GA_CONFIG = join(tmp, 'config.json');
+    try {
+      const { text, seen } = setup([call('whats_new', { markSeen: true }), say('ok')]);
+      await text('what is new');
+      expect(seen[1].messages.at(-1).content).not.toContain('error');
+      expect(readdirSync(tmp)).not.toContain('whats-new.json');
+    } finally {
+      if (old === undefined) delete process.env.GA_CONFIG; else process.env.GA_CONFIG = old;
+    }
   });
 });
