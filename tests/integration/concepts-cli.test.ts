@@ -3,7 +3,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { CONCEPT_SRC } from '../../src/concept-apply.ts';
-import { applyAll, reviewList } from '../../src/concepts-cli.ts';
+import { applyAll, reviewList, scan } from '../../src/concepts-cli.ts';
 import { LOINC } from '../../src/concepts.ts';
 import { upsertEntries } from '../../src/conceptmap.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
@@ -112,4 +112,25 @@ test('a record with several source tags takes the one whose key has a map, else 
 
 test('reviewList rejects an unknown type', async () => {
   await expect(reviewList(client, pid, 'unmapped', 'Patient')).rejects.toThrow(/type must be/);
+});
+
+test('scan pages by cursor, never _offset, over more than one page', async () => {
+  const k = `good-${randomUUID()}`;
+  for (let i = 0; i < 25; i++) await client.createResource(withSrc(lab(`Paged ${i}`, '2024-07-01'), ['smart'], 'x', [`urn:ga-server:id:smart:${k}`]));
+  const queries: string[] = [];
+  const spy = new Proxy(client, {
+    get: (t, p) => (p === 'searchResourcePages' || p === 'searchResources'
+      ? (type: string, q: Record<string, string>, o: object) => { queries.push(JSON.stringify(q)); return (t as never as Record<string, (...a: unknown[]) => unknown>)[p as string](type, q, o); }
+      : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+  });
+  let seen = 0;
+  let pages = 0;
+  for await (const page of scan(spy, pid, ['Observation'], {}, 20)) {
+    pages++;
+    seen += page.filter((r) => (r as Observation).code?.text?.startsWith('Paged')).length;
+  }
+  expect(seen).toBe(25);
+  expect(pages).toBeGreaterThan(1);
+  expect(queries.length).toBeGreaterThan(2);
+  expect(queries.some((q) => q.includes('_offset'))).toBe(false);
 });

@@ -59,13 +59,18 @@ function sourceResolver(client: MedplumClient, patientId: string, maps: () => Ma
   };
 }
 
-async function* scan(client: MedplumClient, patientId: string, types: string[], extra: Record<string, string> = {}): AsyncGenerator<Resource[]> {
+// Ids first by cursor (Medplum caps _offset at 10000; a cursor needs _sort=_lastUpdated and _count >= 20), then the records
+// in batches of up to 100: writing a record while paging would move it in a _lastUpdated order. size: page and batch size (at least 20).
+// shortcut: all ids of a type sit in memory (about 40 bytes each), fine for a personal record.
+export async function* scan(client: MedplumClient, patientId: string, types: string[], extra: Record<string, string> = {}, size = PAGE): AsyncGenerator<Resource[]> {
   for (const type of types) {
-    for (let offset = 0; ; offset += PAGE) {
-      // _sort _id: writing a record changes lastUpdated, not its place in this order, so offsets stay stable.
-      const page = await client.searchResources(type as 'Observation', { [COMPARTMENT[type]]: `Patient/${patientId}`, _sort: '_id', _count: String(PAGE), _offset: String(offset), ...extra }, { cache: 'no-cache' });
-      if (page.length) yield page;
-      if (page.length < PAGE) break;
+    const ids: string[] = [];
+    const q = { [COMPARTMENT[type]]: `Patient/${patientId}`, _sort: '_lastUpdated', _count: String(size), _elements: 'id', ...extra };
+    for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) ids.push(...page.map((r) => r.id as string));
+    const step = Math.min(size, 100); // an _id list of 500 uuids makes a URL some servers refuse
+    for (let i = 0; i < ids.length; i += step) {
+      const batch = await client.searchResources(type as 'Observation', { _id: ids.slice(i, i + step).join(','), _count: String(step) }, { cache: 'no-cache' });
+      if (batch.length) yield batch;
     }
   }
 }
