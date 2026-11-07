@@ -28,7 +28,9 @@ test('older source does not overwrite', () => {
 test('equal content skips', () => {
   // existing carries an extra identifier from an earlier merge, in a different order
   const ex = existing({ ...ms('active'), identifier: [{ system: 'urn:ga-server:id:pdf', value: 'h' }] } as Resource, src('2024-01-01'));
-  expect(decide(ex, stamp(ms('active'), src('2024-06-01T10:00:00Z'), ID))).toBe('skip');
+  expect(decide(ex, stamp(ms('active'), src('2024-06-01T10:00:00Z'), ID))).toBe('update'); // newer source re-confirms a medication
+  const obs = { resourceType: 'Observation', status: 'final', code: { text: 'x' } } as Resource;
+  expect(decide(existing(obs, src('2024-01-01')), stamp(obs, src('2024-06-01'), ID))).toBe('skip'); // other types: no churn
 });
 
 test('newer different content updates', () => {
