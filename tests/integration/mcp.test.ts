@@ -315,6 +315,7 @@ describe('purpose-built read tools', () => {
     expect(v.rows.map((r: { setting: string; kind: string }) => [r.setting, r.kind])).toEqual([['home', 'reading'], ['clinic', 'reading']]);
     expect((await tool('vitals', { daily: true })).rows).toMatchObject([{ name: 'Steps, daily total (Apple Health)', kind: 'daily total', setting: 'home' }]);
     expect((await tool('vitals', { name: 'weight', until: '2025-02-28' })).rows).toEqual([]);
+    expect(await tool('vitals', { name: 'weight', daily: true })).toMatchObject({ rows: [{ kind: 'reading' }, { kind: 'reading' }], hint: expect.stringMatching(/^no daily summaries/) });
     expect(await tool('vitals', { limit: 1 })).toMatchObject({ truncated: true, hint: expect.stringContaining('daily: true') });
   });
   test('notes_search: text inside notes and messages; archives and source files skipped', async () => {

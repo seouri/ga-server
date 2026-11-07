@@ -31,4 +31,8 @@ test('vitals: readings query vital-signs; daily keeps only Apple summaries and s
   expect(d).toMatchObject({ rows: [{ kind: 'daily total' }], truncated: true, hint: expect.any(String) });
   expect((await vitals(client, 'p', { daily: true })).rows.map((r) => r.kind)).toEqual(['daily total', 'nightly']);
   await expect(vitals(client, 'p', { until: '2024-13-01' })).rejects.toThrow(/until must be/);
+  // No summary for the name (e.g. weight): the readings come back, labelled.
+  const weight = [o('Body weight', { meta: apple })];
+  const c2 = { search: async (_t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: (q.get('category') === 'vital-signs' ? weight : []).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect(await vitals(c2, 'p', { name: 'weight', daily: true })).toMatchObject({ rows: [{ name: 'Body weight', kind: 'reading' }], hint: 'no daily summaries for this; these are readings' });
 });
