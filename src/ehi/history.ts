@@ -3,8 +3,8 @@ import type {
   CodeableConcept, FamilyMemberHistory, FamilyMemberHistoryCondition, Identifier, Immunization, Observation, Procedure, QuestionnaireResponse,
   Resource,
 } from '@medplum/fhirtypes';
-import { DUP_OF, TAG } from '../engine.ts';
-import { EPIC_OID } from '../identity.ts';
+import { DUP_OF } from '../engine.ts';
+import { EPIC_OID, TAG } from '../identity.ts';
 import { ehiDate } from './dates.ts';
 import { type EhiCtx, ehiId, encounterRef, epicId, localId, PATIENT_REF } from './ids.ts';
 import type { EhiTables, Row } from './read.ts';

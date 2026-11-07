@@ -8,7 +8,7 @@ import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
 import { searchAll, validDay } from './labs.ts';
 import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
-import { TAG } from './engine.ts';
+import { TAG } from './identity.ts';
 
 type Match = { cvx: string[]; names: string[] };
 type Rule = {

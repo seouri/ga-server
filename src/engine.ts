@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, NEWEST_IMPORT, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport } from './share/scope.ts';
 
@@ -29,8 +29,6 @@ export function addReport(total: ImportReport, r: ImportReport): void {
 type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
-export const TAG = 'urn:ga-server:tag';
-const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
@@ -58,7 +56,6 @@ const isValidationFailure = (e: unknown): e is OperationOutcomeError => {
   return getStatus(e.outcome) === 400 && issues.length > 0 && issues.every((i) => VALIDATION.includes(i.code) && !!i.expression?.length);
 };
 
-export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 // Sticky protection: source-conflict (a newer source differed) or person-edited (GA wrote only bookkeeping onto a person's edit, becoming its author).
 const shielded = (r: Resource) => hasTag(r, 'source-conflict') || hasTag(r, 'person-edited');
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;

@@ -2,8 +2,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
-import { hasTag } from '../engine.ts';
-import { NEWEST_IMPORT, TAG } from '../identity.ts';
+import { hasTag, NEWEST_IMPORT, TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 

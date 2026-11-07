@@ -26,6 +26,7 @@ export const sha256 = (s: string | Buffer): string => createHash('sha256').updat
 export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
+export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);

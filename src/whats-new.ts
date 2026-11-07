@@ -6,8 +6,7 @@ import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resourc
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
-import { hasTag } from './engine.ts';
-import { arrivedAt, TAG } from './identity.ts';
+import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medMap } from './lists.ts';
