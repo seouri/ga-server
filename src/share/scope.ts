@@ -15,7 +15,7 @@ const NEVER = new Set([
   'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
 ]);
 // FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
-export const COMPARTMENT_TYPES = [
+export const PATIENT_COMPARTMENT = [
   'Account', 'AdverseEvent', 'AllergyIntolerance', 'Appointment', 'AppointmentResponse', 'AuditEvent', 'Basic', 'BodyStructure',
   'CarePlan', 'CareTeam', 'ChargeItem', 'Claim', 'ClaimResponse', 'ClinicalImpression', 'Communication', 'CommunicationRequest',
   'Composition', 'Condition', 'Consent', 'Coverage', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'DetectedIssue',
@@ -25,7 +25,8 @@ export const COMPARTMENT_TYPES = [
   'MedicationDispense', 'MedicationRequest', 'MedicationStatement', 'MolecularSequence', 'NutritionOrder', 'Observation', 'Patient',
   'Person', 'Procedure', 'Provenance', 'QuestionnaireResponse', 'RelatedPerson', 'RequestGroup', 'ResearchSubject', 'RiskAssessment',
   'Schedule', 'ServiceRequest', 'Specimen', 'SupplyDelivery', 'SupplyRequest', 'Task', 'VisionPrescription',
-].filter((t) => !NEVER.has(t)) as ResourceType[];
+] as ResourceType[];
+export const COMPARTMENT_TYPES = PATIENT_COMPARTMENT.filter((t) => !NEVER.has(t));
 // Archives and imported source files (C-CDA, EHI media, PDFs): untrimmed demographics, MRN, insurance and out-of-scope data.
 // Only the records extracted from them are shared; their Binary is never followed because they never enter `resources`.
 const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:file']);
