@@ -123,7 +123,7 @@ export type LabTrend = {
 // others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen)
 // from the same source when there is exactly one; never across sources (a PDF "Glucose" is not the hospital's), never one its
 // source map calls unmatched. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
-export function summarizeLabs(obs: Observation[]): LabTrend[] {
+export function groupLabs(obs: Observation[]): Observation[][] {
   const rows = obs.map((o) => {
     const m = conceptMatch(o);
     return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested };
@@ -146,9 +146,16 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     if (!k) continue; // nothing to group by
     groups.set(k, [...(groups.get(k) ?? []), x]);
   }
-  return [...groups.values()].map((g): LabTrend => {
-    // Undated last; the same day: the newest written first.
-    g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? ''));
+  // Undated last; the same day: the newest written first.
+  return [...groups.values()].map((g) => g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? '')).map((x) => x.o));
+}
+
+export function summarizeLabs(obs: Observation[]): LabTrend[] {
+  return groupLabs(obs).map((os): LabTrend => {
+    const g = os.map((o) => {
+      const m = conceptMatch(o);
+      return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested };
+    });
     const [l] = g;
     const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
     const a = num(l.o), b = p && num(p.o);

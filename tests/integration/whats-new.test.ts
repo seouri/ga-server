@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
-import type { Observation } from '@medplum/fhirtypes';
+import type { MedicationStatement, Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
 import type { SourceInfo } from '../../src/identity.ts';
-import { arrivedSince } from '../../src/whats-new.ts';
+import { arrivedSince, statusItems } from '../../src/whats-new.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -35,4 +35,16 @@ test('arrivedSince returns created records, not old or unmarked ones', async () 
   expect(got.length).toBe(1);
   expect(got[0].id).not.toBe(unmarked.id);
   expect(await arrivedSince(client, pid, new Date(Date.now() + 60000).toISOString())).toEqual([]);
+});
+
+test('statusItems sees a medication stopped since', async () => {
+  const ms = await client.createResource<MedicationStatement>({
+    resourceType: 'MedicationStatement', status: 'active', subject: { reference: `Patient/${pid}` }, medicationCodeableConcept: { text: 'Synthetic drug' },
+  });
+  await new Promise((r) => setTimeout(r, 1100));
+  const since = new Date().toISOString();
+  await new Promise((r) => setTimeout(r, 1100));
+  await client.updateResource({ ...ms, status: 'stopped' });
+  const items = await statusItems(client, pid, since);
+  expect(items.filter((i) => i.id === ms.id).map((i) => i.detail)).toEqual([{ from: 'active', to: 'stopped' }]);
 });

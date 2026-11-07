@@ -1,9 +1,9 @@
 import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Resource } from '@medplum/fhirtypes';
+import type { Observation, Resource } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
-import { clinicalDate, kindOf, readLastSeen, tally, writeLastSeen } from '../src/whats-new.ts';
+import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, tally, writeLastSeen } from '../src/whats-new.ts';
 
 const TAG = 'urn:ga-server:tag';
 const tag = (code: string) => ({ tag: [{ system: TAG, code }] });
@@ -55,4 +55,52 @@ test('readLastSeen ignores a corrupt or unreadable file', () => {
   writeFileSync(join(dir, 'whats-new.json'), 'null');
   expect(readLastSeen(dir)).toBeUndefined();
   expect(readLastSeen(join(dir, 'whats-new.json'))).toBeUndefined(); // a file where the directory should be
+});
+
+const ARRIVED = 'urn:ga-server:ext:arrived';
+const ldl = (id: string, date: string, value: number, extra: object = {}) => obs({
+  id, code: { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: 'LDL' }, effectiveDateTime: date, valueQuantity: { value, unit: 'mg/dL' },
+  referenceRange: [{ high: { value: 100, unit: 'mg/dL' } }], ...extra,
+}) as Observation;
+
+test('labItems: high with previous, no range, and historical', () => {
+  const a = ldl('a', '2026-10-01', 160), old = ldl('b', '2025-01-01', 120);
+  const [item, ...rest] = labItems([a], [a, old], '2026-11-07');
+  expect(rest).toEqual([]);
+  expect(item).toMatchObject({ kind: 'lab', title: 'LDL', date: '2026-10-01', id: 'a', detail: { flag: 'high', previous: { date: '2025-01-01' } } });
+  const plain = obs({ id: 'c', effectiveDateTime: '2026-10-01', valueQuantity: { value: 5 } }) as Observation;
+  expect(labItems([plain], [plain], '2026-11-07')).toEqual([]);
+  const h = ldl('d', '2024-05-05', 170);
+  expect(labItems([h], [h], '2026-11-07')).toEqual([]);
+});
+
+const RX = 'http://www.nlm.nih.gov/research/umls/rxnorm';
+const med = (id: string, over: object) => ({ resourceType: 'MedicationStatement', id, status: 'active', ...over }) as Resource;
+const arrivedExt = (at: string) => ({ extension: [{ url: ARRIVED, valueInstant: at }] });
+
+test('medicationItems: new only when no earlier record shares the code or name', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const coded = (id: string, at: string) => med(id, { medicationCodeableConcept: { coding: [{ system: RX, code: '1234' }], text: 'Drug A' }, ...arrivedExt(at) });
+  const earlier = coded('e', '2026-01-01T00:00:00Z'), fresh = coded('f', '2026-11-02T00:00:00Z');
+  expect(medicationItems([fresh], [earlier, fresh], since)).toEqual([]);
+  const items = medicationItems([fresh], [fresh], since);
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({ kind: 'new medication', title: 'Drug A', detail: { rxnorm: '1234', status: 'active' } });
+  const named = (id: string, text: string, ext: object) => med(id, { medicationCodeableConcept: { text }, ...ext });
+  const oldN = named('o', 'Drug  B', {}), newN = named('n', 'drug b', arrivedExt('2026-11-02T00:00:00Z'));
+  expect(medicationItems([newN], [oldN, newN], since)).toEqual([]);
+});
+
+const vac = (vaccine: string, status: string, n: number) => ({ vaccine, status, reason: 'r', records: Array.from({ length: n }, () => ({ date: '2020-01-01', source: 's' })) });
+const hm = (topic: string, status: string, next?: string) => obs({
+  id: topic, code: { text: `Health maintenance: ${topic}` }, valueString: status,
+  extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-06-01' }],
+  ...(next && { component: [{ code: { text: 'Next due date' }, valueDateTime: next }] }),
+}) as Observation;
+
+test('followUpItems: started vaccine series and Epic health maintenance', () => {
+  const v = { edition: 'x', asOf: '2026-11-07', unmatched: [], possibleDuplicates: [], results: [vac('zoster', 'due', 1), vac('flu', 'due', 0), vac('mmr', 'complete', 2)] } as unknown as Parameters<typeof followUpItems>[0];
+  const items = followUpItems(v, [hm('Colonoscopy', 'Overdue', '1900-01-01'), hm('Mammogram', 'Not Due', '2026-11-08')], '2026-11-07', '1970-01-01');
+  expect(items.map((i) => [i.kind, i.title])).toEqual([['vaccine follow-up', 'zoster'], ['health maintenance', 'Colonoscopy']]);
+  expect(items[1].detail).toEqual({ status: 'Overdue', nextDue: undefined, asOfExport: '2026-06-01' });
 });
