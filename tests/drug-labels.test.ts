@@ -54,3 +54,15 @@ test('sends only the code', async () => {
   for (const u of t.urls) expect(u).toMatch(/rxcui[:/]"?\d+/);
   expect(t.urls.join()).not.toMatch(/617312.*(name|date|value)/i);
 });
+
+test('combination products are skipped: single-substance label preferred, RxNav combos dropped', async () => {
+  const sub = (id: string, t: string, names: string[]) => ({ ...label(id, t, ['i']), openfda: { generic_name: ['x'], substance_name: names } });
+  const a = mk(() => json({ results: [sub('combo', '20260101', ['A', 'B']), sub('single', '20240101', ['A'])] }));
+  const r = await drugLabel('6809', a);
+  expect(r.status === 'ok' && r.setId).toBe('single');
+  const b = mk((u) => u.includes('rxnav') ? json({ relatedGroup: { conceptGroup: [{ conceptProperties: [{ rxcui: '111', name: 'a 5 MG Oral Tablet' }, { rxcui: '222', name: 'a / b Oral Tablet' }] }] } })
+    : u.includes('rxcui:%22') || u.includes('"6809"') ? json({}, 404) : json({ results: [label('s', '20240101', ['i'])] }));
+  expect((await drugLabel('6809', b)).status).toBe('ok');
+  expect(b.urls.at(-1)).toContain('"111"');
+  expect(b.urls.at(-1)).not.toContain('222');
+});
