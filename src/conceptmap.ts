@@ -122,7 +122,7 @@ export async function upsertEntries(client: MedplumClient, source: string, entri
   try {
     written = map.id
       ? await client.updateResource(body, { headers: { 'If-Match': `W/"${map.meta?.versionId}"` } })
-      : await client.createResourceIfNoneExist(body, `url=${url}`);
+      : await client.createResourceIfNoneExist(body, `url=${encodeURIComponent(url)}`);
   } catch (e) {
     if (!retry || !(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 412) throw e;
   }

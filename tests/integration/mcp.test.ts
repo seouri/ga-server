@@ -418,12 +418,12 @@ describe('concept tools', () => {
   const LOCAL = 'urn:test:local-code';
   let inproc: Client;
   let offline: Client;
-  const seed = async (name: string, n: number) => {
+  const seed = async (name: string, n: number, specimen?: string) => {
     const obs = (i: number): Observation => ({
       resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${pid}` },
       category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
       code: { coding: [{ system: LOCAL, code: name, display: name }], text: name },
-      valueQuantity: { value: i, unit: 'mg/dL' }, effectiveDateTime: '2024-01-02',
+      valueQuantity: { value: i, unit: 'mg/dL' }, effectiveDateTime: '2024-01-02', ...(specimen && { specimen: { display: specimen } }),
       identifier: [{ system: `urn:ga-server:id:smart:${key}`, value: `Observation/${randomUUID()}` }],
       meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-smart' }, { system: 'urn:ga-server:tag', code: 'concept-unmapped' }] },
     });
@@ -450,6 +450,7 @@ describe('concept tools', () => {
     await seed('Zeta many', 510);
     await seed('Zeta fix', 3);
     await seed('Zeta offline', 2);
+    await seed('Zeta urine', 2, 'Urine');
     inproc = await connect(loincOk);
     offline = await connect((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
   }, 120_000);
@@ -466,8 +467,9 @@ describe('concept tools', () => {
     const r = await call('concepts_to_review', { type: 'Observation' });
     expect(r.isError).toBe(false);
     const terms = JSON.parse(r.text).terms.filter((t: { source: string }) => t.source === source);
-    expect(terms.map((t: { name: string; count: number }) => [t.name, t.count])).toEqual([['Zeta many', 510], ['Zeta fix', 3], ['Zeta offline', 2]]);
-    expect(terms[0]).toMatchObject({ unit: 'mg/dL', type: 'Observation', examples: ['2024-01-02'] });
+    expect(terms.map((t: { name: string; count: number }) => [t.name, t.count]).slice(0, 2)).toEqual([['Zeta many', 510], ['Zeta fix', 3]]); // then the two of 2, in either order
+    expect(terms[0]).toMatchObject({ unit: 'mg/dL', type: 'Observation', key: 'zeta many|mg/dl', examples: ['2024-01-02'] });
+    expect(terms.find((t: { name: string }) => t.name === 'Zeta urine').key).toBe('zeta urine|mg/dl|urine');
     expect(r.text).not.toContain('"value"');
     expect((await call('concepts_to_review', { type: 'Patient' })).isError).toBe(true);
   });
@@ -521,5 +523,23 @@ describe('concept tools', () => {
     const w = await inCall(inproc, 'map_concept', map('Zeta fix', { system: 'http://www.nlm.nih.gov/research/umls/rxnorm' }));
     expect(w.isError).toBe(true);
     expect((await records('Zeta fix')).every((o) => ga(o)[0]?.code === '2339-0')).toBe(true);
+  });
+
+  test('a specimen-bearing term is mapped by its key; a key not of that name and unit is refused; no records gives status no records', async () => {
+    const no = await inCall(inproc, 'map_concept', map('Zeta urine'));
+    expect(JSON.parse(no.text)).toMatchObject({ changed: 0, status: 'no records' });
+    const bad = await inCall(inproc, 'map_concept', map('Zeta urine', { key: 'zeta many|mg/dl' }));
+    expect(bad.isError).toBe(true);
+    const ok = await inCall(inproc, 'map_concept', map('Zeta urine', { key: 'zeta urine|mg/dl|urine', confident: false }));
+    expect(JSON.parse(ok.text)).toEqual({ changed: 2, status: 'suggested' });
+    for (const o of await records('Zeta urine')) expect(ga(o).map((c) => c.code)).toEqual(['2345-7']);
+  });
+
+  test('malformed codes and oversized text are refused before any write', async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    for (const extra of [{ type: 'Condition', system: 'http://snomed.info/sct', code: '12' }, { type: 'Condition', system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'e11.9' }, { type: 'Procedure', system: 'http://www.ama-assn.org/go/cpt', code: '8006' }, { display: 'x'.repeat(301) }, { name: 'x'.repeat(201) }]) {
+      expect((await inCall(inproc, 'map_concept', map('Zeta odd', extra))).isError).toBe(true);
+    }
+    expect((await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' }))?.meta?.versionId).toBe(m?.meta?.versionId);
   });
 });
