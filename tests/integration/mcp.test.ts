@@ -122,6 +122,11 @@ test('fhir_search returns imported LDL', async () => {
   const read = await call('fhir_read', { resourceType: 'Observation', id: b.entry?.[0].resource?.id as string });
   expect(JSON.parse(read.text).valueQuantity.value).toBe(111);
   expect((await call('fhir_read', { resourceType: 'Enterprise', id: 'x' })).text).toMatch(/not available/);
+  // A list repeats the param: a date range is AND, not the comma-joined OR Medplum's client would build.
+  const range = async (date: string[]) =>
+    (JSON.parse((await call('fhir_search', { resourceType: 'Observation', params: { subject: `Patient/${pid}`, code: 'http://loinc.org|13457-7', date } })).text) as Bundle).entry?.length ?? 0;
+  expect(await range(['ge2024-01-01', 'lt2025-01-01'])).toBe(1);
+  expect(await range(['ge2025-01-01', 'lt2026-01-01'])).toBe(0);
 });
 
 test('cardiovascular_risk_10yr returns PREVENT and PCE', async () => {
