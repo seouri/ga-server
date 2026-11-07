@@ -61,7 +61,7 @@ Connecting a hospital from chat needs the https redirect registered with Epic ([
 Each app's redirect addresses are in `config/chat-apps.json`.
 
 - **Claude Code** (any machine): `claude mcp add --transport http ga https://<machine>.<tailnet>.ts.net/mcp`. Not yet verified.
-- **Grok (grok.com)**: free account. Not yet verified.
+- **Grok (grok.com)**: free account. Verified 2026-11-06. Add the connector under Connectors, Custom; passkey sign-in and consent worked. Grok uses GA only when you name it, e.g. "Look in my GA: ...". Reading records, hospital status, share preview, confirm and revoke, and upload links all worked. To import a PDF, attach it in the Grok chat too: Grok reads it, GA keeps the uploaded original. A chat app may open a share link right after creating it; that shows up as an access in the share log.
 - **claude.ai**: a free personal account allows one custom connector. On an Enterprise plan only an organization Owner can add one. Not yet verified.
 - **ChatGPT**: whether attaching files needs a paid plan is not yet known. Not yet verified.
 - **Gemini app**: not yet verified.
