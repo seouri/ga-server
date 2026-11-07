@@ -8,7 +8,7 @@ export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
 const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 export const SMART_ID = 'urn:ga-server:id:smart:';
-const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
+export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
 
 type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] } };
 const extDate = (r: Resource, url: string): number | undefined => {

@@ -11,6 +11,7 @@ test('noteText: inline text/plain only; archives, source files and RTF skipped',
   expect(noteText(doc('a', 'hello'))).toBe('hello');
   expect(noteText(doc('b', 'x', { identifier: [{ system: 'urn:ga-server:id:file', value: 'h' }] }))).toBeUndefined();
   expect(noteText(doc('c', 'x', { content: [{ attachment: { contentType: 'text/rtf', data: b64('{\\rtf') } }] }))).toBeUndefined();
+  expect(noteText(doc('e', 'ecg csv', { identifier: [{ system: 'urn:ga-server:id:apple-health', value: 'h' }] }))).toBeUndefined();
   expect(noteText(doc('d', 'x', { content: [{ attachment: { contentType: 'text/plain', url: 'Binary/1' } }] }))).toBeUndefined();
 });
 
@@ -21,6 +22,7 @@ test('snippet: around the first match, collapsed, ellipses', () => {
   expect(s.endsWith('…')).toBe(true);
   expect(s).toContain('Knee PAIN here');
   expect(snippet('short note')).toBe('short note');
+  expect(snippet('say knee\n  pain now', 'knee pain')).toBe('say knee pain now');
 });
 
 test('notesSearch: notes and messages merged newest first, case-insensitive, date params', async () => {
@@ -37,4 +39,5 @@ test('notesSearch: notes and messages merged newest first, case-insensitive, dat
   ]);
   expect(seen.map(([t, q]) => [t, q.getAll(t === 'Communication' ? 'sent' : 'date')])).toEqual([['DocumentReference', ['ge2025-01-01']], ['Communication', ['ge2025-01-01']]]);
   expect((await notesSearch(client, 'p', { limit: 1 })).truncated).toBe(true);
+  expect((await notesSearch(client, 'p', { text: 'reports  knee' })).rows.map((r) => r.id)).toEqual(['n1']); // whitespace-insensitive
 });

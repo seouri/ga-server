@@ -16,7 +16,7 @@ test('portalWarning: none without stale sources; fix per status and transport', 
   expect(portalWarning([s({ status: 'error', error: 'not_enabled' })], false)).toContain('ga sync --enable');
 });
 
-test('read tools put portalWarning first, cached per server; no Endpoints adds nothing', async () => {
+test('read tools put portalWarning first; no Endpoints adds nothing; a failed check says status unknown', async () => {
   let reads = 0;
   const connect = async (eps: object[]) => {
     const client = {
@@ -31,9 +31,14 @@ test('read tools put portalWarning first, cached per server; no Endpoints adds n
   const stale = { resourceType: 'Endpoint', status: 'off', identifier: [{ system: 'urn:ga-server:id:smart-source', value: 'h' }], extension: [{ url: 'urn:ga-server:ext:smart-patient', valueReference: { reference: 'Patient/p' } }] };
   const search = await connect([stale]);
   expect((await search()).startsWith('{"portalWarning":"Hospital records may be out of date.')).toBe(true);
-  await search();
   expect(reads).toBe(1);
   expect(JSON.parse(await (await connect([]))())).toEqual({ resourceType: 'Bundle', entry: [] });
+  const broken = { search: async () => ({ resourceType: 'Bundle' }), readResource: async () => ({ resourceType: 'Observation', id: 'o' }), searchResources: async () => { throw new Error('down'); } } as unknown as MedplumClient;
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const c = new Client({ name: 't', version: '0' });
+  await Promise.all([buildMcpServer({ client: broken, cfg: {} as never, patientId: 'p' }).connect(a), c.connect(b)]);
+  for (const [name, args] of [['fhir_read', { resourceType: 'Observation', id: 'o' }], ['cardiovascular_risk_10yr', { age: 50, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 }]] as const)
+    expect(JSON.parse(((await c.callTool({ name, arguments: args })) as { content: { text: string }[] }).content[0].text).portalWarning).toBe('Hospital connection status unknown: run `ga status`.');
 });
 
 test('fhir_search paging: nextPage carries the next link params only; page searches the given type; tampered tokens refused', async () => {
@@ -48,7 +53,10 @@ test('fhir_search paging: nextPage carries the next link params only; page searc
   const c = new Client({ name: 't', version: '0' });
   await Promise.all([buildMcpServer({ client, cfg: {} as never, patientId: 'p' }).connect(a), c.connect(b)]);
   const call = async (args: object) => (await c.callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation', ...args } })) as { isError?: boolean; content: { text: string }[] };
-  const { nextPage } = JSON.parse((await call({ params: { _count: '5' } })).content[0].text);
+  const first = JSON.parse((await call({ params: { _count: '5' } })).content[0].text);
+  // Warning and cursor ahead of the entries (the remote cap cuts the end); no link with Medplum's base URL.
+  expect(Object.keys(first)).toEqual(['portalWarning', 'nextPage', 'resourceType', 'entry']);
+  const { nextPage } = first;
   expect(pageParams(nextPage).getAll('date')).toEqual(['ge2024-01-01', 'lt2025-01-01']);
   await call({ page: nextPage, params: { code: 'ignored' } });
   expect(calls[1]).toEqual(['Observation', 'date=ge2024-01-01&date=lt2025-01-01&_count=5&_offset=5']);

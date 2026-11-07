@@ -23,7 +23,7 @@ describe('chatInstructions', () => {
 });
 
 const connect = async (remote: boolean, logs: string[] = []) => {
-  const client = { search: async () => ({ blob: 'x'.repeat(200_000) }) } as unknown as MedplumClient;
+  const client = { search: async () => ({ blob: 'x'.repeat(200_000) }), searchResources: async () => [] } as unknown as MedplumClient;
   const server = buildMcpServer({ client, cfg: {} as never, patientId: 'p', ...(remote ? { remote: { publicUrl: 'u', clientName: 'c', log: async (n: string) => void logs.push(n) } } : {}) });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const c = new Client({ name: 't', version: '0' });

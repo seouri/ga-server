@@ -3,8 +3,8 @@ import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
+import { TAG } from './identity.ts';
 
-const TAG = 'urn:ga-server:tag|';
 const PAGE = 100;
 const BUDGET = 140_000; // stays under the remote 150k tool-result cap, so rows are never cut mid-JSON
 
@@ -24,7 +24,7 @@ export function labRow(o: Observation): LabRow {
   const r = o.referenceRange?.[0];
   const lo = qty(r?.low), hi = qty(r?.high);
   const range = r?.text ?? (lo && hi ? `${r?.low?.value}–${hi}` : lo ? `≥${lo}` : hi ? `≤${hi}` : undefined);
-  const row: LabRow = {
+  return {
     date: (o.effectiveDateTime ?? o.effectivePeriod?.start ?? o.effectiveInstant ?? o.issued)?.slice(0, 10),
     name: o.code?.text ?? c?.display ?? c?.code,
     value: qty(o.valueQuantity) ?? o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.[0]?.display,
@@ -34,7 +34,6 @@ export function labRow(o: Observation): LabRow {
     flags: flagsOf(o.meta),
     id: o.id,
   };
-  return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as LabRow;
 }
 
 const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
@@ -84,8 +83,8 @@ export async function labResults(
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const q = new URLSearchParams([
     ['subject', `Patient/${patientId}`],
-    ['_filter', `category eq laboratory or _tag eq ${TAG}extracted-by-llm`],
-    ['_tag:not', `${TAG}src-apple-health`],
+    ['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`],
+    ['_tag:not', `${TAG}|src-apple-health`],
     ['_sort', '-date,_id'],
     ['_count', String(PAGE)],
   ]);

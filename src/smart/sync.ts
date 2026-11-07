@@ -262,27 +262,30 @@ export async function syncAll(client: MedplumClient, dir: string, patientId: str
   return out;
 }
 
+export const patientEndpoints = async (client: MedplumClient, patientId: string): Promise<Endpoint[]> =>
+  (await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' })).filter(forPatient(patientId));
+
+export function endpointStatus(e: Endpoint) {
+  const lastSuccess = ext(e, LAST_SUCCESS)?.valueDateTime;
+  const types = ext(e, ENABLED_TYPES)?.valueString;
+  const error = ext(e, LAST_ERROR)?.valueCode;
+  return {
+    source: e.identifier?.find((i) => i.system === SOURCE_ID)?.value ?? '',
+    name: e.name ?? '',
+    status: e.status as string,
+    ...(lastSuccess && { lastSuccess }),
+    ...(error && { error }),
+    stale: isStale(e.status, lastSuccess, new Date()),
+    enabledTypes: types ? types.split(',') : [],
+  };
+}
+
 export async function readStatus(
   client: MedplumClient,
   patientId: string,
   dir?: string, // given: configured sources with no Endpoint yet (never synced for real) are listed as pending
 ): Promise<{ source: string; name: string; status: string; lastSuccess?: string; error?: string; stale: boolean; enabledTypes: string[] }[]> {
-  const now = new Date();
-  const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' });
-  const listed = eps.filter(forPatient(patientId)).map((e) => {
-    const lastSuccess = ext(e, LAST_SUCCESS)?.valueDateTime;
-    const types = ext(e, ENABLED_TYPES)?.valueString;
-    const error = ext(e, LAST_ERROR)?.valueCode;
-    return {
-      source: e.identifier?.find((i) => i.system === SOURCE_ID)?.value ?? '',
-      name: e.name ?? '',
-      status: e.status,
-      ...(lastSuccess && { lastSuccess }),
-      ...(error && { error }),
-      stale: isStale(e.status, lastSuccess, now),
-      enabledTypes: types ? types.split(',') : [],
-    };
-  });
+  const listed = (await patientEndpoints(client, patientId)).map(endpointStatus);
   const have = new Set(listed.map((s) => s.source));
   const pending = (dir ? readSources(dir) : [])
     .filter((s) => !have.has(s.key))
