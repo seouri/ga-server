@@ -106,7 +106,10 @@ test('stamp uses the per-resource source date and writes last-seen', () => {
   const dated = stamp(r, { ...smart, dateOf: () => '2026-01-02T00:00:00Z' }, SMART_ID) as Observation;
   expect(dated.extension).toEqual([{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-01-02T00:00:00Z' }]);
   expect(dated.meta?.tag?.map((t) => t.code)).toContain('src-smart');
-  const seen = stamp(r, { ...smart, dateOf: () => undefined, seenAt: '2026-11-05T00:00:00Z' }, SMART_ID) as Observation;
+  const at = { ...smart, dateOf: () => undefined, seenAt: '2026-11-05T00:00:00Z' };
+  // Only medications, problems and allergies carry last-seen: no daily rewrite of every portal lab.
+  expect((stamp(r, at, SMART_ID) as Observation).extension).toEqual([{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-05T00:00:00Z' }]);
+  const seen = stamp({ resourceType: 'Condition', subject: r.subject, identifier: [SMART_ID] } as Resource, at, SMART_ID) as Observation;
   expect(LAST_SEEN).toBe('urn:ga-server:ext:last-seen');
   expect(seen.extension).toEqual([
     { url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-05T00:00:00Z' },

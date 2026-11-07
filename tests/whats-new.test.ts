@@ -268,6 +268,23 @@ test('statusItems: names referenced drugs and reads history in small pages', asy
   expect(calls).toHaveLength(2);
 });
 
+test('statusItems: history reads overlap, in page order', async () => {
+  const stmts = Array.from({ length: 12 }, (_, i) => ({ resourceType: 'MedicationStatement', id: `s${i}`, status: 'stopped', medicationCodeableConcept: { text: `Drug ${i}` }, meta: { lastUpdated: '2026-11-05T00:00:00Z' } }));
+  let now = 0, max = 0;
+  const client = {
+    searchResourcePages: async function* (type: string) { yield type === 'MedicationStatement' ? stmts : []; },
+    readHistory: async () => {
+      max = Math.max(max, ++now);
+      await new Promise((r) => setTimeout(r, 5));
+      now--;
+      return { entry: [{ resource: { ...stmts[0], status: 'active', meta: { lastUpdated: '2026-10-01T00:00:00Z' } } }] };
+    },
+  } as unknown as MedplumClient;
+  const items = await statusItems(client, 'p', '2026-11-01T00:00:00Z');
+  expect(items.map((i) => i.title)).toEqual(stmts.map((s) => s.medicationCodeableConcept.text));
+  expect(max).toBe(5);
+});
+
 test('whatsNew: label lookups run at most 3 at a time', async () => {
   const { client, fetch, dir } = big();
   let now = 0, max = 0;

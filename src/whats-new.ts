@@ -164,11 +164,13 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
   const changed: { type: 'Condition'; r: Resource; kind: ReviewItem['kind']; from: string; to: string }[] = [];
   for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
     for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
-      for (const r of page) {
+      // Every portal medication and problem is rewritten on each sync (last-seen): read their histories a few at a time.
+      const found = await pool(page, 5, async (r) => {
         const prev = await versionBefore(client, type as 'Condition', r.id as string, since);
         const from = prev && statusOf(prev), to = statusOf(r);
-        if (from && to && from !== to) changed.push({ type: type as 'Condition', r, kind, from, to });
-      }
+        return from && to && from !== to ? [{ type: type as 'Condition', r, kind, from, to }] : [];
+      });
+      changed.push(...found.flat());
     }
   }
   const meds = medMap(await all);

@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -30,7 +30,6 @@ type TypeCounts = { created: number; linked: number; updated: number; flagged: n
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 export const TAG = 'urn:ga-server:tag';
 const SRC_DATE = 'urn:ga-server:ext:source-date';
-const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
@@ -277,7 +276,7 @@ export async function importResources(
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;
-    const seen = !!source.seenAt && !personEdited(r) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
+    const seen = !!source.seenAt && DATED.has(r.resourceType) && !personEdited(r) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
     if (!changed && !seen) return;
     const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
     const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];

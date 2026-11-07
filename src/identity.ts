@@ -11,9 +11,11 @@ export type SourceInfo = {
   llm?: boolean;
   dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
-  seenAt?: string; // stamp/refresh LAST_SEEN on every record this import touches or skips
+  seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
 };
 export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
+// Medications, problems and allergies: the records the currency rule (src/current.ts) dates, and the only ones that carry LAST_SEEN.
+export const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 // The instant GA first stored a record; set on create only and kept by every later write.
 export const ARRIVED = 'urn:ga-server:ext:arrived';
 export const arrivedAt = (r: Resource): string | undefined => (r as Resource & { extension?: Extension[] }).extension?.find((e) => e.url === ARRIVED)?.valueInstant;
@@ -105,7 +107,7 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   out.extension = [
     ...(out.extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== LAST_SEEN),
     { url: SRC_DATE, valueDateTime: s.dateOf?.(r) ?? s.date },
-    ...(s.seenAt ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
+    ...(s.seenAt && DATED.has(r.resourceType) ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
   ];
   return out;
 }

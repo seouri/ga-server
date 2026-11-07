@@ -158,16 +158,24 @@ describe('syncSource', () => {
     ]);
   });
 
-  it('an unchanged second sync creates and updates nothing and advances last-seen', async () => {
-    const binsBefore = bins(await compartment(pid));
+  it('an unchanged second sync creates and updates nothing and advances last-seen on medications and problems only', async () => {
+    const before = await compartment(pid);
+    const binsBefore = bins(before);
     expect(binsBefore).toHaveLength(1);
     const r = await syncSource(client, dir, src, pid, { now: t2 });
     expect(r.status).toBe('active');
-    expect(r.report).toMatchObject({ created: 0, updated: 0, invalid: 0 });
-    expect(r.report?.seen).toBeGreaterThan(0);
+    expect(r.report).toMatchObject({ created: 0, updated: 0, invalid: 0, seen: 3 });
     const mine = (await compartment(pid)).filter((x) => smartIds(x, src.key).length);
     expect(mine).toHaveLength(12);
-    for (const x of mine) expect(ext(x as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t2.toISOString());
+    const dated = ['MedicationRequest', 'Condition'];
+    expect(mine.filter((x) => dated.includes(x.resourceType))).toHaveLength(3);
+    for (const x of mine) {
+      if (dated.includes(x.resourceType)) expect(ext(x as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t2.toISOString());
+      else {
+        expect(ext(x as { extension?: Extension[] }, LAST_SEEN)).toBeUndefined();
+        expect(x.meta?.versionId).toBe(before.find((y) => y.id === x.id)?.meta?.versionId); // not rewritten
+      }
+    }
     expect(bins(mine)).toEqual(binsBefore);
     expect((await readStatus(client, pid))[0].lastSuccess).toBe(t2.toISOString());
   });

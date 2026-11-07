@@ -1,12 +1,11 @@
 // Medication currency rule (AGENTS.md "Hospital portals (SMART)"), also for problems and allergies.
 import type { Endpoint, Resource } from '@medplum/fhirtypes';
-import { LAST_SEEN, SRC_DATE, TAG } from './identity.ts';
+import { DATED, LAST_SEEN, SRC_DATE, TAG } from './identity.ts';
 import { LAST_SUCCESS, SOURCE_ID } from './smart/sync.ts';
 
 type Currency = 'current' | 'unconfirmed';
 export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
-const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 const SMART_ID = 'urn:ga-server:id:smart:';
 export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
 
@@ -38,7 +37,7 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[], ne
 // Active medication, problem or allergy: the records the currency rule covers.
 export function isActive(r: Resource): boolean {
   const a = r as R;
-  return COVERED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
+  return DATED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 
 // The <key>s of a record's urn:ga-server:id:smart:<key> identifiers.
