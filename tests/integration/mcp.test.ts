@@ -392,18 +392,18 @@ describe('purpose-built read tools', () => {
     expect(s.portalWarning).toMatch(/status error/);
     expect(s.patient).toEqual({ age: expect.any(Number), sex: 'female' });
     expect(s.patient.age).toBeGreaterThanOrEqual(46);
-    expect(s.problems.map((r: { name: string }) => r.name)).toEqual(['Synthetic problem']);
+    expect(s.problems.rows.map((r: { name: string }) => r.name)).toEqual(['Synthetic problem']);
     // Drug A's Medication was deleted above, so it has no name here.
-    expect(s.medications.map((r: { name?: string; currency: string }) => `${r.name}:${r.currency}`).sort()).toEqual(['Synthetic drug B:unconfirmed', 'Synthetic drug D:unconfirmed', 'undefined:current']);
-    expect(s.allergies).toMatchObject([{ name: 'Synthetic allergen' }]);
-    expect(s.keyLabs).toMatchObject([
+    expect(s.medications.rows.map((r: { name?: string; currency: string }) => `${r.name}:${r.currency}`).sort()).toEqual(['Synthetic drug B:unconfirmed', 'Synthetic drug D:unconfirmed', 'undefined:current']);
+    expect(s.allergies.rows).toMatchObject([{ name: 'Synthetic allergen' }]);
+    expect(s.keyLabs.rows).toMatchObject([
       { test: 'A1c', name: 'Hemoglobin A1c', latest: { date: '2025-03-01', value: 70 } },
       { test: 'LDL', latest: { date: '2025-05-01', value: 111 }, flags: ['read from a document by AI'] },
     ]);
     const v = s.vitals.map((r: { name: string; setting: string; value: string }) => [r.setting, r.name, r.value]);
     expect(v).toEqual(expect.arrayContaining([['clinic', 'Body weight', '70 kg'], ['home', 'Body weight', '70 kg'], ['home', 'Blood pressure panel', 'Systolic: 118 mmHg; Diastolic: 76 mmHg']]));
     expect(v.filter((r: string[]) => r[0] === 'clinic' && /blood pressure/.test(r[1])).map((r: string[]) => r[1]).sort()).toEqual(['Diastolic blood pressure', 'Systolic blood pressure']);
-    expect(s.vaccines).toMatchObject({ edition: expect.any(String), dueOrOverdue: expect.any(Array), notEvaluated: expect.any(Number) });
+    expect(s.vaccines).toMatchObject({ edition: expect.any(String), dueOrOverdue: expect.any(Array), notEvaluated: expect.any(Number), unmatched: 0, possibleDuplicates: 0, note: expect.stringContaining('vaccine_gaps') });
     expect(s.lastVisit).toMatchObject({ date: '2025-06-01', type: 'Office visit', class: 'ambulatory' });
     expect(s.imports.sources.map((x: { source: string }) => x.source)).toEqual(expect.arrayContaining(['Epic EHI export', 'Apple Health', 'PDF or photo', expect.stringMatching(/^hospital portal/)]));
     expect(s.imports.newest).toMatch(/^\d{4}-\d{2}-\d{2}$/);

@@ -79,6 +79,7 @@ const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOI
 const norm = (s = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
 // The same test under different names across sources ("LOW DENSITY LIPOPROTEIN CHOL" with a LOINC, "LDL cholesterol" from a PDF without one):
 // [label, LOINC codes, name pattern]; NOT keeps urine, ratio and particle tests out of the name match.
+// shortcut: eGFR misses race-variant codes, and the name patterns can still take urine/CSF/receptor/LDL-P look-alikes; both move to the planned concept-matching layer.
 export const KEY_LABS: [string, string[], RegExp][] = [
   ['A1c', ['4548-4', '17856-6'], /a1c|glycated h/],
   ['Glucose', ['2345-7', '2339-0', '1558-6'], /^glucose\b/],
@@ -110,7 +111,8 @@ export function highLow(o: Observation): 'high' | 'low' | undefined {
   const code = i?.coding?.[0]?.code ?? i?.text;
   if (code) return /^h/i.test(code) ? 'high' : /^l/i.test(code) ? 'low' : undefined;
   const v = o.valueQuantity?.value, r = o.referenceRange?.[0];
-  return v === undefined ? undefined : r?.high?.value !== undefined && v > r.high.value ? 'high' : r?.low?.value !== undefined && v < r.low.value ? 'low' : undefined;
+  // "<5" against a high of 3 says nothing: a comparator skips the range.
+  return v === undefined || o.valueQuantity?.comparator ? undefined : r?.high?.value !== undefined && v > r.high.value ? 'high' : r?.low?.value !== undefined && v < r.low.value ? 'low' : undefined;
 }
 
 export type LabTrend = {
@@ -125,11 +127,13 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
   const coded = new Map(rows.flatMap(({ o, r }) => { const l = loincOf(o); return l ? [[norm(r.name), l] as const] : []; }));
   const groups = new Map<string, typeof rows>();
   for (const x of rows) {
+    if (!x.test && !loincOf(x.o) && !norm(x.r.name)) continue; // nothing to group by
     const k = x.test ? `key:${x.test}` : loincOf(x.o) ?? coded.get(norm(x.r.name)) ?? norm(x.r.name);
     groups.set(k, [...(groups.get(k) ?? []), x]);
   }
   return [...groups.values()].map((g): LabTrend => {
-    g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '')); // undated last
+    // Undated last; the same day: the newest written first.
+    g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? ''));
     const [l] = g;
     const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
     const a = num(l.o), b = p && num(p.o);
@@ -144,10 +148,13 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
   }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
 }
 
+// The key labs, in table order (summarizeLabs already groups each into one entry).
+export const keyLabs = (trends: LabTrend[]): LabTrend[] => KEY_LABS.flatMap(([test]) => trends.filter((t) => t.test === test));
+
 export async function labResults(
   client: MedplumClient,
   patientId: string,
-  { name, since, until, limit = 200, summary = false }: { name?: string; since?: string; until?: string; limit?: number; summary?: boolean },
+  { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
 ): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const q = new URLSearchParams([
@@ -169,7 +176,8 @@ export async function labResults(
     q.set('_sort', '_lastUpdated');
     q.set('_count', '1000');
     const obs = (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
-    if (summary) return fit(summarizeLabs(obs), limit);
+    // keyOnly (health_summary): key labs picked before fit, so other tests can't push them out.
+    if (summary) return fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit);
     return fit(obs.map(labRow).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
   }
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
