@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codesFor, conceptOf, concepts, cvxFor, vitalSpecCode } from '../src/concepts.ts';
+import { codesFor, conceptOf, concepts, CVX, cvxFor, LOINC, vitalSpecCode } from '../src/concepts.ts';
 
 
 describe('concepts', () => {
