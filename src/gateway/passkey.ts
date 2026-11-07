@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -9,11 +9,11 @@ import {
 } from '@simplewebauthn/server';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { readJson, writeJson } from './store.ts';
+import { sha256 as hash } from '../identity.ts';
 
 type Passkey = { id: string; publicKey: string; counter: number; transports?: string[] };
 const DAY = 24 * 3600_000;
 const COOKIE_MS = 12 * 3600_000;
-const hash = (s: string): string => createHash('sha256').update(s).digest('hex');
 const rp = (publicUrl: string) => ({ rpID: new URL(publicUrl).hostname, origin: publicUrl });
 const keys = (dir: string): Passkey[] => readJson<Passkey[]>(dir, 'passkeys.json', []);
 

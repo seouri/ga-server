@@ -1,10 +1,10 @@
 // Calendar feed (spec Part 3): one secret link per install, an iCalendar file of health maintenance due dates. Topic names only, no clinical detail.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { readJson, writeJson } from './gateway/store.ts';
 import type { Item } from './maintenance.ts';
+import { sha256 as hash } from './identity.ts';
 
 const FILE = 'calendar.json';
-const hash = (t: string): string => createHash('sha256').update(t).digest('hex');
 
 type Stored = { tokenHash?: string; id?: string };
 const stored = (dir: string) => readJson<Stored>(dir, FILE, {});

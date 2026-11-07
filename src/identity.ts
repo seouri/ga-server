@@ -22,7 +22,7 @@ export const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condi
 export const ARRIVED = 'urn:ga-server:ext:arrived';
 export const arrivedAt = (r: Resource): string | undefined => (r as Resource & { extension?: Extension[] }).extension?.find((e) => e.url === ARRIVED)?.valueInstant;
 
-const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+export const sha256 = (s: string | Buffer): string => createHash('sha256').update(s).digest('hex');
 export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';

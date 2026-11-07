@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
@@ -11,7 +10,7 @@ import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
 import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
-import { type SourceInfo, stableIdentifier } from './identity.ts';
+import { sha256, type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
@@ -81,7 +80,7 @@ export async function importExtracted(
     }
   }
   // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates.
-  const hash = createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
+  const hash = sha256(readFileSync(sourceFile));
   const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
   if (seen) throw new GaError(`already imported: ${basename(sourceFile)} (if that import failed, delete DocumentReference/${seen.id} to retry)`);
   const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);

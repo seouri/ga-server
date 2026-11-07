@@ -1,7 +1,6 @@
 // ga migrate: one-off move of an install created before GA had its own Medplum project (its client and record lived in
 // Medplum's Super Admin project, whose logins are super admins). Re-imports from the original sources into the new
 // project, verifies, then switches config. ga migrate --delete-old removes the old copy. Prints counts and file names only.
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
@@ -13,7 +12,7 @@ import { importPath } from './ccda.ts';
 import { defaultConfigPath, GaError, type GaConfig, getClient, loadConfig } from './config.ts';
 import { importEhi } from './ehi/import.ts';
 import { exportInfo } from './ehi/read.ts';
-import { SRC_DATE, TAG } from './identity.ts';
+import { sha256, SRC_DATE, TAG } from './identity.ts';
 import { importExtracted } from './mcp.ts';
 import { walkReferences } from './patient.ts';
 import { setup } from './setup.ts';
@@ -155,7 +154,7 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
       continue;
     }
     const kind = tag === 'src-ccda' ? 'ccda' : tag === 'src-ehi' ? 'ehi' : 'apple';
-    const doc = kind === 'ccda' ? byId(FILE, createHash('sha256').update(readFileSync(path)).digest('hex')) : byId(ARCHIVE[kind], await manifestHash(path));
+    const doc = kind === 'ccda' ? byId(FILE, sha256(readFileSync(path))) : byId(ARCHIVE[kind], await manifestHash(path));
     if (!doc) {
       problems.push(`changed since it was imported: ${path}`);
       continue;

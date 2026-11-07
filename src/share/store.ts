@@ -1,8 +1,9 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { GaError, defaultConfigPath } from '../config.ts';
 import { loadSecret, saveSecret, writeAtomic } from '../smart/store.ts';
+import { sha256 as hash } from '../identity.ts';
 
 export const GROUPS = ['labs', 'vitals', 'medications', 'problems', 'allergies', 'immunizations', 'visits', 'notes', 'procedures', 'family', 'messages', 'apple'] as const;
 export type Group = (typeof GROUPS)[number];
@@ -30,7 +31,6 @@ type ShareOpts = Pick<Share, 'audience' | 'label' | 'patientId' | 'baseUrl'> & P
 const DOCTOR_GROUPS: Group[] = ['labs', 'medications', 'problems', 'allergies', 'immunizations', 'vitals'];
 export const defaultGroups = (audience: Share['audience']): Group[] | 'all' => (audience === 'doctor' ? DOCTOR_GROUPS : 'all');
 const DAY = 86400000;
-const hash = (t: string): string => createHash('sha256').update(t).digest('hex');
 const pad = (n: number): string => String(n).padStart(2, '0');
 const localDay = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 

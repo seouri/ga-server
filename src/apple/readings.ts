@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import type { Observation } from '@medplum/fhirtypes';
-import { APPLE } from '../identity.ts';
+import { APPLE, sha256 as sha } from '../identity.ts';
 import type { AhRecord } from './read.ts';
 
 type Def = { text: string; loinc?: string; ucum: string; category: 'vital-signs' | 'activity'; conv: Record<string, (v: number) => number> };
@@ -29,7 +28,6 @@ export const READINGS: Record<string, Def> = {
 };
 const EVENTS: Record<string, string> = { HighHeartRateEvent: 'High heart rate notification', LowCardioFitnessEvent: 'Low cardio fitness notification' };
 
-export const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 export const short = (t: string) => t.replace(/^HK(?:Quantity|Category)TypeIdentifier/, '');
 export const SUBJECT = { reference: 'Patient/apple-patient' };
 export const UCUM = 'http://unitsofmeasure.org';

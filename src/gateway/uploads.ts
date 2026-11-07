@@ -1,6 +1,6 @@
 // Uploads from chat apps: one-time upload links (15 minutes, single use) and the stored files under <gateway dir>/uploads/<fileId>/<name>,
 // kept 24 hours. unzipSafe extracts an uploaded export zip, which is untrusted input.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { type Readable, Transform } from 'node:stream';
@@ -9,13 +9,13 @@ import yauzl from 'yauzl';
 import { GaError } from '../config.ts';
 import { safeName } from '../share/server.ts';
 import { readJson, writeJson } from './store.ts';
+import { sha256 as hash } from '../identity.ts';
 
 export const MAX_UPLOAD = 2 * 1024 ** 3;
 const LINK_MS = 15 * 60_000;
 const KEEP_MS = 24 * 3600_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
 type Links = Record<string, { exp: number; fileId: string }>;
-const hash = (s: string): string => createHash('sha256').update(s).digest('hex');
 const uploadsDir = (dir: string): string => join(dir, 'uploads');
 const links = (dir: string): Links => readJson<Links>(dir, 'uploads.json', {});
 
