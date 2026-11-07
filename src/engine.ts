@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -73,7 +73,7 @@ const canon = (x: unknown) =>
 // incoming ⊆ existing, because existing accumulates extra identifiers from merges.
 function body(r: R): unknown {
   const { id: _i, meta: _m, identifier: _id, extension, ...rest } = stripConcept(r);
-  const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN);
+  const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN && e.url !== ARRIVED);
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 
@@ -237,7 +237,7 @@ async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promis
   const ids = idList(existing);
   for (const i of idList(incoming)) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
   const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
-  const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF);
+  const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF || e.url === ARRIVED);
   return client.updateResource({
     ...incoming,
     id: existing.id,
@@ -260,6 +260,7 @@ export async function importResources(
     ...(source.kind === 'smart' && { byType: {} }),
     unmapped: [],
   };
+  const arrived: Extension = { url: ARRIVED, valueInstant: new Date().toISOString() };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
@@ -476,7 +477,7 @@ export async function importResources(
         } else if (matches.length) {
           const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
-            withTag({ ...coded, extension: [...(coded.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+            withTag({ ...coded, extension: [...(coded.extension ?? []), arrived, ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
@@ -484,7 +485,7 @@ export async function importResources(
           }
           report.possibleDuplicates++;
         } else {
-          target = await client.createResource(coded as Resource);
+          target = await client.createResource({ ...coded, extension: [...(coded.extension ?? []), arrived] } as Resource);
           report.created++;
         }
       }
