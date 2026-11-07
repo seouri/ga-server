@@ -35,11 +35,11 @@ Then bring in your records and ask, in plain words:
 - **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates.
 - **Decision support:** 10-year cardiovascular risk (PREVENT and Pooled Cohort Equations) and charts such as your lipid trend.
 - **Sharing:** private, expiring links for a doctor or family, approved by you.
-- **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet.
+- **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet ([setup](docs/chat-apps.md)).
 
 More examples: [Using GA](docs/usage.md).
 
-Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/chat-apps.md). Share links, chat apps and hospital portal logins also need [Tailscale](https://tailscale.com/download) (free for personal use) to reach GA over the internet.
+Share links, chat apps and hospital portal logins need [Tailscale](https://tailscale.com/download) (free for personal use) to reach GA over the internet.
 
 ## How it works
 
