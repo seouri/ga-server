@@ -263,7 +263,7 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
     code: { coding: [{ system: 'http://loinc.org', code: '2093-3' }] }, effectiveDateTime: at, valueQuantity: { value, unit: 'mg/dL' },
     meta: { tag: [{ system: 'urn:ga-server:tag', code: 'writer-importer' }] },
   }) as Resource;
-  const run = async (stored: Resource) => {
+  const run = async (stored: Resource, incoming = lab('o1', '2024-03-01T19:30:00-05:00')) => {
     const queries: string[] = [];
     const client = {
       getProfile: () => undefined,
@@ -273,7 +273,7 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
       updateResource: async (r: Resource) => r,
       createResource: async (r: Resource) => ({ ...r, id: 'new' }),
     } as unknown as MedplumClient;
-    const report = await importResources(client, [lab('o1', '2024-03-01T19:30:00-05:00')], src('2024-04-01'), 'p', 'h');
+    const report = await importResources(client, [incoming], src('2024-04-01'), 'p', 'h');
     return { report, queries };
   };
   const same = await run(lab('srv-1', '2024-03-02T00:30:00Z'));
@@ -281,4 +281,6 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
   expect(same.queries[0]).toContain('date=ge2024-02-29&date=lt2024-03-03');
   expect((await run(lab('srv-2', '2024-03-02T00:30:00Z', 190))).report).toMatchObject({ possibleDuplicates: 1 }); // same day, other value
   expect((await run(lab('srv-3', '2024-03-02T15:00:00Z'))).report).toMatchObject({ created: 1, possibleDuplicates: 0 }); // next local day
+  // A date-only value is a day, not midnight UTC: a possible duplicate, never an exact merge.
+  expect((await run(lab('srv-4', '2024-03-01T00:00:00Z'), lab('o2', '2024-03-01'))).report).toMatchObject({ merged: 0, possibleDuplicates: 1 });
 });

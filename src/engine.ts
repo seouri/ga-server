@@ -466,8 +466,9 @@ export async function importResources(
         }
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
-        const at = (o: Observation) => Date.parse(effective(o) ?? '');
-        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && at(m) === at(incoming as Observation)) as R | undefined; // NaN never equals
+        // Instants when both carry a time (offsets may differ); a date-only value matches only the same date-only value.
+        const exact = (a = '', b = '') => (a.length > 10 && b.length > 10 ? Date.parse(a) === Date.parse(b) : a === b); // NaN never equals
+        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && exact(effective(m), effective(incoming as Observation))) as R | undefined;
         if (same) {
           target = same;
           const filled = fillFrom(same, coded, source);
