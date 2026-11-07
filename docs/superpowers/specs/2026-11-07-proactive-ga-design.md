@@ -117,12 +117,12 @@ Each item reads: what and when; why it matters for this person (age, sex, histor
 
 ## Decisions from the builder check [call]
 
-1. **Arrival marker.** No field records when a record first reached GA (`meta.lastUpdated` moves on every write, `source-date` is the clinical date). The engine stamps an `urn:ga-server:ext:arrived` instant on create only, never on update; existing records are backfilled from their first `_history` version.
+1. **Arrival marker.** No field records when a record first reached GA (`meta.lastUpdated` moves on every write, `source-date` is the clinical date). The engine stamps an `urn:ga-server:ext:arrived` instant on create only, never on update; records without it count as "before tracking" and are never new (changed in planning: moving GA into its own project re-created every record on one day, so `_history` gives the move date, not the arrival).
 2. **Shown, not called.** Calling `whats_new` moves nothing. The agent passes `markSeen: true` only on the call whose summary it actually showed; that moves the stored timestamp. "Once per conversation" is an instruction to the agent: MCP has no conversation id.
 3. **Doctor's plan freshness.** Epic health maintenance comes only from EHI exports today; accepted for Part 2. Each doctor's-plan date shows its as-of date. Portal ServiceRequest/CarePlan are read when a source returns them (none today).
 4. **Agent-found plans.** A new tool `record_followup {topic, due, quote, documentRef}` with the two-step confirm (preview, the person's yes, then write), stored as a GA-tagged `Basic` with Provenance.
 5. **Shares.** Postponements, dismissals and agent-found plans (`Basic` records tagged by GA) are added to the never-shared list.
-6. **Label lookup.** Ingredient RxNorm code to product codes through RxNav (codes only), then the newest openFDA label carrying the needed sections. Cache keyed by ingredient; the citation gives the label's `set_id` and `effective_time`.
+6. **Label lookup.** Ingredient RxNorm code to product codes through RxNav (codes only), then the newest openFDA label carrying the needed sections. Cache keyed by the RxNorm code looked up (changed in planning: simpler, same result); the citation gives the label's `set_id` and `effective_time`.
 7. **`vaccine_gaps` keeps its output shape** as a view of the engine; its instructions and tests stay.
 8. **Calendar feed** exists only with `GA_PUBLIC_URL` (remote mode), tokens like share links. Subscribing through Funnel is tested live before building it.
 9. **Sex-specific rules.** Read `Patient.gender` plus relevant history (e.g. hysterectomy); when ambiguous, the item reads "discuss with your doctor", never "not for you".
