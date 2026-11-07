@@ -12,6 +12,7 @@ import { createGateway } from '../src/gateway/server.ts';
 import { createProvider } from '../src/gateway/oauth.ts';
 import { enrollLink, ownerCookie } from '../src/gateway/passkey.ts';
 import { writeJson } from '../src/gateway/store.ts';
+import { newCalendarToken, revokeCalendar } from '../src/calendar.ts';
 import { newUpload, uploadPath } from '../src/gateway/uploads.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
@@ -44,6 +45,7 @@ function start(publicUrl: string | null = PUBLIC): Promise<void> {
       return {};
     },
     verifyPasskey: async () => passkeyOk,
+    calendar: async () => 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; ok(); }));
 }
@@ -272,4 +274,23 @@ test('an upload over 2 GB is refused with 413 before the link is used', async ()
   });
   expect(status).toBe(413);
   expect(existsSync(join(dir, 'uploads'))).toBe(false);
+});
+
+test('calendar link: valid token serves the feed, a wrong or revoked one is 404, and it needs remote access', async () => {
+  await start();
+  const token = newCalendarToken(dir);
+  const ok = await fetch(`${base}/cal/${token}.ics`);
+  expect(ok.status).toBe(200);
+  expect(ok.headers.get('content-type')).toMatch(/^text\/calendar/);
+  expect(await ok.text()).toContain('BEGIN:VCALENDAR');
+  expect((await fetch(`${base}/cal/${token}.ics`, { method: 'HEAD' })).status).toBe(200);
+  expect((await fetch(`${base}/cal/${'x'.repeat(43)}.ics`)).status).toBe(404);
+  newCalendarToken(dir); // a new link replaces the old one
+  expect((await fetch(`${base}/cal/${token}.ics`)).status).toBe(404);
+  const t2 = newCalendarToken(dir);
+  revokeCalendar(dir);
+  expect((await fetch(`${base}/cal/${t2}.ics`)).status).toBe(404);
+  server.close();
+  await start(null);
+  expect((await fetch(`${base}/cal/${newCalendarToken(dir)}.ics`)).status).toBe(404);
 });

@@ -3,6 +3,8 @@
 // Without a public URL it serves only /s/... and /callback.
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
+import { calendarFor, toIcs } from '../calendar.ts';
+import { healthMaintenance } from '../maintenance.ts';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
@@ -28,6 +30,7 @@ export type GatewayDeps = {
   tools: (remote: Remote) => McpServer;
   share: ShareDeps;
   completeLogin: (search: string) => Promise<unknown>;
+  calendar?: (id: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
   verifyPasskey?: (response: AuthenticationResponseJSON, expectedChallenge: string) => Promise<boolean>;
 };
 
@@ -249,6 +252,9 @@ export function createGateway(deps: GatewayDeps): http.Server {
 
     if (path === '/.well-known/oauth-protected-resource' || path === '/.well-known/oauth-protected-resource/mcp') return json(res, 200, meta);
     if (path === '/mcp') return mcp(req, res, ip);
+    const c = /^\/cal\/([A-Za-z0-9_-]{43})\.ics$/.exec(path);
+    const calId = c && (req.method === 'GET' || req.method === 'HEAD') && deps.calendar ? calendarFor(deps.dir, c[1]) : undefined;
+    if (c) return calId ? send(res, 200, req.method === 'HEAD' ? '' : await deps.calendar!(calId), 'text/calendar; charset=utf-8') : send(res, 404, renderInactive());
     const i = /^\/interaction\/([A-Za-z0-9_-]+)(\/login|\/consent)?$/.exec(path);
     if (i) return interaction(req, res, ip, i[1], i[2] ?? '');
     const e = /^\/enroll\/([A-Za-z0-9_-]+)$/.exec(path);
@@ -287,6 +293,7 @@ export async function serveGateway(): Promise<void> {
     tools: remoteTools(client, cfg, cfg.patientId),
     share: shareDeps(client),
     completeLogin: (search) => completeLogin(client, smartDir(), cfg.patientId, search),
+    calendar: async (id) => { const m = await healthMaintenance(client, cfg.patientId); return toIcs(m.items, m.asOf, id); },
   });
   const sweep = () => {
     try {

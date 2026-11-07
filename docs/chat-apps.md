@@ -71,6 +71,16 @@ Each app's redirect addresses are in `config/chat-apps.json`.
 
 In each app, add a custom connector with the URL from step 5; the passkey login is the same everywhere.
 
+## Calendar feed
+
+Your health maintenance due dates (screenings, vaccines and your doctor's planned follow-ups) as a calendar you subscribe to, updated whenever your calendar app checks it:
+
+```sh
+GA_PUBLIC_URL=https://<machine>.<tailnet>.ts.net ga calendar
+```
+
+Subscribe to the printed link: Apple Calendar, File, New Calendar Subscription; Google Calendar, Other calendars, From URL. Events carry only the topic name and due date; overdue items show on today, and items you postponed or dismissed are left out. Your calendar app fetches the link from its own servers, so those names and dates leave your computer; anyone with the link can read them. `ga calendar` again makes a new link (the old one stops working); `ga calendar revoke` turns it off.
+
 ## When something fails
 
 - `docker compose logs ga-gateway` shows whether remote access is on (`remote access on: <url>/mcp`).
