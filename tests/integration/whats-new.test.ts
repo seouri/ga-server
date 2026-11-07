@@ -48,3 +48,15 @@ test('statusItems sees a medication stopped since', async () => {
   const items = await statusItems(client, pid, since);
   expect(items.filter((i) => i.id === ms.id).map((i) => i.detail)).toEqual([{ from: 'active', to: 'stopped' }]);
 });
+
+test('statusItems finds the pre-since version past many later no-op versions', async () => {
+  let ms = await client.createResource<MedicationStatement>({
+    resourceType: 'MedicationStatement', status: 'active', subject: { reference: `Patient/${pid}` }, medicationCodeableConcept: { text: 'Synthetic drug 2' },
+  });
+  await new Promise((r) => setTimeout(r, 1100));
+  const since = new Date().toISOString();
+  await new Promise((r) => setTimeout(r, 1100));
+  for (let n = 0; n < 25; n++) ms = await client.updateResource({ ...ms, extension: [{ url: 'urn:test:n', valueInteger: n }] });
+  await client.updateResource({ ...ms, status: 'stopped' });
+  expect((await statusItems(client, pid, since)).filter((i) => i.id === ms.id).map((i) => i.detail)).toEqual([{ from: 'active', to: 'stopped' }]);
+}, 60_000);

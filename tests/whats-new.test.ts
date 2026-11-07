@@ -104,3 +104,13 @@ test('followUpItems: started vaccine series and Epic health maintenance', () => 
   expect(items.map((i) => [i.kind, i.title])).toEqual([['vaccine follow-up', 'zoster'], ['health maintenance', 'Colonoscopy']]);
   expect(items[1].detail).toEqual({ status: 'Overdue', nextDue: undefined, asOfExport: '2026-06-01' });
 });
+
+test('medicationItems resolves a referenced Medication for RxNorm and name', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const m = { resourceType: 'Medication', id: 'm1', code: { coding: [{ system: RX, code: '999' }], text: 'Drug C' } } as Resource;
+  const ref = (id: string, ext: object) => med(id, { medicationReference: { reference: 'Medication/m1' }, meta: { source: '/x/clinic.xml' }, ...ext });
+  const fresh = ref('f', arrivedExt('2026-11-02T00:00:00Z'));
+  const [item] = medicationItems([fresh], [m, fresh], since);
+  expect(item).toMatchObject({ title: 'Drug C', source: 'clinic.xml', id: 'f', detail: { rxnorm: '999' } });
+  expect(medicationItems([fresh], [m, fresh, ref('e', {})], since)).toEqual([]);
+});

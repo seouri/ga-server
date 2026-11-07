@@ -1,6 +1,6 @@
 // whats_new: records that arrived since a time, counted by kind, and the "last seen" marker.
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Extension, Observation, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
@@ -111,23 +111,34 @@ export function labItems(arrived: Observation[], allLabs: Observation[], asOf: s
   }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 }
 
-const medCode = (r: Resource) => (r as Record<string, any>).medicationCodeableConcept as CodeableConcept | undefined; // shortcut: ignores medicationReference
-const medKey = (r: Resource): string | undefined => {
-  const cc = medCode(r);
-  const rx = trusted(r, cc?.coding).find((c) => c.system === RXNORM)?.code;
+// The drug's concept: its own, else the referenced Medication's code, else the reference's display. meds: Medication by `Medication/<id>`.
+const medCode = (r: Resource, meds: Map<string, Resource>): { cc?: CodeableConcept; owner: Resource } => {
+  const x = r as Record<string, any>;
+  const ref = x.medicationReference as { reference?: string; display?: string } | undefined;
+  const m = ref?.reference ? meds.get(ref.reference) : undefined;
+  if (x.medicationCodeableConcept) return { cc: x.medicationCodeableConcept, owner: r };
+  if ((m as Record<string, any> | undefined)?.code) return { cc: (m as Record<string, any>).code, owner: m! };
+  return { cc: ref?.display ? { text: ref.display } : undefined, owner: r };
+};
+const medKey = (cc?: CodeableConcept, owner?: Resource): string | undefined => {
+  const rx = (owner ? trusted(owner, cc?.coding) : cc?.coding ?? []).find((c) => c.system === RXNORM)?.code;
   const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
   return rx ? `rx:${rx}` : name ? `name:${name}` : undefined;
 };
+const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);
 
+// all: every medication record (any source) plus the Medication resources they reference.
 export function medicationItems(arrived: Resource[], all: Resource[], since: string): ReviewItem[] {
-  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return a === undefined || a < since; }).map(medKey));
+  const meds = new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
+  const keyOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKey(cc, owner); };
+  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).map(keyOf));
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
-    const k = medKey(r);
+    const k = keyOf(r);
     if (!k || before.has(k) || seen.has(k)) return [];
     seen.add(k);
     const rxnorm = k.startsWith('rx:') ? k.slice(3) : undefined;
-    return [{ kind: 'new medication', title: concept(medCode(r)) ?? 'Medication', date: clinicalDate(r), detail: { rxnorm, status: (r as { status?: string }).status }, id: r.id }];
+    return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date: clinicalDate(r), detail: { rxnorm, status: (r as { status?: string }).status }, source: sourceOf(r), id: r.id }];
   });
 }
 
@@ -139,10 +150,10 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
   for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
     for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
       for (const r of page) {
-        const history = await client.readHistory(type as 'Condition', r.id as string) as Bundle;
+        const history = await client.readHistory(type as 'Condition', r.id as string, { count: 1000 }) as Bundle;
         const prev = history.entry?.map((e) => e.resource as Resource).find((v) => (v.meta?.lastUpdated ?? '') < since);
         const from = prev && statusOf(prev), to = statusOf(r);
-        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r)) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, id: r.id });
+        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r, new Map()).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id });
       }
     }
   }
@@ -151,7 +162,7 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
 
 export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>, hm: Observation[], asOf: string, birthDate?: string): ReviewItem[] {
   const items: ReviewItem[] = vaccines.results.filter((v) => (v.status === 'due' || v.status === 'overdue') && v.records.length).map((v) => ({
-    kind: 'vaccine follow-up', title: v.vaccine, detail: { status: v.status, reason: v.reason, records: v.records },
+    kind: 'vaccine follow-up', title: v.vaccine, date: v.records.map((x) => x.date).sort().at(-1), detail: { status: v.status, reason: v.reason, records: v.records }, source: [...new Set(v.records.map((x) => x.source))].join(', ') || undefined,
   }));
   for (const o of hm) {
     const topic = o.code?.text?.match(/^Health maintenance: (.+)$/)?.[1];
@@ -160,7 +171,7 @@ export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>,
     const due = next && !(birthDate && next < birthDate) ? next : undefined; // a due date before birth is a bad record
     if (!/^(overdue|due)$/i.test(o.valueString ?? '') && !(due && due <= asOf)) continue;
     const asOfExport = (o.extension as Extension[] | undefined)?.find((e) => e.url === SRC_DATE)?.valueDateTime;
-    items.push({ kind: 'health maintenance', title: topic, detail: { status: o.valueString, nextDue: due, asOfExport }, id: o.id });
+    items.push({ kind: 'health maintenance', title: topic, detail: { status: o.valueString, nextDue: due, asOfExport }, date: asOfExport?.slice(0, 10), source: sourceOf(o), id: o.id });
   }
   return items;
 }
