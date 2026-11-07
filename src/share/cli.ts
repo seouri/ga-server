@@ -1,5 +1,4 @@
-// ga share / shares / revoke: create, list and revoke share links, read their log, export offline, and run the share server.
-// The server prints only its listen line: never tokens, record text or questions.
+// ga share / shares / revoke: create, list and revoke share links, read their log and export offline (ga gateway serve serves them).
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -14,14 +13,13 @@ import { logAccess, readLog } from './audit.ts';
 import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
-import { createServer, downloadName, type ShareDeps } from './server.ts';
+import { downloadName, type ShareDeps } from './server.ts';
 import { createShare, expiryWords, listShares, parseGroups, parseSince, revokeShare, shareDir, status, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
-const PORT = 8110;
 const USAGE =
   'ga share [--for doctor|family] [--label X] [--scope g1,g2|all] [--since 12m|YYYY-MM-DD] [--until YYYY-MM-DD] [--expires 7d|YYYY-MM-DD|never] [--layout A|B] [--questions N]' +
-  ' | ga shares [show <id>] | ga revoke <id> | ga share log [<id>] | ga share export <id> [--out dir] | ga share serve';
+  ' | ga shares [show <id>] | ga revoke <id> | ga share log [<id>] | ga share export <id> [--out dir]';
 const CREATE = {
   for: { type: 'string' }, label: { type: 'string' }, scope: { type: 'string' }, since: { type: 'string' }, until: { type: 'string' },
   expires: { type: 'string' }, layout: { type: 'string' }, questions: { type: 'string' },
@@ -148,7 +146,7 @@ export const binaryFetcher = (client: MedplumClient) => async (ref: string): Pro
   return { data: Buffer.from(await blob.arrayBuffer()), contentType: blob.type };
 };
 
-// Share server deps, for ga share serve and ga gateway serve.
+// Share page deps, for ga gateway serve.
 export function shareDeps(client: MedplumClient): ShareDeps {
   // Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
   const model = process.env.GA_LLM_MODEL;
@@ -165,16 +163,6 @@ export function shareDeps(client: MedplumClient): ShareDeps {
   };
 }
 
-async function serve(): Promise<void> {
-  console.log('ga share serve is deprecated: use ga gateway serve (share pages plus chat-app access)');
-  const server = createServer(shareDeps(await getClient(loadConfig())));
-  // Loopback unless told otherwise: the container sets 0.0.0.0 and publishes the port on 127.0.0.1 only.
-  const host = process.env.GA_SHARE_HOST || '127.0.0.1';
-  await new Promise<void>((ok) => server.listen(PORT, host, ok));
-  const model = process.env.GA_LLM_MODEL;
-  console.log(`ga-share listening on ${host}:${PORT}${model ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
-}
-
 // Returns false when argv is not a share command.
 export async function shareCommand(argv: string[]): Promise<boolean> {
   const [cmd, sub, ...rest] = argv;
@@ -183,10 +171,7 @@ export async function shareCommand(argv: string[]): Promise<boolean> {
       usage(rest.length <= 1);
       await showLog(rest[0]);
     } else if (sub === 'export') await exportShare(rest);
-    else if (sub === 'serve') {
-      usage(!rest.length);
-      await serve();
-    } else await create(argv.slice(1));
+    else await create(argv.slice(1));
   } else if (cmd === 'shares') {
     if (sub === 'show') {
       usage(rest.length === 1);

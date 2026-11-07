@@ -1,5 +1,5 @@
-// Internet-facing share server (behind Tailscale Funnel). Only /s/<token>/... exists; the token is re-checked against shares.json on every request.
-import http from 'node:http';
+// Internet-facing share pages (behind Tailscale Funnel, served by ga gateway serve). Only /s/<token>/... exists; the token is re-checked against shares.json on every request.
+import type http from 'node:http';
 import type { Attachment, DocumentReference } from '@medplum/fhirtypes';
 import type { AccessEvent } from './audit.ts';
 import { toPdf } from './export.ts';
@@ -126,7 +126,7 @@ export function clientIp(req: http.IncomingMessage): string {
   return (Array.isArray(xff) ? xff.at(-1) : xff)?.split(',').at(-1)?.trim() || req.socket.remoteAddress || 'unknown';
 }
 
-// The /s/... routes, for createServer and the gateway.
+// The /s/... routes, served by the gateway.
 export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: Res) => Promise<void> {
   const now = deps.now ?? (() => new Date());
   const limiter = failLimiter();
@@ -220,18 +220,4 @@ export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: 
       askEnabled: !!deps.ask,
     }));
   };
-}
-
-export function createServer(deps: ShareDeps): http.Server {
-  const handle = shareHandler(deps);
-  const server = http.createServer((req, res) => {
-    handle(req, res).catch(() => {
-      // Never a stack trace on the wire.
-      if (!res.headersSent) send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8');
-      else res.destroy();
-    });
-  });
-  server.requestTimeout = 30_000;
-  server.headersTimeout = 20_000;
-  return server;
 }

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Server } from 'node:http';
+import { createServer as httpServer, type Server } from 'node:http';
 import type { Resource } from '@medplum/fhirtypes';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
@@ -13,7 +13,7 @@ vi.mock('../src/share/export.ts', async (orig) => {
 });
 import { logAccess, readLog } from '../src/share/audit.ts';
 import type { Scoped } from '../src/share/scope.ts';
-import { createServer, downloadName, failLimiter } from '../src/share/server.ts';
+import { downloadName, failLimiter, send, shareHandler, type ShareDeps } from '../src/share/server.ts';
 import { createShare, revokeShare, type Share } from '../src/share/store.ts';
 
 const HEADERS = {
@@ -38,7 +38,12 @@ let base: string;
 let logs: { share: Share; e: { kind: string; detail?: string; ip?: string; ua?: string; answerLength?: number } }[];
 let asked: string[];
 
-function start(deps: Partial<Parameters<typeof createServer>[0]> = {}): Promise<void> {
+// The share routes as the gateway serves them (src/gateway/server.ts): a rejected handler is a bare 500.
+const createServer = (deps: ShareDeps): Server => {
+  const handle = shareHandler(deps);
+  return httpServer((req, res) => handle(req, res).catch(() => send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8')));
+};
+function start(deps: Partial<ShareDeps> = {}): Promise<void> {
   server = createServer({
     dir,
     load: async () => scoped,
