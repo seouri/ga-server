@@ -4,7 +4,7 @@ import type { Bundle, Condition, MedicationStatement, Observation, Patient, Reso
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { CONCEPT_SRC } from '../../src/concept-apply.ts';
-import { sourceKey } from '../../src/conceptmap.ts';
+import { loadMaps, lookup, mapUrl, sourceKey, upsertEntry } from '../../src/conceptmap.ts';
 import { importResources } from '../../src/engine.ts';
 import { APPLE, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
@@ -700,7 +700,7 @@ test('a coded LDL teaches the source map; a later uncoded same-term LDL is coded
   const plain = [lab(plainId, { text: ldlText }, 102, '2024-05-06'), lab(odd, { text: 'Synthetic odd test' }, 1, '2024-05-06')];
   expect(await importResources(client, coded, s, pid, 'h')).toMatchObject({ created: 1, unmapped: [] });
   const r = await importResources(client, plain, s, pid, 'h');
-  expect(r).toMatchObject({ created: 2, unmapped: [{ source: map, type: 'Observation', name: 'Synthetic odd test', unit: 'mg/dL', count: 1 }] });
+  expect(r).toMatchObject({ created: 2, unmapped: [{ source: map, type: 'Observation', key: 'synthetic odd test|mg/dl', name: 'Synthetic odd test', unit: 'mg/dL', count: 1 }] });
   const o = await one(plainId);
   expect(o.code.coding).toEqual([{ system: 'http://loinc.org', code: '13457-7', extension: [{ url: CONCEPT_SRC, valueCode: 'source-map' }] }]);
   expect(o.code.text).toBe(ldlText);
@@ -730,11 +730,45 @@ test('a newer importer update of an uncoded record keeps its GA coding and sugge
   // As an agent mapping (Task 5) leaves it: GA's coding, marked suggested, the unmapped tag gone.
   const mapped = { system: 'http://snomed.info/sct', code: '1', extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] };
   await client.updateResource({ ...stored, code: { ...stored.code, coding: [mapped] }, meta: { ...stored.meta, tag: [...(stored.meta?.tag ?? []).filter((t) => t.code !== 'concept-unmapped'), { system: TAG, code: 'concept-suggested' }] } });
-  expect(await importResources(client, [cond()], s('2024-01-01'), pid, 'h')).toMatchObject({ updated: 0, conflicts: 0, skipped: 1 });
+  // Skipped, and the stored record is mapped now: not a review line.
+  expect(await importResources(client, [cond()], s('2024-01-01'), pid, 'h')).toMatchObject({ updated: 0, conflicts: 0, skipped: 1, unmapped: [] });
   expect(await importResources(client, [cond('newer')], s('2024-02-01'), pid, 'h')).toMatchObject({ updated: 1, conflicts: 0 });
   const c = await get();
   expect(c.note?.[0].text).toBe('newer');
   expect(c.code?.coding).toEqual([mapped]);
   expect(tagged(c, 'concept-suggested')).toBe(true);
   expect(tagged(c, 'concept-unmapped')).toBe(false);
+});
+
+test('an agent entry is never replaced by a source learn, even when this process cached the map before the agent wrote it', async () => {
+  const org = uid('synthetic-dup');
+  const source = mapOf(org);
+  const s: SourceInfo = { ...ccda('2024-01-01'), org };
+  const key = 'ldl cholesterol calc|mg/dl';
+  await loadMaps(client); // this process's cache: no map for the source yet
+  // Another process (an agent's map_concept) writes the map directly: this process's cache doesn't know.
+  await client.createResource({
+    resourceType: 'ConceptMap', status: 'active', url: mapUrl(source), meta: { tag: [{ system: TAG, code: 'concept-map' }] },
+    group: [{ source: 'urn:ga-server:termkey', target: 'http://loinc.org', element: [{ code: key, target: [{ code: '18262-6', equivalence: 'equivalent', extension: [{ url: 'urn:ga-server:ext:concept-by', valueCode: 'agent' }, { url: 'urn:ga-server:ext:concept-confident', valueBoolean: true }] }] }] }],
+  });
+  const plainId = uid('ldl');
+  await importResources(client, [lab(uid('ldl'), { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: ldlText }, 101), lab(plainId, { text: ldlText }, 99, '2024-09-09')], s, pid, 'h');
+  await upsertEntry(client, source, { key, target: { system: 'http://loinc.org', code: '13457-7' }, equivalence: 'equivalent', confident: true, by: 'source' }); // stale caller
+  expect(lookup(await loadMaps(client, true), source, key)).toMatchObject({ target: { code: '18262-6' }, by: 'agent' });
+  expect(ga(await one(plainId))).toEqual([{ system: 'http://loinc.org', code: '18262-6', extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] }]);
+});
+
+test('a record coded only by GA is never a content match for a source-coded record', async () => {
+  const org = uid('synthetic-batch');
+  const s: SourceInfo = { ...ccda('2024-01-01'), org };
+  const [at1, at2] = ['2024-10-10T09:00:00Z', '2024-10-12T09:00:00Z'];
+  const [p1, p2] = [uid('tg'), uid('tg')];
+  // The map (learned from the coded twin) codes the uncoded ones: their LOINC is GA's, not the source's.
+  await importResources(client, [lab(uid('tg'), { coding: [{ system: 'http://loinc.org', code: '2571-8' }], text: 'Triglycerides' }, 1), lab(p1, { text: 'Triglycerides' }, 150, at1), lab(p2, { text: 'Triglycerides' }, 150, at2)], s, pid, 'h');
+  expect(ga(await one(p1))).toHaveLength(1);
+  const pdf: SourceInfo = { kind: 'pdf', file: `/tmp/${uid('r')}.pdf`, date: '2024-10-13', writer: 'agent' };
+  const tg = (value: number, at: string): Observation => ({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '2571-8' }], text: 'TG' }, effectiveDateTime: at, valueQuantity: { value, unit: 'mg/dL' }, subject: me() });
+  // Same value and time would have merged, a different value on the day been flagged: neither happens through a GA code.
+  expect(await importResources(client, [tg(150, at1), tg(160, at2)], pdf, pid, uid('h'))).toMatchObject({ created: 2, merged: 0, possibleDuplicates: 0 });
+  for (const id of [p1, p2]) expect(tagged(await one(id), 'possible-duplicate')).toBe(false);
 });

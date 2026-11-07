@@ -12,10 +12,10 @@ const TARGET: Record<string, string[]> = {
 };
 // Sources that code their own records teach their map. Not pdf (extraction codes are guesses, one map for every lab)
 // nor Apple (GA's own fixed codes): both maps are install-wide and agent-curated.
-export const LEARNS = new Set<SourceInfo['kind']>(['ccda', 'ehi', 'smart']);
+const LEARNS = new Set<SourceInfo['kind']>(['ccda', 'ehi', 'smart']);
 
 export type Status = 'source' | 'spec' | 'source-map' | 'suggested' | 'unmapped' | 'excluded';
-export type Unmapped = { source: string; type: string; name: string; unit?: string; count: number };
+export type Unmapped = { source: string; type: string; key: string; name: string; unit?: string; count: number }; // key: the term key the map uses; name, unit: as first seen
 
 const field = (type: string) => (type === 'Immunization' ? 'vaccineCode' : type.startsWith('Medication') ? 'medicationCodeableConcept' : 'code');
 const cc = (r: Resource) => (r as unknown as Record<string, CodeableConcept | undefined>)[field(r.resourceType)];
@@ -93,9 +93,26 @@ export function codeRecord(r: Resource, src: SourceInfo, maps: Maps): { resource
   return { resource: tagged(base, [{ system: TAG, code: 'concept-unmapped' }]), status: 'unmapped' };
 }
 
+// What a batch teaches its source maps, grouped by source: terms the map lacks whose records all carry one code. A term
+// coded two ways in the batch is ambiguous and is not learned (its uncoded copies stay up for review).
+export function learnable(resources: Resource[], src: SourceInfo, maps: Maps): Map<string, MapEntry[]> {
+  const seen = new Map<string, { source: string; entry: MapEntry; codes: Set<string> }>();
+  if (!LEARNS.has(src.kind)) return new Map();
+  for (const r of resources) {
+    const l = codeRecord(r, src, maps).learn;
+    if (!l || lookup(maps, l.source, l.entry.key)) continue;
+    const id = `${l.source}\n${l.entry.key}`;
+    const s = seen.get(id) ?? seen.set(id, { ...l, codes: new Set() }).get(id);
+    s?.codes.add(`${l.entry.target?.system}|${l.entry.target?.code}`);
+  }
+  const out = new Map<string, MapEntry[]>();
+  for (const { source, entry, codes } of seen.values()) if (codes.size === 1) out.set(source, [...(out.get(source) ?? []), entry]);
+  return out;
+}
+
 export const addUnmapped = (to: Unmapped[], from: Unmapped[]): void => {
   for (const u of from) {
-    const hit = to.find((x) => x.source === u.source && x.type === u.type && x.name === u.name && x.unit === u.unit);
+    const hit = to.find((x) => x.source === u.source && x.type === u.type && x.key === u.key);
     if (hit) hit.count += u.count;
     else to.push({ ...u });
   }
@@ -104,5 +121,5 @@ export const addUnmapped = (to: Unmapped[], from: Unmapped[]): void => {
 // The review line for an unmapped record (codeRecord returned 'unmapped', so it has a source key and a name).
 export function countUnmapped(list: Unmapped[], r: Resource, src: SourceInfo): void {
   const unit = (r as Observation).valueQuantity?.unit;
-  addUnmapped(list, [{ source: sourceKey(src, r), type: r.resourceType, name: nameOf(cc(r)) as string, ...(unit && { unit }), count: 1 }]);
+  addUnmapped(list, [{ source: sourceKey(src, r), type: r.resourceType, key: termKey(r) as string, name: nameOf(cc(r)) as string, ...(unit && { unit }), count: 1 }]);
 }

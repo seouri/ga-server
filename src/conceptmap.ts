@@ -63,12 +63,13 @@ export function sourceKey(src: SourceInfo, r: Resource): string {
   return `${src.kind}:${key}`;
 }
 
-let cache: Maps | undefined; // per process; upsertEntry clears it
+let cache: Maps | undefined; // per process; upsertEntries clears it
 
-export async function loadMaps(client: MedplumClient): Promise<Maps> {
-  if (cache) return cache;
+// fresh: read the server, not this process's cache (another process, e.g. an agent's map_concept, may have written).
+export async function loadMaps(client: MedplumClient, fresh = false): Promise<Maps> {
+  if (cache && !fresh) return cache;
   const maps: Maps = new Map();
-  for (const m of await client.searchResources('ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _count: '1000' })) maps.set(decodeURI((m.url as string).slice(MAP_URL.length)), m);
+  for (const m of await client.searchResources('ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _count: '1000' }, { cache: 'no-cache' })) maps.set(decodeURI((m.url as string).slice(MAP_URL.length)), m);
   return (cache = maps);
 }
 
@@ -88,26 +89,33 @@ export function lookup(maps: Maps, source: string, key: string): MapEntry | unde
   };
 }
 
-// Creates or updates the source's map, replacing any earlier entry for the key; one group per target system.
-export async function upsertEntry(client: MedplumClient, source: string, entry: MapEntry): Promise<void> {
+// Creates or updates the source's map in one read-modify-write: an agent entry replaces any earlier entry for its key;
+// a learned (by 'source') entry is only added, never replacing one, judged on the map as just read. One group per target system.
+export async function upsertEntries(client: MedplumClient, source: string, entries: MapEntry[]): Promise<void> {
   const url = mapUrl(source);
-  const map: ConceptMap = (await client.searchOne('ConceptMap', { url })) ?? { resourceType: 'ConceptMap', status: 'active', url, meta: { tag: [{ system: TAG, code: MAP_TAG }] } };
-  const target = entry.target?.code ? entry.target.system : UNMATCHED;
-  const groups: ConceptMapGroup[] = (map.group ?? [])
-    .map((g) => ({ ...g, element: g.element?.filter((e) => e.code !== entry.key) }))
-    .filter((g) => g.element?.length || g.target === target);
-  let g = groups.find((x) => x.target === target);
-  if (!g) groups.push((g = { source: TERM, target, element: [] }));
-  g.element = [...(g.element ?? []), {
-    code: entry.key,
-    target: [{
-      ...(entry.target?.code && { code: entry.target.code, ...(entry.target.display && { display: entry.target.display }) }),
-      equivalence: entry.equivalence,
-      ...(entry.equivalence === 'narrower' || entry.equivalence === 'inexact' ? { comment: `GA concept map: ${entry.equivalence}` } : {}), // R4 invariant cmd-1
-      extension: [{ url: BY, valueCode: entry.by }, { url: CONFIDENT, valueBoolean: entry.confident }],
-    }],
-  }];
+  const map: ConceptMap = (await client.searchOne('ConceptMap', { url }, { cache: 'no-cache' })) ?? { resourceType: 'ConceptMap', status: 'active', url, meta: { tag: [{ system: TAG, code: MAP_TAG }] } };
+  let groups: ConceptMapGroup[] = map.group ?? [];
+  const has = (key: string) => groups.some((g) => g.element?.some((e) => e.code === key));
+  const todo = entries.filter((e) => e.by !== 'source' || !has(e.key));
+  if (!todo.length) return;
+  for (const entry of todo) {
+    const target = entry.target?.code ? entry.target.system : UNMATCHED;
+    groups = groups.map((g) => ({ ...g, element: g.element?.filter((e) => e.code !== entry.key) })).filter((g) => g.element?.length || g.target === target);
+    let g = groups.find((x) => x.target === target);
+    if (!g) groups.push((g = { source: TERM, target, element: [] }));
+    g.element = [...(g.element ?? []), {
+      code: entry.key,
+      target: [{
+        ...(entry.target?.code && { code: entry.target.code, ...(entry.target.display && { display: entry.target.display }) }),
+        equivalence: entry.equivalence,
+        ...(entry.equivalence === 'narrower' || entry.equivalence === 'inexact' ? { comment: `GA concept map: ${entry.equivalence}` } : {}), // R4 invariant cmd-1
+        extension: [{ url: BY, valueCode: entry.by }, { url: CONFIDENT, valueBoolean: entry.confident }],
+      }],
+    }];
+  }
   const body: ConceptMap = { ...map, group: groups.filter((x) => x.element?.length) };
   await (map.id ? client.updateResource(body) : client.createResource(body));
   cache = undefined;
 }
+
+export const upsertEntry = (client: MedplumClient, source: string, entry: MapEntry): Promise<void> => upsertEntries(client, source, [entry]);

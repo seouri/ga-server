@@ -49,9 +49,14 @@ export async function expungeProject(session: MedplumClient, projectId: string):
   await session.post(`${session.fhirUrl('Project', projectId, '$expunge')}?everything=true`, {});
 }
 
-// ConceptMaps the importers learned from test sources (synthetic orgs, uuid source keys, the engine test's portal host). The
-// maps live in the user's own project, outside any patient compartment, so cleanupTestPatient doesn't reach them.
-const TEST_MAP = /^urn:ga-server:conceptmap:(.*synthetic.*|.*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*|smart:fhir-example-org|test-.*)$/i;
+// ConceptMaps the importers learned from test sources: exactly the synthetic orgs and uuid keys the integration files use.
+// The maps live in the user's own project, outside any patient compartment, so cleanupTestPatient doesn't reach them.
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const SPACED = '[0-9a-f]{8} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{12}'; // C-CDA keys are normalised: '-' becomes ' '
+const TEST_MAP = new RegExp(
+  `^urn:ga-server:conceptmap:(ccda:synthetic clinic|ccda:synthetic (clinic|batch|carry|dup) ${SPACED}|ehi:synthetic(-org|-health|-health-b|-health-docs|-health-dup|-fill-[0-9a-f]{8})?` +
+    `|smart:(firstfail|good|link|lock|norefresh|revoked|sync)-${UUID}|smart:fhir-example-org|test-${UUID})$`,
+);
 export async function cleanupTestMaps(client: MedplumClient): Promise<void> {
   for (const m of await client.searchResources('ConceptMap', { _count: '1000' }, { cache: 'no-cache' })) {
     if (TEST_MAP.test(decodeURI(m.url ?? ''))) await client.deleteResource('ConceptMap', m.id as string);
