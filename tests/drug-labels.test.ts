@@ -74,3 +74,12 @@ test('a cache file from the old format is refetched', async () => {
   writeFileSync(join(t.dir, '1.json'), JSON.stringify({ fetchedAt: Date.now(), result: { status: 'ok', setId: 'combo' } }));
   expect((await drugLabel('1', t) as { setId: string }).setId).toBe('s');
 });
+
+test('kit and combination labels without substance_name are skipped by generic name', async () => {
+  const gen = (id: string, names: string[]) => ({ ...label(id, '20260101', ['i']), openfda: { generic_name: names } });
+  for (const names of [['EPINEPHRINE, ALBUTEROL SULFATE, ASPIRIN'], ['EMPAGLIFLOZIN AND METFORMIN HYDROCHLORIDE'], ['A', 'B']]) {
+    expect((await drugLabel('1191', mk(() => json({ results: [gen('kit', names)] })))).status).toBe('no label');
+  }
+  const r = await drugLabel('1191', mk(() => json({ results: [gen('kit', ['EPINEPHRINE, ASPIRIN']), gen('plain', ['ASPIRIN'])] })));
+  expect(r.status === 'ok' && r.setId).toBe('plain');
+});
