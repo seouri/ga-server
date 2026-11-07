@@ -291,3 +291,15 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
   // A date-only value is a day, not midnight UTC: a possible duplicate, never an exact merge.
   expect((await run(lab('srv-4', '2024-03-01T00:00:00Z'), lab('o2', '2024-03-01'))).report).toMatchObject({ merged: 0, possibleDuplicates: 1 });
 });
+
+test('only a C-CDA import also looks for a patientless record by its stable identifier', async () => {
+  for (const [source, expected] of [[src('2024-01-01'), true], [{ ...src('2024-01-01'), kind: 'pdf' } as SourceInfo, false]] as const) {
+    const params: Record<string, string>[] = [];
+    const client = {
+      ...fake('search', new Error('unused')),
+      searchOne: async (_t: string, p: Record<string, string>) => (params.push(p), undefined),
+    } as unknown as MedplumClient;
+    await importResources(client, one, source, 'p', 'h');
+    expect(params.some((p) => 'subject:missing' in p), source.kind).toBe(expected);
+  }
+});

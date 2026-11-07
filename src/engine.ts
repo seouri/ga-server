@@ -381,8 +381,9 @@ export async function importResources(
     // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
     const field = COMPARTMENT[type];
     // A record stored without a patient (the converter emits some C-CDA Encounters/Devices so) belongs to no other patient: match it too.
+    // Only C-CDA stores such records, and the stable identifier is per source kind, so other sources skip this search.
     const byStable = (await client.searchOne(type, { identifier: idKey(ident), ...(field && { [field]: `Patient/${patientId}` }) }, { cache: 'no-cache' }) ??
-      (field ? await client.searchOne(type, { identifier: idKey(ident), [`${field}:missing`]: 'true' }, { cache: 'no-cache' }) : undefined)) as R | undefined;
+      (field && source.kind === 'ccda' ? await client.searchOne(type, { identifier: idKey(ident), [`${field}:missing`]: 'true' }, { cache: 'no-cache' }) : undefined)) as R | undefined;
     const link = byStable ? { dups: [] } : await linkHit(incoming, ident);
     const linked = link.hit;
     const existing = byStable ?? linked;
