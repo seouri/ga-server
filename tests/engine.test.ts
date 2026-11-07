@@ -281,7 +281,7 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
   };
   const same = await run(lab('srv-1', '2024-03-02T00:30:00Z'));
   expect(same.report).toMatchObject({ merged: 1, created: 0, possibleDuplicates: 0 });
-  expect(same.queries[0]).toContain('date=ge2024-02-29&date=lt2024-03-03');
+  expect(same.queries[0]).toContain('date=ge2024-02-29&date=lt2024-03-03&_count=1000');
   expect((await run(lab('srv-2', '2024-03-02T00:30:00Z', 190))).report).toMatchObject({ possibleDuplicates: 1 }); // same day, other value
   expect((await run(lab('srv-3', '2024-03-02T15:00:00Z'))).report).toMatchObject({ created: 1, possibleDuplicates: 0 }); // next local day
   // A date-only value is a day, not midnight UTC: a possible duplicate, never an exact merge.

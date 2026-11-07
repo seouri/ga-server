@@ -394,7 +394,7 @@ export async function importResources(
     const contentMatches = key
       ? await client.searchResources(
           'Observation',
-          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${shift(-1)}`], ['date', `lt${shift(2)}`]]),
+          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${shift(-1)}`], ['date', `lt${shift(2)}`], ['_count', '1000']]), // Apple readings under one code fill the default page
         ).then((ms) => ms.filter((m) => sameDay(when, effective(m) ?? '') && stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
     // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
