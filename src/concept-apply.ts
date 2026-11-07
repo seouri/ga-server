@@ -51,9 +51,12 @@ const conceptOf = <T extends Resource>(from: Resource, to: T): T =>
 export const carryConcept = <T extends Resource>(existing: Resource, incoming: T): T =>
   !own(incoming) && !gaCodings(incoming).length && gaCodings(existing).length ? conceptOf(existing, incoming) : incoming;
 
-// Merges done on source content (`merge` reads GA codings as source codes), then given back the incoming concept.
-export const onSource = <T extends Resource>(existing: T, incoming: T, f: (ex: T, inc: T) => T): T =>
-  conceptOf(incoming, f(stripConcept(existing), stripConcept(incoming)));
+// Merges done on source content (`merge` reads GA codings as source codes), then given back the incoming concept,
+// unless the merge kept a source code (or a Medication reference): then GA adds nothing.
+export const onSource = <T extends Resource>(existing: T, incoming: T, f: (ex: T, inc: T) => T): T => {
+  const m = f(stripConcept(existing), stripConcept(incoming));
+  return own(m) || !cc(m) ? m : conceptOf(incoming, m);
+};
 
 // Pure: adds at most one coding (after the source's), its concept-source extension and one concept tag. Idempotent.
 export function codeRecord(r: Resource, src: SourceInfo, maps: Maps): { resource: Resource; status: Status; learn?: { source: string; entry: MapEntry } } {
