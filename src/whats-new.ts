@@ -2,10 +2,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Extension, Observation, Resource } from '@medplum/fhirtypes';
+import { trusted } from './concept-apply.ts';
+import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
-import { arrivedAt, TAG } from './identity.ts';
+import { arrivedAt, SRC_DATE, TAG } from './identity.ts';
+import { groupLabs, highLow, labRow } from './labs.ts';
+import { concept } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
+import type { vaccineGaps } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -84,4 +89,78 @@ export function readLastSeen(dir: string = dirname(defaultConfigPath())): string
 
 export function writeLastSeen(at: string, dir: string = dirname(defaultConfigPath())): void {
   writeAtomic(lastSeenFile(dir), JSON.stringify({ lastSeen: at }), 0o600);
+}
+
+export type ReviewItem = {
+  kind: 'lab' | 'new medication' | 'medication status' | 'problem status' | 'vaccine follow-up' | 'health maintenance';
+  title: string; date?: string; detail: Record<string, unknown>; source?: string; id?: string;
+};
+
+const daysBefore = (asOf: string, n: number) => new Date(Date.parse(asOf) - n * 864e5).toISOString().slice(0, 10);
+
+export function labItems(arrived: Observation[], allLabs: Observation[], asOf: string): ReviewItem[] {
+  const cutoff = daysBefore(asOf, 365);
+  const groups = groupLabs(allLabs);
+  return arrived.flatMap((o): ReviewItem[] => {
+    const flag = highLow(o), date = clinicalDate(o);
+    if (!flag || !date || date < cutoff) return [];
+    const row = labRow(o);
+    const older = groups.find((g) => g.some((x) => x.id === o.id))?.find((x) => { const d = clinicalDate(x); return d && d < date; });
+    const p = older && labRow(older);
+    return [{ kind: 'lab', title: row.name ?? 'Lab result', date, detail: { value: row.value, range: row.range, flag, previous: p && { date: p.date, value: p.value } }, source: row.source, id: o.id }];
+  }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+}
+
+const medCode = (r: Resource) => (r as Record<string, any>).medicationCodeableConcept as CodeableConcept | undefined; // shortcut: ignores medicationReference
+const medKey = (r: Resource): string | undefined => {
+  const cc = medCode(r);
+  const rx = trusted(r, cc?.coding).find((c) => c.system === RXNORM)?.code;
+  const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
+  return rx ? `rx:${rx}` : name ? `name:${name}` : undefined;
+};
+
+export function medicationItems(arrived: Resource[], all: Resource[], since: string): ReviewItem[] {
+  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return a === undefined || a < since; }).map(medKey));
+  const seen = new Set<string>();
+  return arrived.flatMap((r): ReviewItem[] => {
+    const k = medKey(r);
+    if (!k || before.has(k) || seen.has(k)) return [];
+    seen.add(k);
+    const rxnorm = k.startsWith('rx:') ? k.slice(3) : undefined;
+    return [{ kind: 'new medication', title: concept(medCode(r)) ?? 'Medication', date: clinicalDate(r), detail: { rxnorm, status: (r as { status?: string }).status }, id: r.id }];
+  });
+}
+
+const statusOf = (r: Resource) => { const x = r as Record<string, any>; return (x.status ?? x.clinicalStatus?.coding?.[0]?.code) as string | undefined; };
+
+// A status that changed since `since`, against the last stored version before it.
+export async function statusItems(client: MedplumClient, patientId: string, since: string): Promise<ReviewItem[]> {
+  const out: ReviewItem[] = [];
+  for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
+    for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
+      for (const r of page) {
+        const history = await client.readHistory(type as 'Condition', r.id as string) as Bundle;
+        const prev = history.entry?.map((e) => e.resource as Resource).find((v) => (v.meta?.lastUpdated ?? '') < since);
+        const from = prev && statusOf(prev), to = statusOf(r);
+        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r)) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, id: r.id });
+      }
+    }
+  }
+  return out;
+}
+
+export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>, hm: Observation[], asOf: string, birthDate?: string): ReviewItem[] {
+  const items: ReviewItem[] = vaccines.results.filter((v) => (v.status === 'due' || v.status === 'overdue') && v.records.length).map((v) => ({
+    kind: 'vaccine follow-up', title: v.vaccine, detail: { status: v.status, reason: v.reason, records: v.records },
+  }));
+  for (const o of hm) {
+    const topic = o.code?.text?.match(/^Health maintenance: (.+)$/)?.[1];
+    if (!topic) continue;
+    const next = o.component?.find((c) => /next due/i.test(c.code?.text ?? ''))?.valueDateTime?.slice(0, 10);
+    const due = next && !(birthDate && next < birthDate) ? next : undefined; // a due date before birth is a bad record
+    if (!/^(overdue|due)$/i.test(o.valueString ?? '') && !(due && due <= asOf)) continue;
+    const asOfExport = (o.extension as Extension[] | undefined)?.find((e) => e.url === SRC_DATE)?.valueDateTime;
+    items.push({ kind: 'health maintenance', title: topic, detail: { status: o.valueString, nextDue: due, asOfExport }, id: o.id });
+  }
+  return items;
 }
