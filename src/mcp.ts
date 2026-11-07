@@ -183,7 +183,7 @@ const STDIO_INSTRUCTIONS =
         'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
-        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
+        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest C-CDA or EHI import, or than the newest sync of a portal with that record type in its urn:ga-server:ext:smart-enabled-types (MedicationStatement and MedicationRequest count as one), is unconfirmed. ' +
         'health_summary is the one-call snapshot to start with; current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results (summary: true for trends), vitals vital signs, notes_search the text of notes and messages.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
