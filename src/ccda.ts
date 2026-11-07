@@ -4,6 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { type GaConfig, GaError } from './config.ts';
+import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport } from './engine.ts';
 import { withImportLock } from './lock.ts';
 import { storeDocument } from './document.ts';
@@ -121,7 +122,6 @@ function sourceInfo(xml: string) {
 
 const MED_STATUS: Record<string, MedicationStatement['status']> = { active: 'active', completed: 'completed', aborted: 'stopped', suspended: 'on-hold' };
 const cc = (system: string, code: string) => ({ coding: [{ system, code }] });
-const RXNORM = 'http://www.nlm.nih.gov/research/umls/rxnorm';
 const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
 // Fixes converter template gaps from the source XML; only neutral values ('unknown') when the source has nothing.

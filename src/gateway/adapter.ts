@@ -60,10 +60,6 @@ export class FileAdapter {
     return this.scan([this.model]).find(([, p]) => p.uid === uid)?.[1];
   }
 
-  async findByUserCode(userCode: string): Promise<Payload | undefined> {
-    return this.scan([this.model]).find(([, p]) => p.userCode === userCode)?.[1];
-  }
-
   async consume(id: string): Promise<void> {
     const f = this.file(id);
     if (!existsSync(f)) return;
