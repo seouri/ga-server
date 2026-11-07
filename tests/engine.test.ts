@@ -3,7 +3,7 @@ import type { MedicationStatement, Observation, Resource } from '@medplum/fhirty
 import type { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
 import { decide, fillFrom, importResources, sameValue } from '../src/engine.ts';
-import { stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import { ARRIVED, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
 const ID = { system: 'urn:ga-server:id:ccda', value: 'm1' };
@@ -195,4 +195,10 @@ test('EHI fill: participant display over reference, unknown status, same-day per
   // A report keeps the results the export didn't match, existing first.
   const dr = (refs: string[]) => ({ resourceType: 'DiagnosticReport', result: refs.map((reference) => ({ reference })) }) as unknown as Resource;
   expect(fillFrom(dr(['Observation/a', 'Observation/b']), dr(['Observation/c', 'Observation/a']), EHI)).toEqual(dr(['Observation/a', 'Observation/b', 'Observation/c']));
+});
+
+test('arrival is not content', () => {
+  const ex = existing(ms('active'), src('2024-01-01'));
+  const withArrival = { ...ex, extension: [...(ex.extension ?? []), { url: ARRIVED, valueInstant: '2024-01-02T00:00:00.000Z' }] } as Resource;
+  expect(decide(withArrival, stamp(ms('active'), src('2024-01-01'), ID))).toBe('skip');
 });
