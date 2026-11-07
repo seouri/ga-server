@@ -76,3 +76,4 @@ In each app, add a custom connector with the URL from step 5; the passkey login 
 - `docker compose logs ga-gateway` shows whether remote access is on (`remote access on: <url>/mcp`).
 - The app says the connector is unreachable: check `tailscale funnel status`, that the Mac is awake and online, and that a firewall allows Tailscale.
 - Registration fails with "redirect_uris must belong to a known chat app": the app's redirect address isn't in `config/chat-apps.json`; add it and restart `ga-gateway`.
+- After a GA update adds a tool, an app may keep the tool list it got when you connected (Grok does until you reconnect GA). Answers still work from `health_summary`; reconnect GA in that app to see the new tool.

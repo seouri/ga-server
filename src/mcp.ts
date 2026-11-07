@@ -270,8 +270,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         "A one-call snapshot of the user's health record in GA: call this first for any personal health question, then drill down with the other tools. " +
         'Returns age and sex; problems, medications and allergies (currency "current" or "unconfirmed" by the hospital currency rule); key labs ' +
         '(A1c, glucose, lipids, creatinine, eGFR, ALT, AST, hemoglobin, platelets, potassium, sodium, TSH, whichever exist: the lab_results summary entry, ' +
-        'latest and previous value); latest weight, BMI, blood pressure and resting heart rate per setting (clinic/home); vaccines due or overdue ' +
-        '(from vaccine_gaps: call vaccine_gaps before telling the user a vaccine is due) and the counts not evaluated, unmatched and possible duplicates; the last visit; imported sources with their last import date. Each item has its date and source. ' +
+        'latest and previous value); latest weight, BMI, blood pressure and resting heart rate per setting (clinic/home); health maintenance ' +
+        '(screenings, vaccines and the doctor\'s planned follow-ups worth raising now, upcoming within 6 months, and the byTheWay line; call health_maintenance for dates, why and citations); the last visit; imported sources with their last import date. Each item has its date and source. ' +
         'Lists and key labs are {rows, total, truncated?}. Flag "read from a document by AI": the value was read from a document by AI; tell the user to check it. ' +
         'A section that failed holds {error}.',
       inputSchema: {},

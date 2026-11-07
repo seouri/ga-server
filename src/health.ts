@@ -7,7 +7,8 @@ import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
 import { part, SOURCES } from './whats-new.ts';
 import { endpointStatus } from './smart/sync.ts';
-import { ageOn, vaccineGaps } from './vaccines.ts';
+import { healthMaintenance, raiseNow } from './maintenance.ts';
+import { ageOn } from './vaccines.ts';
 import { newestFirst, vitalRow, vitalSearches } from './vitals.ts';
 
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
@@ -31,18 +32,16 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
     const o = await client.searchOne('Observation', { subject, _tag: `${TAG}|${tag}`, _sort: '-_lastUpdated', _elements: 'meta' }, opts);
     return o ? [{ source, lastImport: o.meta?.lastUpdated?.slice(0, 10) }] : [];
   };
-  const [patient, lists, labs, vitals, vaccines, lastVisit, imports] = await Promise.all([
+  const [patient, lists, labs, vitals, maintenance, lastVisit, imports] = await Promise.all([
     part(client.readResource('Patient', patientId, opts).then((p: Patient) => ({ age: p.birthDate ? ageOn(p.birthDate, asOf) : undefined, sex: p.gender }))),
     part(eps.then((e) => loadLists(client, patientId, e))),
     part(labResults(client, patientId, { summary: true, keyOnly: true, limit: 1000 })),
     part(Promise.all(VITALS.flatMap((n) => [vital(n, false), vital(n, true)])).then((r) => r.flat())),
-    part(vaccineGaps(client, patientId, asOf).then((v) => ({
-      edition: v.edition,
-      dueOrOverdue: v.results.filter((r) => r.status === 'due' || r.status === 'overdue').map((r) => ({ vaccine: r.vaccine, status: r.status, reason: r.reason?.split(/(?<=\.) /).at(-1) })),
-      notEvaluated: v.results.filter((r) => r.status === 'not-evaluated').length,
-      unmatched: v.unmatched.length,
-      possibleDuplicates: v.possibleDuplicates.length,
-      note: 'call vaccine_gaps before telling the user a vaccine is due',
+    // The engine's short view, so a chat app whose tool list predates health_maintenance still answers "what's due" from it.
+    part(healthMaintenance(client, patientId, asOf).then((m) => ({
+      due: m.items.filter((i) => raiseNow(i, asOf)).map(({ name, kind, status, dueDate, importance }) => ({ name, kind, status, dueDate, importance })),
+      upcoming: m.upcoming, byTheWay: m.byTheWay,
+      note: 'call health_maintenance for the full list: guideline and doctor\'s-plan dates, why it matters and the citation',
     }))),
     // date lt tomorrow: Medplum sorts undated encounters first on -date, and a future one is not a visit yet.
     part(client.searchOne('Encounter', new URLSearchParams([['subject', subject], ['date', `lt${tomorrow}`], ['status:not', 'cancelled'], ['status:not', 'entered-in-error'], ['_sort', '-date']]), opts).then((e?: Encounter) =>
@@ -54,5 +53,5 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
   ]);
   // At most 200 each, so the remote 150k cut can't drop the sections after them.
   const list = (kind: Kind) => ('error' in lists ? lists : fit(listRows(lists.all, lists.ctx, kind).map(({ name, currency, since, source, flags }) => ({ name, currency, since, source, flags })), 200));
-  return { asOf, patient, problems: list('problems'), medications: list('medications'), allergies: list('allergies'), keyLabs: labs, vitals, vaccines, lastVisit: lastVisit ?? null, imports };
+  return { asOf, patient, problems: list('problems'), medications: list('medications'), allergies: list('allergies'), keyLabs: labs, vitals, maintenance, lastVisit: lastVisit ?? null, imports };
 }
