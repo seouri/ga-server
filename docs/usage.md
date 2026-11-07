@@ -48,10 +48,11 @@ The server tells Claude that GA is your health record, so plain questions work. 
 > What's new in my record since I last looked?
 > What's due in the next 6 months?
 > Not now for the colorectal screening; remind me after March.
+> I had a colonoscopy in 2024; mark colorectal screening done.
 > Record the lipid recheck my doctor asked for in her Nov 3 message.
 ```
 
-`health_maintenance` lists screenings (USPSTF) and vaccines (CDC) with the guideline's reasons and source, and your doctor's own plan (Epic health maintenance, or a follow-up recorded from a note or message) next to it. `whats_new` shows what arrived since you last looked: out-of-range labs, new medications with their FDA label, status changes, new notes and messages. After answering a health question the agent may add one "By the way" line about the most important item due. `ga calendar` gives a private calendar link of the due dates ([chat apps](chat-apps.md#calendar-feed)).
+`health_maintenance` lists screenings (USPSTF) and vaccines (CDC) with the guideline's reasons and source, and your doctor's own plan (Epic health maintenance, or a follow-up recorded from a note or message) next to it. `whats_new` shows what arrived since you last looked: out-of-range labs, new medications with their FDA label, status changes, new notes and messages. After answering a health question the agent may add one "By the way" line about the most important item due. `postpone` with `done` records that you already had a screening (a year or more ago; not for vaccines, import the record). GA can also text you alerts and replies ([GA texts you](notifications.md)). `ga calendar` gives a private calendar link of the due dates ([chat apps](chat-apps.md#calendar-feed)).
 
 **Import documents**
 

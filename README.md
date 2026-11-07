@@ -33,6 +33,7 @@ Then bring in your records and ask, in plain words:
 - **Answers with citations:** labs and trends, current medications and problems, vitals, notes and messages, each value with its date and source.
 - **What's new:** what arrived since you last looked, from out-of-range labs to new medications with their FDA label.
 - **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates.
+- **GA texts you:** new out-of-range results as they arrive and what's due at a time you pick, by iMessage; reply to ask or to say done ([setup](docs/notifications.md)).
 - **Decision support:** 10-year cardiovascular risk (PREVENT and Pooled Cohort Equations) and charts such as your lipid trend.
 - **Sharing:** private, expiring links for a doctor or family, approved by you.
 - **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet ([setup](docs/chat-apps.md)).
@@ -67,6 +68,7 @@ Everything runs on your computer. It talks only to your own hospitals (to fetch 
 | [Registering GA with Epic](docs/epic-setup.md) | One-time Epic app registration, field by field |
 | [GA from chat apps](docs/chat-apps.md) | Setup for claude.ai, ChatGPT, Gemini, Grok and remote Claude Code |
 | [One test, one name](docs/concepts.md) | How GA links the same test, vaccine or drug across sources under standard codes, and how to review what it mapped |
+| [GA texts you](docs/notifications.md) | iMessage alerts and daily digest, replies, setup, privacy |
 | [Sharing](docs/sharing.md) | Private links for doctors and family: summary, PDF and FHIR downloads, questions |
 | [Running GA](docs/operations.md) | Where data lives, **backup and restore**, uninstall, admin app |
 | [Adding a skill](docs/skills.md) | Writing your own `/` command against GA |
