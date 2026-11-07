@@ -5,7 +5,7 @@ import { GaError } from './config.ts';
 import { evaluateScreenings, loadRules, SOON_DAYS } from './screenings.ts';
 import { SRC_DATE } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
-import { addDays, vaccineGaps } from './vaccines.ts';
+import { addDays, addMonths, vaccineGaps } from './vaccines.ts';
 
 export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, followup
 const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote' };
@@ -65,7 +65,7 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
   const day = asOf.slice(0, 10);
   const items: Item[] = [
     ...guideline.map((g): Item => ({
-      topic: g.topic, name: g.name, kind: 'screening', status: g.status, importance: g.grade === 'C' ? 'low' : 'high', why: g.why, cost: g.cost,
+      topic: g.topic, name: g.name, kind: 'screening', status: g.status, ...(g.dueDate && { dueDate: g.dueDate }), importance: g.grade === 'C' ? 'low' : 'high', why: g.why, cost: g.cost,
       guideline: { ...(g.dueDate && { dueDate: g.dueDate }), grade: g.grade, citation: g.citation, reason: g.reason },
       evidence: g.last ? [g.last] : [],
     })),
@@ -136,7 +136,7 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
 
 const NOTE = "Guideline items cite their source. The doctor's plan is shown as of its date. Not medical advice: input for a conversation with your clinician.";
 
-export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
+export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), months = 6) {
   const p = await client.readResource('Patient', patientId) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
@@ -157,5 +157,27 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
   const rules = loadRules();
   const vaccines = await vaccineGaps(client, patientId, asOf);
   const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions] }, asOf);
-  return { asOf, edition: rules.edition, items: combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf), note: NOTE };
+  const items = combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf);
+  return { asOf, edition: rules.edition, items, upcoming: upcoming(items, asOf, months), byTheWay: byTheWay(items, asOf), note: NOTE };
 }
+
+// Worth raising now: overdue, due soon, or due with high or medium importance, and not held back by a postponement (nextMention null: never).
+export const raiseNow = (i: Item, asOf: string): boolean =>
+  (i.status === 'overdue' || i.status === 'due soon' || (i.status === 'due' && i.importance !== 'low')) && i.nextMention !== null && (!i.nextMention || i.nextMention <= asOf);
+
+const monthYear = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+// The one line an agent adds after answering (spec Part 3): the most important item to raise (items come sorted), plus a count of the rest.
+export function byTheWay(items: Item[], asOf: string): { line: string; topic: string; more: number } | undefined {
+  const [top, ...rest] = items.filter((i) => raiseNow(i, asOf));
+  if (!top) return undefined;
+  const when = top.status === 'overdue' ? `overdue${top.dueDate ? ` since ${monthYear(top.dueDate)}` : ''}` : top.status === 'due soon' && top.dueDate ? `due in ${monthYear(top.dueDate)}` : 'due';
+  const more = rest.length ? `, plus ${rest.length} other item${rest.length > 1 ? 's' : ''}` : '';
+  return { line: `By the way, ${top.name} is ${when}${more}. Want to review it now?`, topic: top.topic, more: rest.length };
+}
+
+// Items with a due date after asOf and within `months`, soonest first.
+export const upcoming = (items: Item[], asOf: string, months = 6) =>
+  items.filter((i) => i.dueDate && i.dueDate > asOf && i.dueDate <= addMonths(asOf, months) && i.status !== 'postponed' && i.status !== 'not for you')
+    .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!))
+    .map(({ topic, name, dueDate, status, importance }) => ({ topic, name, dueDate, status, importance }));

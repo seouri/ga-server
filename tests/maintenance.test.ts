@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Basic, Observation } from '@medplum/fhirtypes';
-import { combine, epicPlans, REMINDER, vaccineItems } from '../src/maintenance.ts';
+import { byTheWay, combine, epicPlans, REMINDER, upcoming, vaccineItems } from '../src/maintenance.ts';
 import type { Item } from '../src/maintenance.ts';
 import { loadRules } from '../src/screenings.ts';
 import type { GuidelineItem, Rules, Status } from '../src/screenings.ts';
@@ -169,4 +169,18 @@ test('an undated Due plan is not hidden by a later dated Not Due', () => {
   const plans = epicPlans([hm('CRCS FOLLOW-UP', '2028-01-01', 'Not Due'), hm('COLORECTAL CANCER SCREENING', undefined, 'Due')]);
   expect(run([g('colorectal', 'A', 'done')], plans)[0].status).toBe('due');
   expect(run([g('colorectal', 'A', 'done')], [...plans].reverse())[0].status).toBe('due');
+});
+
+test('byTheWay names the most important item to raise, counts the rest, and respects not-now', () => {
+  const items = run([g('colorectal', 'A', 'overdue', '2026-03-01'), g('prostate', 'C', 'discuss')], epicPlans([hm('LIPID PANEL - YEARLY', '2026-12-01', 'Not Due')]));
+  expect(byTheWay(items, '2026-11-03')).toEqual({ line: 'By the way, colorectal is overdue since March 2026, plus 1 other item. Want to review it now?', topic: 'colorectal', more: 1 });
+  const quiet = run([g('colorectal', 'A', 'overdue', '2026-03-01')], epicPlans([]), [rem('not-now', 'colorectal', '2026-11-01')]);
+  expect(byTheWay(quiet, '2026-11-03')).toBeUndefined();
+  expect(byTheWay(run([g('prostate', 'C', 'discuss')]), '2026-11-03')).toBeUndefined(); // low and discuss are never raised
+});
+
+test('upcoming lists items due within the window, soonest first', () => {
+  const items = run([g('colorectal', 'A', 'done', '2027-02-01')], epicPlans([hm('LIPID PANEL - YEARLY', '2026-12-01', 'Not Due'), hm('EYE EXAM', '2028-01-01', 'Not Due')]));
+  expect(upcoming(items, '2026-11-03').map((i) => [i.name, i.dueDate])).toEqual([['LIPID PANEL - YEARLY', '2026-12-01'], ['colorectal', '2027-02-01']]);
+  expect(upcoming(items, '2026-11-03', 1).map((i) => i.name)).toEqual(['LIPID PANEL - YEARLY']);
 });

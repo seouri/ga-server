@@ -430,11 +430,12 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         'the guideline (USPSTF grade or CDC schedule, with citation and its due date) and the doctor\'s plan (Epic health maintenance or a recorded follow-up, with its own as-of date) side by side, the evidence used, ' +
         'why it matters and what it costs (quoted from the guideline source) and nextMention (null: never raise again). Relay status, both dates with their labels, and why and cost with the citation. ' +
         'Never judge the guideline yourself or add advice; show both dates when they differ. Raise only items whose nextMention is absent or has passed; the person can defer one with postpone. ' +
-        'Low importance (grade C): say "worth discussing with your doctor". asOf defaults to today (YYYY-MM-DD).',
-      inputSchema: { asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() },
+        'Low importance (grade C): say "worth discussing with your doctor". upcoming: items due within `months` (default 6), soonest first. ' +
+        'byTheWay.line: the one line to add after answering a health question (see whats_new). asOf defaults to today (YYYY-MM-DD).',
+      inputSchema: { asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), months: z.number().int().min(1).max(24).optional() },
       annotations: { readOnlyHint: true },
     },
-    read(({ asOf }) => healthMaintenance(client, patientId, asOf)),
+    read(({ asOf, months }) => healthMaintenance(client, patientId, asOf, months)),
   );
   registerMaintenanceTools(server, deps);
   registerConceptTools(server, deps);

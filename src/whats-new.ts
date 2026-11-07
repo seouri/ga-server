@@ -12,7 +12,7 @@ import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
 import { concept, listRows, loadLists } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
-import { healthMaintenance, type Item } from './maintenance.ts';
+import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -175,10 +175,9 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
   return changed.map(({ type, r, kind, from, to }) => ({ kind, title: concept(r.resourceType === 'Condition' ? (r as Condition).code : medCode(r, meds).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id }));
 }
 
-// Engine items worth raising now: overdue, due soon, or due with high or medium importance, and not held back by a postponement (nextMention null: never).
+// Engine items worth raising now (raiseNow), with their evidence for citation.
 export function followUpItems(items: Item[], asOf: string): ReviewItem[] {
-  const raise = (i: Item) => i.status === 'overdue' || i.status === 'due soon' || (i.status === 'due' && i.importance !== 'low');
-  return items.filter((i) => raise(i) && i.nextMention !== null && (!i.nextMention || i.nextMention <= asOf)).map((i) => {
+  return items.filter((i) => raiseNow(i, asOf)).map((i) => {
     const newest = [...i.evidence].sort((a, b) => b.date.localeCompare(a.date))[0];
     return {
       kind: 'health maintenance', title: i.name, date: i.dueDate, source: newest?.source ?? i.doctorsPlan?.source, id: i.doctorsPlan?.id ?? newest?.id,
@@ -270,6 +269,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   }
   return {
     note: NOTE, since, ...(!opts.since && !stored && { firstRun: true as const }), ...seen,
+    ...(!failed(upkeep) && upkeep.byTheWay && { byTheWay: upkeep.byTheWay }),
     tally: failed(arrived) ? arrived : tally(arrived, asOf), items, itemsTotal: all.length, ...(kept.truncated && { truncated: true as const }),
     ...(Object.keys(errors).length && { sectionErrors: errors }), medicationCheck, ...(omitted > OMITTED_NAMES && { medicationCheckOmitted: omitted }), context,
   };
