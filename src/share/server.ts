@@ -104,13 +104,13 @@ async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: Sha
 
 // Failed token lookups per client IP, fixed window from the first failure. fail() records one and says whether the IP is over the limit.
 // Bounded: at maxIps the oldest IP is evicted (Map insertion order), O(1) per request.
-export function failLimiter(maxIps = MAX_IPS): { fail: (ip: string, t: number) => boolean; size: () => number } {
+export function failLimiter(maxIps = MAX_IPS, maxFails = MAX_FAILS): { fail: (ip: string, t: number) => boolean; size: () => number } {
   const fails = new Map<string, { start: number; n: number }>();
   return {
     fail(ip, t) {
       let f = fails.get(ip);
       if (f && t - f.start >= WINDOW) { fails.delete(ip); f = undefined; }
-      if (f) return ++f.n > MAX_FAILS;
+      if (f) return ++f.n > maxFails;
       if (fails.size >= maxIps) fails.delete(fails.keys().next().value!);
       fails.set(ip, { start: t, n: 1 });
       return false;

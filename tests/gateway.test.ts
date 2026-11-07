@@ -233,10 +233,11 @@ test('without a public URL only share pages and /callback exist', async () => {
   expect((await fetch(`${base}/callback?state=good`)).status).toBe(200);
 });
 
-test('registration requests are limited per IP; authorization requests never are', async () => {
+test('registration requests are limited per IP; authorization requests only far above an owner\'s sign-ins', async () => {
   await start();
   const h = { 'x-forwarded-for': '203.0.113.20' };
-  for (let i = 0; i < 25; i++) expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).not.toBe(429);
+  for (let i = 0; i < 300; i++) expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).not.toBe(429);
+  expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).toBe(429);
   for (let i = 0; i < 20; i++) expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).not.toBe(429);
   expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).toBe(429);
 });
