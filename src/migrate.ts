@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { AuditEvent, Bundle, DocumentReference, Extension, Resource, ResourceType } from '@medplum/fhirtypes';
+import type { AuditEvent, Binary, Bundle, BundleEntry, DocumentReference, Extension, Resource, ResourceType } from '@medplum/fhirtypes';
 import { importAppleHealth } from './apple/import.ts';
 import { manifestHash } from './archive.ts';
 import { importPath } from './ccda.ts';
@@ -24,6 +24,7 @@ import { vaccineGaps } from './vaccines.ts';
 const SHARED = ['Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device'] as ResourceType[];
 const COMPARTMENT = PATIENT_COMPARTMENT.filter((t) => t !== 'Patient');
 const SRC_TAGS = ['src-ccda', 'src-ehi', 'src-apple-health', 'src-pdf', 'src-smart'].map((c) => `${TAG}|${c}`).join(',');
+const TAG_ROWS = ['possible-duplicate', 'source-conflict', 'extracted-by-llm', 'writer-agent', 'src-ccda', 'src-ehi', 'src-apple-health', 'src-pdf'];
 const GA_LOG = 'urn:ga-server:share|,urn:ga-server:remote|'; // share and chat-app access logs (AuditEvent)
 const FILE = 'urn:ga-server:id:file';
 const ARCHIVE = { ehi: 'urn:ga-server:id:ehi-archive', apple: 'urn:ga-server:id:apple-health-archive' };
@@ -91,6 +92,24 @@ export const normalise = (v: unknown): string => {
       : x && typeof x === 'object' ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, y]) => [k, canon(y)])) : x;
   return JSON.stringify(canon(JSON.parse(JSON.stringify(v ?? null).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'ID'))));
 };
+
+// An access log event's identity (R4 AuditEvent has no identifier): when, which log, about what.
+export const auditKey = (e: AuditEvent) => JSON.stringify([Date.parse(e.recorded), e.meta?.tag?.map((t) => `${t.system}|${t.code}`).sort(), e.entity]);
+
+// Transaction bundles of about 200 entries; an entry group (a record and its Binaries) never spans two.
+async function inChunks(c: MedplumClient, groups: BundleEntry[][], done?: (n: number) => void): Promise<void> {
+  let chunk: BundleEntry[] = [];
+  const flush = async () => {
+    if (chunk.length) await c.executeBatch({ resourceType: 'Bundle', type: 'transaction', entry: chunk } as Bundle);
+    done?.(chunk.length);
+    chunk = [];
+  };
+  for (const g of groups) {
+    if (chunk.length + g.length > 200) await flush();
+    chunk.push(...g);
+  }
+  await flush();
+}
 
 export const binaryIds = (rs: Resource[]): string[] =>
   [...new Set([...JSON.stringify(rs).matchAll(/(?:Binary\/|\/storage\/)([0-9a-f]{8}-[0-9a-f-]{27})/g)].map((m) => m[1]))];
@@ -165,20 +184,23 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
     if (t) docsByTitle.set(t, [...(docsByTitle.get(t) ?? []), d.id as string]);
   }
   const groups = new Map<string, Resource[]>();
-  let orphans = 0;
+  const orphans = new Map<string, number>();
   for (const type of EXTRACT_TYPES) {
     for (const r of await all(old, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${oldPid}`, _project: project })) {
       const id = sourceDoc(r, docsByTitle);
-      if (!id) orphans++;
+      const name = basename(r.meta?.source ?? '(no file name)');
+      if (!id) orphans.set(name, (orphans.get(name) ?? 0) + 1);
       else groups.set(id, [...(groups.get(id) ?? []), r]);
     }
   }
-  if (orphans) problems.push(`${orphans} extracted records have no source document`);
+  // E.g. two uploads with one file name. Not migrated automatically: the user re-imports the file afterwards.
+  for (const [name, n] of orphans) problems.push(`${n} records extracted from ${name} cannot be matched to one stored file: delete them in the old copy (admin app) and re-import ${name} after migrating, then re-run`);
   for (const [id, rs] of groups) {
     const doc = files.find((d) => d.id === id);
     const att = doc?.content?.[0]?.attachment;
     if (!doc || !att?.url || !att.title) {
-      problems.push(`source document of ${rs.length} extracted records not found`);
+      const name = basename(rs[0].meta?.source ?? '(no file name)');
+      problems.push(`the stored file behind ${rs.length} records extracted from ${name} is missing: delete them in the old copy (admin app) and re-import ${name} after migrating, then re-run`);
       continue;
     }
     const name = basename(att.title);
@@ -194,8 +216,15 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
         try {
           return await importExtracted(c, cfg, rs.map(stripExtracted), file, srcDate(own));
         } catch (e) {
-          if (e instanceof GaError && e.message.startsWith('already imported')) return 'already imported';
-          throw e;
+          const docId = e instanceof GaError && e.message.startsWith('already imported') ? /DocumentReference\/([^\s)]+)/.exec(e.message)?.[1] : undefined;
+          if (!docId) throw e;
+          // Done on an earlier run only if its records made it too; a failed run left the file alone (importExtracted's hint).
+          const mine = new Map([[name, [docId]]]);
+          for (const type of EXTRACT_TYPES) {
+            const rs = await all(c, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${cfg.patientId}` });
+            if (rs.some((r) => sourceDoc(r, mine) === docId)) return 'already imported';
+          }
+          throw new GaError(`${name}: stored in the GA project by an earlier run, but none of its records (${(e as Error).message})`);
         }
       },
     });
@@ -213,16 +242,24 @@ async function countRows(old: MedplumClient, project: string, oldPid: string, nc
   for (const t of COMPARTMENT) await add(t, t, { _compartment: `Patient/${oldPid}` }, { _compartment: `Patient/${newPid}` });
   for (const t of SHARED) await add(t, t, { _tag: SRC_TAGS }, { _tag: SRC_TAGS });
   await add('AuditEvent (GA logs)', 'AuditEvent', { _tag: GA_LOG }, { _tag: GA_LOG });
+  // Per GA tag (review flags, provenance), over the types that hold records.
+  for (const tag of TAG_ROWS) {
+    for (const t of rows.map((r) => r.type).filter((t): t is ResourceType => !t.includes(' '))) {
+      await add(`${t} ${tag}`, t, { _tag: `${TAG}|${tag}` }, { _tag: `${TAG}|${tag}` });
+    }
+  }
   return rows;
 }
 
-const table = (rows: Row[]) => rows.map((r) => `${r.type.padEnd(24)} ${String(r.old).padStart(8)} ${String(r.new).padStart(8)}${r.old === r.new ? '' : '  <>'}`).join('\n');
+const table = (rows: Row[]) => rows.map((r) => `${r.type.padEnd(40)} ${String(r.old).padStart(8)} ${String(r.new).padStart(8)}${r.old === r.new ? '' : '  <>'}`).join('\n');
 
+// An error (e.g. no birthDate) fails verification rather than comparing equal.
 const vaccines = async (c: MedplumClient, pid: string, asOf: string) => {
   try {
     return normalise(await vaccineGaps(c, pid, asOf));
   } catch (e) {
-    return normalise({ error: (e as Error).message });
+    console.log(`vaccine_gaps failed: ${(e as Error).message}`);
+    return undefined;
   }
 };
 
@@ -244,7 +281,7 @@ export async function migrate({ projectName }: { projectName?: string } = {}): P
       fresh = [await getClient(cfg), cfg];
       return fresh;
     };
-    console.log('checking the original sources...');
+    console.log('stop ga-gateway and ga-sync before migrating (docker compose stop ga-gateway ga-sync): their writes would go to the old copy.\nchecking the original sources...');
     const jobs = await plan(old, project, oldCfg.patientId, newClient, tmp);
     const newCfg = await setup(oldCfg.baseUrl, oldCfg.converterUrl, { out: p.next, projectName });
     if (newCfg.projectId === project || newCfg.patientId === oldCfg.patientId) throw new GaError('the new project is the old one: refusing');
@@ -255,22 +292,23 @@ export async function migrate({ projectName }: { projectName?: string } = {}): P
     }
     const [nc] = await newClient();
 
-    // Access logs, patient references rewritten. One transaction: all or none, so a re-run copies them once.
-    if (!(await count(nc, 'AuditEvent', { _tag: GA_LOG }))) {
-      const events = (await all(old, 'AuditEvent', { _tag: GA_LOG, _project: project })) as AuditEvent[];
-      const entry = events.map(({ id: _id, meta, ...e }) => {
+    // Access logs, patient references rewritten; only those not copied yet, so a re-run picks up late events.
+    const have = new Set(((await all(nc, 'AuditEvent', { _tag: GA_LOG })) as AuditEvent[]).map(auditKey));
+    const copies = ((await all(old, 'AuditEvent', { _tag: GA_LOG, _project: project })) as AuditEvent[])
+      .map(({ id: _id, meta, ...e }) => {
         walkReferences(e, (ref) => (ref === `Patient/${oldCfg.patientId}` ? `Patient/${newCfg.patientId}` : undefined));
-        return { request: { method: 'POST' as const, url: 'AuditEvent' }, resource: { ...e, meta: { tag: meta?.tag } } as AuditEvent };
-      });
-      if (entry.length) await nc.executeBatch({ resourceType: 'Bundle', type: 'transaction', entry } as Bundle);
-      console.log(`access log events copied: ${entry.length}`);
-    }
+        return { ...e, meta: { tag: meta?.tag } } as AuditEvent;
+      })
+      .filter((e) => !have.has(auditKey(e)));
+    await inChunks(nc, copies.map((resource) => [{ request: { method: 'POST' as const, url: 'AuditEvent' }, resource }]));
+    console.log(`access log events copied: ${copies.length}`);
 
     console.log('verifying...');
     const rows = await countRows(old, project, oldCfg.patientId, nc, newCfg.patientId);
-    console.log(`${'type'.padEnd(24)} ${'old'.padStart(8)} ${'new'.padStart(8)}\n${table(rows)}`);
+    console.log(`${'type'.padEnd(40)} ${'old'.padStart(8)} ${'new'.padStart(8)}\n${table(rows)}`);
     const asOf = new Date().toLocaleDateString('en-CA');
-    const sameVaccines = (await vaccines(old, oldCfg.patientId, asOf)) === (await vaccines(nc, newCfg.patientId, asOf));
+    const vOld = await vaccines(old, oldCfg.patientId, asOf);
+    const sameVaccines = vOld !== undefined && vOld === (await vaccines(nc, newCfg.patientId, asOf));
     console.log(`vaccine_gaps: ${sameVaccines ? 'same' : 'DIFFERENT'}`);
     if (mismatches(rows, true).length || !sameVaccines) throw new GaError(`verification failed: config not switched (the new copy is in ${basename(p.next)}'s project)`);
 
@@ -281,7 +319,7 @@ export async function migrate({ projectName }: { projectName?: string } = {}): P
     if (JSON.stringify(moved) !== JSON.stringify(shares)) writeAtomic(join(sd, 'shares.json'), JSON.stringify(moved, null, 2), 0o600);
     writeAtomic(p.backup, readFileSync(p.cfg), 0o600);
     renameSync(p.next, p.cfg);
-    console.log(`switched: ${basename(p.cfg)} now uses the GA project; the old one is in ${basename(p.backup)}.\nRestart ga-gateway and ga-sync if they run, check GA, then: ga migrate --delete-old`);
+    console.log(`switched: ${basename(p.cfg)} now uses the GA project; the old one is in ${basename(p.backup)}.\nStart ga-gateway and ga-sync again (docker compose start ga-gateway ga-sync), check GA, then: ga migrate --delete-old`);
     return { rows };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -314,15 +352,25 @@ export async function deleteOld(): Promise<Record<string, number>> {
   add(await all(old, 'AuditEvent', { _tag: GA_LOG, _project: project }));
   const patient = await old.searchOne('Patient', { _id: oldCfg.patientId, _project: project }, { cache: 'no-cache' });
   if ([...doomed.values(), ...(patient ? [patient] : [])].some((r) => r.meta?.project !== project)) throw new GaError('a record outside the old project was selected: refusing');
-  const urls = [...doomed.keys(), ...binaryIds([...doomed.values()]).map((id) => `Binary/${id}`), ...(patient ? [`Patient/${patient.id}`] : [])];
+  // Each record goes with its Binaries in one transaction: an interrupted run strands none (they are found only through records).
+  const seen = new Set<string>(); // already placed, or already gone (an earlier interrupted run)
+  for (const id of binaryIds([...doomed.values()])) {
+    const b = await old.readResource('Binary', id, { cache: 'no-cache' }).catch(() => undefined);
+    if (!b) seen.add(id);
+    else if ((b as Binary).meta?.project !== project) throw new GaError('a file outside the old project was selected: refusing');
+  }
+  const groups: string[][] = [];
+  for (const [url, r] of doomed) {
+    const bins = binaryIds([r]).filter((id) => !seen.has(id)).map((id) => (seen.add(id), `Binary/${id}`));
+    groups.push([...bins, url]);
+  }
+  if (patient) groups.push([`Patient/${patient.id}`]);
 
   const counts: Record<string, number> = {};
-  for (let i = 0; i < urls.length; i += 200) {
-    const chunk = urls.slice(i, i + 200);
-    await old.executeBatch({ resourceType: 'Bundle', type: 'transaction', entry: chunk.map((url) => ({ request: { method: 'DELETE', url } })) } as Bundle);
-    for (const u of chunk) counts[u.split('/')[0]] = (counts[u.split('/')[0]] ?? 0) + 1;
-    console.log(`deleted ${Math.min(i + 200, urls.length)}/${urls.length}`);
-  }
+  for (const u of groups.flat()) counts[u.split('/')[0]] = (counts[u.split('/')[0]] ?? 0) + 1;
+  const total = groups.flat().length;
+  let n = 0;
+  await inChunks(old, groups.map((g) => g.map((url) => ({ request: { method: 'DELETE', url } }))), (k) => console.log(`deleted ${(n += k)}/${total}`));
   await old.deleteResource('ClientApplication', oldCfg.clientId);
   counts.ClientApplication = 1;
   console.log(Object.entries(counts).map(([k, v]) => `${k} ${v}`).join('\n'));

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Resource } from '@medplum/fhirtypes';
-import { binaryIds, mismatches, normalise, rewriteShares, sourceDoc, stripExtracted } from '../src/migrate.ts';
+import type { AuditEvent, Resource } from '@medplum/fhirtypes';
+import { auditKey, binaryIds, mismatches, normalise, rewriteShares, sourceDoc, stripExtracted } from '../src/migrate.ts';
 import type { Share } from '../src/share/store.ts';
 
 const obs = {
@@ -72,5 +72,15 @@ describe('binaryIds', () => {
       { resourceType: 'DocumentReference', content: [{ attachment: { url: `Binary/${id1}` } }] },
     ] as Resource[];
     expect(binaryIds(docs)).toEqual([id1, id2]);
+  });
+});
+
+describe('auditKey', () => {
+  it('matches a copied access log event, not a different one', () => {
+    const e = { resourceType: 'AuditEvent', id: 'a', recorded: '2026-01-02T03:04:05.000Z', meta: { tag: [{ system: 'urn:ga-server:share', code: 's1' }] }, entity: [{ what: { reference: 'Patient/new' } }] } as AuditEvent;
+    const copy = { ...e, id: 'b', recorded: '2026-01-02T03:04:05Z', meta: { ...e.meta, lastUpdated: '2026-02-01T00:00:00Z' } } as AuditEvent;
+    expect(auditKey(copy)).toBe(auditKey(e));
+    expect(auditKey({ ...e, recorded: '2026-01-02T03:04:06Z' })).not.toBe(auditKey(e));
+    expect(auditKey({ ...e, entity: [{ what: { display: 'fhir_search' } }] })).not.toBe(auditKey(e));
   });
 });

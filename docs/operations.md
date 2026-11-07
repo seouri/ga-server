@@ -65,8 +65,8 @@ GA keeps your record in its own Medplum project, `GA`. Its login (`ga-server-cli
 
 Installs set up before this change kept everything in Medplum's Super Admin project, where every login is a super admin; `ga setup` then stops with "run ga migrate". To move:
 
-1. Back up first (above). `ga migrate` re-imports from your original files (C-CDA, EHI and Apple Health folders, which must still be where you imported them from; PDF imports come from the copies GA stored) into the new project, copies the share and chat-app access logs, compares counts per record type and the vaccine result, and only then switches `.ga/config.json` (the old one is kept as `.ga/config.super-admin.json`). Share links keep working. On a mismatch it stops without switching; re-running is safe.
-2. Restart `ga-gateway` and `ga-sync` if they run (`docker compose restart ga-gateway ga-sync`), and check GA.
+1. Back up first (above), and stop the services that write to GA: `docker compose stop ga-gateway ga-sync`. Then `ga migrate` re-imports from your original files (C-CDA, EHI and Apple Health folders, which must still be where you imported them from; PDF imports come from the copies GA stored) into the new project, copies the share and chat-app access logs, compares counts per record type and the vaccine result, and only then switches `.ga/config.json` (the old one is kept as `.ga/config.super-admin.json`). Share links keep working. On a mismatch it stops without switching; fix what it names and re-run (re-running is safe). Only `ga migrate` switches.
+2. Start them again (`docker compose start ga-gateway ga-sync`) and check GA.
 3. `ga migrate --delete-old` deletes the old copy and the old login.
 
 Hospital portal records are not migrated: `ga migrate` stops if there are any.
