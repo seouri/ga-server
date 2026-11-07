@@ -371,4 +371,41 @@ describe('purpose-built read tools', () => {
     const bad = await search({ page: `${nextPage.slice(0, -4)}!!!!` });
     expect(bad.isError).toBe(true);
   });
+  // Runs last: reuses the meds, problem, allergy, weights, A1c and undated EHI Encounter written above.
+  test('health_summary: one snapshot of every section', async () => {
+    const subject = { reference: `Patient/${p}` };
+    const vs = [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }];
+    const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
+    const mmHg = (value: number) => ({ value, unit: 'mmHg' });
+    const pat = await client.readResource('Patient', p);
+    await client.updateResource({ ...pat, birthDate: '1980-01-15', gender: 'female' });
+    const entry = [
+      { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB', display: 'ambulatory' }, subject, period: { start: '2025-06-01T09:00:00Z' }, type: [{ text: 'Office visit' }] },
+      { resourceType: 'Observation', status: 'final', subject, code: { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: 'LDL' }, effectiveDateTime: '2025-05-01', valueQuantity: { value: 111, unit: 'mg/dL' }, meta: tag('extracted-by-llm', 'src-pdf') },
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Systolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(120), meta: tag('src-ehi') },
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Diastolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(80) },
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Blood pressure panel' }, effectiveDateTime: '2025-04-01', meta: tag('src-apple-health'),
+        component: [{ code: { text: 'Systolic' }, valueQuantity: mmHg(118) }, { code: { text: 'Diastolic' }, valueQuantity: mmHg(76) }] },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const s = await tool('health_summary');
+    expect(s.portalWarning).toMatch(/status error/);
+    expect(s.patient).toEqual({ age: expect.any(Number), sex: 'female' });
+    expect(s.patient.age).toBeGreaterThanOrEqual(46);
+    expect(s.problems.map((r: { name: string }) => r.name)).toEqual(['Synthetic problem']);
+    // Drug A's Medication was deleted above, so it has no name here.
+    expect(s.medications.map((r: { name?: string; currency: string }) => `${r.name}:${r.currency}`).sort()).toEqual(['Synthetic drug B:unconfirmed', 'Synthetic drug D:unconfirmed', 'undefined:current']);
+    expect(s.allergies).toMatchObject([{ name: 'Synthetic allergen' }]);
+    expect(s.keyLabs).toMatchObject([
+      { test: 'A1c', name: 'Hemoglobin A1c', latest: { date: '2025-03-01', value: 70 } },
+      { test: 'LDL', latest: { date: '2025-05-01', value: 111 }, flags: ['read from a document by AI'] },
+    ]);
+    const v = s.vitals.map((r: { name: string; setting: string; value: string }) => [r.setting, r.name, r.value]);
+    expect(v).toEqual(expect.arrayContaining([['clinic', 'Body weight', '70 kg'], ['home', 'Body weight', '70 kg'], ['home', 'Blood pressure panel', 'Systolic: 118 mmHg; Diastolic: 76 mmHg']]));
+    expect(v.filter((r: string[]) => r[0] === 'clinic' && /blood pressure/.test(r[1])).map((r: string[]) => r[1]).sort()).toEqual(['Diastolic blood pressure', 'Systolic blood pressure']);
+    expect(s.vaccines).toMatchObject({ edition: expect.any(String), dueOrOverdue: expect.any(Array), notEvaluated: expect.any(Number) });
+    expect(s.lastVisit).toMatchObject({ date: '2025-06-01', type: 'Office visit', class: 'ambulatory' });
+    expect(s.imports.sources.map((x: { source: string }) => x.source)).toEqual(expect.arrayContaining(['Epic EHI export', 'Apple Health', 'PDF or photo', expect.stringMatching(/^hospital portal/)]));
+    expect(s.imports.newest).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });

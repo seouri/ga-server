@@ -14,6 +14,7 @@ import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
+import { healthSummary } from './health.ts';
 import { currentList, type Kind } from './lists.ts';
 import { vitals } from './vitals.ts';
 import { notesSearch } from './notes.ts';
@@ -177,7 +178,7 @@ const STDIO_INSTRUCTIONS =
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
         'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
-        'current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results, vitals vital signs, notes_search the text of notes and messages.';
+        'health_summary is the one-call snapshot to start with; current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results (summary: true for trends), vitals vital signs, notes_search the text of notes and messages.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
@@ -252,6 +253,28 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       if (no) return no;
       try {
         return warned(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })) as object);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+  server.registerTool(
+    'health_summary',
+    {
+      description:
+        "A one-call snapshot of the user's health record in GA: call this first for any personal health question, then drill down with the other tools. " +
+        'Returns age and sex; problems, medications and allergies (currency "current" or "unconfirmed" by the hospital currency rule); key labs ' +
+        '(A1c, glucose, lipids, creatinine, eGFR, ALT, AST, hemoglobin, platelets, potassium, sodium, TSH, whichever exist: the lab_results summary entry, ' +
+        'latest and previous value); latest weight, BMI, blood pressure and resting heart rate per setting (clinic/home); vaccines due or overdue ' +
+        '(from vaccine_gaps) and the count not evaluated; the last visit; imported sources with their last import date. Each item has its date and source. ' +
+        'Flag "read from a document by AI": the value was read from a document by AI; tell the user to check it. A section that failed holds {error}.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      try {
+        const eps = patientEndpoints(client, patientId);
+        return warned(await healthSummary(client, patientId, eps), eps);
       } catch (e) {
         return fail(e);
       }
