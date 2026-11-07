@@ -2,15 +2,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Extension, Observation, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Endpoint, Extension, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
 import { arrivedAt, SRC_DATE, TAG } from './identity.ts';
-import { groupLabs, highLow, labRow } from './labs.ts';
-import { concept } from './lists.ts';
+import { type LabelSections, drugLabel } from './drug-labels.ts';
+import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
+import { concept, listRows, loadLists } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
-import type { vaccineGaps } from './vaccines.ts';
+import { vaccineGaps } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -174,4 +175,43 @@ export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>,
     items.push({ kind: 'health maintenance', title: topic, detail: { status: o.valueString, nextDue: due, asOfExport }, date: asOfExport?.slice(0, 10), source: sourceOf(o), id: o.id });
   }
   return items;
+}
+
+const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'vaccine follow-up', 'health maintenance'];
+const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
+
+export async function whatsNew(client: MedplumClient, patientId: string, eps: Promise<Endpoint[]>, opts: { since?: string; markSeen?: boolean; asOf?: string; fetch?: typeof fetch; dir?: string } = {}) {
+  const now = new Date();
+  const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
+  const stored = opts.since ? undefined : readLastSeen(opts.dir);
+  const since = opts.since ?? stored ?? daysBefore(asOf, 90);
+  const subject = `Patient/${patientId}`;
+  const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
+  const [arrived, lists, labs, hm, status, patient] = await Promise.all([
+    arrivedSince(client, patientId, since),
+    eps.then((e) => loadLists(client, patientId, e)),
+    q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]]),
+    q([['code:text', 'Health maintenance']]),
+    statusItems(client, patientId, since),
+    client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>,
+  ]);
+  const vaccines = await vaccineGaps(client, patientId, asOf);
+  const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
+  const newMeds = medicationItems(arrived.filter((r) => kindOf(r) === 'medications'), lists.all, since);
+  const items = [
+    ...labItems(arrived.filter(isObs).filter((o) => kindOf(o) === 'lab results'), labs, asOf),
+    ...newMeds, ...status, ...followUpItems(vaccines, hm, asOf, patient.birthDate),
+  ].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
+  const medicationCheck = await Promise.all(newMeds.map(async (m) => ({
+    drug: m.title,
+    label: (m.detail.rxnorm ? await drugLabel(m.detail.rxnorm as string, { fetch: opts.fetch, dir: opts.dir }) : { status: 'no code' }) as LabelSections,
+  })));
+  const names = (kind: 'medications' | 'problems') => listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name);
+  const result = {
+    since, ...(!opts.since && !stored && { firstRun: true as const }), tally: tally(arrived, asOf), items: fit(items, 200).rows, medicationCheck,
+    context: { currentMedications: names('medications'), activeProblems: names('problems'), recentOutOfRange: labItems(labs, labs, asOf) },
+    note: NOTE,
+  };
+  if (opts.markSeen && !opts.since) writeLastSeen(now.toISOString(), opts.dir);
+  return result;
 }

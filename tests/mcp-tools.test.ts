@@ -22,16 +22,19 @@ test('read tools put portalWarning first; no Endpoints adds nothing; a failed ch
     const client = {
       search: async () => ({ resourceType: 'Bundle', entry: [] }),
       searchResources: async () => (reads++, eps),
+      searchResourcePages: async function* () { yield []; }, searchOne: async () => undefined,
+      readResource: async () => ({ resourceType: 'Patient', birthDate: '1980-01-01' }),
     } as unknown as MedplumClient;
     const [a, b] = InMemoryTransport.createLinkedPair();
     const c = new Client({ name: 't', version: '0' });
     await Promise.all([buildMcpServer({ client, cfg: {} as never, patientId: 'p' }).connect(a), c.connect(b)]);
-    return async () => ((await c.callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation' } })) as { content: { text: string }[] }).content[0].text;
+    return async (name = 'fhir_search', args: Record<string, unknown> = { resourceType: 'Observation' }) => ((await c.callTool({ name, arguments: args })) as { content: { text: string }[] }).content[0].text;
   };
   const stale = { resourceType: 'Endpoint', status: 'off', identifier: [{ system: 'urn:ga-server:id:smart-source', value: 'h' }], extension: [{ url: 'urn:ga-server:ext:smart-patient', valueReference: { reference: 'Patient/p' } }] };
   const search = await connect([stale]);
   expect((await search()).startsWith('{"portalWarning":"Hospital records may be out of date.')).toBe(true);
   expect(reads).toBe(1);
+  expect((await search('whats_new', { since: '2026-11-01' })).startsWith('{"portalWarning":')).toBe(true);
   expect(JSON.parse(await (await connect([]))())).toEqual({ resourceType: 'Bundle', entry: [] });
   const broken = { search: async () => ({ resourceType: 'Bundle' }), readResource: async () => ({ resourceType: 'Observation', id: 'o' }), searchResources: async () => { throw new Error('down'); } } as unknown as MedplumClient;
   const [a, b] = InMemoryTransport.createLinkedPair();
