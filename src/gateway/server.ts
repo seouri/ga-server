@@ -18,7 +18,7 @@ import { shareDeps } from '../share/cli.ts';
 import { appName, createProvider, disconnectClient } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
-import { remoteTools } from './remote-log.ts';
+import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
 import { sweepExpired } from './adapter.ts';
 import { MAX_UPLOAD, UploadTooLarge, acceptUpload, cleanUploads, uploadLinkValid } from './uploads.ts';
@@ -30,7 +30,7 @@ export type GatewayDeps = {
   tools: (remote: Remote) => McpServer;
   share: ShareDeps;
   completeLogin: (search: string) => Promise<unknown>;
-  calendar?: (id: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
+  calendar?: (id: string, userAgent?: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
   verifyPasskey?: (response: AuthenticationResponseJSON, expectedChallenge: string) => Promise<boolean>;
 };
 
@@ -254,7 +254,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (path === '/mcp') return mcp(req, res, ip);
     const c = /^\/cal\/([A-Za-z0-9_-]{43})\.ics$/.exec(path);
     const calId = c && (req.method === 'GET' || req.method === 'HEAD') && deps.calendar ? calendarFor(deps.dir, c[1]) : undefined;
-    if (c) return calId ? send(res, 200, req.method === 'HEAD' ? '' : await deps.calendar!(calId), 'text/calendar; charset=utf-8') : send(res, 404, renderInactive());
+    if (c) return calId ? send(res, 200, req.method === 'HEAD' ? '' : await deps.calendar!(calId, req.headers['user-agent']), 'text/calendar; charset=utf-8') : send(res, 404, renderInactive());
     const i = /^\/interaction\/([A-Za-z0-9_-]+)(\/login|\/consent)?$/.exec(path);
     if (i) return interaction(req, res, ip, i[1], i[2] ?? '');
     const e = /^\/enroll\/([A-Za-z0-9_-]+)$/.exec(path);
@@ -293,7 +293,12 @@ export async function serveGateway(): Promise<void> {
     tools: remoteTools(client, cfg, cfg.patientId),
     share: shareDeps(client),
     completeLogin: (search) => completeLogin(client, smartDir(), cfg.patientId, search),
-    calendar: async (id) => { const m = await healthMaintenance(client, cfg.patientId); return toIcs(m.items, m.asOf, id); },
+    calendar: async (id, ua) => {
+      // Logged like a chat-app tool call: who fetched (the calendar app's user agent) and when; a failed log never fails the feed.
+      logRemote(client, `calendar feed: ${(ua ?? 'unknown app').slice(0, 80)}`, 'Calendar feed').catch(() => {});
+      const m = await healthMaintenance(client, cfg.patientId);
+      return toIcs(m.items, m.asOf, id);
+    },
   });
   const sweep = () => {
     try {
