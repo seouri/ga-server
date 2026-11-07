@@ -5,16 +5,16 @@ GA can text you by iMessage: new out-of-range results as they arrive, and what i
 ## What GA sends and when
 
 - **New out-of-range results**, as they arrive. Only results collected within the last 30 days, and only ones that arrived after you set this up.
-- **Due items**, once a day at the digest time (default 08:00): screenings, vaccines and follow-ups that are due or overdue.
-- Nothing during sleep hours (default 22:00-07:00); it waits until they end.
+- **Due items**, once a day at the digest time (default 09:00): screenings, vaccines and follow-ups that are overdue, due soon, or due and of high or medium importance.
+- Nothing during sleep hours (default 22:00-07:00); it waits until they end. Replies to your own texts still go out. The digest time cannot fall inside the sleep hours.
 - Nothing on a day with nothing to say.
 - Never the same item twice. A due item you did not act on comes back after 14, 60 or 365 days, depending on its importance.
 
-The first line of each text is generic ("GA: 2 new results"), so the lock screen shows no health detail. The details follow below it.
+The first line of each text is generic ("GA: 2 new results"), but iOS previews show more lines. To keep details off the lock screen, set Settings > Notifications > Messages > Show Previews > When Unlocked.
 
 ## Replying
 
-- `done 2024` (or a month or day): you already had it. GA records it with the year and says what it recorded. A year or more ago is needed. Vaccines can't be marked done by text; import the record instead.
+- `done 2024` (or a month or day): you already had it. GA records it with the year and says what it recorded. Give at least the year it was done (YYYY, YYYY-MM or YYYY-MM-DD, in the past). Vaccines can't be marked done by text; import the record instead.
 - `not now`, or `remind me after March`: GA holds the item back.
 - Any question ("what's due?", "what was my last LDL?"): GA answers from your record.
 
@@ -60,3 +60,5 @@ Your text, and the records needed to answer it, go to the AI provider you chose.
 - Delivery is at least once: if the bridge dies mid-send, you may get one duplicate.
 - The conversation memory is kept for 30 minutes and is lost when the gateway restarts.
 - Vaccines can't be marked done by text.
+- `TZ` must be set in `.env` (`setup.sh` writes it); otherwise the gateway runs on UTC and sleep and digest times shift.
+- `ga notify test` writes the outbox from the host; a rare overlap with an ack can resend one message.

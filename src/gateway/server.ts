@@ -408,14 +408,17 @@ export async function serveGateway(): Promise<void> {
     let running = false; // a tick never starts while another runs
     const run = async () => {
       if (running) return;
-      running = true;
+      running = true; // released only when tick() settles (below); tick is async, so it cannot throw synchronously
       let timer: NodeJS.Timeout | undefined;
       try {
         const hung = new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error('tick timed out after 5 minutes')), TICK_MS); });
-        await Promise.race([hung, tick({ client, patientId: cfg.patientId, dir: nd, now: new Date(), eps: () => patientEndpoints(client, cfg.patientId) })]);
+        const t = tick({ client, patientId: cfg.patientId, dir: nd, now: new Date(), eps: () => patientEndpoints(client, cfg.patientId) });
+        const release = () => { running = false; };
+        t.then(release, release); // only the tick settling frees the guard: a timeout must not let a second tick overlap a hung one
+        await Promise.race([hung, t]);
       } catch (e) {
         writeState(nd, { ...readState(nd), lastError: String((e as Error).message ?? e).slice(0, 200) });
-      } finally { clearTimeout(timer); running = false; }
+      } finally { clearTimeout(timer); }
     };
     setInterval(() => void run().catch(() => {}), 60_000).unref();
   }

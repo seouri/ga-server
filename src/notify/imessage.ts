@@ -32,7 +32,7 @@ export function decodeBody(b: Buffer): string | undefined {
 
 type Row = { rowId: number; from: string; text: string; at: string };
 
-// Owner's replies: is_from_me 0, or is_from_me 1 unless the text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
+// Owner's replies: any row unless its text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
 // (owner's Apple ID on this Mac), pending the spike. Other handles are skipped. `scanned` is the highest ROWID looked at, skipped rows included.
 export function readSince(dbPath: string, afterRowId: number, owner: string, recent: string[] = []): { rows: Row[]; scanned: number } {
   const db = new DatabaseSync(dbPath, { readOnly: true });
@@ -46,7 +46,7 @@ export function readSince(dbPath: string, afterRowId: number, owner: string, rec
       scanned = Math.max(scanned, Number(x.r));
       if (normalizeHandle(x.hid) !== me) continue;
       const text = x.t ?? (x.b ? decodeBody(Buffer.from(x.b)) : undefined);
-      if (!text || (x.me === 1n && recent.includes(text))) continue;
+      if (!text || recent.includes(text)) continue; // GA's own sends can come back either way
       const d = Number(x.d), ms = Math.abs(d) > 1e12 ? d / 1e6 : d * 1e3; // ns on recent macOS, seconds before
       out.push({ rowId: Number(x.r), from: me, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
     }
@@ -54,7 +54,8 @@ export function readSince(dbPath: string, afterRowId: number, owner: string, rec
   } finally { db.close(); }
 }
 
-type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[] };
+type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }> };
+const BACKOFF = [1, 5, 30].map((m) => m * 60_000); // a failed id is retried after 1, 5, then 30 minutes
 export type BridgeDeps = { url: string; token: string; dbPath: string; owner: string; every: number; dir: string; send?: typeof sendText; fetch?: typeof fetch; now?: () => number };
 
 const maxRowId = (dbPath: string): number => {
@@ -85,13 +86,20 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   if (scanned > (st.lastRowId ?? 0)) st.lastRowId = scanned;
   st.sent = []; st.failed = [];
   writeJson(d.dir, 'bridge.json', st);
+  const retry = st.retry ?? {};
+  let tried = 0;
   for (const o of outgoing) {
-    try { await send(d.owner, o.text); st.sent.push(o.id); st.recent.push({ text: o.text, at: (d.now ?? Date.now)() }); } catch (e) {
-      const m = (e as Error).message; st.failed.push({ id: o.id, error: /^(timeout|osascript exit \S+)$/.test(m) ? m : 'send failed' });
+    if (retry[o.id] && now < retry[o.id].next) continue; // waiting out its backoff
+    tried++;
+    try { await send(d.owner, o.text); st.sent.push(o.id); delete retry[o.id]; st.recent.push({ text: o.text, at: (d.now ?? Date.now)() }); } catch (e) {
+      const m = (e as Error).message, n = (retry[o.id]?.n ?? 0) + 1;
+      retry[o.id] = { n, next: now + BACKOFF[Math.min(n, BACKOFF.length) - 1] };
+      st.failed.push({ id: o.id, error: /^(timeout|osascript exit \S+)$/.test(m) ? m : 'send failed' });
     }
+    st.retry = retry;
     writeJson(d.dir, 'bridge.json', st);
   }
-  if (incoming.length || outgoing.length) log(`in ${incoming.length}, out ${outgoing.length}, failed ${st.failed.length}`);
+  if (incoming.length || tried) log(`in ${incoming.length}, out ${tried}, failed ${st.failed.length}`);
   return true;
 }
 

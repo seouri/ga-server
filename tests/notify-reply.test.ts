@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import { findConfirmPage } from '../src/confirm.ts';
 import { pending } from '../src/notify/outbox.ts';
+import { readState } from '../src/notify/settings.ts';
 import { createReplier } from '../src/notify/reply.ts';
 import { writeJson } from '../src/gateway/store.ts';
 
@@ -120,5 +121,12 @@ describe('answering texts', () => {
     } finally {
       if (old === undefined) delete process.env.GA_CONFIG; else process.env.GA_CONFIG = old;
     }
+  });
+
+  it('at most 10 replies per 10 minutes; past that nothing is queued and lastError is set once', async () => {
+    const { text, dir } = setup(Array.from({ length: 12 }, () => say('ok')));
+    for (let i = 0; i < 12; i++) await text('hi');
+    expect(pending(dir)).toHaveLength(10);
+    expect(readState(dir).lastError).toBe('reply limit reached');
   });
 });

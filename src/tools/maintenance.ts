@@ -45,7 +45,7 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
         'Record that the person does not want a health_maintenance item raised now. topic: the item\'s topic exactly as health_maintenance lists it. ' +
         'until (YYYY-MM-DD): hold it until that date; dismiss: true: never mention a low-importance item again (refused for medium or high importance: use not now or a date); neither: "not now", ' +
         `it comes back after ${DAYS.high} days (high importance), ${DAYS.medium} (medium) or ${DAYS.low} (low). Use it when the person says so; no confirmation step. reason: their words, optional. ` +
-        'done: the person says they already had it (date at least a year; method one of the screening\'s options); not with until or dismiss; not for vaccines.',
+        'done: the person says they already had it (give at least the year it was done (YYYY, YYYY-MM or YYYY-MM-DD, in the past); method one of the screening\'s options); not with until or dismiss; not for vaccines.',
       inputSchema: { topic: z.string().min(1), until: DAY.optional(), dismiss: z.boolean().optional(),
         done: z.object({ date: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/), method: z.string().max(100).optional(), where: z.string().max(100).optional() }).optional(), reason: z.string().max(300).optional() },
       annotations: { destructiveHint: false },

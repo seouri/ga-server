@@ -33,6 +33,18 @@ describe('ga notify', () => {
     expect(readFileSync(join(e.dir, 'token'), 'utf8')).toBe(t);
   });
 
+  it('digest defaults to 09:00', async () => {
+    const e = setupEnv();
+    await notifyCommand(['setup', '--to', '+15551230000'], e.deps);
+    expect(readSettings(e.dir)?.digestAt).toBe('09:00');
+  });
+
+  it('rejects a phone with under 7 digits and a digest inside the sleep window', async () => {
+    const e = setupEnv();
+    await expect(notifyCommand(['setup', '--to', '+-------'], e.deps)).rejects.toThrow(/usage/);
+    await expect(notifyCommand(['setup', '--to', '+15551230000', '--digest', '23:00'], e.deps)).rejects.toThrow(/sleep/);
+  });
+
   it('rejects bad args', async () => {
     const e = setupEnv();
     await expect(notifyCommand(['setup'], e.deps)).rejects.toThrow(/usage/);

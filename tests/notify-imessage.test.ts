@@ -105,4 +105,28 @@ describe('round', () => {
     expect(b.failed).toEqual([{ id: 'b', error: 'send failed' }]);
     expect(e.bodies[1].incoming).toHaveLength(1);
   });
+
+  it('an is_from_me=0 row equal to a recent GA send is skipped', async () => {
+    const e = setup();
+    await round(e.deps(T0), () => {});
+    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ text: 'GA: digest', at: T0 }] }));
+    e.add(1, 'GA: digest', 0);
+    await round(e.deps(T0 + 1000), () => {});
+    expect(e.bodies[1].incoming).toEqual([]);
+  });
+
+  it('a failed send retries after 1, 5, then 30 minutes and logs once per attempt', async () => {
+    const e = setup();
+    const logs: string[] = [];
+    await round(e.deps(T0), () => {});
+    let sends = 0;
+    const bad = async () => { sends++; throw new Error('osascript exit 1'); };
+    e.setOut([{ id: 'a', text: 'A' }]);
+    await round(e.deps(T0 + 1000, bad), (s) => logs.push(s));
+    const again = () => e.setOut([{ id: 'a', text: 'A' }]); // the gateway keeps offering it
+    for (const [dt, want] of [[30_000, 1], [61_000, 2], [3 * 60_000, 2], [6 * 60_000 + 2000, 3], [20 * 60_000, 3], [37 * 60_000, 4]] as const) {
+      again(); await round(e.deps(T0 + dt, bad), (s) => logs.push(s)); expect(sends).toBe(want);
+    }
+    expect(logs.filter((l) => /failed 1/.test(l))).toHaveLength(4);
+  });
 });

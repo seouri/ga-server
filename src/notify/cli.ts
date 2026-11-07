@@ -10,6 +10,7 @@ import { writeAtomic } from '../smart/store.ts';
 import { writeJson } from '../gateway/store.ts';
 import { normalizeHandle } from './imessage.ts';
 import { enqueue, pending } from './outbox.ts';
+import { inSleep } from './select.ts';
 import { notifyDir, readSettings, readState } from './settings.ts';
 
 const LABEL = 'org.ga.notify-bridge';
@@ -31,9 +32,11 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
   if (cmd === 'setup') {
     const raw = rest.indexOf('--to') < 0 ? undefined : rest[rest.indexOf('--to') + 1];
     const opt = (k: string) => { const i = rest.indexOf(k); return i < 0 ? undefined : rest[i + 1]; };
-    const to = raw && /^(\+[\d\s\-().]{7,20}|[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+)$/.test(raw) ? normalizeHandle(raw) : undefined, digest = opt('--digest') ?? '08:00', sleep = (opt('--sleep') ?? '22:00-07:00').split('-');
+    const to = raw && /^(\+[\d\s\-().]{7,20}|[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+)$/.test(raw) ? normalizeHandle(raw) : undefined, digest = opt('--digest') ?? '09:00', sleep = (opt('--sleep') ?? '22:00-07:00').split('-');
     const known = rest.every((a, i) => a.startsWith('--') ? ['--to', '--digest', '--sleep'].includes(a) : i > 0 && rest[i - 1].startsWith('--'));
+    if (to && !to.includes('@') && to.length < 8) throw new GaError(USAGE); // +, then at least 7 digits
     if (!to || !known || !HHMM.test(digest) || sleep.length !== 2 || !sleep.every((s) => HHMM.test(s))) throw new GaError(USAGE);
+    if (inSleep(new Date(2000, 0, 1, ...(digest.split(':').map(Number) as [number, number])), sleep as [string, string])) throw new GaError('the digest time is inside the sleep window; choose another time or sleep hours');
     writeJson(dir, 'settings.json', { to, digestAt: digest, sleep, setupAt: (deps.now?.() ?? new Date()).toISOString() });
     if (!existsSync(join(dir, 'token'))) writeAtomic(join(dir, 'token'), randomBytes(32).toString('hex'), 0o600);
     const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
