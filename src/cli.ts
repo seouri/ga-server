@@ -72,6 +72,8 @@ try {
       if (!pub) throw new GaError('the calendar link needs remote access: set GA_PUBLIC_URL in .env (see docs/chat-apps.md)');
       console.log(`${pub}/cal/${newCalendarToken(gatewayDir())}.ics\nSubscribe to it in your calendar app. Anyone with the link sees your health maintenance topics and due dates; \`ga calendar\` makes a new link (the old one stops), \`ga calendar revoke\` turns it off.`);
     }
+  } else if (process.argv[2] === 'notify') {
+    await (await import('./notify/cli.ts')).notifyCommand(process.argv.slice(3));
   } else if (process.argv[2] === 'gateway' && process.argv[3] === 'serve' && process.argv.length === 4) {
     await (await import('./gateway/server.ts')).serveGateway(); // loaded on demand: oidc-provider is heavy
   } else if (process.argv[2] === 'passkey' && process.argv[3] === 'link' && process.argv.length === 4) {
@@ -96,7 +98,7 @@ try {
     const [arg, , since] = process.argv.slice(3);
     console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {
