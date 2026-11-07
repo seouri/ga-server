@@ -7,6 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { GaError, type GaConfig } from '../config.ts';
 import { logRemote, remoteTools } from '../gateway/remote-log.ts';
 import { chatLoop, type Llm } from '../llm-chat.ts';
+import { normalizeHandle } from './imessage.ts';
 import { enqueue } from './outbox.ts';
 import { readSettings, readState, writeState } from './settings.ts';
 
@@ -21,7 +22,6 @@ const MAX_REPLY = 1500;
 const NO_MODEL = "GA can't answer texts until an AI provider is set (GA_LLM_MODEL).";
 const FAILED = "GA couldn't answer just now. Try again later.";
 
-const handle = (h: string): string => h.toLowerCase().replace(/[\s\-()]/g, '').replace(/^\+/, '');
 
 type Turn = { role: 'user' | 'assistant'; content: string; at: number };
 type Deps = { client: MedplumClient; cfg: GaConfig; patientId: string; dir: string; publicUrl?: string; llm?: Llm; model?: string; now?: () => Date };
@@ -78,7 +78,7 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
     remember: (text) => add('assistant', text),
     async onIncoming(m) {
       const s = readSettings(d.dir);
-      if (!s || ![s.to, ...(s.also ?? [])].some((h) => handle(h) === handle(m.from))) return void (await logRemote(d.client, 'ignored sender', 'iMessage').catch(() => {}));
+      if (!s || ![s.to, ...(s.also ?? [])].some((h) => normalizeHandle(h) === normalizeHandle(m.from))) return void (await logRemote(d.client, 'ignored sender', 'iMessage').catch(() => {}));
       await logRemote(d.client, 'received', 'iMessage').catch(() => {});
       let out: string;
       const history = thread.filter((t) => t.at > now() - THREAD_MS);

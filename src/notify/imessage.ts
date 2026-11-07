@@ -37,15 +37,15 @@ type Row = { rowId: number; from: string; text: string; at: string };
 export function readSince(dbPath: string, afterRowId: number, owner: string | string[], recent: string[] = []): { rows: Row[]; scanned: number } {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const st = db.prepare('select h.id hid, m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? order by m.ROWID');
+    const st = db.prepare('select h.id hid, m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d, coalesce(m.associated_message_type, 0) a from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? order by m.ROWID');
     st.setReadBigInts(true); // ns dates exceed 2^53
-    const rows = st.all(afterRowId) as { hid: string; r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint }[];
+    const rows = st.all(afterRowId) as { hid: string; r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint; a: bigint }[];
     const out: Row[] = [], mine = [owner].flat().map(normalizeHandle);
     let scanned = afterRowId;
     for (const x of rows) {
       scanned = Math.max(scanned, Number(x.r));
       const from = normalizeHandle(x.hid);
-      if (!mine.includes(from)) continue;
+      if (!mine.includes(from) || x.a !== 0n) continue; // a tapback (type >= 2000) is not a text
       const text = x.t ?? (x.b ? decodeBody(Buffer.from(x.b)) : undefined);
       if (!text || recent.includes(text)) continue; // GA's own sends can come back either way
       const d = Number(x.d), ms = Math.abs(d) > 1e12 ? d / 1e6 : d * 1e3; // ns on recent macOS, seconds before

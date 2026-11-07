@@ -37,9 +37,9 @@ describe('readSince', () => {
   it('returns the owner reply, not GA echo, not other handles; decodes attributedBody', () => {
     const p = join(mkdtempSync(join(tmpdir(), 'chat-')), 'chat.db');
     const db = new DatabaseSync(p);
-    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer)');
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer, associated_message_type integer default 0)');
     db.prepare('insert into handle values (1, ?), (2, ?)').run('+15551230000', '+15559999999');
-    const ins = db.prepare('insert into message values (?, ?, ?, ?, ?, ?)');
+    const ins = db.prepare('insert into message (ROWID, text, attributedBody, is_from_me, handle_id, date) values (?, ?, ?, ?, ?, ?)');
     const d = 700_000_000_000_000_000n; // ns since 2001
     ins.run(1, 'old', null, 0, 1, d);
     ins.run(2, 'GA: digest', null, 1, 1, d); // GA's own send, echoed
@@ -55,13 +55,25 @@ describe('readSince', () => {
   });
 });
 
+describe('readSince reactions', () => {
+  it('skips a tapback from the owner but still advances past it', () => {
+    const p = join(mkdtempSync(join(tmpdir(), 'chat-')), 'chat.db');
+    const db = new DatabaseSync(p);
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer, associated_message_type integer default 0)');
+    db.prepare('insert into handle values (1, ?)').run('+15551230000');
+    db.prepare('insert into message values (1, ?, null, 0, 1, 0, 2000)').run('Loved "GA: digest"');
+    db.close();
+    expect(readSince(p, 0, '+15551230000')).toEqual({ rows: [], scanned: 1 });
+  });
+});
+
 describe('readSince with also handles', () => {
   it('takes is_from_me rows on an also handle, skips GA phone-handle send and other handles', () => {
     const p = join(mkdtempSync(join(tmpdir(), 'chat-')), 'chat.db');
     const db = new DatabaseSync(p);
-    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer)');
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer, associated_message_type integer default 0)');
     db.prepare('insert into handle values (1, ?), (2, ?), (3, ?)').run('+15551230000', 'Owner@Example.com', 'other@example.com');
-    const ins = db.prepare('insert into message values (?, ?, ?, ?, ?, ?)');
+    const ins = db.prepare('insert into message (ROWID, text, attributedBody, is_from_me, handle_id, date) values (?, ?, ?, ?, ?, ?)');
     const d = 700_000_000_000_000_000n;
     ins.run(1, null, blob('GA: digest'), 1, 1, d); // GA's own send to the phone handle
     ins.run(2, 'iphone reply', null, 1, 2, d); // owner's iPhone reply, email handle
@@ -87,9 +99,9 @@ describe('round', () => {
     const dir = mkdtempSync(join(tmpdir(), 'bridge-'));
     const p = join(dir, 'chat.db');
     const db = new DatabaseSync(p);
-    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer)');
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer, associated_message_type integer default 0)');
     db.prepare('insert into handle values (1, ?)').run(OWNER);
-    const add = (id: number, text: string, me: number) => db.prepare('insert into message values (?, ?, null, ?, 1, 0)').run(id, text, me);
+    const add = (id: number, text: string, me: number) => db.prepare('insert into message (ROWID, text, attributedBody, is_from_me, handle_id, date) values (?, ?, null, ?, 1, 0)').run(id, text, me);
     const bodies: { incoming: unknown[]; sent: string[]; failed: unknown[] }[] = [];
     let outgoing: { id: string; text: string }[] = [];
     const fetch = (async (_u: string, init: { body: string }) => { bodies.push(JSON.parse(init.body)); const o = outgoing; outgoing = []; return { ok: true, json: async () => ({ outgoing: o }) }; }) as unknown as typeof globalThis.fetch;

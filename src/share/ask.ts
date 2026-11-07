@@ -6,7 +6,6 @@ import { basename } from 'node:path';
 import { cardiovascularRisk10yr } from '../cardiovascular-risk.ts';
 import { chatLoop, type Llm } from '../llm-chat.ts';
 export { BUDGET_USED, SORRY } from '../llm-chat.ts';
-export type { Llm } from '../llm-chat.ts';
 import { currency, currencyContext, type Ctx } from '../current.ts';
 import { readable, slim } from '../mcp.ts';
 import { dateOf, inScope } from './scope.ts';
