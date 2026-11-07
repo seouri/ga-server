@@ -178,7 +178,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       if (no) return no;
       try {
         // Medplum's client joins arrays with commas (FHIR OR); repeated params (AND, e.g. date ranges) need URLSearchParams.
-        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => (k === '_count' ? [] : [v].flat().map((x) => [k, x]))));
+        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => [v].flat().map((x) => [k, x])));
         q.set('_count', String(Math.min(Number([params._count].flat()[0]) || 20, 1000)));
         const b = await client.search(resourceType as 'Observation', q, { cache: 'no-cache' });
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
