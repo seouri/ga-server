@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
+import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
 import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
@@ -97,7 +98,7 @@ export async function importExtracted(
     if (m) await client.updateResource<Immunization>({ ...m, identifier: [...(m.identifier ?? []), stableIdentifier(imms[n], source, fileHash, patientId)] });
   }
   const paired = new Set(imms.filter((_, n) => pairs[n]));
-  const report = await importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash);
+  const report = await withImportLock(() => importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash));
   report.merged += paired.size;
   return report;
 }

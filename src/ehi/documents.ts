@@ -4,6 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Attachment, Communication, DocumentReference, Resource } from '@medplum/fhirtypes';
 import { storeDocument } from '../document.ts';
 import { importResources, type ImportReport } from '../engine.ts';
+import { withImportLock } from '../lock.ts';
 import { ehiDate } from './dates.ts';
 import { mapEncounters } from './encounters.ts';
 import { type EhiCtx, ehiId, encounterRef, localId, PATIENT_REF, resolveUnlinked } from './ids.ts';
@@ -145,7 +146,7 @@ export async function importDocuments(
   }
   const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...notes.resources, ...mapMessages(t, ctx)];
   const { resources } = await resolveUnlinked(client, batch, patientId);
-  const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');
+  const report = await withImportLock(() => importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, ''));
   const mediaDir = join(dir, 'Media');
   for (const f of existsSync(mediaDir) ? readdirSync(mediaDir).sort() : []) {
     const type = MEDIA_TYPE[extname(f).toLowerCase()];

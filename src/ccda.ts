@@ -5,6 +5,7 @@ import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medicat
 import { XMLParser } from 'fast-xml-parser';
 import { type GaConfig, GaError } from './config.ts';
 import { addReport, importResources, type ImportReport } from './engine.ts';
+import { withImportLock } from './lock.ts';
 import { storeDocument } from './document.ts';
 
 export async function convertCcda(xml: string, converterUrl: string): Promise<Resource[]> {
@@ -209,7 +210,7 @@ export async function importPath(client: MedplumClient, cfg: GaConfig, path: str
     const xml = readFileSync(file, 'utf8');
     const resources = await convertCcda(xml, cfg.converterUrl);
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-    const r = await importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
+    const r = await withImportLock(() => importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash));
     addReport(total, r);
   }
   return total;

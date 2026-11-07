@@ -3,6 +3,7 @@ import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import { GaError, type GaConfig } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
+import { withImportLock } from '../lock.ts';
 import { mapClinical, mapEcgs } from './clinical.ts';
 import { Daily } from './daily.ts';
 import { type AhClinical, readExport } from './read.ts';
@@ -86,7 +87,7 @@ export async function importAppleHealth(
     if (same) unchanged++;
     return !same;
   });
-  const report = await importResources(client, rest, { kind: 'apple-health', file: dir, date: exportDate, writer: 'importer' }, patientId, '');
+  const report = await withImportLock(() => importResources(client, rest, { kind: 'apple-health', file: dir, date: exportDate, writer: 'importer' }, patientId, ''));
   const skips = { nested, archiveOnly, ...rd.skips, ...dl.skips, ...cl.skips, ...ecg.skips };
   return { ...report, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips };
 }
