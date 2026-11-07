@@ -53,10 +53,12 @@ export function sourceKey(src: SourceInfo, r: Resource): string {
   if (src.kind === 'ccda') return `ccda:${norm(src.org) || norm(basename(dirname(src.file)))}`;
   const ids = [(r as { identifier?: { system?: string } | { system?: string }[] }).identifier ?? []].flat();
   const prefix = `urn:ga-server:id:${src.kind}:`;
-  return `${src.kind}:${ids.find((i) => i.system?.startsWith(prefix))?.system?.slice(prefix.length) ?? ''}`;
+  const key = ids.find((i) => i.system?.startsWith(prefix))?.system?.slice(prefix.length);
+  if (!key) throw new Error(`no ${src.kind} source in the identifiers of ${r.resourceType}`);
+  return `${src.kind}:${key}`;
 }
 
-let cache: Maps | undefined;
+let cache: Maps | undefined; // per process; upsertEntry clears it
 
 export async function loadMaps(client: MedplumClient): Promise<Maps> {
   if (cache) return cache;
@@ -96,6 +98,7 @@ export async function upsertEntry(client: MedplumClient, source: string, entry: 
     target: [{
       ...(entry.target?.code && { code: entry.target.code, ...(entry.target.display && { display: entry.target.display }) }),
       equivalence: entry.equivalence,
+      ...(entry.equivalence === 'narrower' || entry.equivalence === 'inexact' ? { comment: `GA concept map: ${entry.equivalence}` } : {}), // R4 invariant cmd-1
       extension: [{ url: BY, valueCode: entry.by }, { url: CONFIDENT, valueBoolean: entry.confident }],
     }],
   }];
