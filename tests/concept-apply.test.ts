@@ -114,7 +114,8 @@ test('EHI fill: a text-only problem with a GA coding never replaces the C-CDA SN
   const incoming = codeRecord(withId({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { text: 'Hypertension' } } as Condition), EHI,
     new Map([['ehi:syn', { resourceType: 'ConceptMap', status: 'active', url: 'u', group: [{ source: 'urn:ga-server:termkey', target: 'http://hl7.org/fhir/sid/icd-10-cm', element: [{ code: 'hypertension', target: [{ code: 'I10', equivalence: 'equivalent' }] }] }] } as ConceptMap]])).resource;
   const filled = fillFrom(existing, incoming, EHI) as Condition;
-  expect(filled.code?.coding?.[0]).toEqual(snomed);
+  expect(filled.code?.coding).toEqual([snomed]); // a source code kept: no GA coding, no concept tag
+  expect(filled.meta?.tag ?? []).toEqual([]);
   expect(decide(existing, filled)).toBe('skip');
 });
 
