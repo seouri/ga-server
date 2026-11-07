@@ -170,6 +170,9 @@ export function repair(rs: Resource[], xml: string): Resource[] {
 }
 
 // The header effectiveTime precedes any body effectiveTime in CDA, so the first match is the document's.
+export const custodian = (xml: string): string | undefined =>
+  /<representedCustodianOrganization[^>]*>[\s\S]*?<name[^>]*>([^<]+)<\/name>/.exec(xml)?.[1]?.trim() || undefined;
+
 export function ccdaDate(xml: string): string {
   const m = xml.match(/<effectiveTime\s[^>]*?value="(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?(?:\.\d+)?)?([+-]\d{4})?"/);
   if (!m) throw new GaError('ClinicalDocument has no effectiveTime');
@@ -197,7 +200,7 @@ export async function importPath(client: MedplumClient, cfg: GaConfig, path: str
     const xml = readFileSync(file, 'utf8');
     const resources = await convertCcda(xml, cfg.converterUrl);
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-    const r = await importResources(client, resources, { kind: 'ccda', file, date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
+    const r = await importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
     for (const k of Object.keys(total) as Exclude<keyof ImportReport, 'seen' | 'byType'>[]) total[k] += r[k];
   }
   return total;
