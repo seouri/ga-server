@@ -17,7 +17,6 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - Ask tools for a concept or test name ("ldl", "a1c"): they match the standard codes, not each source's spelling.
 - A flag "possibly <concept> (suggested mapping)" means GA is unsure of the mapping. Say so.
 - `concepts_to_review`: terms with no standard code (`status` `unmapped`, default) or only a suggested one (`suggested`); optional `type`. `status: "agent"` (optional `since` YYYY-MM-DD) lists the mappings agents made, for the user to review; CLI `ga concepts --agent [--since YYYY-MM-DD]`.
-- Map keys carry the record type (`Condition|influenza`). An install with older keys: tell the user to run `ga concepts apply --migrate-keys` once (CLI only).
 - `map_concept`: map one term. Call it right after `ga_import` returns `unmapped`, and for terms from `concepts_to_review`. Pass `source`, `name`, `unit`, `key` and `type` as given there.
 - Set `confident: true` only when name, unit and specimen all agree with the code (for LOINC, its long name). Otherwise `false`: the code is applied as suggested.
 - ICD-10-CM codes are dotted and uppercase (`E11.9`).

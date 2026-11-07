@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { Observation } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
-import { inScope, sourceKey, termKey, untyped } from '../src/conceptmap.ts';
+import { inScope, sourceKey, termKey } from '../src/conceptmap.ts';
 import type { SourceInfo } from '../src/identity.ts';
 
 const lab = (text: string, unit: string, specimen?: string): Observation => ({
@@ -27,8 +27,6 @@ test('termKey: other types are Type|name, medications as written', () => {
   expect(termKey({ resourceType: 'MedicationStatement', status: 'active', subject: {}, medicationCodeableConcept: { text: ' Lisinopril 10 MG ' } })).toBe('MedicationStatement|Lisinopril 10 MG');
   expect(termKey({ resourceType: 'Condition', subject: {}, code: { text: 'Essential  Hypertension' } })).toBe('Condition|essential hypertension');
   expect(termKey({ resourceType: 'Immunization', status: 'completed', patient: {}, vaccineCode: { text: 'Influenza' } })).toBe('Immunization|influenza');
-  expect(untyped('influenza')).toBe(true);
-  expect(untyped('Immunization|influenza') || untyped('glucose|mg/dl')).toBe(false);
   expect(termKey({ resourceType: 'Observation', status: 'final', code: {} })).toBeUndefined();
 });
 

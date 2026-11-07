@@ -51,9 +51,6 @@ export function termKey(r: Resource): string | undefined {
   return n ? `${r.resourceType}|${n}` : undefined;
 }
 
-// A map key written before keys carried the record type (non-Observation keys had no '|').
-export const untyped = (key: string): boolean => !key.includes('|');
-
 // C-CDA identifiers carry no organisation (system is the fixed urn:ga-server:id:ccda), so the key uses the document
 // custodian name (SourceInfo.org, set by the C-CDA importer), else the export folder name.
 export function sourceKey(src: SourceInfo, r: Resource): string {
@@ -145,23 +142,3 @@ export async function upsertEntries(client: MedplumClient, source: string, entri
 }
 
 export const upsertEntry = (client: MedplumClient, source: string, entry: MapEntry): Promise<ConceptMap | undefined> => upsertEntries(client, source, [entry]);
-
-// Rewrites the keys of one map in a versioned write: rename returns the new key(s) of an element, [] to drop it, or
-// undefined to keep it. A new key already in the map keeps that entry (it is newer). Returns how many elements changed.
-export async function rekey(client: MedplumClient, map: ConceptMap, rename: (key: string) => string[] | undefined): Promise<number> {
-  let n = 0;
-  const all = new Set(map.group?.flatMap((g) => g.element?.map((e) => e.code) ?? []));
-  const group = (map.group ?? []).map((g) => ({
-    ...g,
-    element: (g.element ?? []).flatMap((e) => {
-      const to = rename(e.code as string);
-      if (!to) return [e];
-      n++;
-      return to.filter((k) => !all.has(k)).map((k) => (all.add(k), { ...e, code: k }));
-    }),
-  })).filter((g) => g.element.length);
-  if (!n) return 0;
-  cache = undefined;
-  await client.updateResource({ ...map, group }, { headers: { 'If-Match': `W/"${map.meta?.versionId}"` } });
-  return n;
-}
