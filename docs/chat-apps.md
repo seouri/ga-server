@@ -41,7 +41,7 @@ Or use `connected_apps` and `disconnect_app` in chat. Every remote call is logge
 
 ## What you can do in chat
 
-Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `concepts_to_review`) plus:
+Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `concepts_to_review`, `whats_new`) plus:
 
 | Area | Tools |
 |---|---|

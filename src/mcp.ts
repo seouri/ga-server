@@ -15,6 +15,7 @@ import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
 import { healthSummary } from './health.ts';
+import { whatsNew } from './whats-new.ts';
 import { currentList, type Kind } from './lists.ts';
 import { vitals } from './vitals.ts';
 import { notesSearch } from './notes.ts';
@@ -278,6 +279,27 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       try {
         const eps = patientEndpoints(client, patientId);
         return warned(await healthSummary(client, patientId, eps), eps);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+  server.registerTool(
+    'whats_new',
+    {
+      description:
+        'What arrived in GA since the person last saw this summary (or the last 90 days the first time): counts by kind and source, labs out of range, new medications with their FDA label sections, ' +
+        'changed medication and problem statuses, vaccines and health maintenance to follow up, plus current medications, problems and recent out-of-range labs as context. ' +
+        'Call it at the start of a health conversation when it has not been shown yet in this conversation; answer the person\'s question first, then offer the summary in one line. ' +
+        'Pass markSeen: true only on the call whose summary you showed (it stores the time). since: YYYY-MM-DD, for a one-off look; it never marks seen. ' +
+        'Label text: report only what its sections say, quoting the section and the label date; it is not a full interaction screen.',
+      inputSchema: { since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), markSeen: z.boolean().optional() },
+      annotations: { readOnlyHint: false },
+    },
+    async ({ since, markSeen }) => {
+      try {
+        const eps = patientEndpoints(client, patientId);
+        return warned(await whatsNew(client, patientId, eps, { since, markSeen, fetch: deps.fetch }), eps);
       } catch (e) {
         return fail(e);
       }

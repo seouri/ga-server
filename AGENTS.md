@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `health_summary` (one-call snapshot: call it first), `lab_results` (lab results as compact rows: name, date range, newest first; `summary: true` for one trend entry per test), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `notes_search` (text search in notes and MyChart messages), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`, `concepts_to_review` (source terms with no standard code, or only a suggested one), `map_concept` (map one term to a validated code; after `ga_import`, map its `unmapped` terms).
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `health_summary` (one-call snapshot: call it first), `lab_results` (lab results as compact rows: name, date range, newest first; `summary: true` for one trend entry per test), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `notes_search` (text search in notes and MyChart messages), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`, `whats_new` (what arrived since the person last looked; offer it once per conversation), `concepts_to_review` (source terms with no standard code, or only a suggested one), `map_concept` (map one term to a validated code; after `ga_import`, map its `unmapped` terms).
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
@@ -22,6 +22,10 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - ICD-10-CM codes are dotted and uppercase (`E11.9`).
 - No standard code exists: `equivalence: "unmatched"`. That clears the term from review.
 - A second `map_concept` for the same term replaces the first (corrections).
+
+## What's new
+
+`whats_new` (CLI `ga whats-new [--since YYYY-MM-DD]`, which never marks seen) lists records that arrived since the last time the person saw it (`.ga/whats-new.json`), else the last 90 days (`firstRun`): counts by kind and source, out-of-range labs, new medications with FDA label sections (`medicationCheck`; only the RxNorm code leaves the machine), status changes, vaccine and health-maintenance follow-ups, and current medications and problems as context. Pass `markSeen: true` only on the call whose summary you showed; `since` never marks seen. Label text: "From the FDA label; not a full interaction screen. Ask your pharmacist." Report only what the sections say, quoting section and label date.
 
 ## Epic EHI data
 

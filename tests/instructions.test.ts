@@ -11,6 +11,7 @@ describe('chatInstructions', () => {
     expect(t).toContain('Cite every value');
     expect(t).toContain('cardiovascular_risk_10yr');
     expect(t).toContain('lab_results');
+    expect(t).toContain('whats_new');
     for (const n of ['hospital_status', 'hospital_connect', 'hospital_sync']) expect(t).toContain(n);
     expect(t).toContain('upload_link');
     expect(t).toContain('fileId');

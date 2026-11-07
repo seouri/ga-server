@@ -2,8 +2,9 @@ import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Observation, Resource } from '@medplum/fhirtypes';
+import type { MedplumClient } from '@medplum/core';
 import { expect, test } from 'vitest';
-import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, tally, writeLastSeen } from '../src/whats-new.ts';
+import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
 
 const TAG = 'urn:ga-server:tag';
 const tag = (code: string) => ({ tag: [{ system: TAG, code }] });
@@ -113,4 +114,26 @@ test('medicationItems resolves a referenced Medication for RxNorm and name', () 
   const [item] = medicationItems([fresh], [m, fresh], since);
   expect(item).toMatchObject({ title: 'Drug C', source: 'clinic.xml', id: 'f', detail: { rxnorm: '999' } });
   expect(medicationItems([fresh], [m, fresh, ref('e', {})], since)).toEqual([]);
+});
+
+test('whatsNew: first run, markSeen and since', async () => {
+  const empty = { resourceType: 'Bundle', entry: [] };
+  const client = {
+    search: async () => empty, searchOne: async () => undefined, searchResources: async () => [],
+    searchResourcePages: async function* () { yield []; },
+    readResource: async () => ({ resourceType: 'Patient', birthDate: '1980-01-01', gender: 'female' }),
+  } as unknown as MedplumClient;
+  const dir = mkdtempSync(join(tmpdir(), 'ga-wn-'));
+  const run = (o: object) => whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', dir, ...o });
+  const first = await run({});
+  expect(first).toMatchObject({ since: '2026-08-09', firstRun: true, items: [], medicationCheck: [], tally: { total: 0 } });
+  expect(first.note).toContain('not a full interaction screen');
+  expect(readLastSeen(dir)).toBeUndefined();
+  await run({ since: '2026-11-01', markSeen: true });
+  expect(readLastSeen(dir)).toBeUndefined();
+  await run({ markSeen: true });
+  const at = readLastSeen(dir);
+  expect(at).toBeDefined();
+  expect(await run({})).toMatchObject({ since: at });
+  expect((await run({})).firstRun).toBeUndefined();
 });
