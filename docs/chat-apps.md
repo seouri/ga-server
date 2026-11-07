@@ -79,7 +79,7 @@ Your health maintenance due dates (screenings, vaccines and your doctor's planne
 GA_PUBLIC_URL=https://<machine>.<tailnet>.ts.net ga calendar
 ```
 
-Subscribe to the printed link: Apple Calendar, File, New Calendar Subscription; Google Calendar, Other calendars, From URL. Events carry only the topic name and due date. Your calendar app fetches the link from its own servers, so those names and dates leave your computer; anyone with the link can read them. `ga calendar` again makes a new link (the old one stops working); `ga calendar revoke` turns it off.
+Subscribe to the printed link: Apple Calendar, File, New Calendar Subscription; Google Calendar, Other calendars, From URL. Events carry only the topic name and due date; overdue items show on today, and items you postponed or dismissed are left out. Your calendar app fetches the link from its own servers, so those names and dates leave your computer; anyone with the link can read them. `ga calendar` again makes a new link (the old one stops working); `ga calendar revoke` turns it off.
 
 ## When something fails
 

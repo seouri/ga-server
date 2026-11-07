@@ -283,6 +283,7 @@ test('calendar link: valid token serves the feed, a wrong or revoked one is 404,
   expect(ok.status).toBe(200);
   expect(ok.headers.get('content-type')).toMatch(/^text\/calendar/);
   expect(await ok.text()).toContain('BEGIN:VCALENDAR');
+  expect((await fetch(`${base}/cal/${token}.ics`, { method: 'HEAD' })).status).toBe(200);
   expect((await fetch(`${base}/cal/${'x'.repeat(43)}.ics`)).status).toBe(404);
   newCalendarToken(dir); // a new link replaces the old one
   expect((await fetch(`${base}/cal/${token}.ics`)).status).toBe(404);
