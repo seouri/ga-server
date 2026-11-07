@@ -64,3 +64,39 @@ it('digest with a due item queues one with its topic key', async () => {
   await tick(deps(at(9, 5)));
   expect(pending(dir).map((o) => [o.kind, o.keys])).toEqual([['digest', ['topic:colon']]]);
 });
+
+// A whatsNew fake that honors `since` and records its calls.
+const calls: { since?: string; markSeen?: unknown }[] = [];
+const honoring = (all: { id?: string; kind: string; title: string; date: string; arrived: string; detail: object }[], extra: object = {}) => (async (_c: unknown, _p: unknown, _e: unknown, o: { since?: string; markSeen?: unknown }) => {
+  calls.push(o);
+  return { items: all.filter((i) => i.arrived >= o.since!), medicationCheck: [], ...extra };
+}) as never;
+
+it('since is max(setupAt, checkedAt - 10 min), never markSeen', async () => {
+  calls.length = 0;
+  const d = (now: Date) => ({ ...deps(now), whatsNew: honoring([]) });
+  await tick(d(at(8)));
+  await tick(d(at(8, 30)));
+  expect(calls[0].since).toBe(settings.setupAt);
+  expect(calls[1].since).toBe(at(7, 50).toISOString());
+  expect(calls.every((c) => !('markSeen' in c))).toBe(true);
+});
+it('a new medication appears in one digest only, even on the next day', async () => {
+  const med = { id: 'm', kind: 'new medication', title: 'Statin', date: '2026-11-07', arrived: at(8).toISOString(), detail: {} };
+  const day = (n: number, h: number, m = 0) => new Date(2026, 10, 7 + n, h, m);
+  await tick({ ...deps(day(0, 9, 5)), whatsNew: honoring([med]) });
+  expect(pending(dir)).toHaveLength(1);
+  const id = pending(dir)[0].id;
+  ack(dir, [id], [], day(0, 9, 6));
+  await tick({ ...deps(day(1, 9, 5)), whatsNew: honoring([med]) });
+  expect(pending(dir)).toEqual([]);
+});
+it('a labs section error or a throw does not advance checkedAt', async () => {
+  await tick(deps(at(8)));
+  const before = readState(dir).checkedAt;
+  await tick({ ...deps(at(8, 5)), whatsNew: honoring([], { sectionErrors: { labs: 'x' } }) });
+  expect(readState(dir).checkedAt).toBe(before);
+  expect(readState(dir).lastError).toMatch(/labs/);
+  await expect(tick({ ...deps(at(8, 6)), whatsNew: (async () => { throw new Error('down'); }) as never })).rejects.toThrow();
+  expect(readState(dir).checkedAt).toBe(before);
+});

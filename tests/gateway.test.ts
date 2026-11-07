@@ -30,6 +30,8 @@ let passkeyOk = false;
 const calendarAgents: (string | undefined)[] = [];
 
 let incoming: unknown[] = [];
+let notifyNow = new Date(2026, 10, 7, 12);
+const audits: string[] = [];
 let withNotify = true;
 function start(publicUrl: string | null = PUBLIC): Promise<void> {
   server = createGateway({
@@ -49,13 +51,13 @@ function start(publicUrl: string | null = PUBLIC): Promise<void> {
       return {};
     },
     verifyPasskey: async () => passkeyOk,
-    notify: withNotify ? { dir: join(dir, 'notify'), onIncoming: async (m) => { incoming.push(m); } } : undefined,
+    notify: withNotify ? { dir: join(dir, 'notify'), now: () => notifyNow, client: { createResource: async (r: any) => { audits.push(r.entity[0].what.display + '|' + r.agent[0].who.display); return r; } } as never, onIncoming: async (m) => { incoming.push(m); } } : undefined,
     calendar: async (_id, ua) => { calendarAgents.push(ua); return 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n'; },
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; ok(); }));
 }
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; incoming = []; withNotify = true; passkeyOk = false; });
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; incoming = []; withNotify = true; notifyNow = new Date(2026, 10, 7, 12); audits.length = 0; passkeyOk = false; });
 afterEach(async () => { await new Promise((ok) => server?.close(ok)); rmSync(dir, { recursive: true, force: true }); });
 
 // A second provider on the same directory mints tokens the gateway will find.
@@ -369,6 +371,7 @@ test('notify exchange: no or wrong token is 401 and the outbox is untouched', as
   await start();
   for (const t of [null, 'b'.repeat(43), 'short']) expect((await exchange({ ...empty, sent: ['m1'] }, t)).status).toBe(401);
   expect(pending(nd)).toHaveLength(1);
+  expect((await exchange(empty, null, 'GET')).status).toBe(401);
   expect((await exchange(empty, TOKEN, 'GET')).status).toBe(405);
 });
 
@@ -397,4 +400,21 @@ test('notify exchange: body over 64 KB is 413, not configured is 404', async () 
   withNotify = false;
   await start();
   expect((await exchange(empty)).status).toBe(404);
+});
+
+test('notify exchange: results and digests wait through sleep hours, replies do not; acks are logged by kind only', async () => {
+  const { enqueue } = await import('../src/notify/outbox.ts');
+  const nd = join(dir, 'notify');
+  mkdirSync(nd, { recursive: true }); writeFileSync(join(nd, 'token'), TOKEN);
+  writeJson(nd, 'settings.json', { to: '+1', digestAt: '09:00', sleep: ['22:00', '07:00'], setupAt: '2026-11-01T00:00:00.000Z' });
+  enqueue(nd, { id: 'r1', text: 'secret result text', kind: 'result', keys: [] });
+  enqueue(nd, { id: 'p1', text: 'reply', kind: 'reply', keys: [] });
+  await start();
+  notifyNow = new Date(2026, 10, 7, 23);
+  expect(await (await exchange(empty)).json()).toEqual({ outgoing: [{ id: 'p1', text: 'reply' }] });
+  notifyNow = new Date(2026, 10, 8, 7);
+  expect(((await (await exchange(empty)).json()) as any).outgoing.map((o: any) => o.id)).toEqual(['r1', 'p1']);
+  await exchange({ ...empty, sent: ['r1'] });
+  await new Promise((ok) => setTimeout(ok, 20));
+  expect(audits).toEqual(['sent result|iMessage']);
 });

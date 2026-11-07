@@ -25,6 +25,7 @@ import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { ack, pending } from '../notify/outbox.ts';
 import { notifyDir, readSettings, readState, writeState } from '../notify/settings.ts';
+import { inSleep } from '../notify/select.ts';
 import { tick } from '../notify/tick.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
@@ -40,7 +41,7 @@ export type GatewayDeps = {
   completeLogin: (search: string) => Promise<unknown>;
   calendar?: (id: string, userAgent?: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
   // iMessage bridge exchange; absent means POST /notify/exchange is 404. client: logs each acked send (kind only, never text).
-  notify?: { dir: string; client?: MedplumClient; onIncoming?: (m: { from: string; text: string; at: string }) => Promise<void> };
+  notify?: { dir: string; client?: MedplumClient; now?: () => Date; onIncoming?: (m: { from: string; text: string; at: string }) => Promise<void> };
   verifyPasskey?: (response: AuthenticationResponseJSON, expectedChallenge: string) => Promise<boolean>;
 };
 
@@ -49,6 +50,7 @@ type Res = http.ServerResponse;
 const PORT = 8110;
 const CHALLENGE_MS = 5 * 60_000;
 const BODY_MS = 30_000;
+const TICK_MS = 5 * 60_000;
 const NOTIFY_BODY = 64 * 1024;
 const UPLOAD_IDLE_MS = 60_000;
 const MAX_CHALLENGES = 1000;
@@ -103,12 +105,12 @@ export function createGateway(deps: GatewayDeps): http.Server {
   let incomingChain: Promise<void> = Promise.resolve();
   async function notifyExchange(req: Req, res: Res): Promise<void> {
     const n = deps.notify!;
-    if (req.method !== 'POST') return send(res, 405, 'Method not allowed', 'text/plain; charset=utf-8', { Allow: 'POST' });
     let token = '';
     try { token = readFileSync(join(n.dir, 'token'), 'utf8').trim(); } catch {}
     const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
     const h = (x: string) => createHash('sha256').update(x).digest();
     if (!token || !timingSafeEqual(h(token), h(given))) return send(res, 401, 'Unauthorized', 'text/plain; charset=utf-8');
+    if (req.method !== 'POST') return send(res, 405, 'Method not allowed', 'text/plain; charset=utf-8', { Allow: 'POST' });
     let raw = '', size = 0;
     try {
       raw = await new Promise<string>((ok, fail) => {
@@ -136,7 +138,9 @@ export function createGateway(deps: GatewayDeps): http.Server {
         writeState(n.dir, { ...readState(n.dir), lastError: String(e?.message ?? e).slice(0, 200) });
       });
     }
-    return json(res, 200, { outgoing: pending(n.dir).map(({ id, text }) => ({ id, text })) });
+    // Quiet hours: results and digests wait; a reply to the owner's own text goes through.
+    const cfg = readSettings(n.dir), asleep = !!cfg && inSleep((n.now ?? (() => new Date()))(), cfg.sleep);
+    return json(res, 200, { outgoing: pending(n.dir).filter((o) => !asleep || o.kind === 'reply').map(({ id, text }) => ({ id, text })) });
   }
 
   async function callback(res: Res, search: string): Promise<void> {
@@ -372,7 +376,8 @@ export async function serveGateway(): Promise<void> {
   const client = await getClient(cfg);
   const publicUrl = process.env.GA_PUBLIC_URL?.replace(/\/+$/, '') || undefined;
   const nd = notifyDir();
-  const notifyOn = !!readSettings(nd) && !readSettings(nd)!.off;
+  const ns = readSettings(nd);
+  const notifyOn = !!ns && !ns.off;
   const server = createGateway({
     publicUrl,
     notify: notifyOn ? { dir: nd, client } : undefined,
@@ -401,11 +406,13 @@ export async function serveGateway(): Promise<void> {
     const run = async () => {
       if (running) return;
       running = true;
+      let timer: NodeJS.Timeout | undefined;
       try {
-        await tick({ client, patientId: cfg.patientId, dir: nd, now: new Date(), eps: () => patientEndpoints(client, cfg.patientId) });
+        const hung = new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error('tick timed out after 5 minutes')), TICK_MS); });
+        await Promise.race([hung, tick({ client, patientId: cfg.patientId, dir: nd, now: new Date(), eps: () => patientEndpoints(client, cfg.patientId) })]);
       } catch (e) {
         writeState(nd, { ...readState(nd), lastError: String((e as Error).message ?? e).slice(0, 200) });
-      } finally { running = false; }
+      } finally { clearTimeout(timer); running = false; }
     };
     setInterval(() => void run().catch(() => {}), 60_000).unref();
   }
