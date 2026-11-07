@@ -81,7 +81,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const SPACED = '[0-9a-f]{8} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{12}'; // C-CDA keys are normalised: '-' becomes ' '
 const TEST_MAP = new RegExp(
   `^urn:ga-server:conceptmap:(ccda:synthetic clinic|ccda:synthetic (clinic|batch|carry|dup) ${SPACED}|ehi:synthetic(-org|-health|-health-b|-health-docs|-health-dup|-fill-[0-9a-f]{8})?` +
-    `|smart:(firstfail|good|link|lock|norefresh|revoked|sync)-${UUID}|smart:fhir-example-org|test-${UUID})$`,
+    `|smart:(cut|firstfail|good|link|lock|norefresh|revoked|sync)-${UUID}|smart:fhir-example-org|test-${UUID})$`,
 );
 export async function cleanupTestMaps(client: MedplumClient): Promise<void> {
   for (const m of await client.searchResources('ConceptMap', { _count: '1000' }, { cache: 'no-cache' })) {

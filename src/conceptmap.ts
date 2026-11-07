@@ -7,7 +7,7 @@ import { SUMMARY } from './vitals.ts';
 
 export const MAP_URL = 'urn:ga-server:conceptmap:';
 export const mapUrl = (source: string): string => MAP_URL + encodeURI(source); // a uri has no spaces (C-CDA org names do)
-const MAP_TAG = 'concept-map'; // uri :below does not match urn: urls, so loadMaps finds the maps by tag
+export const MAP_TAG = 'concept-map'; // uri :below does not match urn: urls, so loadMaps finds the maps by tag
 const TERM = 'urn:ga-server:termkey'; // group.source for every entry
 const UNMATCHED = 'urn:ga-server:unmatched'; // group.target of entries without a code
 const BY = 'urn:ga-server:ext:concept-by';

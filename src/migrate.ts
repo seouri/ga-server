@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { AuditEvent, Binary, Bundle, BundleEntry, DocumentReference, Extension, Resource, ResourceType } from '@medplum/fhirtypes';
+import type { AuditEvent, Binary, Bundle, BundleEntry, ConceptMap, DocumentReference, Extension, Provenance, Resource, ResourceType } from '@medplum/fhirtypes';
 import { importAppleHealth } from './apple/import.ts';
 import { manifestHash } from './archive.ts';
+import { MAP_TAG } from './conceptmap.ts';
 import { importPath } from './ccda.ts';
 import { defaultConfigPath, GaError, type GaConfig, getClient, loadConfig } from './config.ts';
 import { importEhi } from './ehi/import.ts';
@@ -263,6 +264,26 @@ const vaccines = async (c: MedplumClient, pid: string, asOf: string) => {
   }
 };
 
+// Concept maps (the agents' mappings among them) and their map_concept Provenance, into the new project; a re-run copies only
+// what is missing. Before the imports, so they code by the same maps. old reads are scoped to its project: it sees every project.
+async function copyConceptMaps(old: MedplumClient, project: string, nc: MedplumClient): Promise<{ maps: number; provenance: number }> {
+  const n = { maps: 0, provenance: 0 };
+  const key = (p: Provenance) => `${p.recorded}|${p.reason?.[0]?.text}`;
+  for (const m of (await all(old, 'ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _project: project })) as ConceptMap[]) {
+    const { id, meta, ...body } = m;
+    const made = await nc.createResourceIfNoneExist<ConceptMap>({ ...body, meta: { tag: meta?.tag } }, `url=${encodeURIComponent(m.url as string)}`);
+    n.maps++;
+    const have = new Set(((await all(nc, 'Provenance', { target: `ConceptMap/${made.id}` })) as Provenance[]).map(key));
+    for (const p of (await all(old, 'Provenance', { target: `ConceptMap/${id}`, _project: project })) as Provenance[]) {
+      if (have.has(key(p))) continue;
+      const { id: _i, meta: _m, ...rest } = p;
+      await nc.createResource<Provenance>({ ...rest, target: [{ reference: `ConceptMap/${made.id}` }] });
+      n.provenance++;
+    }
+  }
+  return n;
+}
+
 // accept: switch even when counts differ, after printing them (the old copy is kept until --delete-old).
 export async function migrate({ projectName, accept = false }: { projectName?: string; accept?: boolean } = {}): Promise<{ rows: Row[] }> {
   const p = paths();
@@ -286,6 +307,8 @@ export async function migrate({ projectName, accept = false }: { projectName?: s
     const jobs = await plan(old, project, oldCfg.patientId, newClient, tmp);
     const newCfg = await setup(oldCfg.baseUrl, oldCfg.converterUrl, { out: p.next, projectName });
     if (newCfg.projectId === project || newCfg.patientId === oldCfg.patientId) throw new GaError('the new project is the old one: refusing');
+    const copied = await copyConceptMaps(old, project, (await newClient())[0]);
+    console.log(`concept maps copied: ${copied.maps} (map_concept records: ${copied.provenance})`);
     for (const [n, job] of jobs.entries()) {
       console.log(`[${n + 1}/${jobs.length}] ${job.label}`);
       const r = (await job.run()) as Record<string, unknown> | string;
