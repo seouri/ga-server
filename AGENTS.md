@@ -1,6 +1,6 @@
 # GA server agent notes
 
-GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
+GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `lab_results` (lab results as compact rows: name, date range, newest first), `current_medications`, `current_problems`, `allergies` (the currency rule below already applied), `vitals` (clinic and Apple Health readings, or Apple daily summaries with `daily: true`), `notes_search` (text search in notes and MyChart messages), `fhir_search`, `fhir_read`, `ga_import`, `cardiovascular_risk_10yr`, `vaccine_gaps`.
 
 - Cardiovascular risk: gather inputs from GA and call `cardiovascular_risk_10yr` (PREVENT and Pooled Cohort Equations); never compute those scores yourself.
 - Problems: Condition `category` `problem-list-item` is the problem list; `encounter-diagnosis` is a diagnosis coded at one visit.
@@ -15,7 +15,7 @@ GA exposes a stdio MCP server `ga-server` (`node src/cli.ts mcp`) with tools `la
 `ga import <ehi-folder> [--tz <IANA zone>]` (CLI only; MCP cannot import it) loads an Epic EHI export. Identifiers use `urn:ga-server:id:ehi:<org>`; re-import is a no-op. Where it lives:
 
 - Notes: `DocumentReference` with an inline `text/plain` attachment; the original RTF is a separate DocumentReference linked by `relatesTo` (`transforms`).
-- MyChart messages: `Communication` (`payload` text, `sent`, `sender`/`recipient` display, `inResponseTo` for the thread).
+- MyChart messages: `Communication` (`payload` text, `sent`, `sender`/`recipient` display, `inResponseTo` for the thread). `notes_search` searches the text of both notes and messages.
 - Family history: `FamilyMemberHistory`. Social history, vitals: `Observation`. Questionnaires: `QuestionnaireResponse`.
 - Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
