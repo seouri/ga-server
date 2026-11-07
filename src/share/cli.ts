@@ -15,7 +15,7 @@ import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
 import { downloadName, type ShareDeps } from './server.ts';
 import { createShare, expiryWords, listShares, parseGroups, parseSince, revokeShare, shareDir, status, tokenOf } from './store.ts';
-import type { Group, Share } from './store.ts';
+import type { Share } from './store.ts';
 
 const USAGE =
   'ga share [--for doctor|family] [--label X] [--scope g1,g2|all] [--since 12m|YYYY-MM-DD] [--until YYYY-MM-DD] [--expires 7d|YYYY-MM-DD|never] [--layout A|B] [--questions N]' +
