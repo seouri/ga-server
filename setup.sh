@@ -26,6 +26,7 @@ npm install
 if ! grep -q '^TZ=' .env 2>/dev/null; then
   tz=$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*zoneinfo/||p')
   if [ -n "$tz" ] && node -e 'new Intl.DateTimeFormat("en", { timeZone: process.argv[1] })' "$tz" 2>/dev/null; then
+    [ -s .env ] && [ -n "$(tail -c1 .env)" ] && echo >> .env # a last line without newline would swallow TZ
     echo "TZ=$tz" >> .env
     echo "==> time zone $tz written to .env"
   else
