@@ -64,6 +64,9 @@ export async function labResults(
     // Follow by path: the link's host is Medplum's configured base, which the gateway container may not reach.
     b = rows.length > limit || !next ? undefined : await client.get<Bundle<Observation>>(next.replace(/^\w+:\/\/[^/]+\//, ''), { cache: 'no-cache' });
   }
+  // Medplum sorts undated results first on -date; a latest-value question wants them last.
+  // shortcut: only within the fetched pages, fine unless a patient has over a page of undated labs.
+  rows.sort((a, b) => Number(!a.date) - Number(!b.date));
   let size = 0;
   const fit = rows.slice(0, limit).findIndex((r) => (size += JSON.stringify(r).length + 1) > BUDGET);
   const truncated = rows.length > limit || fit >= 0;
