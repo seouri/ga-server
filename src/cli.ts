@@ -55,6 +55,10 @@ try {
     const cfg = loadConfig();
     const client = await getClient(cfg);
     console.log(JSON.stringify(await whatsNew(client, cfg.patientId as string, patientEndpoints(client, cfg.patientId as string), { since: process.argv[4] })));
+  } else if (process.argv[2] === 'maintenance' && (process.argv.length === 3 || (process.argv[3] === '--as-of' && /^\d{4}-\d{2}-\d{2}$/.test(process.argv[4] ?? '') && process.argv.length === 5))) {
+    const { healthMaintenance } = await import('./maintenance.ts');
+    const cfg = loadConfig();
+    console.log(JSON.stringify(await healthMaintenance(await getClient(cfg), cfg.patientId as string, process.argv[4])));
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
@@ -82,7 +86,7 @@ try {
     const [arg, , since] = process.argv.slice(3);
     console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

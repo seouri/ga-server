@@ -3,7 +3,7 @@ import { GaError } from './config.ts';
 
 // Mode C: the code goes back to the agent in the preview. Typed codes or passkey links plug in here later.
 // shortcut: in memory, lost on restart (the agent just asks for a new preview).
-type Kind = 'share' | 'enable';
+type Kind = 'share' | 'enable' | 'followup';
 const TTL_MS = 15 * 60_000;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const pending = new Map<string, { kind: Kind; payload: unknown; expires: number }>();

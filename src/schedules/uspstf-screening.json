@@ -1,0 +1,198 @@
+{
+ "edition": "USPSTF screening recommendations, as of 2026-11-07",
+ "_source": "Each topic's text is quoted from its USPSTF Final Recommendation Statement page (source). LOINC codes checked at NLM clinicaltables loinc_items; HCPCS at NLM clinicaltables hcpcs; SNOMED CT displays on tx.fhir.org; colorectal codes from config/concepts.json (colorectal cancer screening). CPT descriptors from public payer and coding pages (AMA owns the descriptors).",
+ "topics": [
+  {
+   "id": "colorectal",
+   "name": "Colorectal cancer screening",
+   "grade": "A",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/colorectal-cancer-screening",
+   "published": "2021-05-18",
+   "ages": [50, 75],
+   "doneBy": [
+    { "name": "colonoscopy", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://snomed.info/sct|73761001", "http://snomed.info/sct|444783004", "http://www.ama-assn.org/go/cpt|45378", "http://www.ama-assn.org/go/cpt|45380", "http://www.ama-assn.org/go/cpt|45384", "http://www.ama-assn.org/go/cpt|45385", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0105", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0121"], "text": ["colonoscop*"], "years": 10, "not": ["virtual", "ct"] },
+    { "name": "stool test (FIT or gFOBT)", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|2335-8", "http://loinc.org|29771-3", "http://loinc.org|57905-2", "http://loinc.org|56490-6", "http://loinc.org|56491-4", "http://loinc.org|58453-2", "http://loinc.org|80372-6", "http://loinc.org|27396-1", "http://loinc.org|14563-1", "http://loinc.org|12503-9", "http://snomed.info/sct|441579003", "http://www.ama-assn.org/go/cpt|82274", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0328"], "text": ["occult stool", "occult fecal", "occult feces", "FIT", "fit stool", "fit fecal", "fecal immunochemical", "hemoccult*", "ifobt", "gfobt", "fobt"], "years": 1, "not": ["dna", "urine", "gastric", "respirator", "n95", "mask"] },
+    { "name": "stool DNA-FIT", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|77353-1", "http://loinc.org|77354-9", "http://www.ama-assn.org/go/cpt|81528"], "text": ["cologuard", "stool dna", "fit dna"], "years": 3 },
+    { "name": "CT colonography", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://snomed.info/sct|418714002", "http://www.ama-assn.org/go/cpt|74261", "http://www.ama-assn.org/go/cpt|74262", "http://www.ama-assn.org/go/cpt|74263"], "text": ["ct colonograph*", "virtual colonoscop*"], "years": 5 },
+    { "name": "flexible sigmoidoscopy", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://www.ama-assn.org/go/cpt|45330", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0104"], "text": ["sigmoidoscop*"], "years": 5 }
+   ],
+   "why": "The USPSTF concludes with high certainty that screening for colorectal cancer in adults aged 50 to 75 years has substantial net benefit.",
+   "cost": "Colorectal cancer is the third leading cause of cancer death for both men and women.",
+   "epic": ["COLORECTAL", "CRCS", "COLON CANCER"]
+  },
+  {
+   "id": "colorectal-45",
+   "name": "Colorectal cancer screening (ages 45 to 49)",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/colorectal-cancer-screening",
+   "published": "2021-05-18",
+   "ages": [45, 49],
+   "doneBy": [
+    { "name": "colonoscopy", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://snomed.info/sct|73761001", "http://snomed.info/sct|444783004", "http://www.ama-assn.org/go/cpt|45378", "http://www.ama-assn.org/go/cpt|45380", "http://www.ama-assn.org/go/cpt|45384", "http://www.ama-assn.org/go/cpt|45385", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0105", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0121"], "text": ["colonoscop*"], "years": 10, "not": ["virtual", "ct"] },
+    { "name": "stool test (FIT or gFOBT)", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|2335-8", "http://loinc.org|29771-3", "http://loinc.org|57905-2", "http://loinc.org|56490-6", "http://loinc.org|56491-4", "http://loinc.org|58453-2", "http://loinc.org|80372-6", "http://loinc.org|27396-1", "http://loinc.org|14563-1", "http://loinc.org|12503-9", "http://snomed.info/sct|441579003", "http://www.ama-assn.org/go/cpt|82274", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0328"], "text": ["occult stool", "occult fecal", "occult feces", "FIT", "fit stool", "fit fecal", "fecal immunochemical", "hemoccult*", "ifobt", "gfobt", "fobt"], "years": 1, "not": ["dna", "urine", "gastric", "respirator", "n95", "mask"] },
+    { "name": "stool DNA-FIT", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|77353-1", "http://loinc.org|77354-9", "http://www.ama-assn.org/go/cpt|81528"], "text": ["cologuard", "stool dna", "fit dna"], "years": 3 },
+    { "name": "CT colonography", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://snomed.info/sct|418714002", "http://www.ama-assn.org/go/cpt|74261", "http://www.ama-assn.org/go/cpt|74262", "http://www.ama-assn.org/go/cpt|74263"], "text": ["ct colonograph*", "virtual colonoscop*"], "years": 5 },
+    { "name": "flexible sigmoidoscopy", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://www.ama-assn.org/go/cpt|45330", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0104"], "text": ["sigmoidoscop*"], "years": 5 }
+   ],
+   "why": "The USPSTF concludes with moderate certainty that screening for colorectal cancer in adults aged 45 to 49 years has moderate net benefit.",
+   "cost": "Colorectal cancer is the third leading cause of cancer death for both men and women.",
+   "epic": ["COLORECTAL", "CRCS", "COLON CANCER"]
+  },
+  {
+   "id": "cervical",
+   "name": "Cervical cancer screening",
+   "grade": "A",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/cervical-cancer-screening",
+   "published": "2018-08-21",
+   "ages": [21, 65],
+   "sex": "female",
+   "doneBy": [
+    { "name": "cervical cytology (Pap test)", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|10524-7", "http://loinc.org|19762-4", "http://loinc.org|19765-7", "http://loinc.org|33717-0", "http://loinc.org|47527-7", "http://loinc.org|47528-5", "http://www.ama-assn.org/go/cpt|88142", "http://www.ama-assn.org/go/cpt|88175", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0123", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0124", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0141"], "text": ["pap smear", "pap test", "cervical cytolog*", "cervicovaginal cytolog*", "thinprep", "gyn* cytolog*"], "years": 3, "not": ["anal"] },
+    { "name": "high-risk HPV test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|21440-3", "http://loinc.org|30167-1", "http://loinc.org|59420-0", "http://loinc.org|71431-1", "http://loinc.org|77379-6", "http://www.ama-assn.org/go/cpt|87624", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0476"], "text": ["hpv", "papillomavirus", "papilloma virus"], "years": 5, "not": ["vaccin*", "gardasil", "anal", "oral", "throat"], "minAge": 30 }
+   ],
+   "why": "Most cases of cervical cancer occur among women who have not been adequately screened.",
+   "cost": "Screening aims to identify high-grade precancerous cervical lesions to prevent progression to cervical cancer.",
+   "epic": ["CERVICAL", "PAP"],
+   "history": [
+    { "name": "hysterectomy", "types": ["Procedure", "Condition"], "codes": ["http://snomed.info/sct|236886002", "http://snomed.info/sct|116140006", "http://hl7.org/fhir/sid/icd-10-cm|Z90.710"], "text": ["hysterectom*", "absence cervix"], "not": ["supracervical"] }
+   ]
+  },
+  {
+   "id": "breast",
+   "name": "Breast cancer screening (mammogram)",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/breast-cancer-screening",
+   "published": "2024-04-30",
+   "ages": [40, 74],
+   "sex": "female",
+   "doneBy": [
+    { "name": "screening mammogram", "types": ["Procedure", "DiagnosticReport", "Observation"], "codes": ["http://loinc.org|24606-6", "http://snomed.info/sct|24623002", "http://www.ama-assn.org/go/cpt|77067", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0202"], "text": ["screen* mammo*", "mammograph* bilateral", "mam screen*", "tomosynthesis screen*"], "years": 2, "not": ["diagnostic"] }
+   ],
+   "why": "Among all US women, breast cancer is the second most common cancer and the second most common cause of cancer death.",
+   "cost": "Both screening and guideline-concordant treatment are essential for reducing breast cancer mortality, highlighting the importance of timely and effective treatment at the earliest stage of diagnosis.",
+   "epic": ["MAMMO", "MAMMOGRAM", "MAMMOGRAPHY", "BREAST CANCER SCREEN", "BREAST CANCER SCREENING"],
+   "history": [
+    { "name": "bilateral mastectomy", "types": ["Procedure", "Condition"], "codes": ["http://snomed.info/sct|27865001", "http://snomed.info/sct|52314009", "http://snomed.info/sct|456903003", "http://hl7.org/fhir/sid/icd-10-cm|Z90.13"], "text": ["bilateral mastectom*", "absence bilateral breasts", "double mastectom*"] }
+   ]
+  },
+  {
+   "id": "lung",
+   "name": "Lung cancer screening (low-dose CT)",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/lung-cancer-screening",
+   "published": "2021-03-09",
+   "ages": [50, 80],
+   "riskBased": "20 pack-year smoking history and currently smoke or have quit within the past 15 years",
+   "doneBy": [
+    { "name": "low-dose CT of the chest", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://snomed.info/sct|16334891000119106", "http://www.ama-assn.org/go/cpt|71271", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0297"], "text": ["ldct", "low dose ct chest", "low dose ct thorax", "low dose ct lung", "ct lung screen*", "ct chest screen*"], "years": 1, "not": ["abdomen", "pelvis", "renal", "decision"] }
+   ],
+   "why": "Lung cancer is the second most common cancer and the leading cause of cancer death in the US.",
+   "cost": "Early-stage lung cancer has a better prognosis and is more amenable to treatment.",
+   "epic": ["LUNG CANCER", "LDCT"]
+  },
+  {
+   "id": "prostate",
+   "name": "Prostate cancer screening (PSA)",
+   "grade": "C",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/prostate-cancer-screening",
+   "published": "2018-05-08",
+   "ages": [55, 69],
+   "sex": "male",
+   "doneBy": [
+    { "name": "PSA test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|2857-1", "http://loinc.org|83112-3", "http://loinc.org|35741-8", "http://www.ama-assn.org/go/cpt|84153", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0103"], "text": ["psa", "prostate specific"], "years": null }
+   ],
+   "why": "For men aged 55 to 69 years, the decision to undergo periodic prostate-specific antigen (PSA)-based screening for prostate cancer should be an individual one.",
+   "cost": "The goal of screening for prostate cancer is to identify high-risk, localized prostate cancer that can be successfully treated, thereby preventing the morbidity and mortality associated with advanced or metastatic prostate cancer.",
+   "epic": ["PSA SCREEN", "PSA SCREENING", "PROSTATE CANCER SCREEN", "PROSTATE CANCER SCREENING"]
+  },
+  {
+   "id": "aaa",
+   "name": "Abdominal aortic aneurysm screening (ultrasound)",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/abdominal-aortic-aneurysm-screening",
+   "published": "2019-12-10",
+   "ages": [65, 75],
+   "sex": "male",
+   "riskBased": "ever smoked",
+   "doneBy": [
+    { "name": "abdominal aorta ultrasound", "types": ["Procedure", "DiagnosticReport"], "codes": ["http://www.ama-assn.org/go/cpt|76706", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets|G0389"], "text": ["aaa screen*", "aort* ultrasound", "us aort*", "aort* duplex"], "years": null, "not": ["root", "valve", "echo*", "cardiac", "heart"] }
+   ],
+   "why": "The USPSTF recommends 1-time screening for abdominal aortic aneurysm (AAA) with ultrasonography in men aged 65 to 75 years who have ever smoked.",
+   "cost": "Most AAAs are asymptomatic until they rupture.",
+   "epic": ["AAA", "AORTIC ANEURYSM"]
+  },
+  {
+   "id": "hepatitis-c",
+   "name": "Hepatitis C screening",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/hepatitis-c-screening",
+   "published": "2020-03-02",
+   "ages": [18, 79],
+   "doneBy": [
+    { "name": "hepatitis C antibody test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|13955-0", "http://loinc.org|16128-1", "http://loinc.org|40726-2", "http://www.ama-assn.org/go/cpt|86803"], "text": ["hcv ab", "hcv antibod*", "hepatitis c ab", "hepatitis c antibod*", "hepatitis c virus ab", "hep c ab"], "years": null }
+   ],
+   "why": "Hepatitis C virus (HCV) is the most common chronic blood-borne pathogen in the US and a leading cause of complications from chronic liver disease.",
+   "cost": "The purpose of antiviral treatment regimens for HCV infection is to prevent long-term health complications of chronic HCV infection (eg, cirrhosis, liver failure, and hepatocellular carcinoma).",
+   "epic": ["HEP C SCREEN", "HEP C SCREENING", "HEPATITIS C SCREEN", "HEPATITIS C SCREENING", "HCV SCREEN", "HCV SCREENING"]
+  },
+  {
+   "id": "hiv",
+   "name": "HIV screening",
+   "grade": "A",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/human-immunodeficiency-virus-hiv-infection-screening",
+   "published": "2019-06-11",
+   "ages": [15, 65],
+   "doneBy": [
+    { "name": "HIV test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|56888-1", "http://loinc.org|7917-8", "http://loinc.org|31201-7", "http://loinc.org|89365-1", "http://loinc.org|80387-4", "http://www.ama-assn.org/go/cpt|87389"], "text": ["hiv ab", "hiv ag", "hiv antibod*", "hiv antigen*"], "years": null, "not": ["genotyp*", "resistance", "prep", "vaccin*"] }
+   ],
+   "why": "Approximately 15% of persons living with HIV are unaware of their infection.",
+   "cost": "Early initiation of ART and other interventions effectively reduce the risk of clinical progression to AIDS, AIDS-defining clinical events, and mortality.",
+   "epic": ["HIV SCREEN", "HIV SCREENING"]
+  },
+  {
+   "id": "diabetes",
+   "name": "Prediabetes and type 2 diabetes screening",
+   "grade": "B",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/screening-for-prediabetes-and-type-2-diabetes",
+   "published": "2021-08-24",
+   "ages": [35, 70],
+   "riskBased": "overweight or obesity",
+   "doneBy": [
+    { "name": "A1c", "types": ["Observation", "DiagnosticReport"], "codes": ["http://loinc.org|4548-4", "http://loinc.org|17856-6", "http://loinc.org|4549-2"], "text": ["a1c", "hba1c"], "years": 3 },
+    { "name": "fasting glucose", "types": ["Observation", "DiagnosticReport"], "codes": ["http://loinc.org|1558-6"], "text": ["fasting glucose"], "years": 3, "not": ["urine"] }
+   ],
+   "why": "Screening asymptomatic adults for prediabetes and type 2 diabetes may allow earlier detection, diagnosis, and treatment, with the ultimate goal of improving health outcomes.",
+   "cost": "Diabetes is the leading cause of kidney failure and new cases of blindness among adults in the US.",
+   "epic": ["GLUCOSE OR A1C SCREENING", "DIABETES SCREENING", "DIABETES SCREEN"]
+  },
+  {
+   "id": "blood-pressure",
+   "name": "High blood pressure screening (ages 18 to 39)",
+   "grade": "A",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/hypertension-in-adults-screening",
+   "published": "2021-04-27",
+   "ages": [18, 39],
+   "doneBy": [
+    { "name": "clinic blood pressure reading", "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 3 }
+   ],
+   "why": "Hypertension is a prevalent condition, affects approximately 45% of the adult US population, and is the most commonly diagnosed condition at outpatient office visits.",
+   "cost": "Hypertension is a major contributing risk factor for heart failure, myocardial infarction, stroke, and chronic kidney disease.",
+   "epic": ["BLOOD PRESSURE SCREEN", "BLOOD PRESSURE SCREENING", "HYPERTENSION SCREEN", "HYPERTENSION SCREENING"]
+  },
+  {
+   "id": "blood-pressure-40",
+   "name": "High blood pressure screening (age 40 and over)",
+   "grade": "A",
+   "source": "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation/hypertension-in-adults-screening",
+   "published": "2021-04-27",
+   "ages": [40, 120],
+   "doneBy": [
+    { "name": "clinic blood pressure reading", "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 1 }
+   ],
+   "why": "Hypertension is a prevalent condition, affects approximately 45% of the adult US population, and is the most commonly diagnosed condition at outpatient office visits.",
+   "cost": "Hypertension is a major contributing risk factor for heart failure, myocardial infarction, stroke, and chronic kidney disease.",
+   "epic": ["BLOOD PRESSURE SCREEN", "BLOOD PRESSURE SCREENING", "HYPERTENSION SCREEN", "HYPERTENSION SCREENING"]
+  }
+ ],
+ "_text": "text: any one phrase matches when each of its words appears as a whole word in the record's name (lower case, punctuation as spaces; a trailing * matches a word prefix); not: phrases that rule a name out, besides the evaluator's own list of order, refusal and conversation words (src/screenings.ts NOT_DONE). Codes are matched exactly and ignore text and not. A word with capitals (FIT) must appear in those capitals."
+}

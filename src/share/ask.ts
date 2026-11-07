@@ -34,8 +34,11 @@ export function instructions(vaccines: boolean): string {
       if (/^1\. /.test(l))
         return `${bold(l)} Use \`search_records\` (type, text matched against names, since, until, limit; newest first). Search by name, e.g. "LDL" or a drug name. Use \`read_record\` to resolve references, e.g. a MedicationStatement's Medication for the drug name, or to read a note's full text.`;
       if (/^6\. /.test(l)) return `${bold(l)} ${APPLE}`;
-      if (/^7\. /.test(l) && !vaccines)
-        return `${bold(l)} This share has no schedule check: list the vaccine doses in the records, with dates, and say vaccinations are listed without a schedule check. Never judge the schedule yourself.`;
+      // health_maintenance reads reminders and the whole record: not offered to a share.
+      if (/^7\. /.test(l))
+        return vaccines
+          ? `${bold(l)} Call \`vaccine_gaps\`; never judge the schedule yourself. Report its schedule edition, statuses, records used, unmatched and possible-duplicate records.`
+          : `${bold(l)} This share has no schedule check: list the vaccine doses in the records, with dates, and say vaccinations are listed without a schedule check. Never judge the schedule yourself.`;
       return l.replaceAll(' (optional `asOf`)', '').replaceAll('fhir_search', 'search_records').replaceAll('fhir_read', 'read_record');
     })
     .join('\n')

@@ -13,7 +13,7 @@ export type Scoped = { patient: Patient; resources: Resource[]; support: Resourc
 // Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
 const NEVER = new Set([
   'Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person',
-  'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
+  'Basic', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
 ]);
 // FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
 export const PATIENT_COMPARTMENT = [

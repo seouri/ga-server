@@ -32,5 +32,5 @@ export function chatInstructions(): string {
     })
     .join('\n')
     .trim();
-  return `${steps}\n\nImporting a document:\n${extract}\n\nCreating a share or enabling hospital record types returns a preview: show it to the user and call again with its \`confirm\` code only after the user says yes.`;
+  return `${steps}\n\nImporting a document:\n${extract}\n\nCreating a share, enabling hospital record types or recording a follow-up (\`record_followup\`) returns a preview: show it to the user and call again with its \`confirm\` code only after the user says yes.`;
 }
