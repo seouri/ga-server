@@ -12,7 +12,7 @@ import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
-import { noteText, snippet } from './notes.ts';
+import { messageText, noteText, snippet } from './notes.ts';
 import { addDays } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
@@ -196,7 +196,7 @@ export function followUpItems(items: Item[], asOf: string): ReviewItem[] {
 export function noteItems(arrived: Resource[]): ReviewItem[] {
   return arrived.flatMap((r): ReviewItem[] => {
     const isMsg = r.resourceType === 'Communication';
-    const body = isMsg ? r.payload?.map((p) => p.contentString).filter(Boolean).join('\n') : r.resourceType === 'DocumentReference' ? noteText(r) : undefined;
+    const body = isMsg ? messageText(r) : r.resourceType === 'DocumentReference' ? noteText(r) : undefined;
     if (!body) return [];
     const date = (isMsg ? r.sent ?? r.received : r.resourceType === 'DocumentReference' ? r.date : undefined)?.slice(0, 10);
     const title = isMsg ? `Message${r.sender?.display ? ` from ${r.sender.display}` : ''}` : concept((r as { type?: CodeableConcept }).type) ?? 'Clinical note';

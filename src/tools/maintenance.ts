@@ -8,7 +8,7 @@ import { validDay } from '../labs.ts';
 import { CONFIRM_ON_PAGE, preview, previewLink, takeConfirmed } from '../confirm.ts';
 import { healthMaintenance, REMINDER } from '../maintenance.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
-import { noteText } from '../notes.ts';
+import { messageText, noteText } from '../notes.ts';
 
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(validDay, 'not a calendar date');
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -87,7 +87,7 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
         const [type, id] = a.documentRef.split('/') as ['DocumentReference' | 'Communication', string];
         const doc = await client.readResource(type, id, { cache: 'no-cache' }).catch(() => undefined) as DocumentReference | Communication | undefined;
         if (doc?.subject?.reference !== subject.reference) throw new GaError(`${a.documentRef} is not a document of this patient`);
-        const body = doc.resourceType === 'Communication' ? doc.payload?.map((p) => p.contentString).filter(Boolean).join('\n') : noteText(doc);
+        const body = doc.resourceType === 'Communication' ? messageText(doc) : noteText(doc);
         if (!body) throw new GaError(`${a.documentRef} has no note text to check the quote against`);
         if (!norm(body).includes(norm(a.quote))) throw new GaError('the quote does not appear in that document');
         const view = { topic: a.topic, due: a.due, quote: a.quote, documentRef: a.documentRef };
