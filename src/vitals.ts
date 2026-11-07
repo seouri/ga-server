@@ -5,7 +5,7 @@ import { TAG } from './identity.ts';
 import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
 
 // Apple's per-day (and per-night) summaries are stored with these words in code.text (src/apple/daily.ts).
-const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
+export const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
 // Names that have such a summary; weight, BP, SpO2 and clinic vitals are readings only.
 const HAS_DAILY = /heart|respirat|step|distance|flight|sleep|activ|ring/i;
 
