@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport } from './share/scope.ts';
 
@@ -63,10 +63,7 @@ const idKey = (i: Identifier) => `${i.system}|${i.value}`;
 const idList = (r: R): Identifier[] => [r.identifier ?? []].flat(); // singular on SINGULAR_ID types
 const isApple = (r: R) => idList(r).some((i) => i.system === APPLE);
 const hasNonApple = (r: R) => idList(r).some((i) => i.system !== APPLE);
-const canon = (x: unknown) =>
-  JSON.stringify(x, (_k, v) =>
-    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
-  );
+const canon = (x: unknown) => JSON.stringify(x, sorted);
 
 // Equality ignores id, meta, our bookkeeping extensions, identifiers and GA-added codings; identifiers only need
 // incoming ⊆ existing, because existing accumulates extra identifiers from merges.

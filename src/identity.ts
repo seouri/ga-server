@@ -54,7 +54,8 @@ export function sameDay(a: string, b: string): boolean {
   return new Date(t + mins * 60_000).toISOString().slice(0, 10) === a.slice(0, 10);
 }
 
-const sorted = (_k: string, v: unknown) =>
+// JSON.stringify replacer: object keys in sorted order, so equal content stringifies equally.
+export const sorted = (_k: string, v: unknown) =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
 
 // Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
