@@ -45,6 +45,10 @@ try {
       const cfg = loadConfig();
       console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz })));
     }
+  } else if (process.argv[2] === 'migrate' && process.argv.slice(3).every((a) => a === '--delete-old' || a === '--accept')) {
+    const { deleteOld, migrate } = await import('./migrate.ts');
+    const accept = process.argv.includes('--accept');
+    await (process.argv.includes('--delete-old') ? deleteOld({ accept }) : migrate({ accept }));
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
@@ -65,7 +69,7 @@ try {
       console.log(`disconnected ${id}`);
     }
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

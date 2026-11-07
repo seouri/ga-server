@@ -58,3 +58,15 @@ Then delete the repo folder, which includes `.ga/` with your keys and tokens. Al
 ## Admin app
 
 The FHIR server's admin app runs at http://localhost:3000. Log in as `admin@example.com` with the `adminPassword` from `.ga/config.json`: `ga setup` replaces the seeded default with a random password and stores it there (mode 0600). Re-running setup reuses it. **Back up `.ga/config.json`**: it holds the only copy of the admin password and client secret, and losing it locks you out of the admin account.
+
+## GA's own project
+
+GA keeps your record in its own Medplum project, `Guardian Angel`. Its login (`ga-server-cli`) is an ordinary member limited by an access policy to health records: it cannot read logins, secrets or other projects. The admin account is only for the admin app; choose the `Guardian Angel` project there to see your record.
+
+Installs set up before this change kept everything in Medplum's Super Admin project, where every login is a super admin; `ga setup` then stops with "run ga migrate". To move:
+
+1. Back up first (above), and stop the services that write to GA: `docker compose stop ga-gateway ga-sync`. Then `ga migrate` re-imports from your original files (C-CDA, EHI and Apple Health folders, which must still be where you imported them from; PDF imports come from the copies GA stored) into the new project, copies the share and chat-app access logs, compares counts per record type and the vaccine result, and only then switches `.ga/config.json` (the old one is kept as `.ga/config.super-admin.json`). Share links keep working. On a mismatch it stops without switching; fix what it names and re-run (re-running is safe). Differences that come from today's importers (for example older duplicates now merged) can be accepted after reviewing the table: `ga migrate --accept` switches anyway, and `ga migrate --delete-old --accept` deletes despite them. A PDF whose results all merged into hospital records is not re-stored: import it again (`/ga-import <file>`) after switching.
+2. Start them again (`docker compose start ga-gateway ga-sync`) and check GA.
+3. `ga migrate --delete-old` deletes the old copy and the old login.
+
+Hospital portal records are not migrated: `ga migrate` stops if there are any.

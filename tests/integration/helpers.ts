@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { MedplumClient } from '@medplum/core';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { MedplumClient } from '@medplum/core';
+import { getClient, loadConfig } from '../../src/config.ts';
 import type { Bundle, Patient } from '@medplum/fhirtypes';
 
 // Tests must never write onto the real Patient (identifier ...|self).
@@ -22,4 +26,25 @@ export async function cleanupTestPatient(client: MedplumClient, patientId: strin
     for (const r of mine) await client.deleteResource(r.resourceType, r.id as string);
   }
   await client.deleteResource('Patient', patientId);
+}
+
+// A temp GA_CONFIG holding only the admin login and URLs of the running install, for tests that run ga setup against a
+// throwaway Medplum project; the user's own config is read, never written. session: one admin login in the Super Admin
+// project (found through the user's GA client) for housekeeping on throwaway projects only. Medplum allows 5 password
+// logins a minute.
+export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string; session: MedplumClient }> {
+  const real = loadConfig();
+  const me = (await (await getClient(real)).get('auth/me')) as { project: { id: string } };
+  const session = new MedplumClient({ baseUrl: real.baseUrl });
+  const { code } = await session.startLogin({ email: 'admin@example.com', password: real.adminPassword as string, projectId: me.project.id });
+  await session.processCode(code as string);
+  const dir = mkdtempSync(join(tmpdir(), 'ga-test-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify({ baseUrl: real.baseUrl, converterUrl: real.converterUrl, adminPassword: real.adminPassword }), { mode: 0o600 });
+  process.env.GA_CONFIG = path;
+  return { dir, baseUrl: real.baseUrl, session };
+}
+
+export async function expungeProject(session: MedplumClient, projectId: string): Promise<void> {
+  await session.post(`${session.fhirUrl('Project', projectId, '$expunge')}?everything=true`, {});
 }
