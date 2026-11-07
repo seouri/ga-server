@@ -50,8 +50,7 @@
    },
    {
     "system": "http://loinc.org",
-    "code": "2089-1",
-    "label": "direct"
+    "code": "2089-1"
    }
   ]
  },
@@ -107,12 +106,12 @@
    {
     "system": "http://loinc.org",
     "code": "62238-1",
-    "label": "race-free"
+    "label": "CKD-EPI"
    },
    {
     "system": "http://loinc.org",
     "code": "98979-8",
-    "label": "race-free"
+    "label": "race-free (CKD-EPI 2021)"
    },
    {
     "system": "http://loinc.org",
@@ -126,7 +125,8 @@
    },
    {
     "system": "http://loinc.org",
-    "code": "33914-3"
+    "code": "33914-3",
+    "label": "MDRD"
    }
   ]
  },
