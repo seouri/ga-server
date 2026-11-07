@@ -76,6 +76,7 @@ services:
       MEDPLUM_SUPPORT_EMAIL: '"GA" <ga@localhost>'
       MEDPLUM_MAX_JSON_SIZE: '1mb'
       MEDPLUM_MAX_BATCH_SIZE: '50mb'
+      MEDPLUM_DEFAULT_FHIR_QUOTA: '10000000' # per login per minute; Medplum's 50,000 stops large imports by GA's ordinary (non-super-admin) login
       MEDPLUM_VM_CONTEXT_BOTS_ENABLED: 'false'
       MEDPLUM_ALLOWED_ORIGINS: 'http://localhost:3000'
       MEDPLUM_INTROSPECTION_ENABLED: 'true'
