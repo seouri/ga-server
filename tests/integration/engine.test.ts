@@ -606,7 +606,7 @@ test('smart with a real newer date updates', async () => {
   expect(found.extension?.find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime).toBe('2026-10-01T00:00:00Z');
 });
 
-test('unchanged re-import only advances last-seen', async () => {
+test('unchanged re-import only advances last-seen, and only on the problem', async () => {
   const o = uid('o');
   const c = uid('c');
   // No meta.lastUpdated: a different sync date each run must not count as an update.
@@ -625,13 +625,14 @@ test('unchanged re-import only advances last-seen', async () => {
     ] as (Resource & { extension?: { url: string; valueDateTime?: string }[] })[];
   const before = await fetch();
   const second = await run(T2, T2);
-  expect(second).toMatchObject({ created: 0, updated: 0, merged: 0, seen: 2 });
+  expect(second).toMatchObject({ created: 0, updated: 0, merged: 0, seen: 1 });
   const zero = { created: 0, linked: 0, updated: 0, flagged: 0 };
-  expect(second.byType).toEqual({ Observation: { ...zero, seen: 1 }, Condition: { ...zero, seen: 1 } });
+  expect(second.byType).toEqual({ Observation: { ...zero, seen: 0 }, Condition: { ...zero, seen: 1 } });
   const after = await fetch();
   expect(after).toHaveLength(2);
   const strip = ({ meta: _m, extension, ...r }: Resource & { extension?: { url: string }[] }) => ({ ...r, extension: extension?.filter((e) => e.url !== LAST_SEEN) });
-  for (const r of after) expect(r.extension?.find((e) => e.url === LAST_SEEN)?.valueDateTime).toBe(T2);
+  for (const r of after) expect(r.extension?.find((e) => e.url === LAST_SEEN)?.valueDateTime).toBe(r.resourceType === 'Condition' ? T2 : undefined);
+  expect(after[0].meta?.versionId).toBe(before[0].meta?.versionId); // the lab is not rewritten
   expect(after.map(strip)).toEqual(before.map(strip));
   // A third run at the same time writes nothing.
   expect(await run(T2, T2)).toMatchObject({ created: 0, updated: 0, seen: 0 });
@@ -841,10 +842,10 @@ test('arrival survives update, merge, skip and possible-duplicate', async () => 
 });
 
 test('arrival survives a last-seen bump and a fill-only merge', async () => {
-  const o = uid('o');
-  const batch = [{ ...chol(o, 170, '2026-02-03'), identifier: [{ system: SMART_SYS, value: `Observation/${o}` }] } as Resource];
+  const c = uid('c');
+  const batch = [{ ...problem([{ system: SMART_SYS, value: `Condition/${c}` }], 'active'), id: c } as Resource];
   const run = (at: string) => importResources(client, batch, smartSrc(at, { seenAt: at, fillOnly: () => true }), pid, 'h');
-  const arrival = async () => arrivedAt((await client.searchResources('Observation', { identifier: `${SMART_SYS}|Observation/${o}` }, { cache: 'no-cache' }))[0]);
+  const arrival = async () => arrivedAt((await client.searchResources('Condition', { identifier: `${SMART_SYS}|Condition/${c}` }, { cache: 'no-cache' }))[0]);
   await run('2026-11-04T00:00:00Z');
   const first = await arrival();
   expect(first).toBeDefined();

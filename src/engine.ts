@@ -366,6 +366,8 @@ export async function importResources(
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
     if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };
     const incoming = stamp(r, source, ident) as R;
+    // Last-seen goes only on a record already linked to this source: on any other it would read "no longer returned".
+    const carries = (ex: R) => idList(ex).some((i) => idKey(i) === idKey(ident));
     delete incoming.id;
     const type = incoming.resourceType;
     // Identity and matching use the record as the source sent it; what is written carries GA's coding.
@@ -406,7 +408,7 @@ export async function importResources(
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
     const fillOnto = async (ex: R): Promise<R> => {
       if (personEdited(ex)) {
-        await keep(ex, false);
+        if (carries(ex)) await keep(ex, false);
         report.skipped++;
         return ex;
       }
@@ -443,7 +445,8 @@ export async function importResources(
         } else if (d === 'conflict') {
           // The tag and last-seen in one write: a person's edit must not make a portal medication read "may have been stopped".
           const tagged = (hasTag(existing, 'source-conflict') ? existing : withTag(existing, 'source-conflict')) as R;
-          await keep(tagged, tagged !== existing);
+          if (carries(existing)) await keep(tagged, tagged !== existing);
+          else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (d === 'update') {
