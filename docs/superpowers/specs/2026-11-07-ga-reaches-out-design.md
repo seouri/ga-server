@@ -28,7 +28,7 @@ Spike these before planning the adapter in detail; the answers can change the se
 1. **Self-message notifications.** If the Mac's Messages is signed in with the owner's own Apple ID and GA sends to the owner's own number, does the iPhone show a notification? If not, the fallback is a separate Apple ID for GA signed into Messages on the GA Mac (GA then appears as its own contact, which is nicer anyway), and the owner decides whether that conflict with their own Messages use on that Mac is acceptable. Bring the result to the user before building the adapter.
 2. **Sending:** AppleScript / `osascript` to Messages (`send ... to buddy/participant`) works from a background process, and which macOS permissions (Automation) it prompts for.
 3. **Receiving:** reading new incoming messages from `~/Library/Messages/chat.db` (needs Full Disk Access for the process), including the `attributedBody` text format on current macOS.
-4. **Where it runs:** Messages lives on the host, not in Docker, so the adapter (and the loop around it) is a host process, kept alive by launchd, reaching Medplum at its local address as the CLI does.
+4. **Where it runs [call, from code reading]:** Messages lives on the host, not in Docker, so the iMessage adapter is a small host process kept alive by launchd. The core (what to send, replies, tools) runs inside `ga-gateway`, because confirm links are held in the gateway's memory (`src/confirm.ts`) and only the gateway can serve them; the gateway also already has the AI provider settings and TZ. The host bridge relays: it posts incoming texts to the gateway on `127.0.0.1:8110` with a secret token and sends back what the gateway queues.
 
 ## Part 1: GA reaches you
 
