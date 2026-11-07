@@ -1,10 +1,9 @@
-// Share tools for chat apps (remote servers only). Creating a share is two steps: preview, then confirm with the same arguments.
-import { isDeepStrictEqual } from 'node:util';
+// Share tools for chat apps (remote servers only). Creating a share is two steps: a preview, then the person confirms on the gateway page it links to.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
-import { preview, takeConfirmed } from '../confirm.ts';
+import { CONFIRM_ON_PAGE, previewLink } from '../confirm.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { readLog } from '../share/audit.ts';
 import { scopeWords } from '../share/page.ts';
@@ -18,9 +17,8 @@ const CREATE = {
   until: z.string().optional(),
   expires: z.string().optional(),
   questionsPerDay: z.number().int().min(0).optional(),
-  confirm: z.string().optional(),
 };
-type Args = { audience: 'doctor' | 'family'; label: string; scope?: string[] | 'all'; since?: string; until?: string; expires?: string; questionsPerDay?: number; confirm?: string };
+type Args = { audience: 'doctor' | 'family'; label: string; scope?: string[] | 'all'; since?: string; until?: string; expires?: string; questionsPerDay?: number };
 
 export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shareDir()): void {
   const { client, patientId, remote } = deps;
@@ -30,42 +28,38 @@ export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shar
     'share_create',
     {
       description:
-        'Create a share link to the health record for a doctor or family member. Two steps: call without confirm to get a preview (audience, scope, dates, expiry) ' +
-        'and a confirm code; show it to the user, and only after they agree call again with the same arguments plus confirm. scope: "all" or groups ' +
+        `Create a share link to the health record for a doctor or family member. ${CONFIRM_ON_PAGE} The page shows the share link once confirmed; ` +
+        'then share_list shows the new share. scope: "all" or groups ' +
         'labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple. since/until: 12m, 2y or YYYY-MM-DD. ' +
         'expires: 7d, 12h, YYYY-MM-DD or never (doctor default 7d).',
       inputSchema: CREATE,
       annotations: { destructiveHint: true },
     },
-    async (a: Args) => {
+    async (rest: Args) => {
       try {
-        const { confirm, ...rest } = a;
-        let now = new Date();
+        const now = new Date();
         const groups = rest.scope === undefined ? undefined : parseGroups(Array.isArray(rest.scope) ? rest.scope.join(',') : rest.scope);
         const since = rest.since === undefined ? undefined : parseSince(rest.since, now);
         const until = rest.until === undefined ? undefined : parseSince(rest.until, now);
         const expires = parseExpiry(rest.expires ?? (rest.audience === 'doctor' ? '7d' : 'never'), now) ?? 'never'; // also rejects a bad value
-        if (!confirm) {
-          const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? defaultGroups(rest.audience) }), since, until, expires };
-          return text({ ...view, ...preview('share', { args: rest, now: now.toISOString() }) });
-        }
-        const prev = takeConfirmed<{ args: typeof rest; now: string }>('share', confirm);
-        if (!isDeepStrictEqual(prev.args, rest)) throw new GaError('arguments changed since the preview; ask for a new preview');
-        now = new Date(prev.now); // create with the previewed clock so the expiry matches the preview exactly
-        const { share, token } = createShare(dir, {
-          audience: rest.audience,
-          label: rest.label,
-          ...(groups && { groups }),
-          ...(since && { since }),
-          ...(until && { until }),
-          ...(rest.expires !== undefined && { expires: rest.expires }),
-          ...(rest.questionsPerDay !== undefined && { questionsPerDay: rest.questionsPerDay }),
-          patientId,
-          baseUrl: remote.publicUrl,
-        }, now);
-        const link = `${remote.publicUrl}/s/${token}`;
-        const png = (await QRCode.toDataURL(link)).replace(/^data:image\/png;base64,/, '');
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ id: share.id, link, scope: scopeWords(share), expires: expiryWords(share) }) }, { type: 'image' as const, data: png, mimeType: 'image/png' }] };
+        const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? defaultGroups(rest.audience) }), since, until, expires };
+        // Created with the previewed clock so the expiry matches the preview exactly.
+        const run = async () => {
+          const { share, token } = createShare(dir, {
+            audience: rest.audience,
+            label: rest.label,
+            ...(groups && { groups }),
+            ...(since && { since }),
+            ...(until && { until }),
+            ...(rest.expires !== undefined && { expires: rest.expires }),
+            ...(rest.questionsPerDay !== undefined && { questionsPerDay: rest.questionsPerDay }),
+            patientId,
+            baseUrl: remote.publicUrl,
+          }, now);
+          const link = `${remote.publicUrl}/s/${token}`;
+          return { done: `Share "${share.label}" created: ${scopeWords(share)}, expires ${expiryWords(share)}.`, link, qr: await QRCode.toDataURL(link) };
+        };
+        return text({ ...view, ...previewLink(remote.publicUrl, { title: 'Create a share link', view, run }) });
       } catch (e) {
         return fail(e);
       }

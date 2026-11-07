@@ -15,7 +15,9 @@ describe('chatInstructions', () => {
     for (const n of ['hospital_status', 'hospital_connect', 'hospital_sync']) expect(t).toContain(n);
     expect(t).toContain('upload_link');
     expect(t).toContain('fileId');
-    expect(t).toContain('`confirm` code');
+    expect(t).toContain('`confirmUrl`');
+    expect(t).toContain('you cannot confirm it yourself');
+    expect(t).not.toContain('`confirm` code');
     expect(t).toContain('record_followup');
     expect(t).toContain('health_maintenance');
   });

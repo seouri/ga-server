@@ -14,6 +14,7 @@ import { enrollLink, ownerCookie } from '../src/gateway/passkey.ts';
 import { writeJson } from '../src/gateway/store.ts';
 import { newCalendarToken, revokeCalendar } from '../src/calendar.ts';
 import { newUpload, uploadPath } from '../src/gateway/uploads.ts';
+import { previewLink } from '../src/confirm.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const RESOURCE = `${PUBLIC}/mcp`;
@@ -260,6 +261,39 @@ test('upload links: passkey first, owner POST stores once, strangers store nothi
   // Used: refused, nothing more stored.
   expect((await post(cookie)).status).toBe(404);
   expect(readdirSync(join(dir, 'uploads'))).toEqual([fileId]);
+});
+
+test('confirm links: only the signed-in owner sees the preview and confirms; GET never uses the code', async () => {
+  await start();
+  writeJson(dir, 'passkeys.json', [{ id: 'AAAA', publicKey: 'AAAA', counter: 0 }]);
+  let runs = 0;
+  const { confirmUrl } = previewLink(PUBLIC, { title: 'Create a share link', view: { label: '<b>Mom</b>', scope: 'labs' }, run: async () => (runs++, { done: 'Share created.', link: `${PUBLIC}/s/tok` }) });
+  const path = new URL(confirmUrl).pathname;
+  const post = (cookie = '') => fetch(base + path, { method: 'POST', headers: { cookie }, body: '' });
+
+  expect((await fetch(`${base}/confirm/${'x'.repeat(43)}`)).status).toBe(404);
+  // A stranger (or the agent) gets the passkey page, and its POST runs nothing.
+  expect(await (await fetch(base + path)).text()).toContain('Sign in with passkey');
+  expect(await (await post()).text()).toContain('Sign in with passkey');
+  expect(runs).toBe(0);
+
+  passkeyOk = true;
+  const signed = await fetch(`${base}${path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  expect(await signed.json()).toEqual({ redirect: path });
+  const cookie = signed.headers.getSetCookie()[0].split(';')[0];
+  const page = await (await fetch(base + path, { headers: { cookie } })).text();
+  expect(page).toContain('&lt;b&gt;Mom&lt;/b&gt;');
+  expect(page).toContain(`<form method="post" action="${path}">`);
+  expect(runs).toBe(0);
+
+  const ok = await post(cookie);
+  expect(ok.status).toBe(200);
+  const done = await ok.text();
+  expect(done).toContain('Share created.');
+  expect(done).toContain(`${PUBLIC}/s/tok`);
+  expect(runs).toBe(1);
+  expect((await post(cookie)).status).toBe(404); // single use
+  expect(runs).toBe(1);
 });
 
 test('an upload over 2 GB is refused with 413 before the link is used', async () => {

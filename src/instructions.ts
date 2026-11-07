@@ -17,6 +17,7 @@ export function chatInstructions(): string {
     .slice(skill.search(/^0\. /m), skill.search(/^10\. /m))
     .split('\n')
     .map((l) => (/^0\. /.test(l) ? `${bold(l)} ${STEP0}` : /^6\. /.test(l) ? `${bold(l)} ${APPLE}` : l))
+    .map((l) => l.replace('show it, and call again with its `confirm` code only after the user says yes', 'show it and its `confirmUrl`: the user confirms on that page'))
     .join('\n')
     .trim();
   const extract = read('ga-import/extract.md')
@@ -32,5 +33,5 @@ export function chatInstructions(): string {
     })
     .join('\n')
     .trim();
-  return `${steps}\n\nImporting a document:\n${extract}\n\nCreating a share, enabling hospital record types or recording a follow-up (\`record_followup\`) returns a preview: show it to the user and call again with its \`confirm\` code only after the user says yes.`;
+  return `${steps}\n\nImporting a document:\n${extract}\n\nCreating a share, enabling hospital record types or recording a follow-up (\`record_followup\`) returns a preview and a \`confirmUrl\`: show both to the user. They review it and press Confirm on that page (signed in with their passkey); you cannot confirm it yourself, and never ask them to confirm something they did not ask for. Afterwards check the result: \`share_list\`, \`hospital_status\` or \`health_maintenance\`.`;
 }

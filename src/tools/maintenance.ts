@@ -4,7 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Basic, DocumentReference, Extension, Provenance } from '@medplum/fhirtypes';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
-import { preview, takeConfirmed } from '../confirm.ts';
+import { CONFIRM_ON_PAGE, preview, previewLink, takeConfirmed } from '../confirm.ts';
 import { healthMaintenance, REMINDER } from '../maintenance.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { noteText } from '../notes.ts';
@@ -64,17 +64,22 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
     {
       description:
         "Record a follow-up the doctor planned, found in a note in GA (a clinical note; MyChart messages are not accepted) (never inferred by you): topic (a health_maintenance topic, or a new name), due (YYYY-MM-DD), " +
-        'quote (the note\'s own words, which must appear in it), documentRef (DocumentReference/<id> of the note). Two steps: call without confirm to get a preview and a confirm code; ' +
-        'show it to the user, and only after they agree call again with the same arguments plus confirm. It then shows in health_maintenance as the doctor\'s plan, dated today.',
-      inputSchema: { topic: z.string().min(1).max(100), due: DAY, quote: z.string().min(1).max(500), documentRef: z.string().regex(/^DocumentReference\/[\w.-]+$/), confirm: z.string().optional() },
+        'quote (the note\'s own words, which must appear in it), documentRef (DocumentReference/<id> of the note). ' +
+        (remote
+          ? `${CONFIRM_ON_PAGE} `
+          : 'Two steps: call without confirm to get a preview and a confirm code; show it to the user, and only after they agree call again with the same arguments plus confirm. ') +
+        'It then shows in health_maintenance as the doctor\'s plan, dated today.',
+      inputSchema: { topic: z.string().min(1).max(100), due: DAY, quote: z.string().min(1).max(500), documentRef: z.string().regex(/^DocumentReference\/[\w.-]+$/), ...(!remote && { confirm: z.string().optional() }) },
       annotations: { destructiveHint: true },
     },
     async ({ confirm, ...a }) => {
+      const record = () =>
+        write('followup', a.topic, [{ url: 'urn:ga-server:ext:due', valueDate: a.due }, { url: 'urn:ga-server:ext:quote', valueString: a.quote }], `follow-up "${a.topic}" due ${a.due}, quoting ${a.documentRef}`, a.documentRef);
       try {
         if (confirm) {
           const prev = takeConfirmed<typeof a>('followup', confirm);
           if (JSON.stringify(prev) !== JSON.stringify(a)) throw new GaError('arguments changed since the preview; ask for a new preview');
-          await write('followup', a.topic, [{ url: 'urn:ga-server:ext:due', valueDate: a.due }, { url: 'urn:ga-server:ext:quote', valueString: a.quote }], `follow-up "${a.topic}" due ${a.due}, quoting ${a.documentRef}`, a.documentRef);
+          await record();
           return text({ recorded: 'followup', topic: a.topic, due: a.due });
         }
         const doc = await client.readResource('DocumentReference', a.documentRef.split('/')[1], { cache: 'no-cache' }).catch(() => undefined) as DocumentReference | undefined;
@@ -82,7 +87,10 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
         const body = noteText(doc);
         if (!body) throw new GaError(`${a.documentRef} has no note text to check the quote against`);
         if (!norm(body).includes(norm(a.quote))) throw new GaError('the quote does not appear in that document');
-        return text({ topic: a.topic, due: a.due, quote: a.quote, documentRef: a.documentRef, ...preview('followup', a) });
+        const view = { topic: a.topic, due: a.due, quote: a.quote, documentRef: a.documentRef };
+        if (!remote) return text({ ...view, ...preview('followup', a) });
+        const run = async () => (await record(), { done: `Follow-up "${a.topic}" due ${a.due} recorded.` });
+        return text({ ...view, ...previewLink(remote.publicUrl, { title: 'Record a follow-up from a note', view, run }) });
       } catch (e) {
         return fail(e);
       }

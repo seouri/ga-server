@@ -53,7 +53,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 
 - Relay what it says; never judge a guideline or add advice. Raise only items whose `nextMention` is absent or past. Grade C: "worth discussing with your doctor". `discuss` means GA cannot tell eligibility (sex or history): say so.
 - `postpone {topic, until?, dismiss?, reason?}`: when the person says not now, until a date, or never (dismiss is refused unless the item is low importance). No confirm. It writes a `Basic` (code system `urn:ga-server:reminder`: `not-now`, `postpone`, `dismiss`) with Provenance.
-- `record_followup {topic, due, quote, documentRef}`: a follow-up the doctor planned, found in a note, with the note's own words (it must appear in the document). Preview first; call again with `confirm` only after the user's yes. Writes a `Basic` `followup`. Never infer one.
+- `record_followup {topic, due, quote, documentRef}`: a follow-up the doctor planned, found in a note, with the note's own words (it must appear in the document). Preview first; over stdio call again with `confirm` only after the user's yes (chat apps: the user confirms on the preview's `confirmUrl` page). Writes a `Basic` `followup`. Never infer one.
 - `Basic` is never shared.
 
 ## Apple Health data
@@ -101,7 +101,7 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 
 Chat apps (claude.ai, ChatGPT, Gemini, Grok, Grok Bot, remote Claude Code) reach the same tools over `https://<host>/mcp` (`ga-gateway`, on only with `GA_PUBLIC_URL`; owner login with a passkey). Beyond the read tools they have: `hospital_connect`, `hospital_status`, `hospital_enable`, `hospital_sync`, `hospital_disconnect`; `share_create`, `share_list`, `share_log`, `share_revoke`; `upload_link`, `import_file`, `import_status`; `connected_apps`, `disconnect_app`.
 
-- Two-step confirm: `share_create` and `hospital_enable` first return a preview. Show it, wait for the user's yes, then call again. Never confirm on your own.
+- Two-step confirm: `share_create`, `hospital_enable` and `record_followup` return a preview and a `confirmUrl` (the gateway's owner-only `/confirm/<code>` page). Show both; the user reviews and presses Confirm there (passkey sign-in), then check the result (`share_list`, `hospital_status`, `health_maintenance`). You cannot confirm yourself; the code does nothing in a tool call.
 - Files: the chat cannot give GA a file. Call `upload_link`, tell the user to open it and pick the file, then `import_file` (exports, in the background; poll `import_status`). For a PDF or photo, read the file in the chat, extract by the rules above and call `ga_import` with `fileId` (from the upload) instead of `sourceFile`. ChatGPT direct file passing is off until `fileHosts` in `config/chat-apps.json` has a host.
 - Setup for the user: [docs/chat-apps.md](docs/chat-apps.md).
 

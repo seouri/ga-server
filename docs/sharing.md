@@ -25,7 +25,7 @@ ga share export <id> [--out dir]                        # <Name>_health-summary_
 
 **From Claude Code.** Ask in plain words, with or without `/ga`: "/ga share my labs and medications from the last 2 years with Dr. Kim for a week", "share everything with Mom, no expiry", "list my shares", "revoke the Dr. Kim share", "who opened Mom's link?". Claude shows the parsed audience, scope, dates and expiry and runs `ga share …` only after you confirm. The terminal QR code may not survive in the chat; ask for the link, open it on your phone, and tap **Show QR**.
 
-**From chat apps.** Connected apps ([GA from chat apps](chat-apps.md)) have `share_create`, `share_list`, `share_log` and `share_revoke`. `share_create` first returns a preview (audience, scope, dates, expiry); the share is made only after your yes.
+**From chat apps.** Connected apps ([GA from chat apps](chat-apps.md)) have `share_create`, `share_list`, `share_log` and `share_revoke`. `share_create` first returns a preview (audience, scope, dates, expiry) and a link to GA's confirm page; the share is made only when you press Confirm there (passkey sign-in), and the page shows its link and QR code.
 
 **Turning on links.** `docker compose up -d` starts `ga-gateway`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:
 

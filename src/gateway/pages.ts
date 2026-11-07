@@ -1,4 +1,4 @@
-// Gateway pages: owner sign-in, consent, passkey enrollment, file upload, hospital login return. Every interpolated value goes through esc;
+// Gateway pages: owner sign-in, consent, passkey enrollment, file upload, confirming a chat app's preview, hospital login return. Every interpolated value goes through esc;
 // the one script per page carries a nonce and calls only WebAuthn and this origin.
 import { doc, esc } from '../share/page.ts';
 
@@ -67,3 +67,18 @@ document.getElementById('go').addEventListener('click', async () => {
   }
 });
 </script>`);
+
+export const confirmInvalid = (): string => msg('Link not valid', 'This confirmation link is no longer valid. Ask your chat for a new preview.');
+
+// A plain form post: no script, and the SameSite=Lax owner cookie never rides a cross-site post.
+export const confirmPage = (title: string, view: Record<string, unknown>, path: string): string =>
+  doc(title, `<h1>${esc(title)}</h1><p>Your chat app asked for this. Confirm only if you asked for it.</p><dl>${Object.entries(view)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'string' ? v : JSON.stringify(v))}</dd>`)
+    .join('')}</dl>
+<form method="post" action="${esc(path)}"><button>Confirm</button></form>`);
+
+export const confirmDone = (r: { done: string; link?: string; qr?: string }): string =>
+  doc('Done', `<h1>${esc(r.done)}</h1>${r.link ? `<p><a href="${esc(r.link)}">${esc(r.link)}</a></p>` : ''}${r.qr ? `<p><img src="${esc(r.qr)}" alt="QR code of the link"></p>` : ''}<p>You can close this window and return to your chat.</p>`);
+
+export const confirmFailed = (why: string): string => msg('Not done', `That did not work: ${why}`);

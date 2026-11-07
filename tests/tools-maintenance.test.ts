@@ -3,10 +3,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MedplumClient } from '@medplum/core';
+import { takeConfirmPage } from '../src/confirm.ts';
 import { registerMaintenanceTools } from '../src/tools/maintenance.ts';
 
 const NOTE = 'Plan: repeat colonoscopy\nin 3 years, per Dr. X.';
-const setup = async () => {
+const setup = async (remote = true) => {
   const created: any[] = [];
   const doc = (subject: string) => ({ resourceType: 'DocumentReference', id: 'd1', subject: { reference: subject }, content: [{ attachment: { contentType: 'text/plain', data: Buffer.from(NOTE).toString('base64') } }] });
   const client = {
@@ -21,7 +22,7 @@ const setup = async () => {
     createResource: async (r: any) => { created.push(r); return { ...r, id: `id${created.length}` }; },
   } as unknown as MedplumClient;
   const server = new McpServer({ name: 't', version: '0' });
-  registerMaintenanceTools(server, { client, cfg: {} as never, patientId: 'p', remote: { publicUrl: 'u', clientName: 'chat app', log: async () => {} } });
+  registerMaintenanceTools(server, { client, cfg: {} as never, patientId: 'p', ...(remote && { remote: { publicUrl: 'https://x.example', clientName: 'chat app', log: async () => {} } }) });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const c = new Client({ name: 't', version: '0' });
   await Promise.all([server.connect(a), c.connect(b)]);
@@ -63,8 +64,8 @@ describe('postpone', () => {
 
 describe('record_followup', () => {
   const args = { topic: 'Colonoscopy', due: '2029-05-01', quote: 'REPEAT colonoscopy in 3  years', documentRef: 'DocumentReference/d1' };
-  it('previews first, writes only with the confirm code', async () => {
-    const { created, call } = await setup();
+  it('stdio: previews first, writes only with the confirm code', async () => {
+    const { created, call } = await setup(false);
     const p = await call('record_followup', args);
     expect(p.json.confirm).toBeTruthy();
     expect(created).toEqual([]);
@@ -77,6 +78,17 @@ describe('record_followup', () => {
     });
     expect(created[1]).toMatchObject({ resourceType: 'Provenance', entity: [{ what: { reference: 'DocumentReference/d1' } }] });
     expect((await call('record_followup', { ...args, confirm: p2.json.confirm })).error).toBe(true); // used
+  });
+  it('remote: the preview links to the confirm page; the agent cannot confirm, the page writes', async () => {
+    const { created, call } = await setup();
+    const p = await call('record_followup', args);
+    expect(p.json.confirm).toBeUndefined();
+    const code = p.json.confirmUrl.split('/').pop();
+    await call('record_followup', { ...args, confirm: code });
+    expect(created).toEqual([]);
+    expect((await takeConfirmPage(code)!.run()).done).toContain('recorded');
+    expect(created.map((x) => x.resourceType)).toEqual(['Basic', 'Provenance']);
+    expect(created[1].agent[0].who.display).toBe('chat app');
   });
   it('an impossible date fails validation cleanly', async () => {
     const { created, call } = await setup();
