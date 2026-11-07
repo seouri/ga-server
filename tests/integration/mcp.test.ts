@@ -337,7 +337,7 @@ describe('purpose-built read tools', () => {
     const o = (text: string, date: string, extra: Partial<Observation>): Observation =>
       ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 70, unit: 'kg' }, ...extra });
     const entry = [
-      o('Body weight', '2025-03-01', { category: cat('vital-signs') }),
+      o('Body weight', '2025-03-01', { category: cat('vital-signs'), meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] } }), // a clinic source; an untagged reading's setting is unknown
       o('Body weight', '2025-03-01T20:00:00Z', { category: cat('vital-signs'), meta: apple }),
       o('Steps, daily total (Apple Health)', '2025-03-01', { category: cat('activity'), meta: apple }),
       o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] } }),
@@ -400,9 +400,9 @@ describe('purpose-built read tools', () => {
       { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB', display: 'ambulatory' }, subject, period: { start: '2025-06-01T09:00:00Z' }, type: [{ text: 'Office visit' }] },
       { resourceType: 'Observation', status: 'final', subject, code: { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: 'LDL' }, effectiveDateTime: '2025-05-01', valueQuantity: { value: 111, unit: 'mg/dL' }, meta: tag('extracted-by-llm', 'src-pdf') },
       { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Systolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(120), meta: tag('src-ehi') },
-      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Diastolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(80) },
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Diastolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(80), meta: tag('src-ehi') },
       // found by its concept code, not its name
-      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Wt', coding: [{ system: 'http://loinc.org', code: '29463-7' }] }, effectiveDateTime: '2025-04-03', valueQuantity: { value: 71, unit: 'kg' } },
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Wt', coding: [{ system: 'http://loinc.org', code: '29463-7' }] }, effectiveDateTime: '2025-04-03', valueQuantity: { value: 71, unit: 'kg' }, meta: tag('src-ehi') },
       { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Blood pressure panel' }, effectiveDateTime: '2025-04-01', meta: tag('src-apple-health'),
         component: [{ code: { text: 'Systolic' }, valueQuantity: mmHg(118) }, { code: { text: 'Diastolic' }, valueQuantity: mmHg(76) }] },
     ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
