@@ -127,14 +127,18 @@ describe('concepts: one test under different names and codes', () => {
       lab('LDL-P', '2025-01-01'), lab('LDL calc', '2023-01-01', '13457-7'), lab('LDL direct', '2024-02-01', '18262-6'),
       lab('Hemoglobin A1c', '2024-01-01', '4548-4'), lab('hemoglobin  a1c', '2024-06-01'), // uncoded, one coded twin of its name and unit: joins
     ]);
-    expect(keyLabs(s).map((x) => [x.test, x.name, x.count, x.method])).toEqual([
+    expect(keyLabs(s).map((x) => [x.test, x.name, x.count, x.latest.method])).toEqual([
       ['A1c', 'hemoglobin  a1c', 2, undefined], ['Glucose', 'Glucose', 1, undefined], ['LDL', 'LDL direct', 2, 'direct'], ['TSH', 'TSH', 1, undefined],
     ]);
     expect(s.filter((x) => !x.test).map((x) => [x.name, x.count])).toEqual(expect.arrayContaining([['Glucose', 1], ['Glucose', 1], ['TSH receptor antibody', 1], ['Thyrotropin receptor Ab', 1], ['LDL-P', 1]]));
   });
   it('eGFR: race-free and race-based stay one trend, each value with its method', () => {
     const [e] = summarizeLabs([lab('eGFR', '2024-01-01', '98979-8'), lab('eGFR non-Afr. American', '2021-01-01', '48642-3')]);
-    expect(e).toMatchObject({ test: 'eGFR', count: 2, method: 'race-free (CKD-EPI 2021)', previous: { method: 'race-based' } });
+    expect(e).toMatchObject({ test: 'eGFR', count: 2, latest: { method: 'race-free (CKD-EPI 2021)' }, previous: { method: 'race-based' } });
+  });
+  it('a group coded only 13457-7 reports latest.method calculated', () => {
+    const [t] = summarizeLabs([lab('LDL', '2024-01-01', '13457-7'), lab('LDL', '2023-01-01', '13457-7')]);
+    expect(t).toMatchObject({ test: 'LDL', latest: { method: 'calculated' }, previous: { method: 'calculated' } });
   });
   it('a match only through a concept-suggested coding is flagged "possibly", and stays out of the concept and keyLabs', () => {
     const guess = mapped('LDL chol (est)', '2025-01-01', '13457-7', true);

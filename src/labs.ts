@@ -104,7 +104,7 @@ export function highLow(o: Observation): 'high' | 'low' | undefined {
 }
 
 export type LabTrend = {
-  test?: string; method?: string; name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string };
+  test?: string; name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string; method?: string };
   previous?: { date?: string; value?: string | number; method?: string }; change?: number; count: number; outOfRange: number; first?: string; source?: string; flags?: string[];
 };
 
@@ -137,8 +137,8 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     const a = num(l.o), b = p && num(p.o);
     const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
     return {
-      test: g.find((x) => x.m)?.m?.concept.name, method: l.m?.label, name: l.r.name, loinc: g.map((x) => (x.guess ? undefined : loincOf(x.o))).find(Boolean), unit: unitOf(l.o),
-      latest: { date: l.r.date, value: a ?? l.r.value, flag },
+      test: g.find((x) => x.m)?.m?.concept.name, name: l.r.name, loinc: g.map((x) => (x.guess ? undefined : loincOf(x.o))).find(Boolean), unit: unitOf(l.o),
+      latest: { date: l.r.date, value: a ?? l.r.value, flag, method: l.m?.label },
       previous: p && { date: p.r.date, value: b ?? p.r.value, method: p.m?.label },
       change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
       count: g.length, outOfRange: g.filter((x) => highLow(x.o)).length, first: g.findLast((x) => x.r.date)?.r.date, source: l.r.source, flags: l.r.flags,

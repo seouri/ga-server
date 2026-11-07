@@ -248,7 +248,7 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
         [undefined, 'LDL chol (est)', 1, ['read from a document by AI', 'possibly LDL (suggested mapping)']],
         ['LDL', 'LDL cholesterol', 2, ['read from a document by AI']],
       ]);
-      expect(ldl.rows[1].previous).toMatchObject({ date: '2021-01-01', method: 'calculated' });
+      expect(ldl.rows[1]).toMatchObject({ latest: { method: 'calculated' }, previous: { date: '2021-01-01', method: 'calculated' } });
       const rows = (await labs({ name: 'LDL cholesterol' })).rows; // a synonym resolves to the concept
       expect(rows.map((r: { name: string }) => r.name)).toEqual(['LDL chol (est)', 'LDL cholesterol', 'LOW DENSITY LIPOPROTEIN CHOL']);
       expect(rows[0].flags).toContain('possibly LDL (suggested mapping)');
@@ -467,6 +467,7 @@ describe('concept tools', () => {
     await seed('Zeta fix', 3);
     await seed('Zeta offline', 2);
     await seed('Zeta urine', 2, 'Urine');
+    await seed('Zeta none', 2);
     inproc = await connect(loincOk);
     offline = await connect((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
   }, 120_000);
@@ -549,6 +550,19 @@ describe('concept tools', () => {
     const ok = await inCall(inproc, 'map_concept', map('Zeta urine', { key: 'zeta urine|mg/dl|urine', confident: false }));
     expect(JSON.parse(ok.text)).toEqual({ changed: 2, status: 'suggested' });
     for (const o of await records('Zeta urine')) expect(ga(o).map((c) => c.code)).toEqual(['2345-7']);
+  });
+
+  test('a code validation says does not exist is refused with the reason, no map write and no Provenance; unmatched returns status unmatched', async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    const provs = async () => (await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' })).length;
+    const before = await provs();
+    const noSuch = await connect((async () => new Response(JSON.stringify([0, [], null, []]))) as unknown as typeof fetch);
+    const r = await inCall(noSuch, 'map_concept', map('Zeta none', { code: '99999-9' }));
+    expect(r).toMatchObject({ isError: true, text: expect.stringContaining('unknown LOINC code 99999-9') });
+    expect((await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' }))?.meta?.versionId).toBe(m?.meta?.versionId);
+    expect(await provs()).toBe(before);
+    expect((await records('Zeta none')).every((o) => !ga(o).length)).toBe(true);
+    expect(JSON.parse((await inCall(inproc, 'map_concept', map('Zeta none', { equivalence: 'unmatched' }))).text)).toMatchObject({ status: 'unmatched' });
   });
 
   test('malformed codes and oversized text are refused before any write', async () => {
