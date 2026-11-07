@@ -1,6 +1,7 @@
 // vitals: clinic and Apple Health vital signs as compact rows; Apple's daily summaries only on request (AGENTS.md "Apple Health data").
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
+import { codesFor, conceptNamed } from './concepts.ts';
 import { TAG } from './identity.ts';
 import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
 
@@ -34,15 +35,24 @@ export async function vitals(
   const q = new URLSearchParams([['subject', `Patient/${patientId}`], ['_sort', '-date,_id'], ['_count', '100']]);
   if (daily) q.append('_tag', `${TAG}|src-apple-health`);
   q.append('category', daily ? 'activity' : 'vital-signs');
-  if (name) q.append('code:text', name);
   dateRange(q, 'date', since, until);
-  const { rows } = await collect(client, 'Observation', q, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+  // A vital concept's name ("weight") also finds its member codes: a second search, Medplum can't OR code and code:text.
+  const c = name && !daily ? conceptNamed(name) : undefined;
+  const by: [string, string][] = name ? [['code:text', name]] : [];
+  if (c?.kind === 'vital') by.push(['code', codesFor(c.name).map((x) => `${x.system}|${x.code}`).join(',')]);
+  const found = await Promise.all((by.length ? by : [undefined]).map((p) => {
+    const s = new URLSearchParams(q);
+    if (p) s.append(...p);
+    return collect(client, 'Observation', s, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+  }));
+  const ids = new Set<string | undefined>();
+  const rows = found.length === 1 ? found[0].rows : found.flatMap((f) => f.rows).filter((r) => !ids.has(r.id) && !!ids.add(r.id)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
   // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".
   if (daily && !rows.length) {
     const r = await vitals(client, patientId, { name, since, until, limit });
     return { ...r, hint: `no daily summaries for this; these are readings${r.hint ? `; ${r.hint}` : ''}` };
   }
-  const out = fit(rows, limit);
+  const out = fit(rows, limit, found.some((f) => f.more));
   const longRange = !daily && (!name || HAS_DAILY.test(name)) ? 'use daily: true for long-range trends, or ' : '';
   return out.truncated ? { ...out, hint: `more results: ${longRange}narrow the dates or the name` } : out;
 }

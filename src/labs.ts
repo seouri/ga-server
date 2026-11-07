@@ -2,6 +2,9 @@
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@medplum/fhirtypes';
+import { CONCEPT_SRC } from './concept-apply.ts';
+import { termKey } from './conceptmap.ts';
+import { type Concept, codesFor, concepts, conceptNamed, conceptOf, LOINC } from './concepts.ts';
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
 
@@ -18,8 +21,19 @@ export function flagsOf(meta?: { tag?: { code?: string }[] }): string[] | undefi
   return f.length ? f : undefined;
 }
 
+// The record's concept and member label. suggested: only through a GA-added coding on a record tagged concept-suggested.
+export function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
+  const codings = o.code?.coding ?? [];
+  const unsure = o.meta?.tag?.some((t) => t.system === TAG && t.code === 'concept-suggested');
+  const sure = conceptOf(unsure ? codings.filter((c) => !c.extension?.some((e) => e.url === CONCEPT_SRC)) : codings);
+  const guess = !sure && unsure ? conceptOf(codings) : undefined;
+  return sure ?? (guess && { ...guess, suggested: true });
+}
+
 export function labRow(o: Observation): LabRow {
   const c = o.code?.coding?.[0];
+  const m = conceptMatch(o);
+  const flags = [...(flagsOf(o.meta) ?? []), ...(m?.suggested ? [`possibly ${m.concept.name} (suggested mapping)`] : [])];
   const r = o.referenceRange?.[0];
   const lo = qty(r?.low), hi = qty(r?.high);
   const range = r?.text ?? (lo && hi ? `${r?.low?.value}–${hi}` : lo ? `≥${lo}` : hi ? `≤${hi}` : undefined);
@@ -30,7 +44,7 @@ export function labRow(o: Observation): LabRow {
     range,
     interpretation: o.interpretation?.[0]?.coding?.[0]?.code ?? o.interpretation?.[0]?.text,
     source: o.meta?.source ? basename(o.meta.source) : undefined,
-    flags: flagsOf(o.meta),
+    flags: flags.length ? flags : undefined,
     id: o.id,
   };
 }
@@ -74,33 +88,8 @@ export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; tot
   return { rows: out, total: out.length, ...(truncated ? { truncated: true as const } : {}) };
 }
 
-const LOINC = 'http://loinc.org';
 const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOINC)?.code;
 const norm = (s = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
-// The same test under different names across sources ("LOW DENSITY LIPOPROTEIN CHOL" with a LOINC, "LDL cholesterol" from a PDF without one):
-// [label, LOINC codes, name pattern]; NOT keeps urine, ratio and particle tests out of the name match.
-// shortcut: eGFR misses race-variant codes, and the name patterns can still take urine/CSF/receptor/LDL-P look-alikes; both move to the planned concept-matching layer.
-export const KEY_LABS: [string, string[], RegExp][] = [
-  ['A1c', ['4548-4', '17856-6'], /a1c|glycated h/],
-  ['Glucose', ['2345-7', '2339-0', '1558-6'], /^glucose\b/],
-  ['LDL', ['13457-7', '18262-6', '2089-1'], /\bldl\b|low density lipo/],
-  ['HDL', ['2085-9'], /\bhdl\b|high density lipo/],
-  ['Total cholesterol', ['2093-3'], /^(total )?cholesterol(,? total)?$/],
-  ['Triglycerides', ['2571-8'], /^triglyceride/],
-  ['Creatinine', ['2160-0'], /^creatinine\b/],
-  ['eGFR', ['33914-3', '48642-3', '48643-1', '62238-1', '98979-8'], /egfr|glomerular/],
-  ['ALT', ['1742-6', '1743-4'], /^alt\b|alanine amino/],
-  ['AST', ['1920-8'], /^ast\b|aspartate amino/],
-  ['Hemoglobin', ['718-7'], /^(h(a)?emoglobin|hgb)\b(?!.*(a1c|glyc))/],
-  ['Platelets', ['777-3', '26515-7'], /^(platelets?|plt)( count)?$/],
-  ['Potassium', ['2823-3', '6298-4'], /^potassium\b/],
-  ['Sodium', ['2951-2', '2947-0'], /^sodium\b/],
-  ['TSH', ['3016-3', '11580-8'], /\btsh\b|thyrotropin|thyroid stimulating/],
-];
-const NOT = /urine|\bur\b|ratio|non[- ]?hdl|particle|clearance/;
-const byName = (n: string) => KEY_LABS.find(([label, , re]) => n === label.toLowerCase() || (re.test(n) && !NOT.test(n)))?.[0];
-// The key lab a result is (by LOINC, else by name), or the one a lab_results name asks for.
-export const keyLabOf = (o: Observation) => KEY_LABS.find(([, codes]) => codes.includes(loincOf(o) ?? ''))?.[0] ?? byName(norm(labRow(o).name));
 
 const num = (o: Observation) => (o.valueQuantity?.comparator ? undefined : o.valueQuantity?.value);
 const unitOf = (o: Observation) => o.valueQuantity?.unit ?? o.valueQuantity?.code;
@@ -116,19 +105,29 @@ export function highLow(o: Observation): 'high' | 'low' | undefined {
 }
 
 export type LabTrend = {
-  test?: string; name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string }; previous?: { date?: string; value?: string | number };
-  change?: number; count: number; outOfRange: number; first?: string; source?: string; flags?: string[];
+  test?: string; method?: string; name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string };
+  previous?: { date?: string; value?: string | number; method?: string }; change?: number; count: number; outOfRange: number; first?: string; source?: string; flags?: string[];
 };
 
-// One entry per test: a key lab (any code or name) is one group; others by LOINC, else by name (case/space-insensitive), and an uncoded
-// result joins the LOINC group of the same name.
+// One entry per test: a concept (any member code, its own or GA-added and not suggested) is one group, labelled by the member (method);
+// others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen) when
+// there is exactly one.
 export function summarizeLabs(obs: Observation[]): LabTrend[] {
-  const rows = obs.map((o) => ({ o, r: labRow(o), test: keyLabOf(o) }));
-  const coded = new Map(rows.flatMap(({ o, r }) => { const l = loincOf(o); return l ? [[norm(r.name), l] as const] : []; }));
+  const rows = obs.map((o) => {
+    const m = conceptMatch(o);
+    return { o, r: labRow(o), m: m?.suggested ? undefined : m };
+  });
+  const keyOf = (x: (typeof rows)[number]) => (x.m ? `concept:${x.m.concept.name}` : loincOf(x.o));
+  const twins = new Map<string, Set<string>>();
+  for (const x of rows) {
+    const k = keyOf(x), t = termKey(x.o);
+    if (k && t) twins.set(t, (twins.get(t) ?? new Set()).add(k));
+  }
   const groups = new Map<string, typeof rows>();
   for (const x of rows) {
-    if (!x.test && !loincOf(x.o) && !norm(x.r.name)) continue; // nothing to group by
-    const k = x.test ? `key:${x.test}` : loincOf(x.o) ?? coded.get(norm(x.r.name)) ?? norm(x.r.name);
+    const twin = twins.get(termKey(x.o) ?? '');
+    const k = keyOf(x) ?? (twin?.size === 1 ? [...twin][0] : norm(x.r.name));
+    if (!k) continue; // nothing to group by
     groups.set(k, [...(groups.get(k) ?? []), x]);
   }
   return [...groups.values()].map((g): LabTrend => {
@@ -139,17 +138,17 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     const a = num(l.o), b = p && num(p.o);
     const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
     return {
-      test: l.test, name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
+      test: g.find((x) => x.m)?.m?.concept.name, method: l.m?.label, name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
       latest: { date: l.r.date, value: a ?? l.r.value, flag },
-      previous: p && { date: p.r.date, value: b ?? p.r.value },
+      previous: p && { date: p.r.date, value: b ?? p.r.value, method: p.m?.label },
       change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
       count: g.length, outOfRange: g.filter((x) => highLow(x.o)).length, first: g.findLast((x) => x.r.date)?.r.date, source: l.r.source, flags: l.r.flags,
     };
   }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
 }
 
-// The key labs, in table order (summarizeLabs already groups each into one entry).
-export const keyLabs = (trends: LabTrend[]): LabTrend[] => KEY_LABS.flatMap(([test]) => trends.filter((t) => t.test === test));
+// The lab concepts' entries, in concepts.json order (summarizeLabs already groups each into one entry).
+export const keyLabs = (trends: LabTrend[]): LabTrend[] => concepts().filter((c) => c.kind === 'lab').flatMap((c) => trends.filter((t) => t.test === c.name));
 
 export async function labResults(
   client: MedplumClient,
@@ -164,13 +163,15 @@ export async function labResults(
     ['_sort', '-date,_id'],
     ['_count', '100'],
   ]);
-  // A key-lab name ("ldl") also finds that test under its LOINC codes and other names: filtered here, Medplum can't OR code and code:text.
-  const key = name ? byName(norm(name)) : undefined;
+  // A lab concept's name ("ldl") finds its member codes (GA-added too) plus the literal name (results not yet coded):
+  // filtered here, Medplum can't OR code and code:text.
+  const c = name ? conceptNamed(name) : undefined;
+  const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
   if (name && !key) q.append('code:text', name);
   dateRange(q, 'date', since, until);
   // An extracted result with some other category (e.g. a vital sign) is not a lab.
   const isLab = (o: Observation) => !o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory'));
-  const named = (o: Observation) => !key || keyLabOf(o) === key || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
+  const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
   if (summary || key) {
     // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
     q.set('_sort', '_lastUpdated');

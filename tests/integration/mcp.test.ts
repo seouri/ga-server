@@ -210,12 +210,17 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
     const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
     const o = (text: string, date: string, extra: Partial<Observation> = {}): Observation =>
       ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 5.6, unit: '%' }, ...extra });
+    const gaLoinc = (code: string) => ({ system: 'http://loinc.org', code, extension: [{ url: 'urn:ga-server:ext:concept-source', valueCode: 'agent' }] });
     const fixed = [
-      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory') }),
+      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] } }),
       o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: tag('possible-duplicate') }),
       o('Glucose', '2024-03-01', { meta: tag('extracted-by-llm') }),
       o('Hemoglobin A1c (Apple)', '2024-04-01', { category: cat('laboratory'), meta: tag('src-apple-health') }),
       o('Body weight a1c', '2024-05-01', { category: cat('vital-signs'), meta: tag('extracted-by-llm') }),
+      // Concepts: a hospital-coded LDL and a PDF LDL under another name with a GA-added code are one test; a suggested-only one is flagged apart.
+      o('LOW DENSITY LIPOPROTEIN CHOL', '2021-01-01', { category: cat('laboratory'), code: { text: 'LOW DENSITY LIPOPROTEIN CHOL', coding: [{ system: 'http://loinc.org', code: '13457-7' }] } }),
+      o('LDL cholesterol', '2021-02-01', { code: { text: 'LDL cholesterol', coding: [gaLoinc('13457-7')] }, meta: tag('extracted-by-llm', 'src-pdf') }),
+      o('LDL chol (est)', '2021-03-01', { code: { text: 'LDL chol (est)', coding: [gaLoinc('13457-7')] }, meta: tag('extracted-by-llm', 'src-pdf', 'concept-suggested') }),
     ];
     // A panel on one day, more than one 100-row page: ties must neither repeat nor go missing across pages.
     const panel = Array.from({ length: 110 }, (_, n) => o(`Panel item ${n}`, '2022-01-01', { category: cat('laboratory') }));
@@ -225,9 +230,9 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
     const labs = async (args: Record<string, unknown>) => JSON.parse(((await sub.callTool({ name: 'lab_results', arguments: args })).content as { text: string }[])[0].text);
     try {
       const all = await labs({ limit: 1000 });
-      expect(all.total).toBe(113);
+      expect(all.total).toBe(116);
       expect(all.truncated).toBeUndefined();
-      expect(new Set(all.rows.map((r: { id: string }) => r.id)).size).toBe(113);
+      expect(new Set(all.rows.map((r: { id: string }) => r.id)).size).toBe(116);
       expect(all.rows.slice(0, 3).map((r: { name: string }) => r.name)).toEqual(['HEMOGLOBIN A1C', 'Glucose', 'Hemoglobin A1c']);
       expect(all.rows.some((r: { name: string }) => /Apple|weight/.test(r.name))).toBe(false);
       expect(all.rows[0]).toMatchObject({ date: '2024-12-31', value: '5.6 %', flags: ['possible-duplicate'] });
@@ -237,8 +242,15 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
       expect((await labs({ until: '2024-02-29', name: 'a1c' })).rows.map((r: { date: string }) => r.date)).toEqual(['2023-06-01']);
       expect(await labs({ limit: 2 })).toMatchObject({ total: 2, truncated: true });
       // summary: one entry per test over every page (cursor paging), case-insensitive names grouped.
-      expect((await labs({ summary: true, limit: 1000 })).total).toBe(112);
-      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', flags: ['possible-duplicate'] }]);
+      expect((await labs({ summary: true, limit: 1000 })).total).toBe(114);
+      const ldl = await labs({ summary: true, name: 'ldl' });
+      expect(ldl.rows.map((r: { test?: string; name: string; count: number; flags?: string[] }) => [r.test, r.name, r.count, r.flags])).toEqual([
+        [undefined, 'LDL chol (est)', 1, ['read from a document by AI', 'possibly LDL (suggested mapping)']],
+        ['LDL', 'LDL cholesterol', 2, ['read from a document by AI']],
+      ]);
+      expect(ldl.rows[1].previous).toMatchObject({ date: '2021-01-01', method: 'calculated' });
+      expect((await labs({ name: 'ldl' })).rows.map((r: { name: string }) => r.name)).toEqual(['LDL chol (est)', 'LDL cholesterol', 'LOW DENSITY LIPOPROTEIN CHOL']);
+      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', loinc: '4548-4', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', flags: ['possible-duplicate'] }]);
       const bad = await sub.callTool({ name: 'lab_results', arguments: { since: '2024' } });
       expect(bad.isError).toBe(true);
     } finally {
@@ -325,7 +337,7 @@ describe('purpose-built read tools', () => {
       o('Body weight', '2025-03-01', { category: cat('vital-signs') }),
       o('Body weight', '2025-03-01T20:00:00Z', { category: cat('vital-signs'), meta: apple }),
       o('Steps, daily total (Apple Health)', '2025-03-01', { category: cat('activity'), meta: apple }),
-      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory') }),
+      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] } }),
     ].map((resource) => ({ resource, request: { method: 'POST', url: 'Observation' } }));
     await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
     const v = await tool('vitals');
