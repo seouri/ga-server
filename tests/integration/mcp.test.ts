@@ -333,4 +333,9 @@ describe('purpose-built read tools', () => {
     expect((await tool('notes_search', { text: 'zebrafinch', until: '2025-02-15' })).rows).toHaveLength(1);
     expect((await tool('notes_search', { since: '2025' })).error).toMatch(/since must be/);
   });
+  test('portalWarning: a stale source is named with its fix; a patient without sources gets no field', async () => {
+    for (const name of ['lab_results', 'vitals', 'notes_search', 'current_medications'])
+      expect((await tool(name)).portalWarning).toMatch(/status error, last success 2026-11-01T00:00:00\.000Z: sync: `ga sync`/);
+    expect(JSON.parse((await call('fhir_search', { resourceType: 'Observation', params: { _count: '1' } })).text).portalWarning).toBeUndefined();
+  });
 });
