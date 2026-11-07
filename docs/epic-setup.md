@@ -105,15 +105,17 @@ Verified in the sandbox (2026-11-06): the `http://localhost:8765/callback` redir
 
 ## https callback
 
-Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel (the same Funnel that serves share links, see [Sharing](sharing.md)). Only the `/callback` path is added, and GA listens behind it only while `ga connect` waits for your login; any other time it answers nothing.
+Production Epic accepts only `https` redirects, so GA receives the login callback through Tailscale Funnel, in `ga-gateway`, the same service that serves share links and chat apps (see [Sharing](sharing.md)). `ga connect` with an https redirect needs `ga-gateway` running (`docker compose up -d`). The gateway accepts only a callback for a login that is waiting; any other time `/callback` answers nothing useful.
 
 1. Your Funnel address is `https://<machine>.<tailnet>.ts.net`: `tailscale status --json | grep DNSName` (drop the trailing dot), or the Tailscale app's machine name. With the Mac App Store app, `tailscale` is `/Applications/Tailscale.app/Contents/MacOS/Tailscale`.
-2. Route `/callback` to GA's login listener (once; it stays across restarts):
+2. Route Funnel to the gateway (once; it stays across restarts). One route `/` serves `/callback` too:
 
    ```sh
-   tailscale funnel --bg --set-path /callback 8765
-   tailscale funnel status          # shows /callback proxying to 127.0.0.1:8765, beside / for share links if set
+   tailscale funnel --bg 8110
+   tailscale funnel status          # shows / proxying to 127.0.0.1:8110
    ```
+
+   If you earlier added a separate `/callback` route to port 8765, turn it off, e.g. `tailscale funnel --set-path /callback off`.
 
 3. In the Epic app, **Add Another URI**: `https` + `<machine>.<tailnet>.ts.net/callback`. Keep the `http://localhost:8765/callback` one for the sandbox.
 4. Connect with it once; GA remembers it (in `.ga/smart/app.json`) for later `ga connect` runs:
@@ -122,7 +124,7 @@ Production Epic accepts only `https` redirects, so GA receives the login callbac
    ga connect <hospital FHIR base URL> --client-id <Client ID> --redirect-uri https://<machine>.<tailnet>.ts.net/callback
    ```
 
-A login that never returns usually means Funnel is off or `/callback` isn't routed: check `tailscale funnel status`. Anyone can reach that URL while GA waits, but GA accepts only the one callback carrying the login's random `state`, and the code is useless without GA's private key and PKCE verifier.
+A login that never returns usually means Funnel is off, `/` isn't routed to 8110 or `ga-gateway` is down: check `tailscale funnel status` and `docker compose ps`. Anyone can reach that URL, but GA accepts only the one callback carrying the login's random `state`, and the code is useless without GA's private key and PKCE verifier.
 
 
 ## Data Use Questionnaire
@@ -135,7 +137,7 @@ Open it with **Open Data Use Questionnaire** on the app page. Epic shows some an
 |---|---|
 | Which option best describes the company offering the app? | **An individual or independent developer.** |
 | How is this app funded? | **This app is produced by volunteers or is available in the open source community.** (only this one) |
-| Where does this app store user data? | **This app can store user data locally on the user's device.** and **This app offers users an option to store data in locations outside of the user's control.** (questions and PDF reading send record text to your AI provider, if you turn them on) |
+| Where does this app store user data? | **This app can store user data locally on the user's device.** and **This app offers users an option to store data in locations outside of the user's control.** (questions, PDF reading and chat apps you connect send record text to your AI provider, if you turn them on) |
 | For how long does this app store user data? | **This app stores your data indefinitely.** |
 | Does this app allow users to delete all of the data that have been stored about them? | **Yes, this app allows users to delete all of the data that have been stored about them.** |
 | Other than the user, who has access to user data? | **People and groups users authorize.** (share links) and **Apps that users authorize.** (your AI agents over MCP, and the AI model you choose to answer share-link questions) |
@@ -157,7 +159,7 @@ Answer this tab too: hospitals on older Epic versions show it, and an unanswered
 | Which option best describes the company offering the app to users/patients? | **An individual or independent developer.** |
 | Do you have a business associate agreement with each covered entity your app will connect to? | **No.** |
 | How is this app funded? | **This app is produced by volunteers or is available in the open source community.** (only this one) |
-| Where can this app store user data? | **Locally on the user's device.**, **The app can perform core services without storing data on servers, and the app stores user data on servers in the US only if the user opts in.** and **…on servers outside the US only if the user opts in.** (GA runs on your own machine by default; if you choose to host it on a cloud server, in any country, or turn on questions or PDF reading, which send record text to your AI provider, that is your opt-in. Do not tick the plain "On servers in/outside the United States": GA never requires a server) |
+| Where can this app store user data? | **Locally on the user's device.**, **The app can perform core services without storing data on servers, and the app stores user data on servers in the US only if the user opts in.** and **…on servers outside the US only if the user opts in.** (GA runs on your own machine by default; if you choose to host it on a cloud server, in any country, or turn on questions, PDF reading or chat apps, which send record text to your AI provider, that is your opt-in. Do not tick the plain "On servers in/outside the United States": GA never requires a server) |
 | Other than the user, who has access to user data? | **People and groups users authorize.** and **Apps that users authorize.** |
 | Will the user specifically approve and be notified of each access, or is their authorization general and information is shared without notification? | **Users authorize access and sharing of their information generally and are not notified.** (you approve each share link once; its accesses are logged, not notified) |
 | Do you allow users to obtain a record of the data that have been collected about them? | **We allow users to obtain a complete record of the data that have been collected about them.** |

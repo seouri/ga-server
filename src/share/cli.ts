@@ -14,8 +14,8 @@ import { logAccess, readLog } from './audit.ts';
 import { recordRows, summarize, toBundle, toPdf } from './export.ts';
 import { scopeWords } from './page.ts';
 import { BINARY_URL, loadScoped, scopedCache } from './scope.ts';
-import { createServer, downloadName } from './server.ts';
-import { GROUPS, createShare, listShares, parseSince, revokeShare, shareDir, tokenOf } from './store.ts';
+import { createServer, downloadName, type ShareDeps } from './server.ts';
+import { createShare, expiryWords, listShares, parseGroups, parseSince, revokeShare, shareDir, status, tokenOf } from './store.ts';
 import type { Group, Share } from './store.ts';
 
 const PORT = 8110;
@@ -65,9 +65,6 @@ async function funnelHint(): Promise<void> {
   if (!/Funnel on/.test(out) || !/proxy http:\/\/(127\.0\.0\.1|localhost):8110\b/.test(out)) console.log('Links work after you run: tailscale funnel --bg 8110');
 }
 
-const expiryWords = (s: Share): string => (s.expires ? new Date(s.expires).toLocaleString() : 'never');
-const status = (s: Share, now = Date.now()): string => (s.revoked ? 'revoked' : s.expires && now > Date.parse(s.expires) ? 'expired' : 'active');
-
 async function printLink(s: Share, token: string): Promise<void> {
   const url = `${s.baseUrl}/s/${token}`;
   console.log(url);
@@ -76,14 +73,6 @@ async function printLink(s: Share, token: string): Promise<void> {
 }
 
 const patientId = (): string => process.env.GA_PATIENT_ID || loadConfig().patientId; // GA_PATIENT_ID: tests only, as in smart/cli.ts
-
-function parseGroups(v: string): Group[] | 'all' {
-  if (v === 'all') return 'all';
-  const gs = v.split(',').map((g) => g.trim()).filter(Boolean);
-  for (const g of gs) if (!GROUPS.includes(g as Group)) throw new GaError(`unknown group ${g}: use all or some of ${GROUPS.join(', ')}`);
-  if (!gs.length) throw new GaError(`--scope needs all or some of ${GROUPS.join(', ')}`);
-  return gs as Group[];
-}
 
 async function create(argv: string[]): Promise<void> {
   const { values, positionals } = args(argv, CREATE);
@@ -159,13 +148,13 @@ export const binaryFetcher = (client: MedplumClient) => async (ref: string): Pro
   return { data: Buffer.from(await blob.arrayBuffer()), contentType: blob.type };
 };
 
-async function serve(): Promise<void> {
-  const client = await getClient(loadConfig());
+// Share server deps, for ga share serve and ga gateway serve.
+export function shareDeps(client: MedplumClient): ShareDeps {
   // Any OpenAI-compatible Chat Completions API: OpenAI, Gemini, OpenRouter, Anthropic, or a local Ollama (no key).
   const model = process.env.GA_LLM_MODEL;
   const llm = model ? new OpenAI({ baseURL: process.env.GA_LLM_BASE_URL || undefined, apiKey: process.env.GA_LLM_API_KEY || 'none' }) : undefined;
   const cached = scopedCache(loadScoped);
-  const server = createServer({
+  return {
     dir: shareDir(),
     load: (share) => cached(client, share),
     log: (share, e) => logAccess(client, share, e),
@@ -173,11 +162,17 @@ async function serve(): Promise<void> {
     ...(llm && model && {
       ask: (q, s, share) => ask(q, s, share, { llm, model, ...(offersVaccines(share) && { vaccines: () => vaccineGaps(client, share.patientId) }) }),
     }),
-  });
+  };
+}
+
+async function serve(): Promise<void> {
+  console.log('ga share serve is deprecated: use ga gateway serve (share pages plus chat-app access)');
+  const server = createServer(shareDeps(await getClient(loadConfig())));
   // Loopback unless told otherwise: the container sets 0.0.0.0 and publishes the port on 127.0.0.1 only.
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
-  console.log(`ga-share listening on ${host}:${PORT}${llm ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
+  const model = process.env.GA_LLM_MODEL;
+  console.log(`ga-share listening on ${host}:${PORT}${model ? ` (questions: ${model})` : ' (questions off: no GA_LLM_MODEL)'}`);
 }
 
 // Returns false when argv is not a share command.

@@ -14,6 +14,7 @@ There is no GA service and no GA company. Each copy of GA is installed and run b
 - **Network traffic.** GA connects only to:
   - your own health systems, to fetch your records;
   - your own AI provider, only if you turn that on (for example for answering questions or reading a PDF), using your own account;
+  - the chat apps you connect to GA (for example claude.ai, ChatGPT, Gemini or Grok). Records they read through GA's tools reach that provider under your account and its terms, as they do with any AI agent you use; disconnect an app at any time (`ga apps disconnect`);
   - people you choose to share with, only if you create a share link. Each link covers only the records you select, can expire, and you can revoke it at any time.
 - **Your control.** You can disconnect a health system at any time (`ga disconnect`). This deletes GA's tokens; you can also revoke GA's access in MyChart. Deleting GA's data directory and database deletes everything GA stored.
 

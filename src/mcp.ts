@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
-import { type MedplumClient, OperationOutcomeError } from '@medplum/core';
+import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
 import type { Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -13,6 +13,11 @@ import { pairImmunizations } from './ehi/history.ts';
 import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
+import { chatInstructions } from './instructions.ts';
+import { registerHospitalTools } from './tools/hospitals.ts';
+import { registerAppTools } from './tools/apps.ts';
+import { registerImportTools } from './tools/imports.ts';
+import { registerShareTools } from './tools/shares.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -116,18 +121,23 @@ export const readable = (x: unknown): unknown => {
 };
 
 const TYPE_RE = /^[A-Z][A-Za-z]+$/;
-const text = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v) }] });
-const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
+// Medplum project-admin types (secrets, logins, bots): never readable through the agent tools, either transport.
+// Medplum's own lists (so upgrades are covered) plus the types GA already blocked.
+const ADMIN_TYPES = new Set([...protectedResourceTypes, ...projectAdminResourceTypes, 'ClientApplication', 'User', 'Project', 'ProjectMembership', 'Login', 'Bot', 'AccessPolicy', 'JsonWebKey', 'UserConfiguration', 'UserSecurityRequest', 'Subscription', 'Agent', 'DomainConfiguration', 'PasswordChangeRequest', 'SmartAppLaunch', 'BulkDataExport', 'AsyncJob']);
+const refuseAdmin = (t: string) => (ADMIN_TYPES.has(t) ? fail(new GaError(`${t} is not available through this tool`)) : undefined);
+export const text = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v) }] });
+export const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
 
-export async function runMcp(cfg: GaConfig): Promise<void> {
-  // stdout is the MCP channel: send anything chatty to stderr.
-  console.log = console.info = console.error;
-  const client = await getClient(cfg);
-  const patientId = process.env.GA_PATIENT_ID || cfg.patientId; // env override is for tests only
-  const server = new McpServer(
-    { name: 'ga-server', version: '0.1.0' },
-    {
-      instructions:
+export type ToolDeps = {
+  client: MedplumClient;
+  cfg: GaConfig;
+  patientId: string;
+  // dir: the gateway's state directory (uploads); default gatewayDir().
+  remote?: { publicUrl: string; clientName: string; dir?: string; disconnect?: (clientId: string) => Promise<void>; log: (tool: string) => Promise<void> };
+};
+
+const CAP = 150_000; // claude.ai's tool-result limit is about this size
+const STDIO_INSTRUCTIONS =
         "GA (Guardian Angel) is the user's personal health record: labs, vitals, medications, problems and documents from their hospitals. " +
         "For any question about the user's own health, look here first and cite the records you use. " +
         'Hospital portal sync status: first fhir_search Endpoint with identifier urn:ga-server:id:smart-source| (system only). A source is stale if its ' +
@@ -135,15 +145,32 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
-        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed.',
-    },
-  );
+        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed.';
+
+export function buildMcpServer(deps: ToolDeps): McpServer {
+  const { client, cfg, patientId, remote } = deps;
+  const server = new McpServer({ name: 'ga-server', version: '0.1.0' }, { instructions: remote ? chatInstructions() : STDIO_INSTRUCTIONS });
+  if (remote) {
+    // One wrap for every tool: log first, then cap the text.
+    const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
+    (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
+      register(name, config, async (...a: unknown[]) => {
+        await remote.log(name);
+        const r = await cb(...a);
+        for (const c of r.content ?? [])
+          if (c.type === 'text' && c.text.length > CAP) c.text = `${c.text.slice(0, CAP)}[truncated: narrow the search, e.g. _count, _elements or a date range]`;
+        return r;
+      });
+  }
   server.registerTool(
     'fhir_search',
-    { description: "Search the user's personal health record (GA) by FHIR resource type and search params.", inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) } },
+    { description: "Search the user's personal health record (GA) by FHIR resource type and search params.", inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.string()).default({}) }, annotations: { readOnlyHint: true } },
     async ({ resourceType, params }) => {
+      const no = refuseAdmin(resourceType);
+      if (no) return no;
       try {
         const b = await client.search(resourceType as 'Observation', { ...params, _count: String(Math.min(Number(params._count) || 20, 1000)) }, { cache: 'no-cache' });
+        b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
         return text(readable(b));
       } catch (e) {
@@ -153,8 +180,10 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
   );
   server.registerTool(
     'fhir_read',
-    { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() } },
+    { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() }, annotations: { readOnlyHint: true } },
     async ({ resourceType, id }) => {
+      const no = refuseAdmin(resourceType);
+      if (no) return no;
       try {
         return text(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })));
       } catch (e) {
@@ -173,6 +202,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         bpTx: z.boolean(), statin: z.boolean(), diabetes: z.boolean(), smoker: z.boolean(), egfr: z.number(),
         race: z.enum(['black', 'other']).optional(),
       },
+      annotations: { readOnlyHint: true },
     },
     async (input) => text(cardiovascularRisk10yr(input)),
   );
@@ -185,6 +215,7 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
         '(complete/due/overdue/not-recommended/immune/not-evaluated), the GA records used (date, source) and the reason; unmatched records; ' +
         'possible-duplicate records; and the schedule edition. asOf defaults to today (YYYY-MM-DD).',
       inputSchema: { asOf: z.string().optional() },
+      annotations: { readOnlyHint: true },
     },
     async ({ asOf }) => {
       try {
@@ -194,11 +225,13 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
       }
     },
   );
-  server.registerTool(
+  // Remote ga_import (by fileId) is in tools/imports.ts.
+  if (!remote) server.registerTool(
     'ga_import',
     {
       description: 'Import resources extracted from one local PDF/image: stores the file, links resources to it, dedups. Call once per document.',
       inputSchema: { resources: z.array(z.record(z.string(), z.unknown())), sourceFile: z.string(), documentDate: z.string().optional() },
+      annotations: { destructiveHint: true },
     },
     async ({ resources, sourceFile, documentDate }) => {
       try {
@@ -208,5 +241,19 @@ export async function runMcp(cfg: GaConfig): Promise<void> {
       }
     },
   );
-  await server.connect(new StdioServerTransport());
+  if (remote) {
+    registerShareTools(server, deps);
+    registerHospitalTools(server, deps);
+    registerImportTools(server, deps);
+    if (remote.disconnect) registerAppTools(server, deps); // the gateway supplies it
+  }
+  return server;
+}
+
+export async function runMcp(cfg: GaConfig): Promise<void> {
+  // stdout is the MCP channel: send anything chatty to stderr.
+  console.log = console.info = console.error;
+  const client = await getClient(cfg);
+  const patientId = process.env.GA_PATIENT_ID || cfg.patientId; // env override is for tests only
+  await buildMcpServer({ client, cfg, patientId }).connect(new StdioServerTransport());
 }

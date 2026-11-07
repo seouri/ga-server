@@ -29,21 +29,24 @@ Then bring in your records and ask:
 > Share my labs from the last 2 years with Dr. Kim for a week.
 ```
 
+Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/chat-apps.md).
+
 ## How it works
 
 ```mermaid
 flowchart LR
   you([You]) --> agent["Claude Code or any MCP agent<br/>/ga, /ga-import, /ga-lipids"]
   agent -- "stdio MCP: fhir_search, fhir_read,<br/>ga_import, vaccine_gaps, risk" --> mcp["ga mcp"]
+  apps(["claude.ai, ChatGPT,<br/>Gemini, Grok"]) -- "Tailscale Funnel, /mcp" --> gateway
   agent -- "runs CLI: ga import, ga share" --> cli["ga CLI"]
   mcp --> fhir[("FHIR server<br/>Docker, local Postgres")]
   cli -- "dedup engine" --> fhir
   files["C-CDA, Epic EHI,<br/>Apple Health, PDFs"] --> cli
   epic["Epic portals<br/>(SMART on FHIR, read-only)"] -- "daily" --> sync["ga-sync"] --> fhir
-  fhir --> share["ga-share<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family"])
+  fhir --> gateway["ga-gateway<br/>127.0.0.1:8110"] -- "Tailscale Funnel" --> people(["Doctors, family"])
 ```
 
-Everything runs on your computer. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent you chat with, and share-link questions if you turn them on). The agent never talks to the FHIR server directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
+Everything runs on your computer. It talks only to your own hospitals (to fetch your records), and your records leave it only to the people you share a link with and to your own AI provider (the agent or chat app you connect, and share-link questions if you turn them on). The agent never talks to the FHIR server directly: it goes through GA's MCP tools and CLI, which add provenance, deduplication and scope checks.
 
 ## Documentation
 
@@ -52,6 +55,7 @@ Everything runs on your computer. It talks only to your own hospitals (to fetch 
 | [Using GA](docs/usage.md) | Slash commands and example prompts, other MCP agents, importing C-CDA, Epic EHI, Apple Health and PDFs, review flags |
 | [Hospital portals](docs/hospital-portals.md) | Connecting Epic patient portals (MyChart) for daily automatic sync |
 | [Registering GA with Epic](docs/epic-setup.md) | One-time Epic app registration, field by field |
+| [GA from chat apps](docs/chat-apps.md) | Setup for claude.ai, ChatGPT, Gemini, Grok and remote Claude Code |
 | [Sharing](docs/sharing.md) | Private links for doctors and family: summary, PDF and FHIR downloads, questions |
 | [Running GA](docs/operations.md) | Where data lives, **backup and restore**, uninstall, admin app |
 | [Adding a skill](docs/skills.md) | Writing your own `/` command against GA |

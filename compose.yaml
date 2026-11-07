@@ -133,8 +133,9 @@ services:
       GA_BASE_URL: 'http://medplum-server:8103/'
     command: ['node', 'src/cli.ts', 'sync', '--daemon']
 
-  # Share links (ga share serve): same image, user and mounts as ga-sync. Tailscale Funnel on the host proxies to 127.0.0.1:8110.
-  ga-share:
+  # The one public service (ga gateway serve): share links, /callback, and with GA_PUBLIC_URL chat-app access (OAuth, /mcp).
+  # Same image, user and mounts as ga-sync. Tailscale Funnel on the host proxies to 127.0.0.1:8110.
+  ga-gateway:
     image: node:26.13.0-alpine
     restart: unless-stopped
     init: true
@@ -154,10 +155,30 @@ services:
       GA_CONFIG: /ga/.ga/config.json
       GA_BASE_URL: 'http://medplum-server:8103/'
       GA_SHARE_HOST: 0.0.0.0
+      GA_PUBLIC_URL: ${GA_PUBLIC_URL:-}
       GA_LLM_BASE_URL: ${GA_LLM_BASE_URL:-}
       GA_LLM_API_KEY: ${GA_LLM_API_KEY:-}
       GA_LLM_MODEL: ${GA_LLM_MODEL:-}
-    command: ['node', 'src/cli.ts', 'share', 'serve']
+    command: ['node', 'src/cli.ts', 'gateway', 'serve']
+
+  # Nightly backup (scripts/backup.sh): database dump, stored files and .ga to GA_BACKUP_DIR, newest 7 kept.
+  # Backups hold all health records: keep the directory on an encrypted disk. Same user as ga-sync so files stay yours.
+  ga-backup:
+    image: postgres:16
+    restart: unless-stopped
+    init: true
+    user: '${UID:-1000}:${GID:-1000}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: medplum # same as POSTGRES_PASSWORD above
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ga-binary:/ga-binary:ro
+      - ./.ga:/dot-ga:ro
+      - ${GA_BACKUP_DIR:-./backups}:/backups
+    command: ['bash', '/backup.sh']
 
 volumes:
   ga-postgres:

@@ -1,12 +1,14 @@
 // SMART standalone launch: PKCE S256 + state, private_key_jwt (RS384), rotating refresh tokens.
-import { closeSync, openSync, rmSync, statSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, openSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import * as oidc from 'openid-client';
 import { GaError } from '../config.ts';
-import { loadSecret, readSources, saveSecret, signingKey, writeSources } from './store.ts';
+import { deleteSecret, loadSecret, readSources, saveSecret, signingKey, writeSources } from './store.ts';
 import type { SourceRec } from './store.ts';
+import type { SyncResult } from './sync.ts';
 
 export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
 
@@ -100,12 +102,49 @@ function listen(port: number): Promise<{ port: number; callback: Promise<string>
   });
 }
 
+// Code-for-token exchange shared by connect (localhost listener) and finishLogin (gateway): saves tokens, upserts sources.json.
+// openid-client sends the callback URL's origin and path as redirect_uri, so rebuild it from the registered one.
+async function exchange(
+  dir: string,
+  config: oidc.Configuration,
+  base: string,
+  redirectUri: string,
+  search: string,
+  verifier: string,
+  state: string,
+  name?: string,
+): Promise<SourceRec> {
+  const current = new URL(redirectUri);
+  current.search = search;
+  const r = await oidc.authorizationCodeGrant(config, current, { pkceCodeVerifier: verifier, expectedState: state }).catch((e: unknown) => {
+    throw oauthError(e, 'authorization');
+  });
+  const key = sourceKey(base);
+  const t = toTokens(r);
+  saveSecret(dir, key, t);
+  const sources = readSources(dir);
+  const prev = sources.find((s) => s.key === key);
+  const rec: SourceRec = { ...prev, key, name: name ?? prev?.name ?? key, fhirBase: base, patient: t.patient };
+  writeSources(dir, [...sources.filter((s) => s.key !== key), rec]);
+  return rec;
+}
+
+const authUrl = async (config: oidc.Configuration, base: string, redirectUri: string, state: string, verifier: string): Promise<URL> =>
+  oidc.buildAuthorizationUrl(config, {
+    redirect_uri: redirectUri,
+    scope: SCOPE,
+    state,
+    code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
+    code_challenge_method: 'S256',
+    aud: base,
+  });
+
 export async function connect(
   dir: string,
   fhirBase: string,
   clientId: string,
   open: (url: string) => void | Promise<void>,
-  opts: { name?: string; port?: number; redirectUri?: string } = {},
+  opts: { name?: string; port?: number } = {},
 ): Promise<SourceRec> {
   const base = fhirBase.replace(/\/+$/, '');
   const config = await discover(dir, base, clientId);
@@ -113,33 +152,63 @@ export async function connect(
   const state = oidc.randomState();
   const cb = await listen(opts.port ?? 8765);
   try {
-    // https (e.g. a Tailscale Funnel address proxying to this listener) for production Epic; localhost otherwise.
-    const redirectUri = opts.redirectUri ?? `http://localhost:${cb.port}/callback`;
-    const url = oidc.buildAuthorizationUrl(config, {
-      redirect_uri: redirectUri,
-      scope: SCOPE,
-      state,
-      code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
-      code_challenge_method: 'S256',
-      aud: base,
-    });
-    await open(url.href);
-    // openid-client sends the callback URL's origin and path as redirect_uri, so rebuild it from the registered one.
-    const current = new URL(redirectUri);
-    current.search = await cb.callback;
-    const r = await oidc.authorizationCodeGrant(config, current, { pkceCodeVerifier: verifier, expectedState: state }).catch((e: unknown) => {
-      throw oauthError(e, 'authorization');
-    });
-    const key = sourceKey(base);
-    const t = toTokens(r);
-    saveSecret(dir, key, t);
-    const sources = readSources(dir);
-    const prev = sources.find((s) => s.key === key);
-    const rec: SourceRec = { ...prev, key, name: opts.name ?? prev?.name ?? key, fhirBase: base, patient: t.patient };
-    writeSources(dir, [...sources.filter((s) => s.key !== key), rec]);
-    return rec;
+    const redirectUri = `http://localhost:${cb.port}/callback`;
+    await open((await authUrl(config, base, redirectUri, state, verifier)).href);
+    return await exchange(dir, config, base, redirectUri, await cb.callback, verifier, state, opts.name);
   } finally {
     cb.close();
+  }
+}
+
+// Login in two halves through encrypted files, so the process that receives the redirect (the gateway) need not be the one that started it.
+const hash = (state: string): string => createHash('sha256').update(state).digest('hex');
+export const pendingName = (state: string): string => `pending-${hash(state)}`;
+export const resultName = (state: string): string => `result-${hash(state)}`;
+export type LoginResult = { source: SourceRec; result: SyncResult } | { error: string; fhirBase: string };
+type Pending = { verifier: string; state: string; fhirBase: string; clientId: string; redirectUri: string; name?: string; expires: number };
+const LOGIN_TTL_MS = 10 * 60_000;
+
+export async function startLogin(dir: string, fhirBase: string, clientId: string, redirectUri: string, name?: string): Promise<{ url: string; state: string }> {
+  const base = fhirBase.replace(/\/+$/, '');
+  const config = await discover(dir, base, clientId);
+  const verifier = oidc.randomPKCECodeVerifier();
+  const state = oidc.randomState();
+  const url = (await authUrl(config, base, redirectUri, state, verifier)).href;
+  const p: Pending = { verifier, state, fhirBase: base, clientId, redirectUri, name, expires: Date.now() + LOGIN_TTL_MS };
+  saveSecret(dir, pendingName(state), p);
+  return { url, state };
+}
+
+export async function finishLogin(dir: string, search: string, now: Date = new Date()): Promise<SourceRec> {
+  const state = new URLSearchParams(search).get('state') ?? '';
+  // Claim by rename before reading: of two concurrent callbacks with one state only one wins; single use even when expired or the exchange fails.
+  const claimed = `claimed-${hash(state)}-${randomBytes(6).toString('hex')}`;
+  try {
+    renameSync(join(dir, 'tokens', `${pendingName(state)}.enc`), join(dir, 'tokens', `${claimed}.enc`));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new GaError('unknown_state');
+    throw e;
+  }
+  const p = loadSecret<Pending>(dir, claimed);
+  if (!p) throw new GaError('unknown_state');
+  deleteSecret(dir, claimed);
+  if (now.getTime() > p.expires) throw new GaError('login_expired');
+  const config = await discover(dir, p.fhirBase, p.clientId);
+  return exchange(dir, config, p.fhirBase, p.redirectUri, search, p.verifier, p.state, p.name);
+}
+
+// Polls for the result the gateway writes (completeLogin).
+export async function waitForLogin(dir: string, state: string, timeoutMs = 600_000): Promise<SourceRec> {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const r = loadSecret<LoginResult>(dir, resultName(state));
+    if (r) {
+      deleteSecret(dir, resultName(state));
+      if ('error' in r) throw new GaError(r.error);
+      return r.source;
+    }
+    if (Date.now() > end) throw new GaError('login not completed: the gateway must be running: docker compose up -d ga-gateway');
+    await new Promise((res) => setTimeout(res, 500));
   }
 }
 

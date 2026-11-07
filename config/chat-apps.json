@@ -1,0 +1,26 @@
+{
+  "fileHosts": [],
+  "apps": [
+    { "name": "claude.ai", "redirects": ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"] },
+    { "name": "ChatGPT", "redirects": ["https://chatgpt.com/connector_platform_oauth_redirect", "https://chatgpt.com/connector/oauth/*"] },
+    {
+      "name": "Gemini app",
+      "redirects": [
+        "https://oauth-redirect.googleusercontent.com/r/*",
+        "https://oauth-redirect-sandbox.googleusercontent.com/r/*",
+        "https://oauth-redirect-test.googleusercontent.com/r/*"
+      ]
+    },
+    {
+      "name": "Grok",
+      "redirects": [
+        "https://grok.com/connectors-oauth-exchange-code/",
+        "https://grok.com/connectors-oauth-exchange-code",
+        "https://grok.com/connectors/oauth/callback",
+        "https://grok.com/connectors/oauth/callback/"
+      ]
+    },
+    { "name": "Grok Bot", "redirects": ["https://cursor.com/agents/mcp/oauth/callback", "https://www.cursor.com/agents/mcp/oauth/callback"] },
+    { "name": "Claude Code", "redirects": ["http://localhost:*", "http://127.0.0.1:*"] }
+  ]
+}

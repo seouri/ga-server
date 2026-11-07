@@ -121,6 +121,7 @@ test('fhir_search returns imported LDL', async () => {
   expect(Object.keys(res.meta ?? {}).sort()).toEqual(['source', 'tag']);
   const read = await call('fhir_read', { resourceType: 'Observation', id: b.entry?.[0].resource?.id as string });
   expect(JSON.parse(read.text).valueQuantity.value).toBe(111);
+  expect((await call('fhir_read', { resourceType: 'Enterprise', id: 'x' })).text).toMatch(/not available/);
 });
 
 test('cardiovascular_risk_10yr returns PREVENT and PCE', async () => {
