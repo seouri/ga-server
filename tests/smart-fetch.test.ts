@@ -75,6 +75,21 @@ describe('fetchAll', () => {
     await m2.close();
   });
 
+  it('a failed later page or a 429 fails the fetch instead of dropping the type', async () => {
+    for (const [status, page] of [[404, 2], [429, 2], [429, 1]] as const) {
+      const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+      serveFixtures(m2);
+      m2.route('/fhir/Encounter', (_q, res, url) => {
+        if (page === 1 || url.searchParams.get('p') === '2') return void res.writeHead(status).end();
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', link: [{ relation: 'next', url: `${m2.fhirBase}/Encounter?p=2` }], entry: [] }));
+      });
+      const err = await fetchAll(m2.fhirBase, m2.grant(), P, ['Encounter']).catch((e: Error) => e);
+      await m2.close();
+      expect((err as Error).message, `${status} on page ${page}`).toBe(`Encounter: HTTP ${status}`);
+    }
+  });
+
   it('follows a HAPI-style next link on the base itself (<base>?_getpages=...)', async () => {
     const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
     serveFixtures(m2);

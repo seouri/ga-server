@@ -308,6 +308,27 @@ describe('syncAll', () => {
   });
 });
 
+describe('a cut-short fetch', () => {
+  it('a 429 fails the sync: Endpoint error, last success and last-seen stay where they were', async () => {
+    const pid = await newPatient();
+    const { publicJwks } = await ensureKeys(dir);
+    const mock = await startMock({ clientId, jwks: publicJwks });
+    serveFixtures(mock);
+    const src: SourceRec = { key: newKey('cut'), name: 'Cut Hospital', fhirBase: mock.fhirBase, patient: P, enabledTypes: ['MedicationRequest'] };
+    fresh(src.key, mock);
+    const t1 = new Date(Date.now() - 60_000);
+    expect((await syncSource(client, dir, src, pid, { now: t1 })).status).toBe('active');
+    mock.route('/fhir/MedicationRequest', (_q, res) => void res.writeHead(429).end());
+    expect(await syncSource(client, dir, src, pid)).toEqual({ source: src.key, status: 'error', error: 'fetch_error' });
+    await mock.close();
+    const [ep] = await endpoints(src.key);
+    expect(ep.status).toBe('error');
+    expect(ext(ep, 'urn:ga-server:ext:smart-last-success')?.valueDateTime).toBe(t1.toISOString());
+    const [mr] = (await compartment(pid)).filter((x) => x.resourceType === 'MedicationRequest');
+    expect(ext(mr as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t1.toISOString());
+  });
+});
+
 // Endpoint is in no patient compartment: readStatus must only list this patient's sources.
 describe('readStatus', () => {
   it('lists nothing for a patient without sources', async () => {
