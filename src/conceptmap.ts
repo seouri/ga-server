@@ -1,6 +1,6 @@
 import { basename, dirname } from 'node:path';
 import { conceptMapTranslate, type MedplumClient } from '@medplum/core';
-import type { Coding, ConceptMap, ConceptMapGroup, Observation, Resource } from '@medplum/fhirtypes';
+import type { CodeableConcept, Coding, ConceptMap, ConceptMapGroup, Observation, Resource } from '@medplum/fhirtypes';
 import { type SourceInfo, TAG } from './identity.ts';
 import { SUMMARY } from './vitals.ts';
 
@@ -31,20 +31,19 @@ export function inScope(r: Resource): boolean {
 // Labs and vitals: name|unit(|specimen), normalised. Medications: the name as written. Others: normalised name.
 // Unit and specimen stay in the key, so a urine glucose is never answered by the serum glucose entry.
 export function termKey(r: Resource): string | undefined {
-  const name = (c?: { text?: string; coding?: Coding[] }) => c?.text ?? c?.coding?.find((x) => x.display)?.display;
-  let n: string | undefined;
+  const name = (c?: CodeableConcept) => c?.text ?? c?.coding?.find((x) => x.display)?.display;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;
-    n = norm(name(o.code));
+    const n = norm(name(o.code));
     if (!n) return undefined;
     return [n, norm(o.valueQuantity?.unit ?? o.valueQuantity?.code), ...(o.specimen?.display ? [norm(o.specimen.display)] : [])].join('|');
   }
   if (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') {
-    const m = r as { medicationCodeableConcept?: { text?: string; coding?: Coding[] }; medicationReference?: { display?: string } };
+    const m = r as { medicationCodeableConcept?: CodeableConcept; medicationReference?: { display?: string } };
     return (name(m.medicationCodeableConcept) ?? m.medicationReference?.display)?.trim() || undefined;
   }
-  n = norm(name((r as { code?: { text?: string; coding?: Coding[] }; vaccineCode?: { text?: string; coding?: Coding[] } }).code ?? (r as { vaccineCode?: { text?: string; coding?: Coding[] } }).vaccineCode));
-  return n || undefined;
+  const c = r as { code?: CodeableConcept; vaccineCode?: CodeableConcept };
+  return norm(name(c.code ?? c.vaccineCode)) || undefined;
 }
 
 // C-CDA identifiers carry no organisation (system is the fixed urn:ga-server:id:ccda), so the key uses the document
