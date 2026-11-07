@@ -81,7 +81,8 @@ export async function* scan(client: MedplumClient, patientId: string, types: str
   }
 }
 
-export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
+// review: only records up for review (unmapped or suggested), for a term first mapped now; a correction re-reads every record of the source.
+export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string; review?: boolean } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
   let maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
   // A write onto a record a person last changed would make GA its author and drop the person-edit protection (engine decide/protect): leave those.
@@ -116,7 +117,8 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
   };
   const kind = opts.source?.split(':')[0];
   const n = { scanned: 0, matched: 0, coded: 0, suggested: 0, unmapped: 0, changed: 0 };
-  for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES, kind ? { _tag: `${TAG}|src-${kind}` } : {})) {
+  const only: Record<string, string> = opts.review ? { _tag: `${TAG}|concept-unmapped,${TAG}|concept-suggested` } : kind ? { _tag: `${TAG}|src-${kind}` } : {}; // infoOf still checks the source
+  for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES, only)) {
     for (const r of page) {
       n.scanned++;
       if (opts.source && termKey(r) !== opts.key) continue; // before infoOf: no source file is read for other terms

@@ -180,3 +180,24 @@ test('a stale backfill write gets 412: re-read and re-coded once (the other chan
   expect((await applyAll(racing, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(0);
   expect(gaCode(await client.readResource('Observation', r2.id as string))).toBeUndefined();
 });
+
+test('review: a first mapping reads only records up for review; a correction reads every record of the source', async () => {
+  const k = `good-${randomUUID()}`;
+  const mk = (day: string) => client.createResource(withSrc(lab('Glucose', day), ['smart'], 'x', [`urn:ga-server:id:smart:${k}`]));
+  const flagged = await mk('2024-08-01');
+  await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' }); // tags it concept-unmapped
+  const quiet = await mk('2024-08-02'); // no concept tag (a record from before the concept layer)
+  await agentGlucose(`smart:${k}`, '2345-7');
+  const queries: string[] = [];
+  const spy = new Proxy(client, {
+    get: (t, p) => (p === 'searchResourcePages'
+      ? (type: string, q: Record<string, string>, o: object) => (queries.push(JSON.stringify(q)), t.searchResourcePages(type as 'Observation', q, o))
+      : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+  });
+  expect((await applyAll(spy, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation', review: true })).changed).toBe(1);
+  expect(queries.every((q) => q.includes('"_tag":"urn:ga-server:tag|concept-unmapped,urn:ga-server:tag|concept-suggested"'))).toBe(true);
+  expect(gaCode(await client.readResource('Observation', flagged.id as string))?.code).toBe('2345-7');
+  expect(gaCode(await client.readResource('Observation', quiet.id as string))).toBeUndefined();
+  expect((await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(1);
+  expect(gaCode(await client.readResource('Observation', quiet.id as string))?.code).toBe('2345-7');
+});
