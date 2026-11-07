@@ -14,6 +14,8 @@ Back to the [README](../README.md).
 
 All ports bind to `127.0.0.1`. Nothing is reachable from the network unless you turn on Tailscale Funnel, which exposes one service, `ga-gateway` (port 8110): share links, the hospital login return `/callback` and, only if `GA_PUBLIC_URL` is set in `.env`, chat-app access (`/mcp`, login and upload pages; see [GA from chat apps](chat-apps.md)). The FHIR server and admin app are never exposed. Chat-app logins live in `.ga/` and come back with a restore.
 
+`ga-sync` and `ga-gateway` use the time zone in `.env` (`TZ`) for dates: an import without its own zone, Apple Health daily totals, share dates and "today". `./setup.sh` writes your computer's zone there; an older install adds it once (on a Mac, `echo TZ=$(readlink /etc/localtime | sed 's|.*zoneinfo/||') >> .env`, or `echo TZ=America/New_York >> .env` with your zone), then `docker compose up -d`. Without it the containers use UTC.
+
 After changing `.env`, run `docker compose up -d`. The services restart on their own after a reboot or Docker restart. Share links, chat apps and daily sync work only while the computer is awake and online: on a Mac, keep it plugged in and stop it sleeping (System Settings, Battery or Lock Screen, or run `caffeinate -s`).
 
 ## Backup
