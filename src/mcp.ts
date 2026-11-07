@@ -286,7 +286,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       description:
         "The user's lab and test results from GA (blood tests, urine tests, A1c, cholesterol...): use this for any question about lab results " +
         '(the latest value, a trend, a year\'s results) instead of fhir_search. Finds labs from every source, including PDFs imported without a category; ' +
-        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"); since/until: YYYY-MM-DD, inclusive. ' +
+        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"; a common test also matches its LOINC codes and other names, e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"); since/until: YYYY-MM-DD, inclusive. ' +
         'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
         'truncated: more results exist; narrow by name or dates. summary: true returns one entry per test instead (trends, "how has X changed"), ' +

@@ -77,6 +77,30 @@ export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; tot
 const LOINC = 'http://loinc.org';
 const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === LOINC)?.code;
 const norm = (s = '') => s.toLowerCase().replace(/\s+/g, ' ').trim();
+// The same test under different names across sources ("LOW DENSITY LIPOPROTEIN CHOL" with a LOINC, "LDL cholesterol" from a PDF without one):
+// [label, LOINC codes, name pattern]; NOT keeps urine, ratio and particle tests out of the name match.
+export const KEY_LABS: [string, string[], RegExp][] = [
+  ['A1c', ['4548-4', '17856-6'], /a1c|glycated h/],
+  ['Glucose', ['2345-7', '2339-0', '1558-6'], /^glucose\b/],
+  ['LDL', ['13457-7', '18262-6', '2089-1'], /\bldl\b|low density lipo/],
+  ['HDL', ['2085-9'], /\bhdl\b|high density lipo/],
+  ['Total cholesterol', ['2093-3'], /^(total )?cholesterol(,? total)?$/],
+  ['Triglycerides', ['2571-8'], /^triglyceride/],
+  ['Creatinine', ['2160-0'], /^creatinine\b/],
+  ['eGFR', ['33914-3', '48642-3', '48643-1', '62238-1', '98979-8'], /egfr|glomerular/],
+  ['ALT', ['1742-6', '1743-4'], /^alt\b|alanine amino/],
+  ['AST', ['1920-8'], /^ast\b|aspartate amino/],
+  ['Hemoglobin', ['718-7'], /^(h(a)?emoglobin|hgb)\b(?!.*(a1c|glyc))/],
+  ['Platelets', ['777-3', '26515-7'], /^(platelets?|plt)( count)?$/],
+  ['Potassium', ['2823-3', '6298-4'], /^potassium\b/],
+  ['Sodium', ['2951-2', '2947-0'], /^sodium\b/],
+  ['TSH', ['3016-3', '11580-8'], /\btsh\b|thyrotropin|thyroid stimulating/],
+];
+const NOT = /urine|\bur\b|ratio|non[- ]?hdl|particle|clearance/;
+const byName = (n: string) => KEY_LABS.find(([label, , re]) => n === label.toLowerCase() || (re.test(n) && !NOT.test(n)))?.[0];
+// The key lab a result is (by LOINC, else by name), or the one a lab_results name asks for.
+export const keyLabOf = (o: Observation) => KEY_LABS.find(([, codes]) => codes.includes(loincOf(o) ?? ''))?.[0] ?? byName(norm(labRow(o).name));
+
 const num = (o: Observation) => (o.valueQuantity?.comparator ? undefined : o.valueQuantity?.value);
 const unitOf = (o: Observation) => o.valueQuantity?.unit ?? o.valueQuantity?.code;
 
@@ -90,17 +114,18 @@ export function highLow(o: Observation): 'high' | 'low' | undefined {
 }
 
 export type LabTrend = {
-  name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string }; previous?: { date?: string; value?: string | number };
+  test?: string; name?: string; loinc?: string; unit?: string; latest: { date?: string; value?: string | number; flag?: string }; previous?: { date?: string; value?: string | number };
   change?: number; count: number; outOfRange: number; first?: string; source?: string; flags?: string[];
 };
 
-// One entry per test: grouped by LOINC, else by name (case/space-insensitive); an uncoded result joins the LOINC group of the same name.
+// One entry per test: a key lab (any code or name) is one group; others by LOINC, else by name (case/space-insensitive), and an uncoded
+// result joins the LOINC group of the same name.
 export function summarizeLabs(obs: Observation[]): LabTrend[] {
-  const rows = obs.map((o) => ({ o, r: labRow(o) }));
+  const rows = obs.map((o) => ({ o, r: labRow(o), test: keyLabOf(o) }));
   const coded = new Map(rows.flatMap(({ o, r }) => { const l = loincOf(o); return l ? [[norm(r.name), l] as const] : []; }));
   const groups = new Map<string, typeof rows>();
   for (const x of rows) {
-    const k = loincOf(x.o) ?? coded.get(norm(x.r.name)) ?? norm(x.r.name);
+    const k = x.test ? `key:${x.test}` : loincOf(x.o) ?? coded.get(norm(x.r.name)) ?? norm(x.r.name);
     groups.set(k, [...(groups.get(k) ?? []), x]);
   }
   return [...groups.values()].map((g): LabTrend => {
@@ -110,7 +135,7 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     const a = num(l.o), b = p && num(p.o);
     const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
     return {
-      name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
+      test: l.test, name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
       latest: { date: l.r.date, value: a ?? l.r.value, flag },
       previous: p && { date: p.r.date, value: b ?? p.r.value },
       change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
@@ -132,15 +157,20 @@ export async function labResults(
     ['_sort', '-date,_id'],
     ['_count', '100'],
   ]);
-  if (name) q.append('code:text', name);
+  // A key-lab name ("ldl") also finds that test under its LOINC codes and other names: filtered here, Medplum can't OR code and code:text.
+  const key = name ? byName(norm(name)) : undefined;
+  if (name && !key) q.append('code:text', name);
   dateRange(q, 'date', since, until);
   // An extracted result with some other category (e.g. a vital sign) is not a lab.
   const isLab = (o: Observation) => !o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory'));
-  if (summary) {
-    // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); summarizeLabs orders by date.
+  const named = (o: Observation) => !key || keyLabOf(o) === key || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
+  if (summary || key) {
+    // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
     q.set('_sort', '_lastUpdated');
     q.set('_count', '1000');
-    return fit(summarizeLabs((await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? o : undefined), Infinity)).rows), limit);
+    const obs = (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
+    if (summary) return fit(summarizeLabs(obs), limit);
+    return fit(obs.map(labRow).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
   }
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
   // Medplum sorts undated results first on -date; a latest-value question wants them last.

@@ -3,41 +3,14 @@ import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Encounter, Endpoint, Observation, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
-import { collect, labResults, type LabTrend } from './labs.ts';
+import { collect, KEY_LABS, labResults, type LabTrend } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
 import { vitalRow } from './vitals.ts';
 
-// [label, LOINC codes, name pattern for results without one]; NOT keeps urine, ratio and particle tests out of the name match.
-const KEY_LABS: [string, string[], RegExp][] = [
-  ['A1c', ['4548-4', '17856-6'], /a1c|glycated h/],
-  ['Glucose', ['2345-7', '2339-0', '1558-6'], /^glucose\b/],
-  ['LDL', ['13457-7', '18262-6', '2089-1'], /\bldl\b/],
-  ['HDL', ['2085-9'], /\bhdl\b/],
-  ['Total cholesterol', ['2093-3'], /^(total )?cholesterol(,? total)?$/],
-  ['Triglycerides', ['2571-8'], /^triglyceride/],
-  ['Creatinine', ['2160-0'], /^creatinine\b/],
-  ['eGFR', ['33914-3', '48642-3', '48643-1', '62238-1', '98979-8'], /egfr|glomerular/],
-  ['ALT', ['1742-6', '1743-4'], /^alt\b|alanine amino/],
-  ['AST', ['1920-8'], /^ast\b|aspartate amino/],
-  ['Hemoglobin', ['718-7'], /^(h(a)?emoglobin|hgb)\b(?!.*(a1c|glyc))/],
-  ['Platelets', ['777-3', '26515-7'], /^(platelets?|plt)( count)?$/],
-  ['Potassium', ['2823-3', '6298-4'], /^potassium\b/],
-  ['Sodium', ['2951-2', '2947-0'], /^sodium\b/],
-  ['TSH', ['3016-3', '11580-8'], /\btsh\b|thyrotropin|thyroid stimulating/],
-];
-const NOT = /urine|\bur\b|ratio|non[- ]?hdl|particle|clearance/;
-
-// The newest matching trend per key lab.
-export function keyLabs(trends: LabTrend[]): (LabTrend & { test: string })[] {
-  return KEY_LABS.flatMap(([test, codes, re]) => {
-    const n = (t: LabTrend) => (t.name ?? '').toLowerCase();
-    const t = trends.filter((x) => (x.loinc && codes.includes(x.loinc)) || (re.test(n(x)) && !NOT.test(n(x))))
-      .sort((a, b) => (b.latest.date ?? '').localeCompare(a.latest.date ?? ''))[0];
-    return t ? [{ test, ...t }] : [];
-  });
-}
+// The key labs, in table order (summarizeLabs already groups each into one entry).
+export const keyLabs = (trends: LabTrend[]): LabTrend[] => KEY_LABS.flatMap(([test]) => trends.filter((t) => t.test === test));
 
 const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
