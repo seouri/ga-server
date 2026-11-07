@@ -219,3 +219,40 @@ test('each created record is stamped with its own arrival time', async () => {
     vi.useRealTimers();
   }
 });
+
+test('a person-edited portal medication still gets its last-seen advanced (body kept, source-conflict tag)', async () => {
+  const SMART = { system: 'urn:ga-server:id:smart:h', value: 'MedicationRequest/1' };
+  const EHI_ROW = { system: 'urn:ga-server:id:ehi:o', value: 'ORDER_MED|1' };
+  const mr = (status: string, extra: object = {}) => ({
+    resourceType: 'MedicationRequest', id: '1', status, intent: 'order', subject: { reference: 'Patient/p' }, medicationCodeableConcept: { text: 'm' }, identifier: [SMART], ...extra,
+  }) as Resource;
+  const smart = (date: string, fill = false): SourceInfo =>
+    ({ kind: 'smart', file: 'https://h/fhir', date, writer: 'importer', seenAt: '2026-11-02T00:00:00Z', fillOnly: () => fill });
+  const edited = (ids: object[] = [SMART]) => ({
+    ...mr('active'), id: 'srv-1', identifier: ids,
+    meta: { author: { reference: 'Practitioner/person' }, tag: [{ system: 'urn:ga-server:tag', code: 'writer-importer' }] },
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-01T00:00:00Z' }, { url: 'urn:ga-server:ext:last-seen', valueDateTime: '2026-11-01T00:00:00Z' }],
+    note: [{ text: 'person note' }],
+  }) as Resource;
+  for (const [what, ex, incoming, source, counted] of [
+    ['unchanged', edited(), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-01T00:00:00Z'), { skipped: 1 }],
+    ['changed: conflict', edited(), mr('stopped'), smart('2026-11-02T00:00:00Z'), { conflicts: 1 }],
+    ['fill-only', edited([SMART, EHI_ROW]), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-02T00:00:00Z', true), { skipped: 1 }],
+  ] as const) {
+    const writes: Resource[] = [];
+    const client = {
+      getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
+      readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
+      searchOne: async () => ex,
+      searchResources: async () => [],
+      updateResource: async (r: Resource) => (writes.push(r), r),
+    } as unknown as MedplumClient;
+    expect(await importResources(client, [incoming], source, 'p', ''), what).toMatchObject({ ...counted, seen: 1 });
+    expect(writes, what).toHaveLength(1);
+    const w = writes[0] as MedicationStatement;
+    expect(w.status, what).toBe('active');
+    expect(w.note, what).toEqual([{ text: 'person note' }]);
+    expect(w.extension?.find((e) => e.url === 'urn:ga-server:ext:last-seen')?.valueDateTime, what).toBe('2026-11-02T00:00:00Z');
+    expect(w.meta?.tag, what).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+  }
+});

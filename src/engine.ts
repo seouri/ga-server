@@ -271,12 +271,12 @@ export async function importResources(
   };
   // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky source-conflict tag.
   const protect = (r: Resource): Resource => (byOther(r) && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r);
-  // A person (or the agent) last shaped this record: smart fill-only and last-seen writes leave it alone.
+  // A person (or the agent) last shaped this record: smart fill-only writes leave it alone (last-seen still advances).
   const personEdited = (r: Resource): boolean => byOther(r) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;
-    const seen = !!source.seenAt && DATED.has(r.resourceType) && !personEdited(r) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
+    const seen = !!source.seenAt && DATED.has(r.resourceType) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
     if (!changed && !seen) return;
     const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
     const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];
@@ -404,6 +404,7 @@ export async function importResources(
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
     const fillOnto = async (ex: R): Promise<R> => {
       if (personEdited(ex)) {
+        await keep(ex, false);
         report.skipped++;
         return ex;
       }
@@ -438,7 +439,9 @@ export async function importResources(
           await keep(existing, false);
           report.skipped++;
         } else if (d === 'conflict') {
-          if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
+          // The tag and last-seen in one write: a person's edit must not make a portal medication read "may have been stopped".
+          const tagged = (hasTag(existing, 'source-conflict') ? existing : withTag(existing, 'source-conflict')) as R;
+          await keep(tagged, tagged !== existing);
           report.conflicts++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (d === 'update') {
