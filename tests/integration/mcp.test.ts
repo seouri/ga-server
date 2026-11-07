@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Observation } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import type { Bundle, Endpoint, Medication, Observation } from '@medplum/fhirtypes';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
@@ -242,4 +242,130 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
   } finally {
     await cleanupTestPatient(client, p);
   }
+});
+
+// One throwaway patient and one MCP process for the purpose-built read tools (each process logs in; Medplum rate-limits logins).
+describe('purpose-built read tools', () => {
+  const T = '2026-11-01T00:00:00.000Z';
+  let p: string;
+  let ep: Endpoint;
+  let sub: Client;
+  const tool = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = await sub.callTool({ name, arguments: args });
+    const t = (r.content as { text: string }[])[0].text;
+    return r.isError ? { error: t } : JSON.parse(t);
+  };
+  beforeAll(async () => {
+    p = await createTestPatient(client);
+    // Endpoints are in no patient compartment: deleted in afterAll. status error: also a stale source.
+    ep = await client.createResource<Endpoint>({
+      resourceType: 'Endpoint', status: 'error', connectionType: { code: 'hl7-fhir-rest' }, payloadType: [{ text: 'x' }], address: 'https://hosp.example/fhir',
+      identifier: [{ system: 'urn:ga-server:id:smart-source', value: `test-${randomUUID()}` }],
+      extension: [
+        { url: 'urn:ga-server:ext:smart-last-success', valueDateTime: T },
+        { url: 'urn:ga-server:ext:smart-patient', valueReference: { reference: `Patient/${p}` } },
+      ],
+    });
+    sub = new Client({ name: 'test', version: '0' });
+    await sub.connect(new StdioClientTransport({ command: 'node', args: [CLI, 'mcp'], env: { ...process.env, GA_PATIENT_ID: p } as Record<string, string> }));
+  });
+  afterAll(async () => {
+    await sub?.close();
+    if (ep?.id) await client.deleteResource('Endpoint', ep.id);
+    if (p) await cleanupTestPatient(client, p);
+  });
+
+  test('current_medications, current_problems, allergies apply the currency rule', async () => {
+    const key = ep.identifier?.[0].value as string;
+    const subject = { reference: `Patient/${p}` };
+    const seen = (t: string) => ({ identifier: [{ system: `urn:ga-server:id:smart:${key}`, value: 'x' }], extension: [{ url: 'urn:ga-server:ext:last-seen', valueDateTime: t }] });
+    const med = await client.createResource<Medication>({ resourceType: 'Medication', code: { text: 'Synthetic drug A' } });
+    const entry = [
+      { resourceType: 'MedicationRequest', status: 'active', intent: 'order', subject, medicationReference: { reference: `Medication/${med.id}` }, ...seen(T) },
+      { resourceType: 'MedicationStatement', status: 'active', subject, medicationCodeableConcept: { text: 'Synthetic drug B' }, ...seen('2026-10-01T00:00:00.000Z') },
+      { resourceType: 'MedicationStatement', status: 'stopped', subject, medicationCodeableConcept: { text: 'Synthetic drug C' } },
+      { resourceType: 'Condition', subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }], code: { text: 'Synthetic problem' } },
+      { resourceType: 'Condition', subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] }, category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'encounter-diagnosis' }] }], code: { text: 'Synthetic visit dx' } },
+      { resourceType: 'AllergyIntolerance', patient: subject, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] }, code: { text: 'Synthetic allergen' } },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    try {
+      await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+      const meds = await tool('current_medications');
+      expect(meds.rows.map((r: { name: string; currency: string }) => [r.name, r.currency])).toEqual([['Synthetic drug A', 'current'], ['Synthetic drug B', 'unconfirmed']]);
+      expect((await tool('current_medications', { include: 'all' })).rows[2]).toMatchObject({ name: 'Synthetic drug C', currency: 'inactive' });
+      expect((await tool('current_problems')).rows.map((r: { name: string }) => r.name)).toEqual(['Synthetic problem']);
+      expect((await tool('allergies')).rows).toMatchObject([{ name: 'Synthetic allergen', currency: 'current' }]);
+    } finally {
+      await client.deleteResource('Medication', med.id as string);
+    }
+  });
+  test('current_medications: the newest Epic import comes from any record type (an EHI Encounter here)', async () => {
+    const subject = { reference: `Patient/${p}` };
+    const epic = (date: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }] });
+    const entry = [
+      { resourceType: 'MedicationStatement', status: 'active', subject, medicationCodeableConcept: { text: 'Synthetic drug D' }, ...epic('2026-11-02T00:00:00Z') },
+      { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, subject, ...epic('2026-11-03T00:00:00Z') },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const d = (await tool('current_medications')).rows.find((r: { name: string }) => r.name === 'Synthetic drug D');
+    expect(d).toMatchObject({ currency: 'unconfirmed', reason: expect.stringContaining('2026-11-03') });
+  });
+
+  test('vitals: clinic and home readings by default, Apple daily summaries only with daily', async () => {
+    const cat = (code: string) => [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code }] }];
+    const apple = { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] };
+    const o = (text: string, date: string, extra: Partial<Observation>): Observation =>
+      ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 70, unit: 'kg' }, ...extra });
+    const entry = [
+      o('Body weight', '2025-03-01', { category: cat('vital-signs') }),
+      o('Body weight', '2025-03-01T20:00:00Z', { category: cat('vital-signs'), meta: apple }),
+      o('Steps, daily total (Apple Health)', '2025-03-01', { category: cat('activity'), meta: apple }),
+      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory') }),
+    ].map((resource) => ({ resource, request: { method: 'POST', url: 'Observation' } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const v = await tool('vitals');
+    expect(v.rows.map((r: { setting: string; kind: string }) => [r.setting, r.kind])).toEqual([['home', 'reading'], ['clinic', 'reading']]);
+    expect((await tool('vitals', { daily: true })).rows).toMatchObject([{ name: 'Steps, daily total (Apple Health)', kind: 'daily total', setting: 'home' }]);
+    expect((await tool('vitals', { name: 'weight', until: '2025-02-28' })).rows).toEqual([]);
+    expect(await tool('vitals', { name: 'weight', daily: true })).toMatchObject({ rows: [{ kind: 'reading' }, { kind: 'reading' }], hint: expect.stringMatching(/^no daily summaries/) });
+    expect(await tool('vitals', { limit: 1 })).toMatchObject({ truncated: true, hint: expect.stringContaining('daily: true') });
+  });
+  test('notes_search: text inside notes and messages; archives and source files skipped', async () => {
+    const subject = { reference: `Patient/${p}` };
+    const b64 = (t: string) => Buffer.from(t).toString('base64');
+    const note = (body: string, extra: object = {}) => ({ resourceType: 'DocumentReference', status: 'current', subject, date: '2025-02-01T09:00:00Z', type: { text: 'Progress note' }, content: [{ attachment: { contentType: 'text/plain', data: b64(body) } }], ...extra });
+    const entry = [
+      note('Synthetic visit: patient mentions zebrafinch symptoms.'),
+      note('zebrafinch inside an archive', { identifier: [{ system: 'urn:ga-server:id:ehi-archive', value: randomUUID() }] }),
+      { resourceType: 'Communication', status: 'completed', subject, sent: '2025-03-01T10:00:00Z', sender: { display: 'Synthetic clinic' }, payload: [{ contentString: 'About your ZEBRAFINCH question' }] },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const r = await tool('notes_search', { text: 'zebrafinch' });
+    expect(r.rows.map((x: { kind: string; date: string }) => [x.kind, x.date])).toEqual([['message', '2025-03-01'], ['Progress note', '2025-02-01']]);
+    expect(r.rows[1].snippet).toContain('zebrafinch symptoms');
+    expect((await tool('notes_search', { text: 'zebrafinch', until: '2025-02-15' })).rows).toHaveLength(1);
+    expect((await tool('notes_search', { since: '2025' })).error).toMatch(/since must be/);
+  });
+  test('portalWarning: a stale source is named with its fix; a patient without sources gets no field', async () => {
+    for (const name of ['lab_results', 'vitals', 'notes_search', 'current_medications'])
+      expect((await tool(name)).portalWarning).toMatch(/status error, last success 2026-11-01T00:00:00\.000Z: sync: `ga sync`/);
+    expect(JSON.parse((await call('fhir_search', { resourceType: 'Observation', params: { _count: '1' } })).text).portalWarning).toBeUndefined();
+  });
+  test('fhir_search nextPage: page 2 differs from page 1; a tampered token is refused', async () => {
+    const entry = ['2020-01-01', '2020-01-02', '2020-01-03'].map((d) => ({
+      resource: { resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text: 'Synthetic paging' }, effectiveDateTime: d },
+      request: { method: 'POST', url: 'Observation' },
+    }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const search = async (args: object) => sub.callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation', ...args } }) as Promise<{ isError?: boolean; content: { text: string }[] }>;
+    const ids = (r: { content: { text: string }[] }) => (JSON.parse(r.content[0].text) as Bundle).entry?.map((e) => e.resource?.id);
+    const p1 = await search({ params: { subject: `Patient/${p}`, 'code:text': 'Synthetic paging', _sort: '-date', _count: '2' } });
+    const { nextPage } = JSON.parse(p1.content[0].text);
+    const p2 = await search({ page: nextPage });
+    expect(ids(p1)).toHaveLength(2);
+    expect(ids(p2)).toHaveLength(1);
+    expect(ids(p1)).not.toContain(ids(p2)?.[0]);
+    const bad = await search({ page: `${nextPage.slice(0, -4)}!!!!` });
+    expect(bad.isError).toBe(true);
+  });
 });

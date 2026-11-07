@@ -5,7 +5,7 @@ import { APPLE } from './share/ask.ts';
 const read = (p: string): string => readFileSync(new URL(`../.claude/skills/${p}`, import.meta.url), 'utf8');
 
 const STEP0 =
-  'Call `hospital_status` first. A source is stale if its status is `off` or `error`, or its last success is missing or older than 48 hours. ' +
+  'Read tools add `portalWarning` to their result when a connected hospital source is stale; `hospital_status` gives the details. A source is stale if its status is `off` or `error`, or its last success is missing or older than 48 hours. ' +
   'If any is stale, start the answer with one line naming it, its last success and the fix: `hospital_connect` when `off` (the user finishes the login in the link it returns); ' +
   '`hospital_sync` when `error`. Error `disconnected` means the user disconnected it on purpose: say so. Error `not_enabled` means no record types are enabled yet, so GA holds nothing from it: ' +
   'use `hospital_sync` with `enable` after checking the dry-run counts. No sources: say nothing.';
