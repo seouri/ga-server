@@ -113,6 +113,9 @@ describe('concepts: one test under different names and codes', () => {
     const r = await labResults(fake(seen), 'p', { name: 'ldl' });
     expect((r.rows as LabRow[]).map((x) => x.name)).toEqual(['LDL cholesterol', 'LDL-P', 'LOW DENSITY LIPOPROTEIN CHOL']);
     expect(new URLSearchParams(seen[0]).get('code:text')).toBeNull();
+    pages = [[mapped('LDL chol (est)', '2025-01-01', '13457-7', true)]];
+    expect(((await labResults(fake(), 'p', { name: 'ldl' })).rows as LabRow[])[0].flags).toContain('possibly LDL (suggested mapping)');
+    pages = [[hospital, pdf, lab('HIGH DENSITY LIPOPROTEIN CHOL', '2024-01-01', '2085-9'), lab('LDL-P', '2023-01-01')]];
     const s = (await labResults(fake(), 'p', { name: 'ldl', summary: true })).rows as LabTrend[];
     expect(s.map((x) => [x.test, x.name, x.count])).toEqual([['LDL', 'LDL cholesterol', 2], [undefined, 'LDL-P', 1]]);
     expect(s[0]).toMatchObject({ latest: { date: '2024-07-26' }, previous: { date: '2022-01-01', method: 'calculated' } });
@@ -139,6 +142,10 @@ describe('concepts: one test under different names and codes', () => {
     expect(labRow(pdf).flags).toEqual(['read from a document by AI']);
     // the record's own LOINC is never suggested, whatever the tag says
     expect(labRow({ ...guess, code: { coding: [{ system: L, code: '2085-9' }, ga('13457-7')] } }).flags).toEqual(['read from a document by AI']);
+    // keyed by its own name only: the GA-suggested LOINC neither sets loinc nor pulls in an uncoded twin
+    const twin = lab('LDL chol (est)', '2024-01-01');
+    expect(summarizeLabs([guess, twin, lab('Other', '2020-01-01', '13457-7')]).map((x) => [x.name, x.count, x.loinc])).toEqual([['LDL chol (est)', 2, undefined], ['Other', 1, '13457-7']]);
+    expect(summarizeLabs([guess, lab('LDL chol (est)', '2020-01-01', '13457-7')]).map((x) => [x.name, x.count])).toEqual([['LDL chol (est)', 1], ['LDL chol (est)', 1]]);
     const s = summarizeLabs([hospital, guess]);
     expect(s.map((x) => [x.test, x.name, x.count, x.flags])).toEqual([[undefined, 'LDL chol (est)', 1, ['read from a document by AI', 'possibly LDL (suggested mapping)']], ['LDL', 'LOW DENSITY LIPOPROTEIN CHOL', 1, undefined]]);
     expect(keyLabs(s).map((x) => x.name)).toEqual(['LOW DENSITY LIPOPROTEIN CHOL']);

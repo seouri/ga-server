@@ -12,6 +12,15 @@ const HAS_DAILY = /heart|respirat|step|distance|flight|sleep|activ|ring/i;
 
 type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' };
 
+// The searches for a vital name: its text, plus its concept's member codes ("weight": 29463-7). Two searches: Medplum can't OR code and code:text.
+export const vitalSearches = (name: string): [string, string][] => {
+  const c = conceptNamed(name);
+  return [['code:text', name], ...(c?.kind === 'vital' ? [['code', codesFor(c.name).map((x) => `${x.system}|${x.code}`).join(',')] as [string, string]] : [])];
+};
+// Merged searches: one row per record, newest first, undated last.
+export const newestFirst = <R extends { id?: string; date?: string }>(rows: R[]): R[] =>
+  [...new Map(rows.map((r) => [r.id, r])).values()].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+
 export function vitalRow(o: Observation): VitalRow {
   const { source, ...row } = labRow(o);
   const parts = o.component?.map((c) => `${c.code?.text ?? c.code?.coding?.[0]?.display}: ${qty(c.valueQuantity) ?? c.valueString ?? ''}`);
@@ -36,17 +45,14 @@ export async function vitals(
   if (daily) q.append('_tag', `${TAG}|src-apple-health`);
   q.append('category', daily ? 'activity' : 'vital-signs');
   dateRange(q, 'date', since, until);
-  // A vital concept's name ("weight") also finds its member codes: a second search, Medplum can't OR code and code:text.
-  const c = name && !daily ? conceptNamed(name) : undefined;
-  const by: [string, string][] = name ? [['code:text', name]] : [];
-  if (c?.kind === 'vital') by.push(['code', codesFor(c.name).map((x) => `${x.system}|${x.code}`).join(',')]);
+  // Daily summaries carry no vital concept code: by text only.
+  const by = !name ? [] : daily ? [['code:text', name] as [string, string]] : vitalSearches(name);
   const found = await Promise.all((by.length ? by : [undefined]).map((p) => {
     const s = new URLSearchParams(q);
     if (p) s.append(...p);
     return collect(client, 'Observation', s, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
   }));
-  const ids = new Set<string | undefined>();
-  const rows = found.length === 1 ? found[0].rows : found.flatMap((f) => f.rows).filter((r) => !ids.has(r.id) && !!ids.add(r.id)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  const rows = newestFirst(found.flatMap((f) => f.rows));
   // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".
   if (daily && !rows.length) {
     const r = await vitals(client, patientId, { name, since, until, limit });

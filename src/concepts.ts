@@ -9,7 +9,7 @@ export const ICD10CM = 'http://hl7.org/fhir/sid/icd-10-cm';
 export const CPT = 'http://www.ama-assn.org/go/cpt';
 export const HCPCS = 'http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets';
 
-export type Concept = { name: string; kind: 'lab' | 'vital' | 'vaccine' | 'procedure' | 'medication' | 'condition'; members: { system: string; code: string; label?: string }[] };
+export type Concept = { name: string; kind: 'lab' | 'vital' | 'vaccine' | 'procedure' | 'medication' | 'condition'; synonyms?: string[]; members: { system: string; code: string; label?: string }[] };
 
 const load = <T>(file: string): T => JSON.parse(readFileSync(new URL(`../config/${file}`, import.meta.url), 'utf8')) as T;
 const list = load<Concept[]>('concepts.json');
@@ -27,15 +27,24 @@ export const codesFor = (name: string): Coding[] => byName.get(name.toLowerCase(
 
 // FHIR Vital Signs profile: the first member of the vital concept is the profile's code.
 const ALIAS: Record<string, string> = { weight: 'body weight', height: 'body height', bmi: 'body mass index', 'body mass index (bmi)': 'body mass index', pulse: 'heart rate', spo2: 'oxygen saturation', temperature: 'body temperature', 'blood pressure': 'blood pressure panel' };
-// The concept a tool name asks for ("ldl", "weight"), by name or vital alias.
-export const conceptNamed = (name: string): Concept | undefined => {
-  const n = name.trim().toLowerCase();
-  return byName.get(ALIAS[n] ?? n);
-};
 // `unit` is accepted for callers and unused: the profile fixes one code per vital whatever the unit.
 export const vitalSpecCode = (name: string, _unit?: string): Coding | undefined => {
-  const c = conceptNamed(name);
+  const n = name.trim().toLowerCase();
+  const c = byName.get(ALIAS[n] ?? n);
   return c?.kind === 'vital' ? codesFor(c.name)[0] : undefined;
+};
+
+// The concept a tool query asks for: a name, vital alias or synonym, alone or with filler words ("my ldl level", "blood glucose").
+// Any other word ("ldl p", "urine glucose", "tsh receptor antibody") keeps the query literal. The longest term wins; a tie between concepts resolves nothing.
+const words = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const FILLER = new Set(['my', 'the', 'blood', 'serum', 'plasma', 'level', 'levels', 'test', 'result', 'results', 'value', 'values', 'cholesterol']);
+const TERMS = [...list.map((c) => [words(c.name), c] as const), ...list.flatMap((c) => (c.synonyms ?? []).map((t) => [words(t), c] as const)),
+  ...Object.entries(ALIAS).map(([a, n]) => [words(a), byName.get(n)!] as const)];
+export const conceptNamed = (query: string): Concept | undefined => {
+  const q = ` ${words(query)} `;
+  const hits = TERMS.filter(([t]) => q.includes(` ${t} `) && q.replace(` ${t} `, ' ').trim().split(' ').every((w) => !w || FILLER.has(w)))
+    .sort(([a], [b]) => b.length - a.length);
+  return hits.length && !hits.some(([t, c]) => t.length === hits[0][0].length && c !== hits[0][1]) ? hits[0][1] : undefined;
 };
 
 export const cvxFor = (name: string): Coding | undefined => {

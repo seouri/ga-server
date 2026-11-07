@@ -2,6 +2,14 @@
  {
   "name": "A1c",
   "kind": "lab",
+  "synonyms": [
+   "hba1c",
+   "hemoglobin a1c",
+   "haemoglobin a1c",
+   "glycated hemoglobin",
+   "glycated haemoglobin",
+   "glycohemoglobin"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -17,6 +25,10 @@
  {
   "name": "Glucose",
   "kind": "lab",
+  "synonyms": [
+   "blood sugar",
+   "fasting glucose"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -36,6 +48,11 @@
  {
   "name": "LDL",
   "kind": "lab",
+  "synonyms": [
+   "ldl c",
+   "ldl cholesterol",
+   "low density lipoprotein"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -57,6 +74,11 @@
  {
   "name": "HDL",
   "kind": "lab",
+  "synonyms": [
+   "hdl c",
+   "hdl cholesterol",
+   "high density lipoprotein"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -68,6 +90,9 @@
  {
   "name": "Total cholesterol",
   "kind": "lab",
+  "synonyms": [
+   "cholesterol total"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -79,6 +104,9 @@
  {
   "name": "Triglycerides",
   "kind": "lab",
+  "synonyms": [
+   "triglyceride"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -101,6 +129,12 @@
  {
   "name": "eGFR",
   "kind": "lab",
+  "synonyms": [
+   "gfr",
+   "estimated gfr",
+   "glomerular filtration rate",
+   "estimated glomerular filtration rate"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -133,6 +167,10 @@
  {
   "name": "ALT",
   "kind": "lab",
+  "synonyms": [
+   "sgpt",
+   "alanine aminotransferase"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -148,6 +186,10 @@
  {
   "name": "AST",
   "kind": "lab",
+  "synonyms": [
+   "sgot",
+   "aspartate aminotransferase"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -159,6 +201,10 @@
  {
   "name": "Hemoglobin",
   "kind": "lab",
+  "synonyms": [
+   "hgb",
+   "haemoglobin"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -170,6 +216,11 @@
  {
   "name": "Platelets",
   "kind": "lab",
+  "synonyms": [
+   "platelet",
+   "platelet count",
+   "plt"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
@@ -215,6 +266,10 @@
  {
   "name": "TSH",
   "kind": "lab",
+  "synonyms": [
+   "thyrotropin",
+   "thyroid stimulating hormone"
+  ],
   "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
   "members": [
    {
