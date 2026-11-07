@@ -45,17 +45,18 @@ export function registerShareTools(server: McpServer, deps: ToolDeps, dir = shar
     async (a: Args) => {
       try {
         const { confirm, ...rest } = a;
-        const now = new Date();
+        let now = new Date();
         const groups = rest.scope === undefined ? undefined : parseGroups(Array.isArray(rest.scope) ? rest.scope.join(',') : rest.scope);
         const since = rest.since === undefined ? undefined : parseSince(rest.since, now);
         const until = rest.until === undefined ? undefined : parseSince(rest.until, now);
-        const expires = rest.expires ?? (rest.audience === 'doctor' ? '7d' : 'never');
-        if (rest.expires !== undefined) parseExpiry(rest.expires, now); // reject a bad value in the preview
+        const expires = parseExpiry(rest.expires ?? (rest.audience === 'doctor' ? '7d' : 'never'), now) ?? 'never'; // also rejects a bad value
         if (!confirm) {
           const view = { audience: rest.audience, label: rest.label, scope: scopeWords({ groups: groups ?? defaultGroups(rest.audience) }), since, until, expires };
-          return text({ ...view, ...preview('share', structuredClone(rest)) });
+          return text({ ...view, ...preview('share', { args: structuredClone(rest), now: now.toISOString() }) });
         }
-        if (!isDeepStrictEqual(takeConfirmed<typeof rest>('share', confirm), rest)) throw new GaError('arguments changed since the preview; ask for a new preview');
+        const prev = takeConfirmed<{ args: typeof rest; now: string }>('share', confirm);
+        if (!isDeepStrictEqual(prev.args, rest)) throw new GaError('arguments changed since the preview; ask for a new preview');
+        now = new Date(prev.now); // create with the previewed clock so the expiry matches the preview exactly
         const { share, token } = createShare(dir, {
           audience: rest.audience,
           label: rest.label,

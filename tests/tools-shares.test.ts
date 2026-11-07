@@ -26,6 +26,14 @@ const setup = async () => {
 const args = { audience: 'family', label: 'Mom', scope: ['labs'] };
 
 describe('share tools', () => {
+  it('preview shows the exact expiry and confirm creates the same one', async () => {
+    const { dir, call } = await setup();
+    const p = await call('share_create', { ...args, expires: '1d' });
+    expect(Math.abs(Date.parse(p.json.expires) - Date.now() - 864e5)).toBeLessThan(5000);
+    expect((await call('share_create', args)).json.expires).toBe('never');
+    await call('share_create', { ...args, expires: '1d', confirm: p.json.confirm });
+    expect(listShares(dir)[0].expires).toBe(p.json.expires);
+  });
   it('preview creates nothing; confirm creates one share at publicUrl with a QR', async () => {
     const { dir, call } = await setup();
     const p = await call('share_create', args);
@@ -42,7 +50,8 @@ describe('share tools', () => {
   it('doctor preview shows the 7 day default expiry', async () => {
     const { call } = await setup();
     const p = await call('share_create', { audience: 'doctor', label: 'Dr' });
-    expect(p.json.expires).toBe('7d');
+    expect(Date.parse(p.json.expires) - Date.now()).toBeGreaterThan(7 * 864e5 - 5000);
+    expect(Date.parse(p.json.expires) - Date.now()).toBeLessThanOrEqual(7 * 864e5);
   });
   it('refuses changed arguments and reused codes', async () => {
     const { dir, call } = await setup();
