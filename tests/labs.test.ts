@@ -32,7 +32,7 @@ describe('labResults', () => {
   });
   it('builds the query, follows next by path, drops non-lab categories, flags truncation', async () => {
     const seen: string[] = [];
-    pages = [[obs(1), obs(2, { category: [{ coding: [{ code: 'vital-signs' }] }] })], [obs(3), obs(4)]];
+    pages = [[obs(0, { effectiveDateTime: undefined }), obs(1), obs(2, { category: [{ coding: [{ code: 'vital-signs' }] }] })], [obs(3), obs(4)]];
     const r = await labResults(fake(seen), 'p', { name: 'a1c', since: '2024-01-01', until: '2024-12-31', limit: 2 });
     expect(r).toMatchObject({ total: 2, truncated: true });
     expect(r.rows.map((x) => x.id)).toEqual(['id1', 'id3']);
