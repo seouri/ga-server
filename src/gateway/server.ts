@@ -57,7 +57,6 @@ export function createGateway(deps: GatewayDeps): http.Server {
   const verifyPasskey = deps.verifyPasskey ?? ((r, c) => verifyAuthentication(deps.dir, pub!, r, c));
   const fails = failLimiter();
   const registrations = failLimiter();
-  const authorizations = failLimiter();
 
   // WebAuthn challenges, server side only: one per interaction or enroll token, single use, short-lived.
   const challenges = new Map<string, { challenge: string; exp: number }>();
@@ -293,9 +292,9 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (u) return upload(req, res, ip, u[1], u[2] ?? '', url.searchParams.get('name') ?? 'upload');
     const k = /^\/confirm\/([A-Za-z0-9_-]{43})(\/login)?$/.exec(path);
     if (k) return confirm(req, res, ip, k[1], k[2] ?? '');
-    // Each registration or authorization request writes a file: 20 of each per IP per 10 minutes.
-    const writes = path === '/reg' && req.method === 'POST' ? registrations : path === '/auth' ? authorizations : undefined;
-    if (writes?.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
+    // Each registration writes a client file: 20 per IP per 10 minutes. Not /auth: behind Funnel without X-Forwarded-For every
+    // request shares one IP, and counting the owner's own sign-ins would lock the owner out.
+    if (path === '/reg' && req.method === 'POST' && registrations.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
     return oidc(req, res);
   }
 
