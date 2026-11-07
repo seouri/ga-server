@@ -294,7 +294,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
         '"possibly <test> (suggested mapping)": GA only guessed this result is that test; say so. ' +
         'truncated: more results exist; narrow by name or dates. summary: true returns one entry per test instead (trends, "how has X changed"), ' +
-        'over every matching result: test (the concept, only for results coded as it), method (e.g. eGFR race-free or race-based, LDL calculated or direct), name, loinc, unit, latest {date, value, flag high/low/...}, previous {date, value, method}, change (latest − previous, same unit), ' +
+        'over every matching result: test (the concept, only for results coded as it), name, loinc, unit, latest {date, value, flag high/low/..., method}, previous {date, value, method} (method: the coded variant, e.g. eGFR race-free or race-based, LDL calculated or direct), change (latest − previous, same unit), ' +
         'count, outOfRange (results flagged high or low), first (date), source and flags of the latest.',
       inputSchema: {
         name: z.string().min(1).optional(),

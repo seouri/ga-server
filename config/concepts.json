@@ -10,7 +10,7 @@
    "glycated haemoglobin",
    "glycohemoglobin"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 4549-2 \"Hemoglobin A1c/Hemoglobin.total in Blood by Electrophoresis\"",
   "members": [
    {
     "system": "http://loinc.org",
@@ -19,6 +19,10 @@
    {
     "system": "http://loinc.org",
     "code": "17856-6"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "4549-2"
    }
   ]
  },
@@ -29,7 +33,7 @@
    "blood sugar",
    "fasting glucose"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 1549-5 \"Glucose [Mass/volume] in Serum or Plasma --pre 100 g glucose PO\"",
   "members": [
    {
     "system": "http://loinc.org",
@@ -41,7 +45,13 @@
    },
    {
     "system": "http://loinc.org",
-    "code": "1558-6"
+    "code": "1558-6",
+    "label": "fasting"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "1549-5",
+    "label": "fasting (before a 100 g glucose load)"
    }
   ]
  },
@@ -118,11 +128,15 @@
  {
   "name": "Creatinine",
   "kind": "lab",
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 38483-4 \"Creatinine [Mass/volume] in Blood\"",
   "members": [
    {
     "system": "http://loinc.org",
     "code": "2160-0"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "38483-4"
    }
   ]
  },
@@ -135,7 +149,7 @@
    "glomerular filtration rate",
    "estimated glomerular filtration rate"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 77147-7 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (MDRD)/1.73 sq M\"; 69405-9 \"Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by based on 1.73 sq M\"",
   "members": [
    {
     "system": "http://loinc.org",
@@ -161,6 +175,16 @@
     "system": "http://loinc.org",
     "code": "33914-3",
     "label": "MDRD"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "77147-7",
+    "label": "MDRD"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "69405-9",
+    "label": "method unspecified"
    }
   ]
  },
@@ -190,11 +214,15 @@
    "sgot",
    "aspartate aminotransferase"
   ],
-  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07)",
+  "_source": "LOINC (loinc.org, checked against NLM Clinical Table Search Service loinc_items, clinicaltables.nlm.nih.gov, 2026-11-07); further members checked on clinicaltables.nlm.nih.gov loinc_items 2026-11-07: 30239-8 \"Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma by With P-5'-P\"",
   "members": [
    {
     "system": "http://loinc.org",
     "code": "1920-8"
+   },
+   {
+    "system": "http://loinc.org",
+    "code": "30239-8"
    }
   ]
  },

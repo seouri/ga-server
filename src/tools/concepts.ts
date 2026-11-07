@@ -46,11 +46,11 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
       description:
         "Map one source term (source, name, unit, type and key exactly as concepts_to_review or ga_import's unmapped list gives them; key carries the specimen when there is one) to a standard code: " +
         'LOINC for labs and vitals, CVX for vaccines, RxNorm for medications (clinical drug when strength and form are given, else ingredient), SNOMED CT or ICD-10-CM for conditions, ' +
-        'SNOMED CT, CPT or HCPCS for procedures. GA checks LOINC, RxNorm and CVX codes exist, then codes every record of that term from that source. ' +
+        'SNOMED CT, CPT or HCPCS for procedures. GA checks LOINC, RxNorm and CVX codes exist (a code that does not exist is refused, nothing written), then codes every record of that term from that source. ' +
         'confident: true only when name, unit and specimen all agree with the code (for LOINC, its long name); otherwise false, and the code is applied as suggested. ' +
         'equivalence: "equivalent" when the code means exactly the term; wider/narrower/inexact are applied as suggested; "unmatched" when no standard code exists ' +
         '(adds none and clears the term from review). A second call for the same term replaces the mapping (corrections). ' +
-        'Returns changed (records recoded), status mapped, suggested or "no records" (the mapping is kept for later imports), and reason (e.g. validation unavailable, not validated).',
+        'Returns changed (records recoded), status mapped, suggested, unmatched or "no records" (the mapping is kept for later imports), and reason (e.g. validation unavailable: applied as suggested; not validated).',
       inputSchema: {
         source: z.string().regex(/^((ehi|ccda|smart):.+|apple-health|pdf)$/),
         name: z.string().min(1).max(200),
@@ -78,7 +78,8 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
         if (!unmatched && !TARGET[type].includes(system)) throw new GaError(`${type} takes ${TARGET[type].join(', ')}, not ${system}`);
         if (!unmatched && !wellFormed(system, code)) throw new GaError(`"${code}" is not a ${system} code`);
         const v = unmatched ? { ok: true } : await validate(system, code, { fetch: deps.fetch });
-        const sure = confident && v.ok && !v.reason; // a failed or skipped validation is applied as suggested
+        if (!v.ok && v.reason !== 'validation unavailable') throw new GaError(`${v.reason}: not mapped`); // the code does not exist
+        const sure = confident && v.ok && !v.reason; // an unavailable or skipped validation is applied as suggested
         const map = await upsertEntry(client, source, {
           key, equivalence, confident: sure, by: 'agent',
           ...(!unmatched && { target: { system, code, display: v.display ?? display } }),
@@ -94,7 +95,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
         });
         const { changed, matched } = await applyAll(client, patientId, { source, key, type });
         if (!matched) return text({ changed, status: 'no records', reason: `no ${type} records of "${key}" from ${source}; the mapping is kept for later imports` });
-        return text({ changed, status: unmatched || (sure && equivalence === 'equivalent') ? 'mapped' : 'suggested', ...(v.reason && { reason: v.reason }) });
+        return text({ changed, status: unmatched ? 'unmatched' : sure && equivalence === 'equivalent' ? 'mapped' : 'suggested', ...(v.reason && { reason: v.reason }) });
       } catch (e) {
         return fail(e);
       }
