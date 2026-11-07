@@ -220,6 +220,10 @@ const firstCoding = (o: Observation) => {
   const c = o.valueCodeableConcept?.coding?.[0];
   return c?.code ? `${c.system ?? ''}|${c.code}` : undefined;
 };
+// The same numbers, ignoring units (sources spell them differently: K/uL vs 10*3/uL) and including a panel's components (BP).
+const nums = (o: Observation) => JSON.stringify([o.valueQuantity?.value ?? o.valueString, ...(o.component ?? []).map((c) => c.valueQuantity?.value)]);
+const sameNumbers = (a: Observation, b: Observation): boolean => nums(a) !== JSON.stringify([null]) && nums(a) === nums(b);
+
 export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueQuantity && b.valueQuantity) return a.valueQuantity.value === b.valueQuantity.value && a.valueQuantity.unit === b.valueQuantity.unit;
   if (a.valueCodeableConcept && b.valueCodeableConcept) return !!firstCoding(a) && firstCoding(a) === firstCoding(b);
@@ -431,7 +435,7 @@ export async function importResources(
     // time in two sources); different values at different times are separate readings (a retaken BP, a home log).
     const timed = (v?: string) => !!v && /T\d/.test(v);
     const sameMoment = (m: R) => !timed(when) || !timed(effective(m as Observation)) || Date.parse(when) === Date.parse(effective(m as Observation)!)
-      || sameValue(m as Observation, incoming as Observation);
+      || sameNumbers(m as Observation, incoming as Observation);
     const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id) && sameMoment(m as R))] as R[];
     const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
     try {

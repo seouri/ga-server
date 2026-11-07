@@ -74,3 +74,9 @@ test('pairBloodPressure joins systolic and diastolic taken at the same moment fr
   const out = pairBloodPressure([r('s1', '8480-6', 122, '2026-11-03T13:01:00Z'), r('d1', '8462-4', 80, '2026-11-03T13:01:00Z'), r('s2', '8480-6', 108, '2026-11-03T15:02:00Z'), r('d2', '8462-4', 76, '2026-11-03T15:02:00Z'), r('d3', '8462-4', 70, '2026-11-03T16:00:00Z')]);
   expect(out.map((o: { id?: string; component?: { valueQuantity?: { value?: number } }[] }) => [o.id, o.component?.map((c) => c.valueQuantity?.value)])).toEqual([['s1', [122, 80]], ['s2', [108, 76]], ['d3', undefined]]);
 });
+
+test('pairBloodPressure never pairs a reading with itself', async () => {
+  const { pairBloodPressure } = await import('../src/vitals.ts');
+  const one = { resourceType: 'Observation', status: 'final', id: 'x', code: { text: 'Systolic/diastolic BP - diastolic', coding: [{ code: '8462-4' }] }, valueQuantity: { value: 80 }, effectiveDateTime: '2026-11-03T13:01:00Z' } as never;
+  expect(pairBloodPressure([one])).toEqual([one]);
+});
