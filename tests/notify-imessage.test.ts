@@ -1,9 +1,9 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { decodeBody, readSince, sendText } from '../src/notify/imessage.ts';
+import { decodeBody, normalizeHandle, readSince, round, sendText } from '../src/notify/imessage.ts';
 
 // Synthetic typedstream: ...NSString, 0x01 '+', length, utf8.
 const blob = (t: string) => {
@@ -48,8 +48,61 @@ describe('readSince', () => {
     ins.run(5, 'stranger', null, 0, 2, d);
     ins.run(6, 'typed on this mac', null, 1, 1, d); // owner's own message in self chat
     db.close();
-    const rows = readSince(p, 1, '+15551230000', ['GA: digest']);
+    const { rows, scanned } = readSince(p, 1, '+1 (555) 123-0000', ['GA: digest']);
+    expect(scanned).toBe(6);
     expect(rows.map((r) => [r.rowId, r.text, r.from])).toEqual([[3, 'reply plain', '+15551230000'], [4, 'reply blob', '+15551230000'], [6, 'typed on this mac', '+15551230000']]);
     expect(rows[0].at).toBe(new Date(Date.UTC(2001, 0, 1) + 700_000_000_000).toISOString());
+  });
+});
+
+describe('normalizeHandle', () => {
+  it('phone to +digits, email lowercased', () => {
+    expect(normalizeHandle('+1 (555) 123-0000')).toBe('+15551230000');
+    expect(normalizeHandle('Me@Ex.COM')).toBe('me@ex.com');
+  });
+});
+
+describe('round', () => {
+  const OWNER = '+15551230000', T0 = 1_800_000_000_000;
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bridge-'));
+    const p = join(dir, 'chat.db');
+    const db = new DatabaseSync(p);
+    db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer)');
+    db.prepare('insert into handle values (1, ?)').run(OWNER);
+    const add = (id: number, text: string, me: number) => db.prepare('insert into message values (?, ?, null, ?, 1, 0)').run(id, text, me);
+    const bodies: { incoming: unknown[]; sent: string[]; failed: unknown[] }[] = [];
+    let outgoing: { id: string; text: string }[] = [];
+    const fetch = (async (_u: string, init: { body: string }) => { bodies.push(JSON.parse(init.body)); const o = outgoing; outgoing = []; return { ok: true, json: async () => ({ outgoing: o }) }; }) as unknown as typeof globalThis.fetch;
+    const deps = (now: number, send = async () => {}) => ({ url: 'http://x', token: 't', dbPath: p, owner: OWNER, every: 1, dir, send, fetch, now: () => now });
+    const state = () => JSON.parse(readFileSync(join(dir, 'bridge.json'), 'utf8'));
+    return { dir, add, bodies, deps, state, setOut: (o: typeof outgoing) => { outgoing = o; } };
+  };
+
+  it('a skipped echo is not re-read after the recent window', async () => {
+    const e = setup();
+    await round(e.deps(T0), () => {}); // first run: starts at max rowid 0
+    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ text: 'GA: digest', at: T0 }] }));
+    e.add(1, 'GA: digest', 1);
+    await round(e.deps(T0 + 60_000), () => {}); // inside window: skipped, lastRowId advances
+    expect(e.state().lastRowId).toBe(1);
+    await round(e.deps(T0 + 11 * 60_000), () => {});
+    expect(e.bodies.map((b) => b.incoming.length)).toEqual([0, 0, 0]);
+  });
+
+  it('a crash mid-sends resumes without resending or replaying; acks carry over', async () => {
+    const e = setup();
+    await round(e.deps(T0), () => {});
+    e.add(1, 'reply', 0);
+    e.setOut([{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }]);
+    let n = 0, mid: { sent: string[]; lastRowId: number } | undefined;
+    await round(e.deps(T0 + 1000, async () => { if (++n === 2) { mid = e.state(); throw new Error('osascript exit 1 +1555 secret'); } }), () => {});
+    expect(mid).toMatchObject({ sent: ['a'], lastRowId: 1 }); // persisted before the second send
+    await round(e.deps(T0 + 6000), () => {});
+    const b = e.bodies[2];
+    expect(b.incoming).toEqual([]);
+    expect(b.sent).toEqual(['a']);
+    expect(b.failed).toEqual([{ id: 'b', error: 'send failed' }]);
+    expect(e.bodies[1].incoming).toHaveLength(1);
   });
 });

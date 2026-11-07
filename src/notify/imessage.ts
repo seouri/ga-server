@@ -8,9 +8,13 @@ import { readJson, writeJson } from '../gateway/store.ts';
 
 const SCRIPT = ['-e', 'on run argv', '-e', 'tell application "Messages" to send (item 2 of argv) to participant (item 1 of argv) of (1st account whose service type = iMessage)', '-e', 'end run'];
 
+// Errors are fixed strings: execFile's own message contains argv (the handle and the text).
 const osascript = (args: string[]): Promise<void> => new Promise((resolve, reject) => {
-  execFile('osascript', args, { timeout: 60_000 }, (e) => (e ? reject(e) : resolve())); // timeout (Automation prompt) rejects: a failed send
+  execFile('osascript', args, { timeout: 60_000 }, (e) => (e ? reject(new Error((e as { killed?: boolean }).killed ? 'timeout' : `osascript exit ${(e as { code?: unknown }).code}`)) : resolve())); // timeout (Automation prompt) is a failed send
 });
+
+// Phone: +digits; email: lowercased. Applied to the setup value and to chat.db handles before comparing.
+export const normalizeHandle = (h: string): string => (h.includes('@') ? h.trim().toLowerCase() : `+${h.replace(/\D/g, '')}`);
 
 export const sendText = (to: string, text: string, run: (args: string[]) => Promise<void> = osascript): Promise<void> => run([...SCRIPT, to, text]);
 
@@ -28,21 +32,25 @@ export function decodeBody(b: Buffer): string | undefined {
 
 type Row = { rowId: number; from: string; text: string; at: string };
 
-// Owner's replies: is_from_me 0, or is_from_me 1 (self-message chat) unless the text is one GA just sent. Other handles are skipped here.
-export function readSince(dbPath: string, afterRowId: number, owner: string, recent: string[] = []): Row[] {
+// Owner's replies: is_from_me 0, or is_from_me 1 unless the text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
+// (owner's Apple ID on this Mac), pending the spike. Other handles are skipped. `scanned` is the highest ROWID looked at, skipped rows included.
+export function readSince(dbPath: string, afterRowId: number, owner: string, recent: string[] = []): { rows: Row[]; scanned: number } {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const st = db.prepare('select m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? and h.id = ? order by m.ROWID');
+    const st = db.prepare('select h.id hid, m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? order by m.ROWID');
     st.setReadBigInts(true); // ns dates exceed 2^53
-    const rows = st.all(afterRowId, owner) as { r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint }[];
-    const out: Row[] = [];
+    const rows = st.all(afterRowId) as { hid: string; r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint }[];
+    const out: Row[] = [], me = normalizeHandle(owner);
+    let scanned = afterRowId;
     for (const x of rows) {
+      scanned = Math.max(scanned, Number(x.r));
+      if (normalizeHandle(x.hid) !== me) continue;
       const text = x.t ?? (x.b ? decodeBody(Buffer.from(x.b)) : undefined);
       if (!text || (x.me === 1n && recent.includes(text))) continue;
       const d = Number(x.d), ms = Math.abs(d) > 1e12 ? d / 1e6 : d * 1e3; // ns on recent macOS, seconds before
-      out.push({ rowId: Number(x.r), from: owner, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
+      out.push({ rowId: Number(x.r), from: me, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
     }
-    return out;
+    return { rows: out, scanned };
   } finally { db.close(); }
 }
 
@@ -59,10 +67,13 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   const now = (d.now ?? Date.now)(), send = d.send ?? sendText;
   const st = readJson<Bridge>(d.dir, 'bridge.json', { recent: [], sent: [], failed: [] });
   st.recent = st.recent.filter((r) => now - r.at < 10 * 60_000);
-  let incoming: Row[] = [];
+  let incoming: Row[] = [], scanned = 0;
   try {
-    if (st.lastRowId === undefined) st.lastRowId = maxRowId(d.dbPath); // first run: do not replay history
-    else incoming = readSince(d.dbPath, st.lastRowId, d.owner, st.recent.map((r) => r.text));
+    if (st.lastRowId === undefined) { st.lastRowId = maxRowId(d.dbPath); writeJson(d.dir, 'bridge.json', st); } // first run: do not replay history
+    else {
+      const r = readSince(d.dbPath, st.lastRowId, d.owner, st.recent.map((x) => x.text));
+      incoming = r.rows; scanned = r.scanned;
+    }
   } catch (e) { log(`cannot read Messages database: ${(e as Error).message}; grant Full Disk Access to node (System Settings > Privacy & Security)`); }
   let res: Response;
   try {
@@ -70,12 +81,16 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   } catch (e) { log(`gateway unreachable: ${(e as Error).message}`); return false; }
   if (!res.ok) { log(`gateway answered ${res.status}`); return false; }
   const { outgoing = [] } = (await res.json()) as { outgoing?: { id: string; text: string }[] };
-  if (incoming.length) st.lastRowId = incoming[incoming.length - 1].rowId;
+  // Persist before any send, and after each, so a crash neither re-sends nor replays.
+  if (scanned > (st.lastRowId ?? 0)) st.lastRowId = scanned;
   st.sent = []; st.failed = [];
-  for (const o of outgoing) {
-    try { await send(d.owner, o.text); st.sent.push(o.id); st.recent.push({ text: o.text, at: (d.now ?? Date.now)() }); } catch (e) { st.failed.push({ id: o.id, error: (e as Error).message.split('\n')[0].slice(0, 100) }); }
-  }
   writeJson(d.dir, 'bridge.json', st);
+  for (const o of outgoing) {
+    try { await send(d.owner, o.text); st.sent.push(o.id); st.recent.push({ text: o.text, at: (d.now ?? Date.now)() }); } catch (e) {
+      const m = (e as Error).message; st.failed.push({ id: o.id, error: /^(timeout|osascript exit \S+)$/.test(m) ? m : 'send failed' });
+    }
+    writeJson(d.dir, 'bridge.json', st);
+  }
   if (incoming.length || outgoing.length) log(`in ${incoming.length}, out ${outgoing.length}, failed ${st.failed.length}`);
   return true;
 }

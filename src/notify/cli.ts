@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { defaultConfigPath, GaError } from '../config.ts';
 import { writeAtomic } from '../smart/store.ts';
 import { writeJson } from '../gateway/store.ts';
+import { normalizeHandle } from './imessage.ts';
 import { enqueue, pending } from './outbox.ts';
 import { notifyDir, readSettings, readState } from './settings.ts';
 
@@ -28,8 +29,9 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
   const [cmd, ...rest] = args;
 
   if (cmd === 'setup') {
+    const raw = rest.indexOf('--to') < 0 ? undefined : rest[rest.indexOf('--to') + 1];
     const opt = (k: string) => { const i = rest.indexOf(k); return i < 0 ? undefined : rest[i + 1]; };
-    const to = opt('--to'), digest = opt('--digest') ?? '08:00', sleep = (opt('--sleep') ?? '22:00-07:00').split('-');
+    const to = raw && /^(\+[\d\s\-().]{7,20}|[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+)$/.test(raw) ? normalizeHandle(raw) : undefined, digest = opt('--digest') ?? '08:00', sleep = (opt('--sleep') ?? '22:00-07:00').split('-');
     const known = rest.every((a, i) => a.startsWith('--') ? ['--to', '--digest', '--sleep'].includes(a) : i > 0 && rest[i - 1].startsWith('--'));
     if (!to || !known || !HHMM.test(digest) || sleep.length !== 2 || !sleep.every((s) => HHMM.test(s))) throw new GaError(USAGE);
     writeJson(dir, 'settings.json', { to, digestAt: digest, sleep, setupAt: (deps.now?.() ?? new Date()).toISOString() });

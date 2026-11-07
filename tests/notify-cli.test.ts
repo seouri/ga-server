@@ -17,7 +17,7 @@ const setupEnv = () => {
 describe('ga notify', () => {
   it('setup writes settings, 0600 token, plist, bootstraps', async () => {
     const e = setupEnv();
-    await notifyCommand(['setup', '--to', '+15551230000', '--digest', '08:30', '--sleep', '22:00-07:00'], e.deps);
+    await notifyCommand(['setup', '--to', '+1 (555) 123-0000', '--digest', '08:30', '--sleep', '22:00-07:00'], e.deps);
     expect(readSettings(e.dir)).toMatchObject({ to: '+15551230000', digestAt: '08:30', sleep: ['22:00', '07:00'], setupAt: '2026-11-07T10:00:00.000Z' });
     expect(statSync(join(e.dir, 'token')).mode & 0o777).toBe(0o600);
     const plist = readFileSync(e.plist, 'utf8');
@@ -36,12 +36,14 @@ describe('ga notify', () => {
   it('rejects bad args', async () => {
     const e = setupEnv();
     await expect(notifyCommand(['setup'], e.deps)).rejects.toThrow(/usage/);
-    await expect(notifyCommand(['setup', '--to', 'x', '--digest', '9am'], e.deps)).rejects.toThrow(/usage/);
+    await expect(notifyCommand(['setup', '--to', '--digest'], e.deps)).rejects.toThrow(/usage/);
+    await expect(notifyCommand(['setup', '--to', '5551230000'], e.deps)).rejects.toThrow(/usage/);
+    await expect(notifyCommand(['setup', '--to', '+15551230000', '--digest', '9am'], e.deps)).rejects.toThrow(/usage/);
   });
 
   it('test enqueues, status prints last error and bridge state, off removes plist', async () => {
     const e = setupEnv();
-    await notifyCommand(['setup', '--to', 'a@b.co'], e.deps);
+    await notifyCommand(['setup', '--to', 'A@B.co'], e.deps);
     await notifyCommand(['test'], e.deps);
     expect(pending(e.dir)[0].text).toBe('GA: test message. Reply anything to check replies.');
     writeState(e.dir, { sentResults: {}, sentTopics: {}, lastError: 'boom' });
