@@ -49,7 +49,7 @@ test('applyAll codes the uncoded same-source term, is idempotent, leaves exclude
   expect((await applyAll(client, pid)).changed).toBe(0);
 
   const list = await reviewList(client, pid, 'unmapped');
-  expect(list).toEqual([{ source: `smart:${key}`, type: 'Observation', name: 'Odd analyte', unit: 'mg/dL', count: 2, examples: ['2024-03-05', '2024-03-01'] }]);
+  expect(list).toEqual([{ source: `smart:${key}`, type: 'Observation', key: 'odd analyte|mg/dl', name: 'Odd analyte', unit: 'mg/dL', count: 2, examples: ['2024-03-05', '2024-03-01'] }]);
   expect(await reviewList(client, pid, 'suggested')).toEqual([]);
 
   await upsertEntries(client, `smart:${key}`, [{ key: 'glucose|mg/dl', target: { system: LOINC, code: '2339-0' }, equivalence: 'equivalent', confident: true, by: 'agent' }]);

@@ -70,7 +70,7 @@ async function* scan(client: MedplumClient, patientId: string, types: string[], 
   }
 }
 
-export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string } = {}): Promise<{ scanned: number; coded: number; suggested: number; unmapped: number; changed: number }> {
+export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
   let maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
   // A write onto a record a person last changed would make GA its author and drop the person-edit protection (engine decide/protect): leave those.
@@ -89,13 +89,14 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
     for (const [source, entries] of learned) await upsertEntries(client, source, entries);
     if (learned.size) maps = await loadMaps(client, true);
   }
-  const n = { scanned: 0, coded: 0, suggested: 0, unmapped: 0, changed: 0 };
-  for await (const page of scan(client, patientId, TYPES)) {
+  const n = { scanned: 0, matched: 0, coded: 0, suggested: 0, unmapped: 0, changed: 0 };
+  for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES)) {
     for (const r of page) {
       n.scanned++;
       const info = mine(r) ? await infoOf(r) : undefined;
       if (!info) continue;
       if (opts.source && (keyOf(r, info) !== opts.source || termKey(r) !== opts.key)) continue;
+      n.matched++;
       const { resource, status } = codeRecord(r, info, maps);
       if (status === 'spec' || status === 'source-map') n.coded++;
       else if (status === 'suggested' || status === 'unmapped') n[status]++;
@@ -113,7 +114,7 @@ const dateOf = (r: Resource): string | undefined => {
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 };
 
-export async function reviewList(client: MedplumClient, patientId: string, status: 'unmapped' | 'suggested', type?: string): Promise<(Omit<Unmapped, 'key'> & { examples: string[] })[]> {
+export async function reviewList(client: MedplumClient, patientId: string, status: 'unmapped' | 'suggested', type?: string): Promise<(Unmapped & { examples: string[] })[]> {
   if (type && !TYPES.includes(type)) throw new GaError(`type must be one of ${TYPES.join(', ')}`);
   const maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
@@ -131,5 +132,5 @@ export async function reviewList(client: MedplumClient, patientId: string, statu
       if (d) row.dates.add(d);
     }
   }
-  return rows.sort((a, b) => b.count - a.count).map(({ key: _k, dates, ...u }) => ({ ...u, examples: [...dates].sort().reverse().slice(0, 3) }));
+  return rows.sort((a, b) => b.count - a.count).map(({ dates, ...u }) => ({ ...u, examples: [...dates].sort().reverse().slice(0, 3) }));
 }
