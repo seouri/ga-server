@@ -10,7 +10,7 @@ import { type EhiCtx, PATIENT_REF, resolveUnlinked } from '../../src/ehi/ids.ts'
 import { mapMeds } from '../../src/ehi/meds.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const EHI = join(import.meta.dirname, '..', 'fixtures', 'ehi');
 // Own org: stable identifiers are global, so this file's records never meet ehi.test.ts's.
@@ -24,6 +24,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await cleanupTestMaps(client);
   for (const d of await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' })) {
     for (const c of d.content ?? []) {
       const bin = c.attachment.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];

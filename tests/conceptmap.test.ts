@@ -52,4 +52,5 @@ test('sourceKey per kind', () => {
   expect(() => sourceKey(src('ehi'), lab('a', 'b'))).toThrow();
   expect(sourceKey(src('ccda', { org: 'Synthetic Clinic' }), lab('a', 'b'))).toBe('ccda:synthetic clinic');
   expect(sourceKey(src('ccda', { file: '/in/Acme Export/doc1.xml' }), lab('a', 'b'))).toBe('ccda:acme export');
+  expect(() => sourceKey(src('ccda', { file: 'doc1.xml' }), lab('a', 'b'))).toThrow(); // no organisation: no catch-all map
 });

@@ -5,6 +5,7 @@ import { type SourceInfo, TAG } from './identity.ts';
 import { SUMMARY } from './vitals.ts';
 
 export const MAP_URL = 'urn:ga-server:conceptmap:';
+export const mapUrl = (source: string): string => MAP_URL + encodeURI(source); // a uri has no spaces (C-CDA org names do)
 const MAP_TAG = 'concept-map'; // uri :below does not match urn: urls, so loadMaps finds the maps by tag
 const TERM = 'urn:ga-server:termkey'; // group.source for every entry
 const UNMATCHED = 'urn:ga-server:unmatched'; // group.target of entries without a code
@@ -50,7 +51,11 @@ export function termKey(r: Resource): string | undefined {
 // custodian name (SourceInfo.org, set by the C-CDA importer), else the export folder name.
 export function sourceKey(src: SourceInfo, r: Resource): string {
   if (src.kind === 'pdf' || src.kind === 'apple-health') return src.kind;
-  if (src.kind === 'ccda') return `ccda:${norm(src.org) || norm(basename(dirname(src.file)))}`;
+  if (src.kind === 'ccda') {
+    const org = norm(src.org) || norm(basename(dirname(src.file)));
+    if (!org) throw new Error('no organisation for a C-CDA source'); // never one catch-all map
+    return `ccda:${org}`;
+  }
   const ids = [(r as { identifier?: { system?: string } | { system?: string }[] }).identifier ?? []].flat();
   const prefix = `urn:ga-server:id:${src.kind}:`;
   const key = ids.find((i) => i.system?.startsWith(prefix))?.system?.slice(prefix.length);
@@ -63,7 +68,7 @@ let cache: Maps | undefined; // per process; upsertEntry clears it
 export async function loadMaps(client: MedplumClient): Promise<Maps> {
   if (cache) return cache;
   const maps: Maps = new Map();
-  for (const m of await client.searchResources('ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _count: '1000' })) maps.set((m.url as string).slice(MAP_URL.length), m);
+  for (const m of await client.searchResources('ConceptMap', { _tag: `${TAG}|${MAP_TAG}`, _count: '1000' })) maps.set(decodeURI((m.url as string).slice(MAP_URL.length)), m);
   return (cache = maps);
 }
 
@@ -85,7 +90,7 @@ export function lookup(maps: Maps, source: string, key: string): MapEntry | unde
 
 // Creates or updates the source's map, replacing any earlier entry for the key; one group per target system.
 export async function upsertEntry(client: MedplumClient, source: string, entry: MapEntry): Promise<void> {
-  const url = MAP_URL + source;
+  const url = mapUrl(source);
   const map: ConceptMap = (await client.searchOne('ConceptMap', { url })) ?? { resourceType: 'ConceptMap', status: 'active', url, meta: { tag: [{ system: TAG, code: MAP_TAG }] } };
   const target = entry.target?.code ? entry.target.system : UNMATCHED;
   const groups: ConceptMapGroup[] = (map.group ?? [])

@@ -48,3 +48,12 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
 export async function expungeProject(session: MedplumClient, projectId: string): Promise<void> {
   await session.post(`${session.fhirUrl('Project', projectId, '$expunge')}?everything=true`, {});
 }
+
+// ConceptMaps the importers learned from test sources (synthetic orgs, uuid source keys, the engine test's portal host). The
+// maps live in the user's own project, outside any patient compartment, so cleanupTestPatient doesn't reach them.
+const TEST_MAP = /^urn:ga-server:conceptmap:(.*synthetic.*|.*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*|smart:fhir-example-org|test-.*)$/i;
+export async function cleanupTestMaps(client: MedplumClient): Promise<void> {
+  for (const m of await client.searchResources('ConceptMap', { _count: '1000' }, { cache: 'no-cache' })) {
+    if (TEST_MAP.test(decodeURI(m.url ?? ''))) await client.deleteResource('ConceptMap', m.id as string);
+  }
+}

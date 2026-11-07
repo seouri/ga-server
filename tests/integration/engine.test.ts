@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, MedicationStatement, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Condition, MedicationStatement, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
+import { CONCEPT_SRC } from '../../src/concept-apply.ts';
+import { sourceKey } from '../../src/conceptmap.ts';
 import { importResources } from '../../src/engine.ts';
 import { APPLE, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
 let pid: string;
@@ -13,7 +15,10 @@ beforeAll(async () => {
   client = await getClient(loadConfig());
   pid = await createTestPatient(client);
 });
-afterAll(async () => cleanupTestPatient(client, pid));
+afterAll(async () => {
+  await cleanupTestMaps(client);
+  await cleanupTestPatient(client, pid);
+});
 
 const ccda = (date: string): SourceInfo => ({ kind: 'ccda', file: 'synthetic.xml', date, writer: 'importer' });
 // Source ids are random per test: identifier search is global, never match leftovers or real data.
@@ -71,7 +76,7 @@ test('reimport is a no-op', async () => {
   expect(first).toMatchObject({ created: 5, updated: 0 });
   const before = (await all()).length;
   const second = await importResources(client, batch, ccda('2024-01-01'), pid, 'h');
-  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
+  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] });
   expect((await all()).length).toBe(before);
   const p = await client.readResource('Patient', pid);
   expect((p as Patient).identifier?.filter((i) => i.value === mrn)).toHaveLength(1);
@@ -674,4 +679,62 @@ test('a fill-only smart copy of an Apple-only reading takes over the body (hospi
   const [found] = await client.searchResources('Observation', { identifier: `${SMART_SYS}|Observation/${o}` }, { cache: 'no-cache' });
   expect(found.status).toBe('amended');
   expect(systems(found)).toContain(APPLE);
+});
+
+// Concept layer (spec Decision 4): a source's own codes teach its map; its uncoded copies of the same term then get coded.
+const lab = (id: string, code: Observation['code'], value: number, day = '2024-03-04'): Observation => ({
+  ...chol(id, value, day), code, category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
+});
+const ldlText = 'LDL Cholesterol Calc';
+const mapOf = (org: string) => sourceKey({ ...ccda(''), org }, { resourceType: 'Observation' } as Resource);
+const ga = (o: Observation) => o.code.coding?.filter((c) => c.extension?.some((e) => e.url === CONCEPT_SRC)) ?? [];
+const one = async (id: string) => (await client.searchResources('Observation', { identifier: `urn:test:src|${id}`, subject: `Patient/${pid}` }, { cache: 'no-cache' }))[0];
+
+test('a coded LDL teaches the source map; a later uncoded same-term LDL is coded; re-import changes nothing', async () => {
+  const org = uid('Synthetic Clinic'); // a space in the source key: the ConceptMap url must still be accepted
+  const map = mapOf(org);
+  const s: SourceInfo = { ...ccda('2024-01-01'), org };
+  const coded = [lab(uid('ldl'), { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: ldlText }, 101)];
+  const plainId = uid('ldl');
+  const odd = uid('odd');
+  const plain = [lab(plainId, { text: ldlText }, 102, '2024-05-06'), lab(odd, { text: 'Synthetic odd test' }, 1, '2024-05-06')];
+  expect(await importResources(client, coded, s, pid, 'h')).toMatchObject({ created: 1, unmapped: [] });
+  const r = await importResources(client, plain, s, pid, 'h');
+  expect(r).toMatchObject({ created: 2, unmapped: [{ source: map, type: 'Observation', name: 'Synthetic odd test', unit: 'mg/dL', count: 1 }] });
+  const o = await one(plainId);
+  expect(o.code.coding).toEqual([{ system: 'http://loinc.org', code: '13457-7', extension: [{ url: CONCEPT_SRC, valueCode: 'source-map' }] }]);
+  expect(o.code.text).toBe(ldlText);
+  expect(tagged(await one(odd), 'concept-unmapped')).toBe(true);
+  for (const batch of [coded, plain]) expect(await importResources(client, batch, s, pid, 'h')).toMatchObject({ created: 0, updated: 0, conflicts: 0, merged: 0, possibleDuplicates: 0 });
+  expect((await one(plainId)).meta?.versionId).toBe(o.meta?.versionId);
+});
+
+test('in one batch an uncoded record before its coded twin is still coded', async () => {
+  const org = uid('synthetic-batch');
+  const s: SourceInfo = { ...ccda('2024-01-01'), org };
+  const plainId = uid('hdl');
+  const batch = [lab(plainId, { text: 'HDL Cholesterol' }, 50, '2024-07-01'), lab(uid('hdl'), { coding: [{ system: 'http://loinc.org', code: '2085-9' }], text: 'HDL Cholesterol' }, 51)];
+  expect(await importResources(client, batch, s, pid, 'h')).toMatchObject({ created: 2, unmapped: [] });
+  expect(ga(await one(plainId))).toHaveLength(1);
+  expect(await importResources(client, batch, s, pid, 'h')).toMatchObject({ created: 0, updated: 0, conflicts: 0 });
+});
+
+test('a newer importer update of an uncoded record keeps its GA coding and suggested tag', async () => {
+  const org = uid('synthetic-carry'); // no map entry for the term
+  const s = (date: string): SourceInfo => ({ ...ccda(date), org });
+  const id = uid('c');
+  const cond = (note?: string): Condition => ({ resourceType: 'Condition', id, identifier: src(id), code: { text: 'Synthetic carry problem' }, subject: me(), ...(note && { note: [{ text: note }] }) });
+  const get = async () => (await client.searchResources('Condition', { identifier: `urn:test:src|${id}`, subject: `Patient/${pid}` }, { cache: 'no-cache' }))[0];
+  expect((await importResources(client, [cond()], s('2024-01-01'), pid, 'h')).unmapped).toHaveLength(1);
+  const stored = await get();
+  // As an agent mapping (Task 5) leaves it: GA's coding, marked suggested, the unmapped tag gone.
+  const mapped = { system: 'http://snomed.info/sct', code: '1', extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] };
+  await client.updateResource({ ...stored, code: { ...stored.code, coding: [mapped] }, meta: { ...stored.meta, tag: [...(stored.meta?.tag ?? []).filter((t) => t.code !== 'concept-unmapped'), { system: TAG, code: 'concept-suggested' }] } });
+  expect(await importResources(client, [cond()], s('2024-01-01'), pid, 'h')).toMatchObject({ updated: 0, conflicts: 0, skipped: 1 });
+  expect(await importResources(client, [cond('newer')], s('2024-02-01'), pid, 'h')).toMatchObject({ updated: 1, conflicts: 0 });
+  const c = await get();
+  expect(c.note?.[0].text).toBe('newer');
+  expect(c.code?.coding).toEqual([mapped]);
+  expect(tagged(c, 'concept-suggested')).toBe(true);
+  expect(tagged(c, 'concept-unmapped')).toBe(false);
 });
