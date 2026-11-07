@@ -1,7 +1,7 @@
 // Checks an agent-proposed code exists (spec "Validation"). Only the code goes out, to NLM: never values, dates or ids.
 import { CVX, cvxShort, LOINC, RXNORM } from './concepts.ts';
 
-export type Validation = { ok: boolean; display?: string; reason?: string };
+type Validation = { ok: boolean; display?: string; reason?: string };
 
 const get = async (f: typeof fetch, url: string): Promise<unknown> => {
   const r = await f(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });

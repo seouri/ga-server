@@ -14,6 +14,7 @@ const TYPES = Object.keys(TARGET) as [string, ...string[]];
 
 // A stand-in record carrying only what the term key and scope read; category laboratory so that, for Observations,
 // only the name rules (Apple summaries, health maintenance, ECG) decide scope.
+// shortcut: no specimen input, so a lab term whose records carry specimen.display (key name|unit|specimen) can't be mapped; add one if such terms show up.
 const termOf = (type: string, name: string, unit?: string): Resource => {
   const cc = { text: name };
   if (type === 'Observation') return { resourceType: 'Observation', status: 'final', code: cc, category: [{ coding: [{ code: 'laboratory' }] }], ...(unit && { valueQuantity: { unit } }) };
