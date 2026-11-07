@@ -31,7 +31,7 @@ export function kindOf(r: Resource): Kind {
 
 export function clinicalDate(r: Resource): string | undefined {
   const x = r as Record<string, any>; // shortcut: untyped field probe across resource types, fine while the list is fixed
-  const d = x.effectiveDateTime ?? x.effectivePeriod?.start ?? x.effectiveInstant ?? x.occurrenceDateTime ?? x.occurrencePeriod?.start ?? x.onsetDateTime
+  const d = x.effectiveDateTime ?? x.effectivePeriod?.start ?? x.effectiveInstant ?? x.occurrenceDateTime ?? x.occurrencePeriod?.start ?? x.performedDateTime ?? x.performedPeriod?.start ?? x.onsetDateTime
     ?? x.recordedDate ?? x.authoredOn ?? x.period?.start ?? x.date ?? x.sent ?? x.issued;
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 }
@@ -66,7 +66,7 @@ export async function arrivedSince(client: MedplumClient, patientId: string, sin
   const out: Resource[] = [];
   for (const [type, param] of TYPES) {
     const q = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' };
-    for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => arrivedAt(r)! >= since));
+    for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
   }
   return out;
 }
@@ -75,7 +75,11 @@ const lastSeenFile = (dir: string) => join(dir, 'whats-new.json');
 
 export function readLastSeen(dir: string = dirname(defaultConfigPath())): string | undefined {
   const f = lastSeenFile(dir);
-  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as { lastSeen?: string }).lastSeen : undefined;
+  if (!existsSync(f)) return undefined;
+  try {
+    const v = (JSON.parse(readFileSync(f, 'utf8')) as { lastSeen?: unknown } | null)?.lastSeen;
+    return typeof v === 'string' ? v : undefined;
+  } catch { return undefined; } // a bad file must not break whats_new
 }
 
 export function writeLastSeen(at: string, dir: string = dirname(defaultConfigPath())): void {

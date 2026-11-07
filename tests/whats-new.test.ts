@@ -1,4 +1,4 @@
-import { mkdtempSync, statSync } from 'node:fs';
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Resource } from '@medplum/fhirtypes';
@@ -25,6 +25,8 @@ test('clinicalDate takes the first present field', () => {
   expect(clinicalDate(obs({ effectivePeriod: { start: '2024-03-04' }, issued: '2025-01-01' }))).toBe('2024-03-04');
   expect(clinicalDate({ resourceType: 'Condition', onsetDateTime: '2020-05-06', recordedDate: '2021-01-01' } as Resource)).toBe('2020-05-06');
   expect(clinicalDate({ resourceType: 'Communication', sent: '2023-07-08T01:00:00Z' } as Resource)).toBe('2023-07-08');
+  expect(clinicalDate({ resourceType: 'Procedure', performedDateTime: '2019-02-03T00:00:00Z' } as Resource)).toBe('2019-02-03');
+  expect(clinicalDate({ resourceType: 'Procedure', performedPeriod: { start: '2018-04-05' } } as Resource)).toBe('2018-04-05');
   expect(clinicalDate(obs())).toBeUndefined();
 });
 
@@ -44,4 +46,13 @@ test('last-seen file: missing, then round trip with mode 0600', () => {
   writeLastSeen('2026-11-07T01:02:03.000Z', dir);
   expect(readLastSeen(dir)).toBe('2026-11-07T01:02:03.000Z');
   expect(statSync(join(dir, 'whats-new.json')).mode & 0o777).toBe(0o600);
+});
+
+test('readLastSeen ignores a corrupt or unreadable file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wn-'));
+  writeFileSync(join(dir, 'whats-new.json'), '{not json');
+  expect(readLastSeen(dir)).toBeUndefined();
+  writeFileSync(join(dir, 'whats-new.json'), 'null');
+  expect(readLastSeen(dir)).toBeUndefined();
+  expect(readLastSeen(join(dir, 'whats-new.json'))).toBeUndefined(); // a file where the directory should be
 });
