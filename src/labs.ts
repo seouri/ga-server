@@ -30,9 +30,8 @@ function conceptMatch(o: Observation): { concept: Concept; label?: string; sugge
   return sure ?? (guess && { ...guess, suggested: true });
 }
 
-export function labRow(o: Observation): LabRow {
+export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   const c = o.code?.coding?.[0];
-  const m = conceptMatch(o);
   const flags = [...(flagsOf(o.meta) ?? []), ...(m?.suggested ? [`possibly ${m.concept.name} (suggested mapping)`] : [])];
   const r = o.referenceRange?.[0];
   const lo = qty(r?.low), hi = qty(r?.high);
@@ -111,13 +110,13 @@ export type LabTrend = {
 
 // One entry per test: a concept (any member code, its own or GA-added and not suggested) is one group, labelled by the member (method);
 // others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen) when
-// there is exactly one.
+// there is exactly one. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
 export function summarizeLabs(obs: Observation[]): LabTrend[] {
   const rows = obs.map((o) => {
     const m = conceptMatch(o);
-    return { o, r: labRow(o), m: m?.suggested ? undefined : m };
+    return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested };
   });
-  const keyOf = (x: (typeof rows)[number]) => (x.m ? `concept:${x.m.concept.name}` : loincOf(x.o));
+  const keyOf = (x: (typeof rows)[number]) => (x.m ? `concept:${x.m.concept.name}` : x.guess ? undefined : loincOf(x.o));
   const twins = new Map<string, Set<string>>();
   for (const x of rows) {
     const k = keyOf(x), t = termKey(x.o);
@@ -125,7 +124,7 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
   }
   const groups = new Map<string, typeof rows>();
   for (const x of rows) {
-    const twin = twins.get(termKey(x.o) ?? '');
+    const twin = x.guess ? undefined : twins.get(termKey(x.o) ?? '');
     const k = keyOf(x) ?? (twin?.size === 1 ? [...twin][0] : norm(x.r.name));
     if (!k) continue; // nothing to group by
     groups.set(k, [...(groups.get(k) ?? []), x]);
@@ -138,7 +137,7 @@ export function summarizeLabs(obs: Observation[]): LabTrend[] {
     const a = num(l.o), b = p && num(p.o);
     const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
     return {
-      test: g.find((x) => x.m)?.m?.concept.name, method: l.m?.label, name: l.r.name, loinc: g.map((x) => loincOf(x.o)).find(Boolean), unit: unitOf(l.o),
+      test: g.find((x) => x.m)?.m?.concept.name, method: l.m?.label, name: l.r.name, loinc: g.map((x) => (x.guess ? undefined : loincOf(x.o))).find(Boolean), unit: unitOf(l.o),
       latest: { date: l.r.date, value: a ?? l.r.value, flag },
       previous: p && { date: p.r.date, value: b ?? p.r.value, method: p.m?.label },
       change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
@@ -179,7 +178,7 @@ export async function labResults(
     const obs = (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
     // keyOnly (health_summary): key labs picked before fit, so other tests can't push them out.
     if (summary) return fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit);
-    return fit(obs.map(labRow).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
+    return fit(obs.map((o) => labRow(o)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
   }
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
   // Medplum sorts undated results first on -date; a latest-value question wants them last.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codesFor, conceptOf, concepts, CVX, cvxFor, LOINC, vitalSpecCode } from '../src/concepts.ts';
+import { codesFor, conceptNamed, conceptOf, concepts, CVX, cvxFor, LOINC, vitalSpecCode } from '../src/concepts.ts';
 
 
 describe('concepts', () => {
@@ -28,6 +28,15 @@ describe('concepts', () => {
     expect(vitalSpecCode('weight', 'kg')?.code).toBe('29463-7');
     expect(vitalSpecCode('Oxygen saturation')?.code).toBe('2708-6');
     expect(vitalSpecCode('LDL')).toBeUndefined();
+  });
+  it('resolves a tool query to a concept by name, alias or synonym, alone or with filler words; look-alikes do not resolve', () => {
+    const at = (q: string) => conceptNamed(q)?.name;
+    for (const [q, c] of <[string, string | undefined][]>[['ldl', 'LDL'], ['LDL cholesterol', 'LDL'], ['LDL-C', 'LDL'], ['my ldl level', 'LDL'], ['HbA1c', 'A1c'], ['hemoglobin a1c', 'A1c'], ['glycated hemoglobin', 'A1c'],
+      ['thyrotropin', 'TSH'], ['blood glucose', 'Glucose'], ['hemoglobin', 'Hemoglobin'], ['GFR', 'eGFR'], ['weight', 'Body weight'], ['non hdl', undefined]])
+      expect([q, at(q)]).toEqual([q, c]);
+    for (const q of ['ldl-p', 'LDL particle', 'tsh receptor antibody', 'urine glucose', 'glucose, urine', 'non-hdl cholesterol', 'resting heart rate', 'cholesterol/hdl ratio', 'bad cholesterol'])
+      expect([q, at(q)]).toEqual([q, undefined]);
+    expect(vitalSpecCode('my weight')).toBeUndefined(); // import coding stays exact
   });
   it('looks up CVX by short description', () => {
     expect(cvxFor('TDAP')).toMatchObject({ system: CVX, code: '115' });
