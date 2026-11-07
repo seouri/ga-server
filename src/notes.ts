@@ -17,6 +17,8 @@ export function noteText(d: DocumentReference): string | undefined {
   return a?.data ? Buffer.from(a.data, 'base64').toString('utf8') : undefined;
 }
 
+export const messageText = (c: Communication): string | undefined => c.payload?.map((p) => p.contentString).filter(Boolean).join('\n') || undefined;
+
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 // Position of needle in the whitespace-collapsed text, case-insensitive (-1: none).
 const find = (t: string, needle: string) => t.toLowerCase().indexOf(norm(needle).toLowerCase());
@@ -48,7 +50,7 @@ export async function notesSearch(
       return row(body as string, { date: (d.date ?? d.context?.period?.start)?.slice(0, 10), kind, author: d.author?.[0]?.display, type: 'DocumentReference', id: d.id });
     }, limit, SCAN),
     collect(client, 'Communication', mq, (c: Communication) => {
-      const body = c.payload?.map((p) => p.contentString).filter(Boolean).join('\n');
+      const body = messageText(c);
       if (!body || !hit(body)) return undefined;
       return row(body, { date: (c.sent ?? c.received)?.slice(0, 10), kind: 'message', author: c.sender?.display, type: 'Communication', id: c.id });
     }, limit, SCAN),

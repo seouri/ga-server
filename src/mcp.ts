@@ -291,7 +291,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     {
       description:
         'What arrived in GA since the person last saw this summary (or the last 90 days the first time): counts by kind and source, labs out of range, new medications with their FDA label sections, ' +
-        'changed medication and problem statuses, vaccines and health maintenance to follow up, plus current medications, problems and recent out-of-range labs as context. ' +
+        'changed medication and problem statuses, new clinical notes and MyChart messages (opening text), vaccines and health maintenance to follow up, plus current medications, problems and recent out-of-range labs as context. ' +
+        'For each new note or message, read it (fhir_read its id) and when a clinician planned a follow-up with a time ("repeat labs in 6 weeks", "see you in 3 months"), offer to record it with record_followup. ' +
         'Call it when a health conversation starts and it has not been shown in this conversation; answer the person\'s question first, then offer the summary in one line. ' +
         'Pass markSeen: true only on the call whose summary you showed (it stores the time, only when nothing failed or was cut: seen: false says why). If truncated, items were cut: say so. since: YYYY-MM-DD, for a one-off look; it never marks seen. ' +
         'Label text: report only what its sections say, quoting the section and the label date; it is not a full interaction screen.',

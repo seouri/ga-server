@@ -12,7 +12,8 @@ test('vitalRow: home vs clinic, summary kind, components as value', () => {
     component: [{ code: { text: 'Systolic' }, valueQuantity: { value: 120, unit: 'mm[Hg]' } }, { code: { text: 'Diastolic' }, valueQuantity: { value: 80, unit: 'mm[Hg]' } }],
   });
   expect(vitalRow(bp)).toEqual({ date: '2025-01-01', name: 'Blood pressure panel', value: 'Systolic: 120 mm[Hg]; Diastolic: 80 mm[Hg]', kind: 'reading', setting: 'home', source: 'Apple Health (Cuff)', id: 'Blood pressure panel' });
-  expect(vitalRow(o('Weight', { meta: { source: '/a/b/visit.pdf' }, valueQuantity: { value: 70, unit: 'kg' } }))).toMatchObject({ value: '70 kg', setting: 'clinic', source: 'visit.pdf', kind: 'reading' });
+  expect(vitalRow(o('Weight', { meta: { source: '/a/b/visit.pdf' }, valueQuantity: { value: 70, unit: 'kg' } }))).toMatchObject({ value: '70 kg', setting: 'unknown', source: 'visit.pdf', kind: 'reading' });
+  expect(vitalRow(o('Weight', { meta: { source: '/a/ehi', tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, valueQuantity: { value: 70, unit: 'kg' } })).setting).toBe('clinic');
   for (const [text, kind] of [['Heart rate, daily mean (Apple Health)', 'daily mean'], ['Steps, daily total (Apple Health)', 'daily total'], ['Activity rings, daily (Apple Health)', 'daily'], ['Sleep, nightly (Apple Health)', 'nightly']])
     expect(vitalRow(o(text, { meta: apple })).kind).toBe(kind);
 });
@@ -65,4 +66,11 @@ test('vitals readings: Apple activity readings and uncategorised PDF vitals, nev
   ];
   const client = { search: async () => ({ resourceType: 'Bundle', entry: entries.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   expect((await vitals(client, 'p', {})).rows.map((r) => r.name).sort()).toEqual(['Body weight', 'Walking steadiness', 'Weight']);
+});
+
+test('pairBloodPressure joins systolic and diastolic taken at the same moment from the same source', async () => {
+  const { pairBloodPressure } = await import('../src/vitals.ts');
+  const r = (id: string, code: string, v: number, t: string, src = '/x/ehi') => ({ resourceType: 'Observation', status: 'final', id, code: { text: 'BLOOD PRESSURE', coding: [{ system: 'http://loinc.org', code }] }, valueQuantity: { value: v, unit: 'mm[Hg]' }, effectiveDateTime: t, meta: { source: src } }) as never;
+  const out = pairBloodPressure([r('s1', '8480-6', 122, '2026-11-03T13:01:00Z'), r('d1', '8462-4', 80, '2026-11-03T13:01:00Z'), r('s2', '8480-6', 108, '2026-11-03T15:02:00Z'), r('d2', '8462-4', 76, '2026-11-03T15:02:00Z'), r('d3', '8462-4', 70, '2026-11-03T16:00:00Z')]);
+  expect(out.map((o: { id?: string; component?: { valueQuantity?: { value?: number } }[] }) => [o.id, o.component?.map((c) => c.valueQuantity?.value)])).toEqual([['s1', [122, 80]], ['s2', [108, 76]], ['d3', undefined]]);
 });

@@ -427,7 +427,12 @@ export async function importResources(
     const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
     const fromApple = source.kind === 'apple-health';
-    const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id))] as R[];
+    // A same-day content match at another time of day is a possible duplicate only with the same value (one lab, collected vs resulted
+    // time in two sources); different values at different times are separate readings (a retaken BP, a home log).
+    const timed = (v?: string) => !!v && /T\d/.test(v);
+    const sameMoment = (m: R) => !timed(when) || !timed(effective(m as Observation)) || Date.parse(when) === Date.parse(effective(m as Observation)!)
+      || sameValue(m as Observation, incoming as Observation);
+    const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id) && sameMoment(m as R))] as R[];
     const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
     try {
       let target: Resource;

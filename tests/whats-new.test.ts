@@ -301,3 +301,18 @@ test('arrivedSince reads Apple Health Observations as a subset of fields, all ot
   expect(qs.find((q) => q._elements)?._tag).toBe(`${TAG}|src-apple-health`);
   expect(qs.find((q) => !q._elements)?.['_tag:not']).toBe(`${TAG}|src-apple-health`);
 });
+
+test('new notes and messages are listed with their opening text; source files are not', async () => {
+  const { noteItems } = await import('../src/whats-new.ts');
+  const b64 = (t: string) => Buffer.from(t).toString('base64');
+  const items = noteItems([
+    { resourceType: 'Communication', id: 'm1', status: 'completed', sent: '2026-11-03T10:00:00Z', sender: { display: 'Clinic NP' }, payload: [{ contentString: 'We will repeat your lab panel in 6 weeks.' }] },
+    { resourceType: 'DocumentReference', id: 'd1', status: 'current', date: '2026-10-01', type: { text: 'Progress note' }, content: [{ attachment: { contentType: 'text/plain', data: b64('Return in 3 months.') } }] },
+    { resourceType: 'DocumentReference', id: 'f1', status: 'current', identifier: [{ system: 'urn:ga-server:id:file', value: 'x' }], content: [{ attachment: { contentType: 'text/plain', data: b64('raw file') } }] },
+  ] as never);
+  expect(items.map((i) => [i.kind, i.title, i.date, i.id])).toEqual([
+    ['note or message', 'Message from Clinic NP', '2026-11-03', 'Communication/m1'],
+    ['note or message', 'Progress note', '2026-10-01', 'DocumentReference/d1'],
+  ]);
+  expect(items[0].detail.text).toContain('repeat your lab panel in 6 weeks');
+});

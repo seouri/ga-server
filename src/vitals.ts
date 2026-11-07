@@ -10,7 +10,7 @@ export const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
 // Names that have such a summary; weight, BP, SpO2 and clinic vitals are readings only.
 const HAS_DAILY = /heart|respirat|step|distance|flight|sleep|activ|ring/i;
 
-type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' };
+type VitalRow = LabRow & { kind: string; setting: 'home' | 'clinic' | 'unknown' };
 
 // The searches for a vital name: its text, plus its concept's member codes ("weight": 29463-7). Two searches: Medplum can't OR code and code:text.
 export const vitalSearches = (name: string): [string, string][] => {
@@ -24,15 +24,33 @@ export const newestFirst = <R extends { id?: string; date?: string }>(rows: R[])
 export function vitalRow(o: Observation): VitalRow {
   const { source, ...row } = labRow(o);
   const parts = o.component?.map((c) => `${c.code?.text ?? c.code?.coding?.[0]?.display}: ${qty(c.valueQuantity) ?? c.valueString ?? ''}`);
-  const apple = o.meta?.tag?.some((t) => t.code === 'src-apple-health');
+  const tags = new Set(o.meta?.tag?.filter((t) => t.system === TAG).map((t) => t.code));
+  const apple = tags.has('src-apple-health');
   const src = apple ? `Apple Health${o.device?.display ? ` (${o.device.display})` : ''}` : source;
   return {
     ...row,
     ...(!row.value && parts?.length ? { value: parts.join('; ') } : {}),
     kind: SUMMARY.exec(row.name ?? '')?.[1] ?? 'reading',
-    setting: apple ? 'home' : 'clinic',
+    // A PDF or photo doesn't say where a reading was taken (a home monitor log looks like a clinic printout).
+    setting: apple ? 'home' : tags.has('src-ehi') || tags.has('src-ccda') || tags.has('src-smart') ? 'clinic' : 'unknown',
     source: src,
   };
+}
+
+const SYS = /systolic/i, DIA = /diastolic/i;
+const part = (o: Observation, code: string, re: RegExp) => o.code?.coding?.some((c) => c.code === code) || re.test(o.code?.text ?? '');
+// Hospitals often store a blood pressure as two records (systolic 8480-6, diastolic 8462-4) at the same moment: one reading, as Apple's panel.
+export function pairBloodPressure(obs: Observation[]): Observation[] {
+  const key = (o: Observation) => `${o.effectiveDateTime ?? ''}|${o.meta?.source ?? ''}`;
+  const dias = new Map(obs.filter((o) => o.effectiveDateTime && part(o, '8462-4', DIA) && o.valueQuantity).map((o) => [key(o), o]));
+  const used = new Set<Observation>();
+  const out = obs.map((o) => {
+    const d = o.effectiveDateTime && part(o, '8480-6', SYS) && o.valueQuantity ? dias.get(key(o)) : undefined;
+    if (!d || used.has(d)) return o;
+    used.add(d);
+    return { ...o, code: { text: 'Blood pressure' }, valueQuantity: undefined, component: [{ code: { text: 'Systolic' }, valueQuantity: o.valueQuantity }, { code: { text: 'Diastolic' }, valueQuantity: d.valueQuantity }] } as Observation;
+  });
+  return out.filter((o) => !used.has(o));
 }
 
 export async function vitals(
@@ -54,9 +72,10 @@ export async function vitals(
   const found = await Promise.all((by.length ? by : [undefined]).map((p) => {
     const s = new URLSearchParams(q);
     if (p) s.append(...p);
-    return collect(client, 'Observation', s, (o: Observation) => ((daily ? SUMMARY.test(o.code?.text ?? '') : reading(o)) ? vitalRow(o) : undefined), limit);
+    return collect(client, 'Observation', s, (o: Observation) => ((daily ? SUMMARY.test(o.code?.text ?? '') : reading(o)) ? o : undefined), limit);
   }));
-  const rows = newestFirst(found.flatMap((f) => f.rows));
+  const obs = [...new Map(found.flatMap((f) => f.rows).map((o) => [o.id, o])).values()];
+  const rows = newestFirst(pairBloodPressure(obs).map(vitalRow));
   // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".
   if (daily && !rows.length) {
     const r = await vitals(client, patientId, { name, since, until, limit });
