@@ -52,10 +52,10 @@ To correct a mapping, ask your agent to map the term again: the new mapping repl
 node src/cli.ts concepts apply               # code stored records and re-apply every map
 ```
 
-Run it after upgrading GA. It is safe to run again: a second run changes nothing. Installs whose maps predate typed keys (`Condition|…`) run `node src/cli.ts concepts apply --migrate-keys` once first.
+Run it after upgrading GA. It is safe to run again: a second run changes nothing.
 
 The learned maps live in the FHIR server, so they are in the nightly backup and come back with a restore. Records you edited by hand are left alone.
 
 ## For agents
 
-The rules agents follow are in [AGENTS.md](../AGENTS.md) ("Concept layer"). The design is in [docs/superpowers/specs/2026-11-07-concept-layer-design.md](superpowers/specs/2026-11-07-concept-layer-design.md).
+The rules agents follow are in [AGENTS.md](../AGENTS.md) ("Concept layer").
