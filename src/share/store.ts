@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { GaError, defaultConfigPath } from '../config.ts';
-import { loadSecret, saveSecret, writeAtomic } from '../smart/store.ts';
+import { loadSecret, readJson, saveSecret, writeAtomic } from '../smart/store.ts';
 import { sha256 as hash } from '../identity.ts';
 
 export const GROUPS = ['labs', 'vitals', 'medications', 'problems', 'allergies', 'immunizations', 'visits', 'notes', 'procedures', 'family', 'messages', 'apple'] as const;
@@ -37,7 +37,7 @@ const localDay = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1
 export const shareDir = (cfgPath: string = defaultConfigPath()): string => join(dirname(cfgPath), 'share');
 
 const file = (dir: string): string => join(dir, 'shares.json');
-export const listShares = (dir: string): Share[] => (existsSync(file(dir)) ? (JSON.parse(readFileSync(file(dir), 'utf8')) as Share[]) : []);
+export const listShares = (dir: string): Share[] => readJson<Share[]>(dir, 'shares.json', []);
 // Read-modify-write under a lock file: the CLI (revoke) and the gateway container (share_create) both rewrite shares.json.
 // Held for a few ms; one older than 10 s was left by a killed process.
 function update<T>(dir: string, fn: (all: Share[]) => T): T {
@@ -146,7 +146,7 @@ const askedFile = (dir: string): string => join(dir, 'asked.json');
 export function takeQuestion(dir: string, id: string, now: Date = new Date()): boolean {
   const s = listShares(dir).find((x) => x.id === id);
   if (!s) throw new GaError(`no share ${id}`);
-  const all = (existsSync(askedFile(dir)) ? JSON.parse(readFileSync(askedFile(dir), 'utf8')) : {}) as Record<string, { day: string; n: number }>;
+  const all = readJson<Record<string, { day: string; n: number }>>(dir, 'asked.json', {});
   const day = localDay(now);
   const n = all[id]?.day === day ? all[id].n : 0;
   if (n >= s.questionsPerDay) return false;

@@ -96,11 +96,14 @@ export async function signingKey(dir: string): Promise<{ key: CryptoKey; kid: st
   return { key: (await importJWK(jwk, 'RS384')) as CryptoKey, kid: jwk.kid as string };
 }
 
-const readJson = <T>(f: string, empty: T): T => (existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as T) : empty);
+export function readJson<T>(dir: string, name: string, fallback: T): T {
+  const f = join(dir, name);
+  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as T) : fallback;
+}
 
 export type SourceRec = { key: string; name: string; fhirBase: string; patient?: string; enabledTypes?: string[] };
 
-export const readSources = (dir: string): SourceRec[] => readJson(join(dir, 'sources.json'), []);
+export const readSources = (dir: string): SourceRec[] => readJson(dir, 'sources.json', []);
 
 export function writeSources(dir: string, s: SourceRec[]): void {
   writeAtomic(join(dir, 'sources.json'), JSON.stringify(s, null, 2));
@@ -108,7 +111,7 @@ export function writeSources(dir: string, s: SourceRec[]): void {
 
 // Registered client id and redirect URI: not secret.
 type App = { clientId?: string; redirectUri?: string };
-export const readApp = (dir: string): App => readJson(join(dir, 'app.json'), {});
+export const readApp = (dir: string): App => readJson(dir, 'app.json', {});
 
 export function writeApp(dir: string, app: App): void {
   writeAtomic(join(dir, 'app.json'), JSON.stringify(app, null, 2));
