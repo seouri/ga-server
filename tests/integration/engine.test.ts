@@ -20,7 +20,8 @@ afterAll(async () => {
   await cleanupTestPatient(client, pid);
 });
 
-const ccda = (date: string): SourceInfo => ({ kind: 'ccda', file: 'synthetic.xml', date, writer: 'importer' });
+// A synthetic folder (map ccda:synthetic clinic): a bare file name would key its map by this repo's folder (sourceKey resolves relative paths).
+const ccda = (date: string): SourceInfo => ({ kind: 'ccda', file: '/synthetic-clinic/synthetic.xml', date, writer: 'importer' });
 // Source ids are random per test: identifier search is global, never match leftovers or real data.
 const uid = (p: string) => `${p}-${randomUUID()}`;
 const TAG = 'urn:ga-server:tag';
@@ -76,7 +77,7 @@ test('reimport is a no-op', async () => {
   expect(first).toMatchObject({ created: 5, updated: 0 });
   const before = (await all()).length;
   const second = await importResources(client, batch, ccda('2024-01-01'), pid, 'h');
-  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] });
+  expect(second).toEqual({ created: 0, updated: 0, skipped: 5, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: first.unmapped }); // still unmapped: still listed
   expect((await all()).length).toBe(before);
   const p = await client.readResource('Patient', pid);
   expect((p as Patient).identifier?.filter((i) => i.value === mrn)).toHaveLength(1);
@@ -771,4 +772,30 @@ test('a record coded only by GA is never a content match for a source-coded reco
   // Same value and time would have merged, a different value on the day been flagged: neither happens through a GA code.
   expect(await importResources(client, [tg(150, at1), tg(160, at2)], pdf, pid, uid('h'))).toMatchObject({ created: 2, merged: 0, possibleDuplicates: 0 });
   for (const id of [p1, p2]) expect(tagged(await one(id), 'possible-duplicate')).toBe(false);
+});
+
+test('a re-import that learns an entry recodes the stored record it skips, without counting an update', async () => {
+  const s: SourceInfo = { ...ccda('2024-01-01'), org: uid('synthetic-batch') };
+  const plainId = uid('alb');
+  const plain = lab(plainId, { text: 'Synthetic albumin' }, 4, '2024-11-01');
+  expect((await importResources(client, [plain], s, pid, 'h')).unmapped).toHaveLength(1);
+  const r = await importResources(client, [plain, lab(uid('alb'), { coding: [{ system: 'http://loinc.org', code: '1751-7' }], text: 'Synthetic albumin' }, 4.1)], s, pid, 'h');
+  expect(r).toMatchObject({ created: 1, updated: 0, skipped: 1, unmapped: [] });
+  const o = await one(plainId);
+  expect(ga(o).map((c) => c.code)).toEqual(['1751-7']);
+  expect(tagged(o, 'concept-unmapped')).toBe(false);
+  expect(await importResources(client, [plain], s, pid, 'h')).toMatchObject({ updated: 0, skipped: 1 });
+  expect((await one(plainId)).meta?.versionId).toBe(o.meta?.versionId); // coded: no further write
+});
+
+test('one source: its coded Condition "Synthetic flu" never codes its Immunization of that name', async () => {
+  const s: SourceInfo = { ...ccda('2024-01-01'), org: uid('synthetic-batch') };
+  const [cid, iid] = [uid('c'), uid('i')];
+  const cond: Condition = { resourceType: 'Condition', id: cid, identifier: src(cid), subject: me(), code: { coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'J11.1' }], text: 'Synthetic flu' } };
+  const imm = { resourceType: 'Immunization', id: iid, identifier: src(iid), status: 'completed', patient: me(), occurrenceDateTime: '2024-10-01', vaccineCode: { text: 'Synthetic flu' } } as Resource;
+  const r = await importResources(client, [cond, imm], s, pid, 'h');
+  expect(r.unmapped).toEqual([expect.objectContaining({ type: 'Immunization', key: 'Immunization|synthetic flu' })]);
+  const [stored] = await client.searchResources('Immunization', { identifier: `urn:test:src|${iid}`, patient: `Patient/${pid}` }, { cache: 'no-cache' });
+  expect(stored.vaccineCode.coding).toBeUndefined();
+  expect(lookup(await loadMaps(client, true), mapOf(s.org as string), 'Condition|synthetic flu')?.target?.code).toBe('J11.1');
 });

@@ -3,8 +3,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MedplumClient } from '@medplum/core';
-import { getClient, loadConfig } from '../../src/config.ts';
-import type { Bundle, Patient } from '@medplum/fhirtypes';
+import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
+import { COMPARTMENT } from '../../src/engine.ts';
+import { setup } from '../../src/setup.ts';
+import type { Bundle, DocumentReference, Patient } from '@medplum/fhirtypes';
 
 // Tests must never write onto the real Patient (identifier ...|self).
 export async function createTestPatient(client: MedplumClient): Promise<string> {
@@ -45,8 +47,32 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
   return { dir, baseUrl: real.baseUrl, session };
 }
 
-export async function expungeProject(session: MedplumClient, projectId: string): Promise<void> {
-  await session.post(`${session.fhirUrl('Project', projectId, '$expunge')}?everything=true`, {});
+// Tests that need their own project (ga setup's policy, migrate) reuse long-lived ones named ga-test*: ga setup creates
+// one the first time and finds it by name after. A project per run leaked: the sandbox admin can't expunge projects.
+export async function testProject(name = 'ga-test'): Promise<{ dir: string; baseUrl: string; session: MedplumClient; cfg: GaConfig }> {
+  const t = await throwawayConfig();
+  return { ...t, cfg: await setup(t.baseUrl, undefined, { projectName: name }) };
+}
+
+// Everything GA clients wrote into a ga-test* project (records, files, maps, Provenance, logs), read and deleted through
+// that project's own GA client, so nothing outside it is reachable. GA setup's self Patient and the admin's profile (not
+// written by a client) stay, so the next run reuses them.
+const DOOMED = [...Object.keys(COMPARTMENT), 'Patient', 'Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device', 'Endpoint', 'ConceptMap', 'Provenance', 'AuditEvent']; // Binary can't be searched: deleted through its DocumentReference
+export async function emptyTestProject(client: MedplumClient): Promise<void> {
+  const me = (await client.get('auth/me', { cache: 'no-cache' })) as { project: { name?: string; display?: string } };
+  if (!/^ga-test/.test(me.project.name ?? me.project.display ?? '')) throw new Error('not a ga-test project');
+  for (const t of DOOMED) {
+    for (;;) {
+      const rs = (await client.searchResources(t as 'Patient', { _count: '1000' }, { cache: 'no-cache' }))
+        .filter((r) => r.meta?.author?.reference?.startsWith('ClientApplication/') && !(t === 'Patient' && (r as Patient).identifier?.some((i) => i.value === 'self')));
+      if (!rs.length) break;
+      for (const r of rs) {
+        const files = t === 'DocumentReference' ? (r as unknown as DocumentReference).content.flatMap((c) => /^Binary\/([\w-]+)$/.exec(c.attachment.url ?? '')?.[1] ?? []) : [];
+        for (const id of files) await client.deleteResource('Binary', id).catch(() => undefined); // shared by another record, or gone
+        await client.deleteResource(t as 'Patient', r.id as string);
+      }
+    }
+  }
 }
 
 // ConceptMaps the importers learned from test sources: exactly the synthetic orgs and uuid keys the integration files use.

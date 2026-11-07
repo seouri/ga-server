@@ -212,8 +212,9 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
       ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 5.6, unit: '%' }, ...extra });
     const gaLoinc = (code: string) => ({ system: 'http://loinc.org', code, extension: [{ url: 'urn:ga-server:ext:concept-source', valueCode: 'agent' }] });
     const fixed = [
-      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] } }),
-      o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: tag('possible-duplicate') }),
+      // One C-CDA source: the uncoded A1c joins its coded twin (twins join within a source only).
+      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] }, meta: { ...tag('src-ccda'), source: '/x/hs.xml' } }),
+      o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: { ...tag('src-ccda', 'possible-duplicate'), source: '/x/hs.xml' } }),
       o('Glucose', '2024-03-01', { meta: tag('extracted-by-llm') }),
       o('Hemoglobin A1c (Apple)', '2024-04-01', { category: cat('laboratory'), meta: tag('src-apple-health') }),
       o('Body weight a1c', '2024-05-01', { category: cat('vital-signs'), meta: tag('extracted-by-llm') }),
@@ -252,7 +253,7 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
       const rows = (await labs({ name: 'LDL cholesterol' })).rows; // a synonym resolves to the concept
       expect(rows.map((r: { name: string }) => r.name)).toEqual(['LDL chol (est)', 'LDL cholesterol', 'LOW DENSITY LIPOPROTEIN CHOL']);
       expect(rows[0].flags).toContain('possibly LDL (suggested mapping)');
-      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', loinc: '4548-4', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', flags: ['possible-duplicate'] }]);
+      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', loinc: '4548-4', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', source: 'hs.xml', flags: ['possible-duplicate'] }]);
       const bad = await sub.callTool({ name: 'lab_results', arguments: { since: '2024' } });
       expect(bad.isError).toBe(true);
     } finally {

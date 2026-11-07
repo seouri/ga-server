@@ -134,3 +134,40 @@ test('scan pages by cursor, never _offset, over more than one page', async () =>
   expect(queries.length).toBeGreaterThan(2);
   expect(queries.some((q) => q.includes('_offset'))).toBe(false);
 });
+
+test('a stale backfill write gets 412: re-read and re-coded once (the other change kept), else left without error', async () => {
+  const k = `good-${randomUUID()}`;
+  await agentGlucose(`smart:${k}`, '2345-7');
+  const mk = () => client.createResource(withSrc(lab('Glucose', '2024-08-01'), ['smart'], 'x', [`urn:ga-server:id:smart:${k}`]));
+  let bumps = 0;
+  const queries: string[] = [];
+  let downloads = 0;
+  // Another writer changes the record between our read and each of our next `bumps` writes.
+  const racing = new Proxy(client, {
+    get: (t, p) => {
+      if (p === 'updateResource') {
+        return async (res: Observation, opts: object) => {
+          if (bumps-- > 0) await t.updateResource({ ...(await t.readResource('Observation', res.id as string, { cache: 'no-cache' })), note: [{ text: `meanwhile ${randomUUID()}` }] }); // new content each time: an unchanged write makes no version
+          return t.updateResource(res, opts);
+        };
+      }
+      if (p === 'searchResourcePages') return (type: string, q: Record<string, string>, o: object) => (queries.push(JSON.stringify(q)), t.searchResourcePages(type as 'Observation', q, o));
+      if (p === 'download') return (...a: unknown[]) => (downloads++, (t.download as (...x: unknown[]) => unknown)(...a));
+      return Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p);
+    },
+  });
+  const r = await mk();
+  bumps = 1;
+  expect((await applyAll(racing, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(1);
+  const got = await client.readResource('Observation', r.id as string);
+  expect(got.note?.[0].text).toMatch(/^meanwhile/);
+  expect(gaCode(got)?.code).toBe('2345-7');
+  // map_concept's scan asks only for its source kind and reads no source file
+  expect(queries.every((q) => q.includes('"_tag":"urn:ga-server:tag|src-smart"'))).toBe(true);
+  expect(downloads).toBe(0);
+
+  const r2 = await mk();
+  bumps = 2;
+  expect((await applyAll(racing, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(0);
+  expect(gaCode(await client.readResource('Observation', r2.id as string))).toBeUndefined();
+});

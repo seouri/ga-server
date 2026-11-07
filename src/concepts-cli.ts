@@ -163,6 +163,7 @@ export async function migrateKeys(client: MedplumClient, patientId: string): Pro
   const maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
   const types = TYPES.filter((t) => t !== 'Observation');
+  const kind = (t: string) => (t.startsWith('Medication') ? 'Medication' : t); // RxNorm fits both medication types
   let carried: Set<string> | undefined; // source \n typed term key of every stored record, read once when needed
   const carriers = async () => {
     if (carried) return carried;
@@ -185,7 +186,6 @@ export async function migrateKeys(client: MedplumClient, patientId: string): Pro
         if (!untyped(key)) continue;
         const takers = types.filter((t) => TARGET[t].includes(g.target ?? ''));
         const can = takers.length ? takers : types; // no vocabulary (unmatched): any type
-        const kind = (t: string) => (t.startsWith('Medication') ? 'Medication' : t);
         let to = can;
         if (new Set(can.map(kind)).size > 1) {
           const have = await carriers();
