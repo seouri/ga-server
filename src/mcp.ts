@@ -13,6 +13,7 @@ import { pairImmunizations } from './ehi/history.ts';
 import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
+import { labResults } from './labs.ts';
 import { chatInstructions } from './instructions.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
@@ -177,7 +178,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       if (no) return no;
       try {
         // Medplum's client joins arrays with commas (FHIR OR); repeated params (AND, e.g. date ranges) need URLSearchParams.
-        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => (k === '_count' ? [] : [v].flat().map((x) => [k, x]))));
+        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => [v].flat().map((x) => [k, x])));
         q.set('_count', String(Math.min(Number([params._count].flat()[0]) || 20, 1000)));
         const b = await client.search(resourceType as 'Observation', q, { cache: 'no-cache' });
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
@@ -196,6 +197,32 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       if (no) return no;
       try {
         return text(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+  server.registerTool(
+    'lab_results',
+    {
+      description:
+        "The user's lab and test results from GA (blood tests, urine tests, A1c, cholesterol...): use this for any question about lab results " +
+        '(the latest value, a trend, a year\'s results) instead of fhir_search. Finds labs from every source, including PDFs imported without a category; ' +
+        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"); since/until: YYYY-MM-DD, inclusive. ' +
+        'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
+        'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
+        'truncated: more results exist; narrow by name or dates.',
+      inputSchema: {
+        name: z.string().min(1).optional(),
+        since: z.string().optional(),
+        until: z.string().optional(),
+        limit: z.number().int().min(1).max(1000).default(200),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) => {
+      try {
+        return text(await labResults(client, patientId, input));
       } catch (e) {
         return fail(e);
       }
