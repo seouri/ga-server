@@ -338,4 +338,21 @@ describe('purpose-built read tools', () => {
       expect((await tool(name)).portalWarning).toMatch(/status error, last success 2026-11-01T00:00:00\.000Z: sync: `ga sync`/);
     expect(JSON.parse((await call('fhir_search', { resourceType: 'Observation', params: { _count: '1' } })).text).portalWarning).toBeUndefined();
   });
+  test('fhir_search nextPage: page 2 differs from page 1; a tampered token is refused', async () => {
+    const entry = ['2020-01-01', '2020-01-02', '2020-01-03'].map((d) => ({
+      resource: { resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text: 'Synthetic paging' }, effectiveDateTime: d },
+      request: { method: 'POST', url: 'Observation' },
+    }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const search = async (args: object) => sub.callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation', ...args } }) as Promise<{ isError?: boolean; content: { text: string }[] }>;
+    const ids = (r: { content: { text: string }[] }) => (JSON.parse(r.content[0].text) as Bundle).entry?.map((e) => e.resource?.id);
+    const p1 = await search({ params: { subject: `Patient/${p}`, 'code:text': 'Synthetic paging', _sort: '-date', _count: '2' } });
+    const { nextPage } = JSON.parse(p1.content[0].text);
+    const p2 = await search({ page: nextPage });
+    expect(ids(p1)).toHaveLength(2);
+    expect(ids(p2)).toHaveLength(1);
+    expect(ids(p1)).not.toContain(ids(p2)?.[0]);
+    const bad = await search({ page: `${nextPage.slice(0, -4)}!!!!` });
+    expect(bad.isError).toBe(true);
+  });
 });

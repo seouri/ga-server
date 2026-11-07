@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
-import { buildMcpServer, portalWarning } from '../src/mcp.ts';
+import { buildMcpServer, pageParams, portalWarning } from '../src/mcp.ts';
 
 const s = (o: object) => ({ source: 'h', name: 'Hosp', status: 'active', stale: true, enabledTypes: [], ...o });
 
@@ -34,4 +34,29 @@ test('read tools put portalWarning first, cached per server; no Endpoints adds n
   await search();
   expect(reads).toBe(1);
   expect(JSON.parse(await (await connect([]))())).toEqual({ resourceType: 'Bundle', entry: [] });
+});
+
+test('fhir_search paging: nextPage carries the next link params only; page searches the given type; tampered tokens refused', async () => {
+  const calls: [string, string][] = [];
+  const client = {
+    search: async (t: string, q: URLSearchParams) => (
+      calls.push([t, q.toString()]),
+      { resourceType: 'Bundle', entry: [], link: [{ relation: 'next', url: 'http://medplum:8103/fhir/R4/Observation?date=ge2024-01-01&date=lt2025-01-01&_count=5&_offset=5' }] }
+    ),
+  } as unknown as MedplumClient;
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const c = new Client({ name: 't', version: '0' });
+  await Promise.all([buildMcpServer({ client, cfg: {} as never, patientId: 'p' }).connect(a), c.connect(b)]);
+  const call = async (args: object) => (await c.callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation', ...args } })) as { isError?: boolean; content: { text: string }[] };
+  const { nextPage } = JSON.parse((await call({ params: { _count: '5' } })).content[0].text);
+  expect(pageParams(nextPage).getAll('date')).toEqual(['ge2024-01-01', 'lt2025-01-01']);
+  await call({ page: nextPage, params: { code: 'ignored' } });
+  expect(calls[1]).toEqual(['Observation', 'date=ge2024-01-01&date=lt2025-01-01&_count=5&_offset=5']);
+  for (const page of ['not-a-token', Buffer.from('"http://evil.example/x"').toString('base64url'), Buffer.from('[["a",1]]').toString('base64url')]) {
+    const r = await call({ page });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toBe('invalid page token');
+  }
+  expect(calls).toHaveLength(2);
+  expect((await call({ page: nextPage, resourceType: 'ClientApplication' })).content[0].text).toContain('not available');
 });

@@ -126,6 +126,18 @@ export const readable = (x: unknown): unknown => {
 };
 
 const TYPE_RE = /^[A-Z][A-Za-z]+$/;
+// fhir_search paging: the token carries only the next link's query params, never a URL or path; the caller's resourceType is searched.
+export const pageToken = (next: string): string => Buffer.from(JSON.stringify([...new URL(next).searchParams])).toString('base64url');
+export function pageParams(token: string): URLSearchParams {
+  let v: unknown;
+  try {
+    v = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'));
+  } catch {
+    v = undefined;
+  }
+  if (!Array.isArray(v) || !v.every((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string'))) throw new GaError('invalid page token');
+  return new URLSearchParams(v as [string, string][]);
+}
 // Medplum project-admin types (secrets, logins, bots): never readable through the agent tools, either transport.
 // Medplum's own lists (so upgrades are covered) plus the types GA already blocked.
 const ADMIN_TYPES = new Set([...protectedResourceTypes, ...projectAdminResourceTypes, 'ClientApplication', 'User', 'Project', 'ProjectMembership', 'Login', 'Bot', 'AccessPolicy', 'JsonWebKey', 'UserConfiguration', 'UserSecurityRequest', 'Subscription', 'Agent', 'DomainConfiguration', 'PasswordChangeRequest', 'SmartAppLaunch', 'BulkDataExport', 'AsyncJob']);
@@ -201,21 +213,23 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       description:
         "Search the user's personal health record (GA) by FHIR resource type and search params. A param given as a list is repeated, " +
         'e.g. a date range {"date": ["ge2024-01-01", "lt2025-01-01"]}; dates need full YYYY-MM-DD (not "2024"). Newest first: "_sort": "-date". ' +
-        'Results read from PDFs may lack a category, so also search without "category" before concluding a result is missing.',
-      inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.union([z.string(), z.array(z.string())])).default({}) },
+        'Results read from PDFs may lack a category, so also search without "category" before concluding a result is missing. ' +
+        'More results: the reply has nextPage; call again with the same resourceType and page set to it (params are then ignored).',
+      inputSchema: { resourceType: z.string().regex(TYPE_RE), params: z.record(z.string(), z.union([z.string(), z.array(z.string())])).default({}), page: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
-    async ({ resourceType, params }) => {
+    async ({ resourceType, params, page }) => {
       const no = refuseAdmin(resourceType);
       if (no) return no;
       try {
         // Medplum's client joins arrays with commas (FHIR OR); repeated params (AND, e.g. date ranges) need URLSearchParams.
-        const q = new URLSearchParams(Object.entries(params).flatMap(([k, v]) => [v].flat().map((x) => [k, x])));
-        q.set('_count', String(Math.min(Number([params._count].flat()[0]) || 20, 1000)));
+        const q = page ? pageParams(page) : new URLSearchParams(Object.entries(params).flatMap(([k, v]) => [v].flat().map((x) => [k, x])));
+        q.set('_count', String(Math.min(Number(q.get('_count')) || 20, 1000)));
         const b = await client.search(resourceType as 'Observation', q, { cache: 'no-cache' });
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
-        return warned(readable(b) as object);
+        const next = b.link?.find((l) => l.relation === 'next')?.url;
+        return warned({ ...(readable(b) as object), ...(next && { nextPage: pageToken(next) }) });
       } catch (e) {
         return fail(e);
       }
