@@ -130,6 +130,16 @@ export function clientIp(req: http.IncomingMessage): string {
 export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: Res) => Promise<void> {
   const now = deps.now ?? (() => new Date());
   const limiter = failLimiter();
+  // The summary PDF, rendered once per loaded scope (the load cache keeps a share's Scoped for its TTL), not per download.
+  const pdfs = new WeakMap<Scoped, { id: string; pdf: Promise<Buffer> }>();
+  const pdfOf = (s: Scoped, share: Share): Promise<Buffer> => {
+    const hit = pdfs.get(s);
+    if (hit?.id === share.id) return hit.pdf;
+    const pdf = toPdf(summarize(s), recordRows(s), { label: share.label, created: share.created, scope: scopeWords(share) });
+    pdfs.set(s, { id: share.id, pdf });
+    pdf.catch(() => pdfs.get(s)?.pdf === pdf && pdfs.delete(s));
+    return pdf;
+  };
 
   return async function handle(req: http.IncomingMessage, res: Res): Promise<void> {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
@@ -190,7 +200,7 @@ export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: 
       return streamBundle(res, s, downloadName(s, 'health-records-FHIR.json', now()));
     }
     if (route === '/download/summary.pdf') {
-      const pdf = await toPdf(summarize(s), recordRows(s), { label: share.label, created: share.created, scope: scopeWords(share) });
+      const pdf = await pdfOf(s, share);
       log({ kind: 'download', detail: 'summary.pdf' });
       return send(res, 200, pdf, 'application/pdf', attach(downloadName(s, 'health-summary.pdf', now())));
     }

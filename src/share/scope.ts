@@ -153,8 +153,10 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
   const p = await client.readResource('Patient', share.patientId, opts);
   // Per type, not $everything: Medplum caps _offset at 10000. _sort=_lastUpdated with _count >= 20 makes it page by _cursor.
   const compartment: Resource[] = [];
+  // Apple data is most of the record: not even fetched for a share without it.
+  const noApple = share.groups !== 'all' && !share.groups.includes('apple') ? { '_tag:not': `${TAG}|src-apple-health` } : {};
   for (const type of COMPARTMENT_TYPES) {
-    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000' };
+    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...noApple };
     for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
   const { resources, refs, newestImport } = selectScoped(compartment, share);

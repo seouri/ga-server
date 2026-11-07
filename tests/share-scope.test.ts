@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Patient, Resource } from '@medplum/fhirtypes';
-import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
+import type { MedplumClient } from '@medplum/core';
+import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Group, Share } from '../src/share/store.ts';
 
@@ -196,4 +197,19 @@ test('selectScoped: newestImport covers the whole compartment, not just the shar
   const out = selectScoped([med, lab], share({ groups: ['medications'] }));
   expect(out.resources).toEqual([med]);
   expect(out.newestImport).toBe(Date.parse('2025-01-01T00:00:00Z'));
+});
+
+test('loadScoped fetches no Apple data for a share without the apple group', async () => {
+  const queries = async (groups: Share['groups']) => {
+    const qs: Record<string, string>[] = [];
+    const client = {
+      readResource: async () => ({ resourceType: 'Patient', id: 'p' }),
+      searchResourcePages: async function* (_t: string, q: Record<string, string>) { qs.push(q); yield []; },
+      searchResources: async () => [],
+    } as unknown as MedplumClient;
+    await loadScoped(client, share({ groups }));
+    return qs;
+  };
+  for (const q of await queries(['labs', 'vitals'])) expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health');
+  for (const g of ['all', ['labs', 'apple']] as Share['groups'][]) for (const q of await queries(g)) expect(q['_tag:not']).toBeUndefined();
 });
