@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -86,4 +86,19 @@ it('shares.json and asked.json are owner-only (0600)', () => {
   takeQuestion(dir, share.id, now);
   expect(statSync(join(dir, 'shares.json')).mode & 0o777).toBe(0o600);
   expect(statSync(join(dir, 'asked.json')).mode & 0o777).toBe(0o600);
+});
+
+describe('shares.json lock', () => {
+  it('waits for a held lock, frees a stale one, and never leaves its own behind', () => {
+    const lock = join(dir, 'shares.json.lock');
+    writeFileSync(lock, '');
+    expect(() => createShare(dir, { ...base, audience: 'family' }, now)).toThrow(/try again/);
+    expect(listShares(dir)).toEqual([]);
+    utimesSync(lock, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000)); // left by a killed process
+    const { share } = createShare(dir, { ...base, audience: 'family' }, now);
+    expect(revokeShare(dir, share.id, now).revoked).toBeDefined();
+    expect(existsSync(lock)).toBe(false);
+    expect(() => revokeShare(dir, 'nope')).toThrow(/no share/);
+    expect(existsSync(lock)).toBe(false);
+  });
 });

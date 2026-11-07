@@ -10,7 +10,7 @@ export const smartDir = (cfgPath: string = defaultConfigPath()): string => join(
 // Same-dir temp file then rename, so a crash never leaves a half-written file.
 export function writeAtomic(file: string, data: string | Buffer, mode?: number): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`; // pids repeat across containers sharing .ga/
   try {
     writeFileSync(tmp, data, mode === undefined ? undefined : { mode });
     renameSync(tmp, file);

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { GaError, defaultConfigPath } from '../config.ts';
 import { loadSecret, saveSecret, writeAtomic } from '../smart/store.ts';
@@ -38,7 +38,31 @@ export const shareDir = (cfgPath: string = defaultConfigPath()): string => join(
 
 const file = (dir: string): string => join(dir, 'shares.json');
 export const listShares = (dir: string): Share[] => (existsSync(file(dir)) ? (JSON.parse(readFileSync(file(dir), 'utf8')) as Share[]) : []);
-const write = (dir: string, s: Share[]): void => writeAtomic(file(dir), JSON.stringify(s, null, 2), 0o600);
+// Read-modify-write under a lock file: the CLI (revoke) and the gateway container (share_create) both rewrite shares.json.
+// Held for a few ms; one older than 10 s was left by a killed process.
+function update<T>(dir: string, fn: (all: Share[]) => T): T {
+  const lock = `${file(dir)}.lock`;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const end = Date.now() + 2000; ; ) {
+    try {
+      closeSync(openSync(lock, 'wx', 0o600));
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+    if (Date.now() - (statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) > 10_000) rmSync(lock, { force: true });
+    else if (Date.now() > end) throw new GaError('shares are being changed elsewhere: try again');
+    else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+  try {
+    const all = listShares(dir);
+    const out = fn(all);
+    writeAtomic(file(dir), JSON.stringify(all, null, 2), 0o600);
+    return out;
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
 
 function parseDate(s: string): Date | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -91,7 +115,7 @@ export function createShare(dir: string, opts: ShareOpts, now: Date = new Date()
   };
   // Secret first: a share without a recoverable token would be unusable.
   saveSecret(dir, `share-${id}`, token);
-  write(dir, [...listShares(dir), share]);
+  update(dir, (all) => all.push(share));
   return { share, token };
 }
 
@@ -103,12 +127,12 @@ export function findByToken(dir: string, token: string, now: Date = new Date()):
 }
 
 export function revokeShare(dir: string, id: string, now: Date = new Date()): Share {
-  const all = listShares(dir);
-  const s = all.find((x) => x.id === id);
-  if (!s) throw new GaError(`no share ${id}`);
-  s.revoked ??= now.toISOString();
-  write(dir, all);
-  return s;
+  return update(dir, (all) => {
+    const s = all.find((x) => x.id === id);
+    if (!s) throw new GaError(`no share ${id}`);
+    s.revoked ??= now.toISOString();
+    return s;
+  });
 }
 
 export function tokenOf(dir: string, id: string): string {
@@ -117,7 +141,7 @@ export function tokenOf(dir: string, id: string): string {
   return t;
 }
 
-// Daily counters live in asked.json, not shares.json: the server never rewrites shares.json, so it cannot undo a CLI revoke.
+// Daily counters live in asked.json, not shares.json: answering a question never rewrites shares.json, so it cannot undo a CLI revoke.
 const askedFile = (dir: string): string => join(dir, 'asked.json');
 export function takeQuestion(dir: string, id: string, now: Date = new Date()): boolean {
   const s = listShares(dir).find((x) => x.id === id);
