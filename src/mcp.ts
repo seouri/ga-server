@@ -18,6 +18,7 @@ import { currentList, type Kind } from './lists.ts';
 import { vitals } from './vitals.ts';
 import { notesSearch } from './notes.ts';
 import { chatInstructions } from './instructions.ts';
+import { readStatus } from './smart/sync.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
@@ -140,11 +141,25 @@ export type ToolDeps = {
   remote?: { publicUrl: string; clientName: string; dir?: string; disconnect?: (clientId: string) => Promise<void>; log: (tool: string) => Promise<void> };
 };
 
+// One line per stale hospital source (SKILL.md step 0 rule, via readStatus), with the fix for this transport; undefined when none.
+export function portalWarning(sources: Awaited<ReturnType<typeof readStatus>>, remote: boolean): string | undefined {
+  const stale = sources.filter((s) => s.stale);
+  if (!stale.length) return undefined;
+  const fix = (s: (typeof stale)[number]) =>
+    s.error === 'disconnected' ? 'the user disconnected it on purpose'
+    : s.error === 'not_enabled' ? `no record types enabled yet, so GA holds nothing from it: ${remote ? 'hospital_sync with enable' : '`ga sync --enable <Type,...> <source>`'} after checking the dry-run counts`
+    : s.status === 'off' ? `reconnect: ${remote ? 'hospital_connect' : '`ga connect <its FHIR address>` (`ga status` lists it)'}`
+    : `sync: ${remote ? 'hospital_sync' : '`ga sync`'}`;
+  const lines = stale.map((s) => `${s.name || s.source} (${s.source}), status ${s.status}${s.error ? ` (${s.error})` : ''}, last success ${s.lastSuccess ?? 'never'}: ${fix(s)}`);
+  return `Hospital records may be out of date. Start the answer with one line naming the source, its last success and the fix. ${lines.join('; ')}`;
+}
+
 const CAP = 150_000; // claude.ai's tool-result limit is about this size
 const STDIO_INSTRUCTIONS =
         "GA (Guardian Angel) is the user's personal health record: labs, vitals, medications, problems and documents from their hospitals. " +
         "For any question about the user's own health, look here first and cite the records you use. " +
-        'Hospital portal sync status: first fhir_search Endpoint with identifier urn:ga-server:id:smart-source| (system only). A source is stale if its ' +
+        'Hospital portal sync status: read tool results carry portalWarning when a connected source is stale; if one does, start the answer with one line from it. ' +
+        'Reading Endpoints directly instead: fhir_search Endpoint with identifier urn:ga-server:id:smart-source| (system only). A source is stale if its ' +
         'status is off or error, or its extension urn:ga-server:ext:smart-last-success is missing or older than 48 hours. If any is stale, start the ' +
         'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
@@ -154,6 +169,19 @@ const STDIO_INSTRUCTIONS =
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
+  // Stale-source check for the read tools, cached 5 minutes; a failed check adds nothing.
+  let checked: { at: number; warning?: string } | undefined;
+  const warned = async (v: object) => {
+    if (!checked || Date.now() - checked.at > 300_000) {
+      try {
+        checked = { at: Date.now(), warning: portalWarning(await readStatus(client, patientId), !!remote) };
+      } catch {
+        checked = undefined;
+      }
+    }
+    // First, so the remote cap (which cuts the end) never drops it.
+    return text(checked?.warning ? { portalWarning: checked.warning, ...v } : v);
+  };
   const server = new McpServer({ name: 'ga-server', version: '0.1.0' }, { instructions: remote ? chatInstructions() : STDIO_INSTRUCTIONS });
   if (remote) {
     // One wrap for every tool: log first, then cap the text.
@@ -187,7 +215,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         const b = await client.search(resourceType as 'Observation', q, { cache: 'no-cache' });
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
-        return text(readable(b));
+        return warned(readable(b) as object);
       } catch (e) {
         return fail(e);
       }
@@ -226,7 +254,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     async (input) => {
       try {
-        return text(await labResults(client, patientId, input));
+        return warned(await labResults(client, patientId, input));
       } catch (e) {
         return fail(e);
       }
@@ -253,7 +281,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     async (input) => {
       try {
-        return text(await vitals(client, patientId, input));
+        return warned(await vitals(client, patientId, input));
       } catch (e) {
         return fail(e);
       }
@@ -277,7 +305,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     async (input) => {
       try {
-        return text(await notesSearch(client, patientId, input));
+        return warned(await notesSearch(client, patientId, input));
       } catch (e) {
         return fail(e);
       }
@@ -301,7 +329,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       },
       async ({ include }) => {
         try {
-          return text(await currentList(client, patientId, kind, include));
+          return warned(await currentList(client, patientId, kind, include));
         } catch (e) {
           return fail(e);
         }
