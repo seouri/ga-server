@@ -15,6 +15,7 @@ import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
 import { currentList, type Kind } from './lists.ts';
+import { vitals } from './vitals.ts';
 import { chatInstructions } from './instructions.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
@@ -148,7 +149,7 @@ const STDIO_INSTRUCTIONS =
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
         'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
-        'current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results.';
+        'current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results, vitals vital signs.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
@@ -225,6 +226,33 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     async (input) => {
       try {
         return text(await labResults(client, patientId, input));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+  server.registerTool(
+    'vitals',
+    {
+      description:
+        "The user's vital signs from GA (blood pressure, heart rate, weight, BMI, SpO2, temperature...): use this for any vitals question instead of fhir_search. " +
+        'Clinic vitals (hospital records, PDFs) and Apple Health home readings together; a home and a clinic reading on the same day are both real (setting says which). ' +
+        'name: part of the name, case-insensitive (e.g. "blood pressure", "weight"); since/until: YYYY-MM-DD, inclusive. Newest first; one row per result: ' +
+        'date, name, value, kind, setting (home/clinic), source, flags, id (for fhir_read). Default: individual readings. daily: true returns only Apple Health ' +
+        'daily summaries instead (kind "daily mean", "daily total", "daily" activity rings, "nightly" sleep): use it for long-range trends, steps and sleep; ' +
+        'never mix summaries with readings. truncated: more results exist; use daily: true or narrow the dates.',
+      inputSchema: {
+        name: z.string().min(1).optional(),
+        since: z.string().optional(),
+        until: z.string().optional(),
+        limit: z.number().int().min(1).max(1000).default(200),
+        daily: z.boolean().default(false),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) => {
+      try {
+        return text(await vitals(client, patientId, input));
       } catch (e) {
         return fail(e);
       }
