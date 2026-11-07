@@ -168,12 +168,12 @@ export const raiseNow = (i: Item, asOf: string): boolean =>
 const monthYear = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 // The one line an agent adds after answering (spec Part 3): the most important item to raise (items come sorted), plus a count of the rest.
-export function byTheWay(items: Item[], asOf: string): { line: string; topic: string; more: number } | undefined {
+export function byTheWay(items: Item[], asOf: string): { line: string; topic: string } | undefined {
   const [top, ...rest] = items.filter((i) => raiseNow(i, asOf));
   if (!top) return undefined;
   const when = top.status === 'overdue' ? `overdue${top.dueDate ? ` since ${monthYear(top.dueDate)}` : ''}` : top.status === 'due soon' && top.dueDate ? `due in ${monthYear(top.dueDate)}` : 'due';
   const more = rest.length ? `, plus ${rest.length} other item${rest.length > 1 ? 's' : ''}` : '';
-  return { line: `By the way, ${top.name} is ${when}${more}. Want to review it now?`, topic: top.topic, more: rest.length };
+  return { line: `By the way, ${top.name} is ${when}${more}. Want to review it now?`, topic: top.topic };
 }
 
 // Items with a due date after asOf and within `months`, soonest first.

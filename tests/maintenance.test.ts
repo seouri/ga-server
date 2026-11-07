@@ -173,7 +173,7 @@ test('an undated Due plan is not hidden by a later dated Not Due', () => {
 
 test('byTheWay names the most important item to raise, counts the rest, and respects not-now', () => {
   const items = run([g('colorectal', 'A', 'overdue', '2026-03-01'), g('prostate', 'C', 'discuss')], epicPlans([hm('LIPID PANEL - YEARLY', '2026-12-01', 'Not Due')]));
-  expect(byTheWay(items, '2026-11-03')).toEqual({ line: 'By the way, colorectal is overdue since March 2026, plus 1 other item. Want to review it now?', topic: 'colorectal', more: 1 });
+  expect(byTheWay(items, '2026-11-03')).toEqual({ line: 'By the way, colorectal is overdue since March 2026, plus 1 other item. Want to review it now?', topic: 'colorectal' });
   const quiet = run([g('colorectal', 'A', 'overdue', '2026-03-01')], epicPlans([]), [rem('not-now', 'colorectal', '2026-11-01')]);
   expect(byTheWay(quiet, '2026-11-03')).toBeUndefined();
   expect(byTheWay(run([g('prostate', 'C', 'discuss')]), '2026-11-03')).toBeUndefined(); // low and discuss are never raised
