@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
-import { labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
-import { keyLabs } from '../src/health.ts';
+import { keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
 
 describe('labRow', () => {
   it('keeps the comparator, unit, one-sided ranges and flags; omits empty fields', () => {
@@ -84,6 +83,15 @@ describe('summarizeLabs', () => {
     expect(c.change).toBeUndefined();
     expect(c.previous?.value).toBe('<5.4 mg/dL');
     expect(summarizeLabs([lab('A', '2024-01-01', 6.1), lab('A', '2023-01-01', 5.4)])[0].change).toBe(0.7);
+    // A comparator skips the range: "<5" is not high against a high of 3.
+    expect(summarizeLabs([lab('B', '2024-01-01', 5, { valueQuantity: { comparator: '<', value: 5 }, referenceRange: [{ high: { value: 3 } }] })])[0].outOfRange).toBe(0);
+  });
+  it('same day: the newest written is latest; results with no name and no code are skipped', () => {
+    const s = summarizeLabs([
+      lab('C', '2024-01-01', 1, { meta: { lastUpdated: '2024-01-02T00:00:00Z' } }), lab('C', '2024-01-01', 2, { meta: { lastUpdated: '2024-01-03T00:00:00Z' } }),
+      { resourceType: 'Observation', status: 'final', code: {}, effectiveDateTime: '2025-01-01', valueQuantity: { value: 9 } },
+    ]);
+    expect(s.map((x) => [x.name, x.latest.value])).toEqual([['C', 2]]);
   });
 });
 

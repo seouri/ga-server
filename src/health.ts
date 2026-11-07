@@ -1,16 +1,13 @@
 // health_summary: a one-call snapshot of the record, built from the other read tools' code; each section fails on its own.
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Encounter, Endpoint, Observation, Patient } from '@medplum/fhirtypes';
+import type { Encounter, Endpoint, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
-import { collect, KEY_LABS, labResults, type LabTrend } from './labs.ts';
+import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
 import { vitalRow } from './vitals.ts';
-
-// The key labs, in table order (summarizeLabs already groups each into one entry).
-export const keyLabs = (trends: LabTrend[]): LabTrend[] => KEY_LABS.flatMap(([test]) => trends.filter((t) => t.test === test));
 
 const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
@@ -35,21 +32,25 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
   const [patient, lists, labs, vitals, vaccines, lastVisit, imports] = await Promise.all([
     part(client.readResource('Patient', patientId, opts).then((p: Patient) => ({ age: p.birthDate ? ageOn(p.birthDate, asOf) : undefined, sex: p.gender }))),
     part(eps.then((e) => loadLists(client, patientId, e))),
-    part(labResults(client, patientId, { summary: true, limit: 1000 }).then((r) => keyLabs(r.rows as LabTrend[]))),
+    part(labResults(client, patientId, { summary: true, keyOnly: true, limit: 1000 })),
     part(Promise.all(VITALS.flatMap((n) => [vital(n, false), vital(n, true)])).then((r) => r.flat())),
     part(vaccineGaps(client, patientId, asOf).then((v) => ({
       edition: v.edition,
-      dueOrOverdue: v.results.filter((r) => r.status === 'due' || r.status === 'overdue').map((r) => ({ vaccine: r.vaccine, status: r.status, reason: r.reason.split(/(?<=\.) /).at(-1) })),
+      dueOrOverdue: v.results.filter((r) => r.status === 'due' || r.status === 'overdue').map((r) => ({ vaccine: r.vaccine, status: r.status, reason: r.reason?.split(/(?<=\.) /).at(-1) })),
       notEvaluated: v.results.filter((r) => r.status === 'not-evaluated').length,
+      unmatched: v.unmatched.length,
+      possibleDuplicates: v.possibleDuplicates.length,
+      note: 'call vaccine_gaps before telling the user a vaccine is due',
     }))),
     // date lt tomorrow: Medplum sorts undated encounters first on -date, and a future one is not a visit yet.
-    part(client.searchOne('Encounter', new URLSearchParams([['subject', subject], ['date', `lt${tomorrow}`], ['_sort', '-date']]), opts).then((e?: Encounter) =>
+    part(client.searchOne('Encounter', new URLSearchParams([['subject', subject], ['date', `lt${tomorrow}`], ['status:not', 'cancelled'], ['status:not', 'entered-in-error'], ['_sort', '-date']]), opts).then((e?: Encounter) =>
       e && { date: (e.period?.start ?? e.period?.end)?.slice(0, 10), type: concept(e.type?.[0]), class: e.class?.display ?? e.class?.code, source: e.meta?.source && basename(e.meta.source), id: e.id })),
     part(Promise.all([...SOURCES.map(imported), eps.then((e) => e.map(endpointStatus).map((s) => ({ source: `hospital portal ${s.name || s.source}`, lastImport: s.lastSuccess?.slice(0, 10) })))]).then((r) => {
       const sources = r.flat();
       return { newest: sources.map((s) => s.lastImport ?? '').sort().at(-1) || undefined, sources };
     })),
   ]);
-  const list = (kind: Kind) => ('error' in lists ? lists : listRows(lists.all, lists.ctx, kind).map(({ name, currency, since, source, flags }) => ({ name, currency, since, source, flags })));
+  // At most 200 each, so the remote 150k cut can't drop the sections after them.
+  const list = (kind: Kind) => ('error' in lists ? lists : fit(listRows(lists.all, lists.ctx, kind).map(({ name, currency, since, source, flags }) => ({ name, currency, since, source, flags })), 200));
   return { asOf, patient, problems: list('problems'), medications: list('medications'), allergies: list('allergies'), keyLabs: labs, vitals, vaccines, lastVisit: lastVisit ?? null, imports };
 }
