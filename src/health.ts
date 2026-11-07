@@ -5,13 +5,12 @@ import type { Encounter, Endpoint, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
 import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
-import { SOURCES } from './whats-new.ts';
+import { part, SOURCES } from './whats-new.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { ageOn, vaccineGaps } from './vaccines.ts';
 import { newestFirst, vitalRow, vitalSearches } from './vitals.ts';
 
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
-const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
 
 export async function healthSummary(client: MedplumClient, patientId: string, eps: Promise<Endpoint[]>) {
   const asOf = new Date().toLocaleDateString('en-CA');

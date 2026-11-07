@@ -137,3 +137,37 @@ test('whatsNew: first run, markSeen and since', async () => {
   expect(await run({})).toMatchObject({ since: at });
   expect((await run({})).firstRun).toBeUndefined();
 });
+
+const ARRIVED_EXT = { url: 'urn:ga-server:ext:arrived', valueInstant: '2026-11-05T00:00:00Z' };
+const big = (patient: object = { resourceType: 'Patient', birthDate: '1980-01-01' }) => {
+  const labs = Array.from({ length: 1000 }, (_, i) => ({ resourceType: 'Observation', id: `o${i}`, status: 'final', code: { text: `Test number ${i}` }, effectiveDateTime: '2026-11-01', valueQuantity: { value: 9, unit: 'mg' }, interpretation: [{ coding: [{ code: 'H' }] }], extension: [ARRIVED_EXT] }));
+  const meds = Array.from({ length: 4 }, (_, i) => ({ resourceType: 'MedicationStatement', id: `m${i}`, status: 'active', medicationCodeableConcept: { text: `Drug ${i}`, coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: `${100 + i}` }] }, effectiveDateTime: '2026-11-02', extension: [ARRIVED_EXT] }));
+  const client = {
+    search: async () => ({ resourceType: 'Bundle', entry: labs.map((resource) => ({ resource })) }), searchOne: async () => undefined, searchResources: async () => [],
+    searchResourcePages: async function* (type: string) { yield type === 'Observation' ? labs : type === 'MedicationStatement' ? meds : []; },
+    readResource: async () => patient, readHistory: async () => ({ entry: [] }),
+  } as unknown as MedplumClient;
+  const text = 'x'.repeat(10_000);
+  const fetch = (async (u: string) => ({ ok: true, status: 200, json: async () => ({ results: [{ set_id: 's', effective_time: '20260101', drug_interactions: [text], warnings: [text], contraindications: [text], boxed_warning: [text], warnings_and_cautions: [text], use_in_specific_populations: [text] }] }) })) as unknown as typeof globalThis.fetch;
+  return { client, fetch, dir: mkdtempSync(join(tmpdir(), 'ga-wn-')) };
+};
+
+test('whatsNew: the whole result stays under the remote cap, note and labels kept', async () => {
+  const { client, fetch, dir } = big();
+  const r = await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir });
+  expect(JSON.stringify(r).length).toBeLessThan(150_000);
+  expect(JSON.stringify(r).startsWith('{"note":')).toBe(true);
+  expect(r.items.length).toBeGreaterThan(10);
+  const mc = r.medicationCheck as { label: { status: string } }[];
+  expect(mc.length).toBe(4);
+  expect(mc[0].label.status).toBe('ok');
+  expect(mc.some((c) => c.label.status === 'omitted: too large')).toBe(true);
+});
+
+test('whatsNew: a failed section is {error} or sectionErrors and the rest returns', async () => {
+  const { client, fetch, dir } = big({ resourceType: 'Patient' }); // no birthDate: vaccines fail
+  const r = await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir });
+  expect(r.sectionErrors?.['follow-ups']).toMatch(/birthDate/);
+  expect(r.items.some((i) => i.kind === 'lab')).toBe(true);
+  expect((r.tally as { total: number }).total).toBeGreaterThan(0);
+});

@@ -180,6 +180,13 @@ export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>,
 const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'vaccine follow-up', 'health maintenance'];
 const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
 
+// A failed section becomes {error} in its place; the rest still returns.
+export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+const failed = (v: unknown): v is { error: string } => typeof v === 'object' && v !== null && !Array.isArray(v) && 'error' in v;
+
+// Budgets (characters) that together stay under the remote 150k tool-result cap, so `note` and the label quotes are never cut.
+const ITEMS = 40_000, LABELS = 60_000, OUT_OF_RANGE = 20_000;
+
 export async function whatsNew(client: MedplumClient, patientId: string, eps: Promise<Endpoint[]>, opts: { since?: string; markSeen?: boolean; asOf?: string; fetch?: typeof fetch; dir?: string } = {}) {
   const now = new Date();
   const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
@@ -187,30 +194,45 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const since = opts.since ?? stored ?? daysBefore(asOf, 90);
   const subject = `Patient/${patientId}`;
   const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
-  const [arrived, lists, labs, hm, status, patient] = await Promise.all([
-    arrivedSince(client, patientId, since),
-    eps.then((e) => loadLists(client, patientId, e)),
-    q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]]),
-    q([['code:text', 'Health maintenance']]),
-    statusItems(client, patientId, since),
-    client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>,
+  const [arrived, lists, labs, hm, status, patient, vaccines] = await Promise.all([
+    part(arrivedSince(client, patientId, since)),
+    part(eps.then((e) => loadLists(client, patientId, e))),
+    part(q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]])),
+    part(q([['code:text', 'Health maintenance']])),
+    part(statusItems(client, patientId, since)),
+    part(client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>),
+    part(vaccineGaps(client, patientId, asOf)),
   ]);
-  const vaccines = await vaccineGaps(client, patientId, asOf);
   const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
-  const newMeds = medicationItems(arrived.filter((r) => kindOf(r) === 'medications'), lists.all, since);
+  const errors: Record<string, string> = {};
+  const get = <T,>(v: T | { error: string }): T => { if (failed(v)) throw new Error(v.error); return v; };
+  const run = (name: string, f: () => ReviewItem[]): ReviewItem[] => {
+    try { return f(); } catch (e) { errors[name] = e instanceof Error ? e.message : String(e); return []; }
+  };
+  const newMeds = run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since));
   const items = [
-    ...labItems(arrived.filter(isObs).filter((o) => kindOf(o) === 'lab results'), labs, asOf),
-    ...newMeds, ...status, ...followUpItems(vaccines, hm, asOf, patient.birthDate),
+    ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
+    ...newMeds,
+    ...run('status changes', () => get(status)),
+    ...run('follow-ups', () => followUpItems(get(vaccines), get(hm), asOf, failed(patient) ? undefined : patient.birthDate)),
   ].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
-  const medicationCheck = await Promise.all(newMeds.map(async (m) => ({
+  const dir = opts.dir && join(opts.dir, 'labels');
+  const checked = await part(Promise.all(newMeds.map(async (m) => ({
     drug: m.title,
-    label: (m.detail.rxnorm ? await drugLabel(m.detail.rxnorm as string, { fetch: opts.fetch, dir: opts.dir }) : { status: 'no code' }) as LabelSections,
-  })));
-  const names = (kind: 'medications' | 'problems') => listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name);
+    label: (m.detail.rxnorm ? await drugLabel(m.detail.rxnorm as string, { fetch: opts.fetch, dir }) : { status: 'no code' }) as LabelSections,
+  }))));
+  // Whole entries only, so a label quote is never cut; the rest are named without their sections.
+  let size = 0;
+  const medicationCheck = failed(checked) ? checked : checked.map((c) => (size += JSON.stringify(c).length) > LABELS ? { drug: c.drug, label: { status: 'omitted: too large' } } : c);
+  const names = (kind: 'medications' | 'problems') => failed(lists) ? lists : listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name).slice(0, 200);
   const result = {
-    since, ...(!opts.since && !stored && { firstRun: true as const }), tally: tally(arrived, asOf), items: fit(items, 200).rows, medicationCheck,
-    context: { currentMedications: names('medications'), activeProblems: names('problems'), recentOutOfRange: labItems(labs, labs, asOf) },
-    note: NOTE,
+    note: NOTE, since, ...(!opts.since && !stored && { firstRun: true as const }),
+    tally: failed(arrived) ? arrived : tally(arrived, asOf), items: fit(items, 200, false, ITEMS).rows, ...(Object.keys(errors).length && { sectionErrors: errors }),
+    medicationCheck,
+    context: {
+      currentMedications: names('medications'), activeProblems: names('problems'),
+      recentOutOfRange: failed(labs) ? labs : fit(labItems(labs, labs, asOf), 200, false, OUT_OF_RANGE).rows,
+    },
   };
   if (opts.markSeen && !opts.since) writeLastSeen(now.toISOString(), opts.dir);
   return result;
