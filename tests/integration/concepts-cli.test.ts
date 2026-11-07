@@ -81,7 +81,16 @@ test('C-CDA records are keyed by the custodian read from the stored source file;
   const a = await client.createResource(withSrc(lab('Glucose', '2024-04-01'), ['ccda'], file, []));
   // A file with no stored copy: its key can't be derived, so nothing is written.
   const lost = await client.createResource(withSrc(lab('Glucose', '2024-04-02'), ['ccda'], '/nowhere/lost/gone.xml', []));
-  await applyAll(client, pid);
+  // The file lookup pages through C-CDA files only (one page used to miss files past the first 1000).
+  const docQueries: string[] = [];
+  const spy = new Proxy(client, {
+    get: (t, p) => (p === 'searchResourcePages'
+      ? (type: string, q: Record<string, string>, o: object) => { if (type === 'DocumentReference') docQueries.push(JSON.stringify(q)); return t.searchResourcePages(type as 'DocumentReference', q, o); }
+      : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+  });
+  await applyAll(spy, pid);
+  expect(docQueries).toHaveLength(1);
+  expect(JSON.parse(docQueries[0])).toMatchObject({ contenttype: 'application/xml', _sort: '_lastUpdated' });
   expect(gaCode(await client.readResource('Observation', a.id as string))?.code).toBe('2345-7');
   const l = await client.readResource('Observation', lost.id as string);
   expect(gaCode(l)).toBeUndefined();

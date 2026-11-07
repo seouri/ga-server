@@ -31,7 +31,13 @@ function sourceResolver(client: MedplumClient, patientId: string, maps: () => Ma
   const orgs = new Map<string, Promise<{ org?: string } | undefined>>();
   const orgOf = (file: string) => {
     const find = async () => {
-      docs ??= client.searchResources('DocumentReference', { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', _count: '1000' }, { cache: 'no-cache' });
+      // Only C-CDA files, every page: an install with over 1000 stored files must still find each custodian.
+      docs ??= (async () => {
+        const out: DocumentReference[] = [];
+        const q = { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml', _sort: '_lastUpdated', _count: '1000' };
+        for await (const page of client.searchResourcePages('DocumentReference', q, { cache: 'no-cache' })) out.push(...page);
+        return out;
+      })();
       const mine = (await docs).filter((d) => d.content?.[0]?.attachment?.title === basename(file) && d.content[0].attachment.url);
       const names = new Set<string | undefined>();
       for (const d of mine) names.add(custodian(await (await client.download(d.content?.[0].attachment?.url as string)).text()));
