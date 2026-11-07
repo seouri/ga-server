@@ -65,7 +65,7 @@ node src/cli.ts concepts --suggested  # terms with only a suggested code
 node src/cli.ts concepts apply        # backfill: code stored records and re-apply every map
 ```
 
-Run `concepts apply` after an upgrade or after editing a map. Your agent maps terms with `map_concept`.
+Run `concepts apply` after an upgrade or after editing a map. If your maps predate typed keys (`Condition|…`), run `node src/cli.ts concepts apply --migrate-keys` once first: a plain apply before that strips the codes older entries added (the migration restores them). Your agent maps terms with `map_concept`.
 
 Learned maps live in the FHIR server as ConceptMaps, one per source, so they are in the nightly backup and restore with the database.
 
