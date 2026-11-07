@@ -1,7 +1,10 @@
 // ga-gateway: the one public service behind Tailscale Funnel. OAuth (oidc-provider), owner sign-in and consent, passkey enrollment,
 // MCP over HTTP at /mcp (bearer token), one-time upload pages at /upload/<token>, owner confirmation of chat-app previews at /confirm/<code>, the hospital login return at /callback and the share pages at /s/...
 // Without a public URL it serves only /s/... and /callback.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { MedplumClient } from '@medplum/core';
 import http from 'node:http';
 import { calendarFor, toIcs } from '../calendar.ts';
 import { healthMaintenance } from '../maintenance.ts';
@@ -12,6 +15,7 @@ import { GaError, getClient, loadConfig } from '../config.ts';
 import { findConfirmPage, takeConfirmPage } from '../confirm.ts';
 import type { ToolDeps } from '../mcp.ts';
 import { completeLogin } from '../smart/actions.ts';
+import { patientEndpoints } from '../smart/sync.ts';
 import { smartDir } from '../smart/store.ts';
 import { renderInactive } from '../share/page.ts';
 import { HEADERS, type ShareDeps, TooLarge, clientIp, failLimiter, readBody, send, shareHandler } from '../share/server.ts';
@@ -19,6 +23,9 @@ import { shareDeps } from '../share/cli.ts';
 import { appName, createProvider, disconnectClient, sweepClients } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
+import { ack, pending } from '../notify/outbox.ts';
+import { notifyDir, readSettings, readState, writeState } from '../notify/settings.ts';
+import { tick } from '../notify/tick.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
 import { sweepExpired } from './adapter.ts';
@@ -32,6 +39,8 @@ export type GatewayDeps = {
   share: ShareDeps;
   completeLogin: (search: string) => Promise<unknown>;
   calendar?: (id: string, userAgent?: string) => Promise<string>; // the iCalendar body for a valid calendar link; id: the install's UID part
+  // iMessage bridge exchange; absent means POST /notify/exchange is 404. client: logs each acked send (kind only, never text).
+  notify?: { dir: string; client?: MedplumClient; onIncoming?: (m: { from: string; text: string; at: string }) => Promise<void> };
   verifyPasskey?: (response: AuthenticationResponseJSON, expectedChallenge: string) => Promise<boolean>;
 };
 
@@ -40,6 +49,7 @@ type Res = http.ServerResponse;
 const PORT = 8110;
 const CHALLENGE_MS = 5 * 60_000;
 const BODY_MS = 30_000;
+const NOTIFY_BODY = 64 * 1024;
 const UPLOAD_IDLE_MS = 60_000;
 const MAX_CHALLENGES = 1000;
 const json = (res: Res, status: number, v: unknown, extra: Record<string, string> = {}): void => send(res, status, JSON.stringify(v), 'application/json', extra);
@@ -88,6 +98,46 @@ export function createGateway(deps: GatewayDeps): http.Server {
       return undefined;
     }
   };
+
+  // Incoming messages are handled one at a time, off the HTTP request; a failure lands in state.lastError.
+  let incomingChain: Promise<void> = Promise.resolve();
+  async function notifyExchange(req: Req, res: Res): Promise<void> {
+    const n = deps.notify!;
+    if (req.method !== 'POST') return send(res, 405, 'Method not allowed', 'text/plain; charset=utf-8', { Allow: 'POST' });
+    let token = '';
+    try { token = readFileSync(join(n.dir, 'token'), 'utf8').trim(); } catch {}
+    const given = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1] ?? '';
+    const h = (x: string) => createHash('sha256').update(x).digest();
+    if (!token || !timingSafeEqual(h(token), h(given))) return send(res, 401, 'Unauthorized', 'text/plain; charset=utf-8');
+    let raw = '', size = 0;
+    try {
+      raw = await new Promise<string>((ok, fail) => {
+        const chunks: Buffer[] = [];
+        req.on('data', (c: Buffer) => { size += c.length; if (size > NOTIFY_BODY) { req.removeAllListeners('data'); fail(new TooLarge()); } else chunks.push(c); });
+        req.on('end', () => ok(Buffer.concat(chunks).toString('utf8')));
+        req.on('error', fail);
+      });
+    } catch (e) {
+      if (!(e instanceof TooLarge)) throw e;
+      res.on('finish', () => req.destroy());
+      return json(res, 413, { error: 'too large' }, { Connection: 'close' });
+    }
+    const b = parse(raw);
+    const strs = (v: unknown): string[] => Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    if (!b || typeof b !== 'object') return json(res, 400, { error: 'bad request' });
+    const sent = strs(b.sent);
+    const failures = (Array.isArray(b.failed) ? b.failed : []).filter((f: any) => typeof f?.id === 'string').map((f: any) => ({ id: f.id, error: String(f.error ?? '').slice(0, 200) }));
+    const acked = pending(n.dir).filter((o) => sent.includes(o.id));
+    ack(n.dir, sent, failures, new Date());
+    for (const o of acked) if (n.client) logRemote(n.client, `sent ${o.kind}`, 'iMessage').catch(() => {});
+    for (const m of Array.isArray(b.incoming) ? b.incoming : []) {
+      if (typeof m?.from !== 'string' || typeof m?.text !== 'string') continue;
+      incomingChain = incomingChain.then(() => n.onIncoming?.({ from: m.from, text: m.text, at: String(m.at ?? '') })).catch((e) => {
+        writeState(n.dir, { ...readState(n.dir), lastError: String(e?.message ?? e).slice(0, 200) });
+      });
+    }
+    return json(res, 200, { outgoing: pending(n.dir).map(({ id, text }) => ({ id, text })) });
+  }
 
   async function callback(res: Res, search: string): Promise<void> {
     try {
@@ -270,6 +320,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
     const path = url.pathname;
     if (path.startsWith('/s/')) return share(req, res);
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
+    if (path === '/notify/exchange' && deps.notify) return notifyExchange(req, res);
     if (path === '/callback' || path === '/callback/') return req.method === 'GET' ? callback(res, url.search) : send(res, 404, renderInactive());
     if (!provider) return send(res, 404, renderInactive());
 
@@ -320,8 +371,11 @@ export async function serveGateway(): Promise<void> {
   const cfg = loadConfig();
   const client = await getClient(cfg);
   const publicUrl = process.env.GA_PUBLIC_URL?.replace(/\/+$/, '') || undefined;
+  const nd = notifyDir();
+  const notifyOn = !!readSettings(nd) && !readSettings(nd)!.off;
   const server = createGateway({
     publicUrl,
+    notify: notifyOn ? { dir: nd, client } : undefined,
     dir: gatewayDir(),
     tools: remoteTools(client, cfg, cfg.patientId),
     share: shareDeps(client),
@@ -342,6 +396,19 @@ export async function serveGateway(): Promise<void> {
   };
   sweep();
   setInterval(sweep, 3600_000).unref();
+  if (notifyOn) {
+    let running = false; // a tick never starts while another runs
+    const run = async () => {
+      if (running) return;
+      running = true;
+      try {
+        await tick({ client, patientId: cfg.patientId, dir: nd, now: new Date(), eps: () => patientEndpoints(client, cfg.patientId) });
+      } catch (e) {
+        writeState(nd, { ...readState(nd), lastError: String((e as Error).message ?? e).slice(0, 200) });
+      } finally { running = false; }
+    };
+    setInterval(() => void run().catch(() => {}), 60_000).unref();
+  }
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
   const model = process.env.GA_LLM_MODEL;

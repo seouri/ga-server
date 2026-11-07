@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -29,6 +29,8 @@ let logins: string[];
 let passkeyOk = false;
 const calendarAgents: (string | undefined)[] = [];
 
+let incoming: unknown[] = [];
+let withNotify = true;
 function start(publicUrl: string | null = PUBLIC): Promise<void> {
   server = createGateway({
     publicUrl: publicUrl ?? undefined,
@@ -47,12 +49,13 @@ function start(publicUrl: string | null = PUBLIC): Promise<void> {
       return {};
     },
     verifyPasskey: async () => passkeyOk,
+    notify: withNotify ? { dir: join(dir, 'notify'), onIncoming: async (m) => { incoming.push(m); } } : undefined,
     calendar: async (_id, ua) => { calendarAgents.push(ua); return 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n'; },
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`; ok(); }));
 }
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; passkeyOk = false; });
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ga-gw-')); calls = []; logins = []; incoming = []; withNotify = true; passkeyOk = false; });
 afterEach(async () => { await new Promise((ok) => server?.close(ok)); rmSync(dir, { recursive: true, force: true }); });
 
 // A second provider on the same directory mints tokens the gateway will find.
@@ -350,4 +353,48 @@ test('calendar link: valid token serves the feed, a wrong or revoked one is 404,
   server.close();
   await start(null);
   expect((await fetch(`${base}/cal/${newCalendarToken(dir)}.ics`)).status).toBe(404);
+});
+
+// The iMessage bridge exchange: a bearer token is the only gate on a public route.
+const TOKEN = 'a'.repeat(43);
+const exchange = (body: unknown, token: string | null = TOKEN, method = 'POST') =>
+  fetch(`${base}/notify/exchange`, { method, headers: token ? { Authorization: `Bearer ${token}` } : {}, body: method === 'POST' ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined });
+const empty = { incoming: [], sent: [], failed: [] };
+
+test('notify exchange: no or wrong token is 401 and the outbox is untouched', async () => {
+  const { enqueue, pending } = await import('../src/notify/outbox.ts');
+  const nd = join(dir, 'notify');
+  mkdirSync(nd, { recursive: true }); writeFileSync(join(nd, 'token'), TOKEN);
+  enqueue(nd, { id: 'm1', text: 'hi', kind: 'result', keys: [] });
+  await start();
+  for (const t of [null, 'b'.repeat(43), 'short']) expect((await exchange({ ...empty, sent: ['m1'] }, t)).status).toBe(401);
+  expect(pending(nd)).toHaveLength(1);
+  expect((await exchange(empty, TOKEN, 'GET')).status).toBe(405);
+});
+
+test('notify exchange: right token returns pending, acked ids are gone next call, failures stay', async () => {
+  const { enqueue, pending } = await import('../src/notify/outbox.ts');
+  const nd = join(dir, 'notify');
+  mkdirSync(nd, { recursive: true }); writeFileSync(join(nd, 'token'), TOKEN);
+  enqueue(nd, { id: 'm1', text: 'one', kind: 'result', keys: [] });
+  enqueue(nd, { id: 'm2', text: 'two', kind: 'digest', keys: [] });
+  await start();
+  const r = await exchange({ incoming: [{ from: '+1', text: 'hello', at: 'x' }], sent: [], failed: [] });
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({ outgoing: [{ id: 'm1', text: 'one' }, { id: 'm2', text: 'two' }] });
+  await new Promise((ok) => setTimeout(ok, 20));
+  expect(incoming).toEqual([{ from: '+1', text: 'hello', at: 'x' }]);
+  const r2 = await exchange({ incoming: [], sent: ['m1'], failed: [{ id: 'm2', error: 'down' }] });
+  expect(await r2.json()).toEqual({ outgoing: [{ id: 'm2', text: 'two' }] });
+  expect(pending(nd).map((o) => o.id)).toEqual(['m2']);
+});
+
+test('notify exchange: body over 64 KB is 413, not configured is 404', async () => {
+  mkdirSync(join(dir, 'notify'), { recursive: true }); writeFileSync(join(dir, 'notify', 'token'), TOKEN);
+  await start();
+  expect((await exchange('x'.repeat(65 * 1024))).status).toBe(413);
+  await new Promise((ok) => server.close(ok));
+  withNotify = false;
+  await start();
+  expect((await exchange(empty)).status).toBe(404);
 });
