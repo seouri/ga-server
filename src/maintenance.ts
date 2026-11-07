@@ -110,6 +110,8 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     const base = i.status;
     if (base === 'due' || base === 'overdue') i.status = ds === 'overdue' ? 'overdue' : base;
     else if (base === 'discuss') i.status = ds === 'overdue' || ds === 'due soon' ? ds : 'discuss'; // an Epic "Due" does not settle an eligibility question
+    // An undated Epic Overdue/Due only says Epic has no completion on file; a dated record GA holds that keeps the guideline current wins.
+    else if (!p.due && i.evidence.length && (base === 'done' || base === 'due soon')) i.status = base;
     else i.status = ds ?? base;
     if (i.kind === 'follow-up') i.importance = i.status === 'overdue' ? 'high' : 'medium';
     return [i];
