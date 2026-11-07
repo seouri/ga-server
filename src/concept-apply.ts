@@ -17,7 +17,7 @@ const LEARNS = new Set<SourceInfo['kind']>(['ccda', 'ehi', 'smart']);
 export type Status = 'source' | 'spec' | 'source-map' | 'suggested' | 'unmapped' | 'excluded';
 export type Unmapped = { source: string; type: string; key: string; name: string; unit?: string; count: number }; // key: the term key the map uses; name, unit: as first seen
 
-const field = (type: string) => (type === 'Immunization' ? 'vaccineCode' : type.startsWith('Medication') ? 'medicationCodeableConcept' : 'code');
+export const field = (type: string) => (type === 'Immunization' ? 'vaccineCode' : type.startsWith('Medication') ? 'medicationCodeableConcept' : 'code');
 const cc = (r: Resource) => (r as unknown as Record<string, CodeableConcept | undefined>)[field(r.resourceType)];
 const isGa = (c: Coding) => !!c.extension?.some((e) => e.url === CONCEPT_SRC);
 export const gaCodings = (r: Resource) => cc(r)?.coding?.filter(isGa) ?? [];

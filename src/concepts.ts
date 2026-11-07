@@ -27,8 +27,7 @@ export const codesFor = (name: string): Coding[] => byName.get(name.toLowerCase(
 
 // FHIR Vital Signs profile: the first member of the vital concept is the profile's code.
 const ALIAS: Record<string, string> = { weight: 'body weight', height: 'body height', bmi: 'body mass index', 'body mass index (bmi)': 'body mass index', pulse: 'heart rate', spo2: 'oxygen saturation', temperature: 'body temperature', 'blood pressure': 'blood pressure panel' };
-// `unit` is accepted for callers and unused: the profile fixes one code per vital whatever the unit.
-export const vitalSpecCode = (name: string, _unit?: string): Coding | undefined => {
+export const vitalSpecCode = (name: string): Coding | undefined => {
   const n = name.trim().toLowerCase();
   const c = byName.get(ALIAS[n] ?? n);
   return c?.kind === 'vital' ? codesFor(c.name)[0] : undefined;

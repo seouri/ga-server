@@ -25,7 +25,7 @@ describe('concepts', () => {
   });
   it('has the spec vital-sign codes', () => {
     expect(vitalSpecCode('Body weight')).toMatchObject({ system: LOINC, code: '29463-7' });
-    expect(vitalSpecCode('weight', 'kg')?.code).toBe('29463-7');
+    expect(vitalSpecCode('weight')?.code).toBe('29463-7');
     expect(vitalSpecCode('Oxygen saturation')?.code).toBe('2708-6');
     expect(vitalSpecCode('LDL')).toBeUndefined();
   });
