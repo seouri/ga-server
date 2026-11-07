@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { UploadTooLarge, acceptUpload, cleanUploads, newUpload, unzipSafe, uploadPath } from '../src/gateway/uploads.ts';
 
@@ -22,6 +22,20 @@ test('a token works once and the file lands under uploads/<fileId>/', async () =
   expect(readFileSync(p, 'utf8')).toBe('%PDF-1.4 synthetic');
   await expect(acceptUpload(dir, u.token, 'x.pdf', body('again'))).rejects.toThrow('upload link');
   expect(readdirSync(join(dir, 'uploads'))).toEqual([fileId]);
+});
+
+test('a file still streaming is not visible to an import', async () => {
+  const u = newUpload(dir, PUBLIC);
+  const s = new PassThrough();
+  const done = acceptUpload(dir, u.token, 'r.pdf', s);
+  s.write('%PDF-1.4 ');
+  await new Promise((ok) => setTimeout(ok, 20));
+  expect(existsSync(join(dir, 'uploads', u.fileId))).toBe(true);
+  expect(() => uploadPath(dir, u.fileId)).toThrow('unknown fileId');
+  s.end('synthetic');
+  await done;
+  expect(readFileSync(uploadPath(dir, u.fileId), 'utf8')).toBe('%PDF-1.4 synthetic');
+  expect(readdirSync(join(dir, 'uploads', u.fileId))).toEqual(['r.pdf']);
 });
 
 test('a token is refused after 15 minutes', async () => {

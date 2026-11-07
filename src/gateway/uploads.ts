@@ -1,7 +1,7 @@
 // Uploads from chat apps: one-time upload links (15 minutes, single use) and the stored files under <gateway dir>/uploads/<fileId>/<name>,
 // kept 24 hours. unzipSafe extracts an uploaded export zip, which is untrusted input.
 import { createHash, randomBytes } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { type Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -50,7 +50,8 @@ function takeLink(dir: string, token: string, now: number): string | undefined {
   return l.exp > now ? l.fileId : undefined;
 }
 
-// Streams body to uploads/<fileId>/<safe name>; over max bytes the partial upload is removed.
+// Streams body to uploads/<fileId>/.part, renamed to <safe name> once complete (safeName never starts with a dot), so an import
+// never sees a half-written file; over max bytes or on failure the partial upload is removed.
 export async function storeUpload(dir: string, fileId: string, fileName: string, body: Readable, max = MAX_UPLOAD): Promise<void> {
   const d = join(uploadsDir(dir), fileId);
   mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -62,7 +63,8 @@ export async function storeUpload(dir: string, fileId: string, fileName: string,
     },
   });
   try {
-    await pipeline(body, cap, createWriteStream(join(d, safeName(fileName, 'upload')), { flags: 'wx', mode: 0o600 }));
+    await pipeline(body, cap, createWriteStream(join(d, '.part'), { flags: 'wx', mode: 0o600 }));
+    renameSync(join(d, '.part'), join(d, safeName(fileName, 'upload')));
   } catch (e) {
     rmSync(d, { recursive: true, force: true });
     throw e;
@@ -80,7 +82,7 @@ export async function acceptUpload(dir: string, token: string, fileName: string,
 // fileId comes from the chat app: checked against GA's own format before it touches a path.
 export function uploadPath(dir: string, fileId: string): string {
   const d = join(uploadsDir(dir), fileId);
-  const f = ID.test(fileId) && existsSync(d) ? readdirSync(d, { withFileTypes: true }).find((e) => e.isFile()) : undefined;
+  const f = ID.test(fileId) && existsSync(d) ? readdirSync(d, { withFileTypes: true }).find((e) => e.isFile() && !e.name.startsWith('.')) : undefined;
   if (!f) throw new GaError('unknown fileId: upload the file with upload_link first (uploads are kept 24 hours)');
   return join(d, f.name);
 }
