@@ -22,7 +22,7 @@ export function flagsOf(meta?: { tag?: { code?: string }[] }): string[] | undefi
 }
 
 // The record's concept and member label. suggested: only through a GA-added coding on a record tagged concept-suggested.
-export function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
+function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
   const codings = o.code?.coding ?? [];
   const unsure = o.meta?.tag?.some((t) => t.system === TAG && t.code === 'concept-suggested');
   const sure = conceptOf(unsure ? codings.filter((c) => !c.extension?.some((e) => e.url === CONCEPT_SRC)) : codings);
