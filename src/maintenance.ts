@@ -136,7 +136,7 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
 
 const NOTE = "Guideline items cite their source. The doctor's plan is shown as of its date. Not medical advice: input for a conversation with your clinician.";
 
-export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), months = 6) {
+export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), months?: number) {
   const p = await client.readResource('Patient', patientId) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;

@@ -134,7 +134,7 @@ test('system prompt: skill steps 1-9, no step 0, no Endpoint, patient and untrus
   expect(sys).toContain('vaccinations are listed without a schedule check');
   expect(instructions(true)).toContain('Call `vaccine_gaps`');
   expect(instructions(true)).not.toContain('without a schedule check');
-  expect(instructions(true)).not.toMatch(/health_maintenance|postpone|record_followup/);
+  expect(instructions(true)).not.toMatch(/health_maintenance|postpone|record_followup|whats_new/);
   expect(instructions(true).startsWith('1. ')).toBe(true);
   expect(instructions(true)).not.toMatch(/ga share|^10\. /m);
 });
