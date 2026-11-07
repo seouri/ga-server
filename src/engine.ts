@@ -58,6 +58,8 @@ const isValidationFailure = (e: unknown): e is OperationOutcomeError => {
 };
 
 export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
+// Sticky protection: source-conflict (a newer source differed) or person-edited (GA wrote only bookkeeping onto a person's edit, becoming its author).
+const shielded = (r: Resource) => hasTag(r, 'source-conflict') || hasTag(r, 'person-edited');
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
 const idList = (r: R): Identifier[] => [r.identifier ?? []].flat(); // singular on SINGULAR_ID types
@@ -181,12 +183,12 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource,
   // Unchanged content skips, except that a newer source re-confirms an importer-owned medication, problem or allergy: the currency rule
   // reads its source date, and a stale one would call an item still on the latest list "unconfirmed".
   const lastBy = existing.meta?.author?.reference;
-  const importerOwned = hasTag(existing, 'writer-importer') && !hasTag(existing, 'source-conflict') && !(author && lastBy && lastBy !== author);
+  const importerOwned = hasTag(existing, 'writer-importer') && !shielded(existing) && !(author && lastBy && lastBy !== author);
   // Portal-synced records are confirmed by last-seen instead (advanced separately), so only file imports need the refresh.
   const dated = DATED.has(incoming.resourceType) && !existing.extension?.some((e) => e.url === LAST_SEEN);
   if (subset && canon(body(existing)) === canon(body(incoming))) return id && importerOwned && dated ? 'update' : 'skip';
-  // Only a write that would actually happen is a conflict. The source-conflict tag sticks: tagging it made GA the author.
-  if ((author && lastBy && lastBy !== author) || hasTag(existing, 'source-conflict')) return 'conflict';
+  // Only a write that would actually happen is a conflict. The protection tags stick: writing them made GA the author.
+  if ((author && lastBy && lastBy !== author) || shielded(existing)) return 'conflict';
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
 
@@ -269,10 +271,11 @@ export async function importResources(
     const lastBy = r.meta?.author?.reference;
     return !!(author && lastBy && lastBy !== author);
   };
-  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky source-conflict tag.
-  const protect = (r: Resource): Resource => (byOther(r) && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r);
+  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky person-edited tag
+  // (not source-conflict: nothing differs yet; a later differing source turns it into a conflict through decide()).
+  const protect = (r: Resource): Resource => (byOther(r) && !shielded(r) ? withTag(r, 'person-edited') : r);
   // A person (or the agent) last shaped this record: smart fill-only writes leave it alone (last-seen still advances).
-  const personEdited = (r: Resource): boolean => byOther(r) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
+  const personEdited = (r: Resource): boolean => byOther(r) || shielded(r) || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;

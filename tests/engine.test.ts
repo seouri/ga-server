@@ -64,6 +64,7 @@ test('a record last changed by someone other than GA conflicts; the source-confl
   const newer = stamp(ms('stopped'), src('2024-06-01'), ID);
   expect(decide(by('Practitioner/person'), newer, GA)).toBe('conflict');
   expect(decide(by(GA, 'source-conflict'), newer, GA)).toBe('conflict');
+  expect(decide(by(GA, 'person-edited'), newer, GA)).toBe('conflict');
   expect(decide(by(GA), newer, GA)).toBe('update');
   expect(decide(by('Practitioner/person'), stamp(ms('active'), src('2024-06-01'), ID), GA)).toBe('skip'); // nothing to write
 });
@@ -102,7 +103,7 @@ test('non-validation errors abort the import', async () => {
   }
 });
 
-test('merging a source into a person-edited match keeps it protected with source-conflict', async () => {
+test('merging a source into a person-edited match keeps it protected with person-edited, not source-conflict', async () => {
   const obs = (id?: string) => ({
     resourceType: 'Observation', id, status: 'final', subject: { reference: 'Patient/p' },
     code: { coding: [{ system: 'http://loinc.org', code: '2093-3' }] },
@@ -122,7 +123,9 @@ test('merging a source into a person-edited match keeps it protected with source
     updateResource: async (r: Resource) => (writes.push(r), r),
   } as unknown as MedplumClient;
   expect(await importResources(client, [obs('o1')], src('2024-01-01'), 'p', 'h')).toMatchObject({ merged: 1 });
-  expect(writes.findLast((w) => w.resourceType === 'Observation')?.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+  const tags = writes.findLast((w) => w.resourceType === 'Observation')?.meta?.tag;
+  expect(tags).toContainEqual({ system: 'urn:ga-server:tag', code: 'person-edited' });
+  expect(tags).not.toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
 });
 
 const ehi: SourceInfo = { kind: 'ehi', file: '/x/ehi', date: '2026-11-04', writer: 'importer' };
@@ -220,7 +223,7 @@ test('each created record is stamped with its own arrival time', async () => {
   }
 });
 
-test('a person-edited portal medication still gets its last-seen advanced (body kept, source-conflict tag)', async () => {
+test('a person-edited portal medication still gets its last-seen advanced (body kept; source-conflict only when the source differs)', async () => {
   const SMART = { system: 'urn:ga-server:id:smart:h', value: 'MedicationRequest/1' };
   const EHI_ROW = { system: 'urn:ga-server:id:ehi:o', value: 'ORDER_MED|1' };
   const mr = (status: string, extra: object = {}) => ({
@@ -234,10 +237,10 @@ test('a person-edited portal medication still gets its last-seen advanced (body 
     extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-01T00:00:00Z' }, { url: 'urn:ga-server:ext:last-seen', valueDateTime: '2026-11-01T00:00:00Z' }],
     note: [{ text: 'person note' }],
   }) as Resource;
-  for (const [what, ex, incoming, source, counted] of [
-    ['unchanged', edited(), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-01T00:00:00Z'), { skipped: 1 }],
-    ['changed: conflict', edited(), mr('stopped'), smart('2026-11-02T00:00:00Z'), { conflicts: 1 }],
-    ['fill-only', edited([SMART, EHI_ROW]), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-02T00:00:00Z', true), { skipped: 1 }],
+  for (const [what, ex, incoming, source, counted, tag] of [
+    ['unchanged', edited(), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-01T00:00:00Z'), { skipped: 1 }, 'person-edited'],
+    ['changed: conflict', edited(), mr('stopped'), smart('2026-11-02T00:00:00Z'), { conflicts: 1 }, 'source-conflict'],
+    ['fill-only', edited([SMART, EHI_ROW]), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-02T00:00:00Z', true), { skipped: 1 }, 'person-edited'],
   ] as const) {
     const writes: Resource[] = [];
     const client = {
@@ -253,7 +256,7 @@ test('a person-edited portal medication still gets its last-seen advanced (body 
     expect(w.status, what).toBe('active');
     expect(w.note, what).toEqual([{ text: 'person note' }]);
     expect(w.extension?.find((e) => e.url === 'urn:ga-server:ext:last-seen')?.valueDateTime, what).toBe('2026-11-02T00:00:00Z');
-    expect(w.meta?.tag, what).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+    expect(w.meta?.tag?.filter((t) => ['person-edited', 'source-conflict'].includes(t.code ?? '')), what).toEqual([{ system: 'urn:ga-server:tag', code: tag }]);
   }
 });
 
