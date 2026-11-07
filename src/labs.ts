@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { termKey } from './conceptmap.ts';
-import { type Concept, codesFor, concepts, conceptNamed, conceptOf, LOINC } from './concepts.ts';
+import { type Concept, codesFor, concepts, conceptNamed, conceptOf, isVitalCode, LOINC } from './concepts.ts';
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
 
@@ -190,8 +190,8 @@ export async function labResults(
   const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
   if (name && !key) q.append('code:text', name);
   dateRange(q, 'date', since, until);
-  // An extracted result with some other category (e.g. a vital sign) is not a lab.
-  const isLab = (o: Observation) => !o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory'));
+  // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
+  const isLab = (o: Observation) => (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
   const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
   if (summary || key) {
     // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.

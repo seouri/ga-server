@@ -17,12 +17,12 @@ test('vitalRow: home vs clinic, summary kind, components as value', () => {
     expect(vitalRow(o(text, { meta: apple })).kind).toBe(kind);
 });
 
-test('vitals: readings query vital-signs; daily keeps only Apple summaries and says how to narrow', async () => {
+test('vitals: readings query vital signs and activity readings; daily keeps only Apple summaries and says how to narrow', async () => {
   const seen: URLSearchParams[] = [];
   const entries = [o('Steps, daily total (Apple Health)', { meta: apple }), o('Six-minute walk distance (estimated)', { meta: apple }), o('Sleep, nightly (Apple Health)', { meta: apple })];
   const client = { search: async (_t: string, q: URLSearchParams) => (seen.push(q), { resourceType: 'Bundle', entry: entries.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   await vitals(client, 'p', { name: 'weight', since: '2024-01-01' });
-  expect(seen[0].getAll('category')).toEqual(['vital-signs']);
+  expect(seen[0].get('_filter')).toBe('category eq vital-signs or category eq activity or _tag eq urn:ga-server:tag|extracted-by-llm');
   expect(seen[0].get('_tag')).toBeNull();
   expect(seen[0].getAll('date')).toEqual(['ge2024-01-01']);
   const d = await vitals(client, 'p', { daily: true, limit: 1 });
@@ -33,7 +33,7 @@ test('vitals: readings query vital-signs; daily keeps only Apple summaries and s
   await expect(vitals(client, 'p', { until: '2024-13-01' })).rejects.toThrow(/until must be/);
   // No summary for the name (e.g. weight): the readings come back, labelled.
   const weight = [o('Body weight', { meta: apple })];
-  const c2 = { search: async (_t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: (q.get('category') === 'vital-signs' ? weight : []).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  const c2 = { search: async (_t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: (q.get('category') !== 'activity' ? weight : []).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   expect((await vitals(c2, 'p', { name: 'weight', limit: 1 })).hint).toBeUndefined();
   const many = { search: async () => ({ resourceType: 'Bundle', entry: [weight[0], weight[0]].map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   expect((await vitals(many, 'p', { name: 'weight', limit: 1 })).hint).toBe('more results: narrow the dates or the name');
@@ -51,4 +51,18 @@ test('vitals: a vital concept name ("weight") also finds its member codes; one r
   seen.length = 0;
   await vitals(client, 'p', { name: 'weight', daily: true });
   expect(seen[0].get('code')).toBeNull(); // daily summaries carry no vital concept code
+});
+
+test('vitals readings: Apple activity readings and uncategorised PDF vitals, never summaries or labs', async () => {
+  const cat = (code: string) => ({ category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code }] }] });
+  const entries = [
+    o('Walking steadiness', { meta: apple, ...cat('activity') }),
+    o('Steps, daily total (Apple Health)', { meta: apple, ...cat('activity') }),
+    o('Weight', { valueQuantity: { value: 70, unit: 'kg' } }), // an older PDF extraction, no category
+    o('Glucose', { valueQuantity: { value: 90, unit: 'mg/dL' } }),
+    o('LDL', cat('laboratory')),
+    o('Body weight', cat('vital-signs')),
+  ];
+  const client = { search: async () => ({ resourceType: 'Bundle', entry: entries.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await vitals(client, 'p', {})).rows.map((r) => r.name).sort()).toEqual(['Body weight', 'Walking steadiness', 'Weight']);
 });
