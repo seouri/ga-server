@@ -73,6 +73,7 @@ test('a record last changed by someone other than GA conflicts; the source-confl
 const fake = (where: 'search' | 'create', err: Error) =>
   ({
     getProfile: () => undefined,
+    searchResourcePages: async function* () {},
     readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
     updateResource: async (r: Resource) => r,
     searchOne: async () => {
@@ -117,6 +118,7 @@ test('merging a source into a person-edited match keeps it protected with person
   const writes: Resource[] = [];
   const client = {
     getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
+    searchResourcePages: async function* () {},
     readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
     searchOne: async () => undefined,
     searchResources: async () => [edited],
@@ -245,6 +247,7 @@ test('a person-edited portal medication still gets its last-seen advanced (body 
     const writes: Resource[] = [];
     const client = {
       getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
+      searchResourcePages: async function* () {},
       readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
       searchOne: async () => ex,
       searchResources: async () => [],
@@ -270,6 +273,7 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
     const queries: string[] = [];
     const client = {
       getProfile: () => undefined,
+      searchResourcePages: async function* () {},
       readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
       searchOne: async () => undefined,
       searchResources: async (type: string, q: URLSearchParams) => (type === 'Observation' ? (queries.push(String(q)), [stored]) : []),

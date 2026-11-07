@@ -4,7 +4,7 @@ import type { MedicationStatement, Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
-import type { SourceInfo } from '../../src/identity.ts';
+import { NEWEST_IMPORT, type SourceInfo } from '../../src/identity.ts';
 import { newestEpicImport } from '../../src/share/scope.ts';
 import { arrivedSince, statusItems } from '../../src/whats-new.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
@@ -67,4 +67,21 @@ test('a C-CDA import stores the newest Epic import date, and an older one does n
   await importResources(client, [obs(randomUUID(), '2024-01-01')], ccda('2024-05-01'), pid, 'h1');
   await importResources(client, [obs(randomUUID(), '2024-01-02')], ccda('2023-05-01'), pid, 'h2');
   expect(await newestEpicImport(client, pid)).toBe(Date.parse('2024-05-01'));
+});
+
+test('with no stored date, an older C-CDA import stores the newest Epic date already in the record', async () => {
+  const p2 = await createTestPatient(client);
+  try {
+    await client.createResource<Observation>({
+      ...obs(randomUUID()), id: undefined, subject: { reference: `Patient/${p2}` },
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] },
+      extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2025-03-01T00:00:00Z' }],
+    });
+    const ccda: SourceInfo = { kind: 'ccda', file: '/synthetic-clinic/synthetic.xml', date: '2024-05-01', writer: 'importer' };
+    await importResources(client, [{ ...obs(randomUUID()), subject: { reference: `Patient/${p2}` } }], ccda, p2, 'h3');
+    const stored = (await client.readResource('Patient', p2, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime;
+    expect(stored).toBe('2025-03-01T00:00:00.000Z');
+  } finally {
+    await cleanupTestPatient(client, p2);
+  }
 });
