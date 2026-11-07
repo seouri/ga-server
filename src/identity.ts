@@ -41,6 +41,16 @@ export function contentKey(o: Observation): string | undefined {
   return code && day ? `${code}|${day}` : undefined;
 }
 
+// Same calendar day, read in a's own offset: 2024-03-01T19:30-05:00 and 2024-03-02T00:30Z are one day. A side without a time
+// or offset compares as written.
+export function sameDay(a: string, b: string): boolean {
+  const off = /(Z|([+-])(\d\d):(\d\d))$/.exec(a);
+  const t = Date.parse(b);
+  if (a.length <= 10 || b.length <= 10 || !off || Number.isNaN(t)) return a.slice(0, 10) === b.slice(0, 10);
+  const mins = off[1] === 'Z' ? 0 : (off[2] === '-' ? -1 : 1) * (Number(off[3]) * 60 + Number(off[4]));
+  return new Date(t + mins * 60_000).toISOString().slice(0, 10) === a.slice(0, 10);
+}
+
 const sorted = (_k: string, v: unknown) =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
 

@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -381,14 +381,16 @@ export async function importResources(
     const linked = link.hit;
     const existing = byStable ?? linked;
     const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
-    // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time on that (UTC) day.
+    // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time. One day wider each side, as UTC
+    // and the record's own offset can disagree on the day; sameDay then keeps those on the incoming record's day.
     const day = key?.split('|')[2];
-    const next = day && new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10);
+    const shift = (n: number) => day && new Date(Date.parse(day) + n * 86_400_000).toISOString().slice(0, 10);
+    const when = effective(incoming as Observation) ?? '';
     const contentMatches = key
       ? await client.searchResources(
           'Observation',
-          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
-        ).then((ms) => ms.filter((m) => stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
+          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${shift(-1)}`], ['date', `lt${shift(2)}`]]),
+        ).then((ms) => ms.filter((m) => sameDay(when, effective(m) ?? '') && stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
     // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
     // Not a person's record, and never by a map other than its own: a record another GA source already coded keeps that coding,
@@ -461,7 +463,8 @@ export async function importResources(
         }
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
-        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
+        const at = (o: Observation) => Date.parse(effective(o) ?? '');
+        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && at(m) === at(incoming as Observation)) as R | undefined; // NaN never equals
         if (same) {
           target = same;
           const filled = fillFrom(same, coded, source);
