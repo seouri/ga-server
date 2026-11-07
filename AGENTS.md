@@ -93,7 +93,7 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 ## Sharing
 
 - `ga share` / `ga shares` / `ga revoke` / `ga share log` / `ga share export` are CLI only; the stdio MCP has no share tool (remote chat sessions do: see "Remote chat apps"). The `/ga` skill (step 10) builds the command and runs it only after the user confirms.
-- Never shared: `Endpoint`, `Provenance`, `AuditEvent`, the EHI and Apple Health archive DocumentReferences, imported source files (DocumentReferences identified `urn:ga-server:id:file`: original PDFs, C-CDA, EHI files; their extracted records are shared), billing and contact records, anything outside the share's patient compartment. The Patient goes out trimmed to name, birth date and gender.
+- Never shared: `Endpoint`, `Provenance`, `AuditEvent`, the EHI and Apple Health archive DocumentReferences, imported source files (DocumentReferences identified `urn:ga-server:id:file`: original PDFs, C-CDA, EHI files; their extracted records are shared), the C-CDA `Composition` (its narrative includes insurance), billing and contact records, anything outside the share's patient compartment. The Patient goes out trimmed to name, birth date and gender.
 - The access log is local `AuditEvent`s tagged `urn:ga-server:share|<share id>` (views, downloads, questions); `ga share log` reads it. Share settings: `.ga/share/shares.json`.
 - The `ga-gateway` compose service runs `ga gateway serve` on `127.0.0.1:8110` (share pages, `/callback` and, with `GA_PUBLIC_URL`, chat-app access); Tailscale Funnel exposes it. Never run `tailscale funnel` for the user.
 

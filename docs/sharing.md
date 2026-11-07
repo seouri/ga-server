@@ -11,7 +11,7 @@ Back to the [README](../README.md).
 | `doctor` (default) | labs, medications, problems, allergies, immunizations, vitals | 7 days | A (one page) | 20 |
 | `family` | all | never | B (tabs) | 20 |
 
-Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log, the full EHI and Apple Health archives, and imported source files (the original PDFs, C-CDA and EHI files) are never shared; only the records extracted from them are.
+Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log, the full EHI and Apple Health archives, imported source files (the original PDFs, C-CDA and EHI files) and the C-CDA document narrative (Composition, which includes insurance) are never shared; only the records extracted from them are.
 
 ```sh
 ga share --for doctor --label "Dr. Kim"                 # link + QR code, scope and expiry

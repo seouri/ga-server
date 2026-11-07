@@ -28,7 +28,6 @@ test.each<[Resource, Group | undefined]>([
   [r({ resourceType: 'Immunization' }), 'immunizations'],
   [r({ resourceType: 'Encounter' }), 'visits'],
   [r({ resourceType: 'DocumentReference' }), 'notes'],
-  [r({ resourceType: 'Composition' }), undefined], // C-CDA narrative holds every section: `all` shares only
   [r({ resourceType: 'Procedure' }), 'procedures'],
   [r({ resourceType: 'FamilyMemberHistory' }), 'family'],
   [r({ resourceType: 'Communication' }), 'messages'],
@@ -68,6 +67,7 @@ test.each([
   r({ resourceType: 'CoverageEligibilityRequest' }),
   r({ resourceType: 'CoverageEligibilityResponse' }),
   r({ resourceType: 'EnrollmentRequest' }),
+  r({ resourceType: 'Composition', section: [{ title: 'Insurance Providers', text: { status: 'generated', div: '<div>member ID</div>' } }] }), // C-CDA narrative incl. payers
   archive('urn:ga-server:id:ehi-archive'),
   archive('urn:ga-server:id:apple-health-archive'),
   archive('urn:ga-server:id:file'),
@@ -148,7 +148,7 @@ test("selectScoped drops records not in the share patient's compartment", () => 
 });
 
 test('never-shared types are not even fetched', () => {
-  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest', 'Binary', 'Medication']) {
+  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest', 'Composition', 'Binary', 'Medication']) {
     expect(COMPARTMENT_TYPES).not.toContain(t);
   }
   for (const t of ['Observation', 'MedicationStatement', 'DocumentReference', 'Communication', 'Condition']) expect(COMPARTMENT_TYPES).toContain(t);

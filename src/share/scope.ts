@@ -11,9 +11,11 @@ import type { Group, Share } from './store.ts';
 export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[]; newestImport?: number };
 
 // Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
+// Composition: the C-CDA narrative, every section including insurance (payer name, member ID).
 const NEVER = new Set([
   'Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person',
   'Basic', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
+  'Composition',
 ]);
 // FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
 export const PATIENT_COMPARTMENT = [
