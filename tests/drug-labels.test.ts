@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -60,9 +60,17 @@ test('combination products are skipped: single-substance label preferred, RxNav 
   const a = mk(() => json({ results: [sub('combo', '20260101', ['A', 'B']), sub('single', '20240101', ['A'])] }));
   const r = await drugLabel('6809', a);
   expect(r.status === 'ok' && r.setId).toBe('single');
+  const only = mk(() => json({ results: [sub('combo', '20260101', ['A', 'B'])] }));
+  expect((await drugLabel('6809', only)).status).toBe('no label');
   const b = mk((u) => u.includes('rxnav') ? json({ relatedGroup: { conceptGroup: [{ conceptProperties: [{ rxcui: '111', name: 'a 5 MG Oral Tablet' }, { rxcui: '222', name: 'a / b Oral Tablet' }] }] } })
     : u.includes('rxcui:%22') || u.includes('"6809"') ? json({}, 404) : json({ results: [label('s', '20240101', ['i'])] }));
   expect((await drugLabel('6809', b)).status).toBe('ok');
   expect(b.urls.at(-1)).toContain('"111"');
   expect(b.urls.at(-1)).not.toContain('222');
+});
+
+test('a cache file from the old format is refetched', async () => {
+  const t = mk(() => json({ results: [label('s', '20240101', ['i'])] }));
+  writeFileSync(join(t.dir, '1.json'), JSON.stringify({ fetchedAt: Date.now(), result: { status: 'ok', setId: 'combo' } }));
+  expect((await drugLabel('1', t) as { setId: string }).setId).toBe('s');
 });

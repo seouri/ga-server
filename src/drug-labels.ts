@@ -9,6 +9,7 @@ export type LabelSections =
   | { status: 'ok'; rxcui: string; setId: string; effective: string; title?: string; sections: Partial<Record<(typeof SECTIONS)[number], string>> }
   | { status: 'no label' | 'unavailable' | 'no code'; rxcui?: string };
 
+const CACHE_V = 2; // 1 allowed combination-product labels
 const TTL = 30 * 86_400_000;
 const MAX = 4000;
 type Label = Record<string, unknown> & { set_id?: string; effective_time?: string; openfda?: { generic_name?: string[]; substance_name?: string[] } };
@@ -31,10 +32,8 @@ async function related(f: typeof fetch, rxcui: string): Promise<string[]> {
 }
 
 function pick(rxcui: string, labels: Label[]): LabelSections {
-  const withSections = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s])));
-  // A combination product's label can carry the ingredient's code too: prefer single-substance labels.
-  const single = withSections.filter((l) => l.openfda?.substance_name?.length === 1);
-  const best = (single.length ? single : withSections).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
+  // Never a label for another drug: a combination product's label can carry the ingredient's code too.
+  const best = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s])) && (l.openfda?.substance_name?.length ?? 0) <= 1).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
   if (!best?.set_id || !best.effective_time) return { status: 'no label', rxcui };
   const sections: Partial<Record<(typeof SECTIONS)[number], string>> = {};
   for (const s of SECTIONS) {
@@ -53,8 +52,8 @@ export async function drugLabel(rxcui: string, opts: { fetch?: typeof fetch; dir
   const file = join(opts.dir ?? join(dirname(defaultConfigPath()), 'labels'), `${rxcui}.json`);
   try {
     if (existsSync(file)) {
-      const c = JSON.parse(readFileSync(file, 'utf8')) as { fetchedAt: number; result: LabelSections };
-      if (now - c.fetchedAt < TTL) return c.result;
+      const c = JSON.parse(readFileSync(file, 'utf8')) as { v?: number; fetchedAt: number; result: LabelSections };
+      if (c.v === CACHE_V && now - c.fetchedAt < TTL) return c.result;
     }
   } catch { /* corrupt cache: refetch */ }
   let result: LabelSections;
@@ -68,6 +67,6 @@ export async function drugLabel(rxcui: string, opts: { fetch?: typeof fetch; dir
   } catch {
     return { status: 'unavailable', rxcui }; // never cached
   }
-  try { writeAtomic(file, JSON.stringify({ fetchedAt: now, result })); } catch { /* cache is best effort */ }
+  try { writeAtomic(file, JSON.stringify({ v: CACHE_V, fetchedAt: now, result })); } catch { /* cache is best effort */ }
   return result;
 }
