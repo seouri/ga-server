@@ -31,12 +31,15 @@ const entry = (key: string, code: string, extra: Partial<MapEntry> = {}): MapEnt
 test('upsertEntry then lookup round-trips; a second upsert replaces; the serum entry is not returned for the urine key', async () => {
   await upsertEntry(client, source, entry('glucose|mg/dl|serum', '2345-7'));
   await upsertEntry(client, source, entry('glucose|mg/dl|urine', '2350-7', { by: 'source', confident: false, equivalence: 'wider' }));
+  for (const equivalence of ['narrower', 'inexact'] as const) await upsertEntry(client, source, entry(`bun|${equivalence}`, '1234-5', { equivalence })); // cmd-1: Medplum rejects these without a comment
   await upsertEntry(client, source, { key: 'weird term|x', equivalence: 'unmatched', confident: true, by: 'agent' });
 
   let maps = await loadMaps(client);
   expect(lookup(maps, source, 'glucose|mg/dl|serum')).toEqual(entry('glucose|mg/dl|serum', '2345-7'));
   expect(lookup(maps, source, 'glucose|mg/dl|urine')).toEqual(entry('glucose|mg/dl|urine', '2350-7', { by: 'source', confident: false, equivalence: 'wider' }));
   expect(lookup(maps, source, 'weird term|x')).toEqual({ key: 'weird term|x', equivalence: 'unmatched', confident: true, by: 'agent' });
+  expect(lookup(maps, source, 'bun|inexact')?.equivalence).toBe('inexact');
+  expect(lookup(maps, source, 'bun|narrower')?.equivalence).toBe('narrower');
   expect(lookup(maps, source, 'glucose|mg/dl')).toBeUndefined();
   expect(lookup(maps, 'other-source', 'glucose|mg/dl|serum')).toBeUndefined();
 

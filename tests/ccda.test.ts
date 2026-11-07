@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import type { Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
-import { ccdaDate, ccdaFiles, repair } from '../src/ccda.ts';
+import { ccdaDate, ccdaFiles, custodian, repair } from '../src/ccda.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -110,4 +110,11 @@ test('repair names medications from the narrative and labels problem-list vs vis
   const [pl, dx] = out.slice(2) as Condition[];
   expect(pl.category?.[0].coding?.[0].code).toBe('problem-list-item');
   expect(dx.category?.[0].coding?.[0].code).toBe('encounter-diagnosis');
+});
+
+test('custodian: own element only, namespace prefix and entities handled, never a later patient name', () => {
+  const doc = (custodianXml: string) => `<ClinicalDocument>${custodianXml}<recordTarget><patientRole><patient><name><given>Pat</given></name></patient></patientRole></recordTarget></ClinicalDocument>`;
+  expect(custodian(doc('<custodian><assignedCustodian><representedCustodianOrganization><id root="1"/></representedCustodianOrganization></assignedCustodian></custodian>'))).toBeUndefined();
+  expect(custodian(doc('<custodian><assignedCustodian><representedCustodianOrganization/></assignedCustodian></custodian>'))).toBeUndefined();
+  expect(custodian(doc('<x:custodian><x:representedCustodianOrganization><x:name> A &amp; B &#233;</x:name></x:representedCustodianOrganization></x:custodian>'))).toBe('A & B \u00e9');
 });

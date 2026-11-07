@@ -169,9 +169,15 @@ export function repair(rs: Resource[], xml: string): Resource[] {
     });
 }
 
+// Custodian organisation name, matched only inside its own element so a nameless custodian can never pick up a later (patient) <name>.
+const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+export const custodian = (xml: string): string | undefined => {
+  const body = /<(?:\w+:)?representedCustodianOrganization\b[^>]*>([\s\S]*?)<\/(?:\w+:)?representedCustodianOrganization>/.exec(xml)?.[1];
+  const name = body && /<(?:\w+:)?name\b[^>]*>([^<]*)<\/(?:\w+:)?name>/.exec(body)?.[1];
+  return name?.replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (m, d, h, n) => (d ? String.fromCodePoint(+d) : h ? String.fromCodePoint(parseInt(h, 16)) : (ENTITY[n] ?? m))).trim() || undefined;
+};
+
 // The header effectiveTime precedes any body effectiveTime in CDA, so the first match is the document's.
-export const custodian = (xml: string): string | undefined =>
-  /<representedCustodianOrganization[^>]*>[\s\S]*?<name[^>]*>([^<]+)<\/name>/.exec(xml)?.[1]?.trim() || undefined;
 
 export function ccdaDate(xml: string): string {
   const m = xml.match(/<effectiveTime\s[^>]*?value="(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?(?:\.\d+)?)?([+-]\d{4})?"/);

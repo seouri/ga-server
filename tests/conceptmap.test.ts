@@ -49,6 +49,7 @@ test('sourceKey per kind', () => {
   expect(sourceKey(src('ehi'), ehi)).toBe('ehi:acme');
   const smart = { ...lab('a', 'b'), identifier: [{ system: 'urn:ga-server:id:smart:hosp1', value: 'Observation/1' }] };
   expect(sourceKey(src('smart'), smart)).toBe('smart:hosp1');
+  expect(() => sourceKey(src('ehi'), lab('a', 'b'))).toThrow();
   expect(sourceKey(src('ccda', { org: 'Synthetic Clinic' }), lab('a', 'b'))).toBe('ccda:synthetic clinic');
   expect(sourceKey(src('ccda', { file: '/in/Acme Export/doc1.xml' }), lab('a', 'b'))).toBe('ccda:acme export');
 });
