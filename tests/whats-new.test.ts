@@ -5,7 +5,7 @@ import type { Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import type { Item } from '../src/maintenance.ts';
 import { expect, test } from 'vitest';
-import { clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, statusItems, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
+import { arrivedSince, clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, statusItems, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
 
 const TAG = 'urn:ga-server:tag';
 const tag = (code: string) => ({ tag: [{ system: TAG, code }] });
@@ -291,4 +291,13 @@ test('whatsNew: label lookups run at most 3 at a time', async () => {
   const slow = (async (...a: Parameters<typeof fetch>) => { max = Math.max(max, ++now); await new Promise((r) => setTimeout(r, 10)); now--; return fetch(...a); }) as typeof fetch;
   await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch: slow, dir });
   expect(max).toBe(3);
+});
+
+test('arrivedSince reads Apple Health Observations as a subset of fields, all others whole', async () => {
+  const qs: Record<string, string>[] = [];
+  const client = { searchResourcePages: async function* (type: string, q: Record<string, string>) { if (type === 'Observation') qs.push(q); yield []; } } as unknown as MedplumClient;
+  await arrivedSince(client, 'p', '2026-01-01');
+  expect(qs).toHaveLength(2);
+  expect(qs.find((q) => q._elements)?._tag).toBe(`${TAG}|src-apple-health`);
+  expect(qs.find((q) => !q._elements)?.['_tag:not']).toBe(`${TAG}|src-apple-health`);
 });

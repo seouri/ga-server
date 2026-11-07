@@ -13,6 +13,8 @@ export type SourceInfo = {
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
   seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
 };
+// On the Patient: the newest source date of any C-CDA or EHI import, so list reads need not scan every Epic record (src/share/scope.ts newestEpicImport).
+export const NEWEST_IMPORT = 'urn:ga-server:ext:newest-epic-import';
 export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
 // Medications, problems and allergies: the records the currency rule (src/current.ts) dates, and the only ones that carry LAST_SEEN.
 export const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);

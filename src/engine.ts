@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, NEWEST_IMPORT, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
@@ -516,6 +516,12 @@ export async function importResources(
       t.flagged += report.possibleDuplicates - before.possibleDuplicates + report.conflicts - before.conflicts;
       t.seen += (report.seen ?? 0) - (before.seen ?? 0);
     }
+  }
+  if (source.kind === 'ccda' || source.kind === 'ehi') {
+    const newest = Math.max(...ordered.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
+    const p = await client.readResource('Patient', patientId);
+    const stored = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+    if (newest > (stored || -Infinity)) await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(newest).toISOString() }] });
   }
   return report;
 }

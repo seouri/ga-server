@@ -122,7 +122,7 @@ test('merging a source into a person-edited match keeps it protected with source
     updateResource: async (r: Resource) => (writes.push(r), r),
   } as unknown as MedplumClient;
   expect(await importResources(client, [obs('o1')], src('2024-01-01'), 'p', 'h')).toMatchObject({ merged: 1 });
-  expect(writes.at(-1)?.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
+  expect(writes.findLast((w) => w.resourceType === 'Observation')?.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
 });
 
 const ehi: SourceInfo = { kind: 'ehi', file: '/x/ehi', date: '2026-11-04', writer: 'importer' };

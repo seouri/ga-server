@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Patient, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
-import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
+import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, newestEpicImport, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Group, Share } from '../src/share/store.ts';
 
@@ -212,4 +212,16 @@ test('loadScoped fetches no Apple data for a share without the apple group', asy
   };
   for (const q of await queries(['labs', 'vitals'])) expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health');
   for (const g of ['all', ['labs', 'apple']] as Share['groups'][]) for (const q of await queries(g)) expect(q['_tag:not']).toBeUndefined();
+});
+
+test('newestEpicImport reads the date stored on the Patient and scans nothing; without it, it scans', async () => {
+  let scans = 0;
+  const client = (extension?: object[]) => ({
+    readResource: async () => ({ resourceType: 'Patient', id: 'p', extension }),
+    searchResourcePages: async function* () { scans++; yield []; },
+  }) as unknown as MedplumClient;
+  expect(await newestEpicImport(client([{ url: 'urn:ga-server:ext:newest-epic-import', valueDateTime: '2025-01-01T00:00:00.000Z' }]), 'p')).toBe(Date.parse('2025-01-01T00:00:00Z'));
+  expect(scans).toBe(0);
+  expect(await newestEpicImport(client(), 'p')).toBe(-Infinity);
+  expect(scans).toBeGreaterThan(0);
 });

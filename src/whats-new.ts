@@ -70,11 +70,17 @@ const TYPES: [Resource['resourceType'], 'subject' | 'patient'][] = [
 ];
 
 // Records without the arrival extension predate tracking and are never returned.
+// Apple Health readings are most records and only counted (tally reads these fields), so they come back as a subset.
+const APPLE_FIELDS = 'meta,extension,identifier,effectiveDateTime,effectivePeriod,issued';
 export async function arrivedSince(client: MedplumClient, patientId: string, since: string): Promise<Resource[]> {
   const out: Resource[] = [];
+  const apple = `${TAG}|src-apple-health`;
   for (const [type, param] of TYPES) {
-    const q = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' };
-    for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
+    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' };
+    const qs = type === 'Observation' ? [{ ...base, '_tag:not': apple }, { ...base, _tag: apple, _elements: APPLE_FIELDS }] : [base];
+    for (const q of qs) {
+      for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
+    }
   }
   return out;
 }

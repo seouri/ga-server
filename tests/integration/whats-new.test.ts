@@ -5,6 +5,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
 import type { SourceInfo } from '../../src/identity.ts';
+import { newestEpicImport } from '../../src/share/scope.ts';
 import { arrivedSince, statusItems } from '../../src/whats-new.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
@@ -60,3 +61,10 @@ test('statusItems finds the pre-since version past many later no-op versions', a
   await client.updateResource({ ...ms, status: 'stopped' });
   expect((await statusItems(client, pid, since)).filter((i) => i.id === ms.id).map((i) => i.detail)).toEqual([{ from: 'active', to: 'stopped' }]);
 }, 60_000);
+
+test('a C-CDA import stores the newest Epic import date, and an older one does not lower it', async () => {
+  const ccda = (date: string): SourceInfo => ({ kind: 'ccda', file: '/synthetic-clinic/synthetic.xml', date, writer: 'importer' });
+  await importResources(client, [obs(randomUUID(), '2024-01-01')], ccda('2024-05-01'), pid, 'h1');
+  await importResources(client, [obs(randomUUID(), '2024-01-02')], ccda('2023-05-01'), pid, 'h2');
+  expect(await newestEpicImport(client, pid)).toBe(Date.parse('2024-05-01'));
+});

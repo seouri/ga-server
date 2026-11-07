@@ -3,7 +3,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
 import { hasTag } from '../engine.ts';
-import { TAG } from '../identity.ts';
+import { NEWEST_IMPORT, TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
@@ -137,8 +137,10 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
 }
 
 // Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
-// the same types, only Epic-tagged records, only the fields currencyContext reads.
+// the date importResources stored on the Patient, else (installs that predate it) a scan of the Epic-tagged records, only the fields currencyContext reads.
 export async function newestEpicImport(client: MedplumClient, patientId: string): Promise<number> {
+  const stored = Date.parse((await client.readResource('Patient', patientId, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+  if (!Number.isNaN(stored)) return stored;
   let newest = -Infinity;
   const _tag = [...EPIC_TAGS].map((c) => `${TAG}|${c}`).join(',');
   for (const type of COMPARTMENT_TYPES) {
