@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Endpoint, Medication, Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { buildMcpServer } from '../../src/mcp.ts';
 
 const PDF = join(import.meta.dirname, '..', 'fixtures', 'labs-synthetic.pdf');
 const CLI = join(import.meta.dirname, '..', '..', 'src', 'cli.ts');
@@ -208,12 +210,18 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
     const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
     const o = (text: string, date: string, extra: Partial<Observation> = {}): Observation =>
       ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 5.6, unit: '%' }, ...extra });
+    const gaLoinc = (code: string) => ({ system: 'http://loinc.org', code, extension: [{ url: 'urn:ga-server:ext:concept-source', valueCode: 'agent' }] });
     const fixed = [
-      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory') }),
-      o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: tag('possible-duplicate') }),
+      // One C-CDA source: the uncoded A1c joins its coded twin (twins join within a source only).
+      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] }, meta: { ...tag('src-ccda'), source: '/x/hs.xml' } }),
+      o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: { ...tag('src-ccda', 'possible-duplicate'), source: '/x/hs.xml' } }),
       o('Glucose', '2024-03-01', { meta: tag('extracted-by-llm') }),
       o('Hemoglobin A1c (Apple)', '2024-04-01', { category: cat('laboratory'), meta: tag('src-apple-health') }),
       o('Body weight a1c', '2024-05-01', { category: cat('vital-signs'), meta: tag('extracted-by-llm') }),
+      // Concepts: a hospital-coded LDL and a PDF LDL under another name with a GA-added code are one test; a suggested-only one is flagged apart.
+      o('LOW DENSITY LIPOPROTEIN CHOL', '2021-01-01', { category: cat('laboratory'), code: { text: 'LOW DENSITY LIPOPROTEIN CHOL', coding: [{ system: 'http://loinc.org', code: '13457-7' }] } }),
+      o('LDL cholesterol', '2021-02-01', { code: { text: 'LDL cholesterol', coding: [gaLoinc('13457-7')] }, meta: tag('extracted-by-llm', 'src-pdf') }),
+      o('LDL chol (est)', '2021-03-01', { code: { text: 'LDL chol (est)', coding: [gaLoinc('13457-7')] }, meta: tag('extracted-by-llm', 'src-pdf', 'concept-suggested') }),
     ];
     // A panel on one day, more than one 100-row page: ties must neither repeat nor go missing across pages.
     const panel = Array.from({ length: 110 }, (_, n) => o(`Panel item ${n}`, '2022-01-01', { category: cat('laboratory') }));
@@ -223,9 +231,9 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
     const labs = async (args: Record<string, unknown>) => JSON.parse(((await sub.callTool({ name: 'lab_results', arguments: args })).content as { text: string }[])[0].text);
     try {
       const all = await labs({ limit: 1000 });
-      expect(all.total).toBe(113);
+      expect(all.total).toBe(116);
       expect(all.truncated).toBeUndefined();
-      expect(new Set(all.rows.map((r: { id: string }) => r.id)).size).toBe(113);
+      expect(new Set(all.rows.map((r: { id: string }) => r.id)).size).toBe(116);
       expect(all.rows.slice(0, 3).map((r: { name: string }) => r.name)).toEqual(['HEMOGLOBIN A1C', 'Glucose', 'Hemoglobin A1c']);
       expect(all.rows.some((r: { name: string }) => /Apple|weight/.test(r.name))).toBe(false);
       expect(all.rows[0]).toMatchObject({ date: '2024-12-31', value: '5.6 %', flags: ['possible-duplicate'] });
@@ -235,8 +243,17 @@ test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vit
       expect((await labs({ until: '2024-02-29', name: 'a1c' })).rows.map((r: { date: string }) => r.date)).toEqual(['2023-06-01']);
       expect(await labs({ limit: 2 })).toMatchObject({ total: 2, truncated: true });
       // summary: one entry per test over every page (cursor paging), case-insensitive names grouped.
-      expect((await labs({ summary: true, limit: 1000 })).total).toBe(112);
-      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', flags: ['possible-duplicate'] }]);
+      expect((await labs({ summary: true, limit: 1000 })).total).toBe(114);
+      const ldl = await labs({ summary: true, name: 'ldl' });
+      expect(ldl.rows.map((r: { test?: string; name: string; count: number; flags?: string[] }) => [r.test, r.name, r.count, r.flags])).toEqual([
+        [undefined, 'LDL chol (est)', 1, ['read from a document by AI', 'possibly LDL (suggested mapping)']],
+        ['LDL', 'LDL cholesterol', 2, ['read from a document by AI']],
+      ]);
+      expect(ldl.rows[1]).toMatchObject({ latest: { method: 'calculated' }, previous: { date: '2021-01-01', method: 'calculated' } });
+      const rows = (await labs({ name: 'LDL cholesterol' })).rows; // a synonym resolves to the concept
+      expect(rows.map((r: { name: string }) => r.name)).toEqual(['LDL chol (est)', 'LDL cholesterol', 'LOW DENSITY LIPOPROTEIN CHOL']);
+      expect(rows[0].flags).toContain('possibly LDL (suggested mapping)');
+      expect((await labs({ summary: true, name: 'a1c' })).rows).toEqual([{ test: 'A1c', name: 'HEMOGLOBIN A1C', loinc: '4548-4', unit: '%', latest: { date: '2024-12-31', value: 5.6 }, previous: { date: '2023-06-01', value: 5.6 }, change: 0, count: 2, outOfRange: 0, first: '2023-06-01', source: 'hs.xml', flags: ['possible-duplicate'] }]);
       const bad = await sub.callTool({ name: 'lab_results', arguments: { since: '2024' } });
       expect(bad.isError).toBe(true);
     } finally {
@@ -323,7 +340,7 @@ describe('purpose-built read tools', () => {
       o('Body weight', '2025-03-01', { category: cat('vital-signs') }),
       o('Body weight', '2025-03-01T20:00:00Z', { category: cat('vital-signs'), meta: apple }),
       o('Steps, daily total (Apple Health)', '2025-03-01', { category: cat('activity'), meta: apple }),
-      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory') }),
+      o('Hemoglobin A1c', '2025-03-01', { category: cat('laboratory'), code: { text: 'Hemoglobin A1c', coding: [{ system: 'http://loinc.org', code: '4548-4' }] } }),
     ].map((resource) => ({ resource, request: { method: 'POST', url: 'Observation' } }));
     await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
     const v = await tool('vitals');
@@ -384,6 +401,8 @@ describe('purpose-built read tools', () => {
       { resourceType: 'Observation', status: 'final', subject, code: { coding: [{ system: 'http://loinc.org', code: '13457-7' }], text: 'LDL' }, effectiveDateTime: '2025-05-01', valueQuantity: { value: 111, unit: 'mg/dL' }, meta: tag('extracted-by-llm', 'src-pdf') },
       { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Systolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(120), meta: tag('src-ehi') },
       { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Diastolic blood pressure' }, effectiveDateTime: '2025-04-02', valueQuantity: mmHg(80) },
+      // found by its concept code, not its name
+      { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Wt', coding: [{ system: 'http://loinc.org', code: '29463-7' }] }, effectiveDateTime: '2025-04-03', valueQuantity: { value: 71, unit: 'kg' } },
       { resourceType: 'Observation', status: 'final', subject, category: vs, code: { text: 'Blood pressure panel' }, effectiveDateTime: '2025-04-01', meta: tag('src-apple-health'),
         component: [{ code: { text: 'Systolic' }, valueQuantity: mmHg(118) }, { code: { text: 'Diastolic' }, valueQuantity: mmHg(76) }] },
     ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
@@ -401,11 +420,157 @@ describe('purpose-built read tools', () => {
       { test: 'LDL', latest: { date: '2025-05-01', value: 111 }, flags: ['read from a document by AI'] },
     ]);
     const v = s.vitals.map((r: { name: string; setting: string; value: string }) => [r.setting, r.name, r.value]);
-    expect(v).toEqual(expect.arrayContaining([['clinic', 'Body weight', '70 kg'], ['home', 'Body weight', '70 kg'], ['home', 'Blood pressure panel', 'Systolic: 118 mmHg; Diastolic: 76 mmHg']]));
+    expect(v).toEqual(expect.arrayContaining([['clinic', 'Wt', '71 kg'], ['home', 'Body weight', '70 kg'], ['home', 'Blood pressure panel', 'Systolic: 118 mmHg; Diastolic: 76 mmHg']]));
     expect(v.filter((r: string[]) => r[0] === 'clinic' && /blood pressure/.test(r[1])).map((r: string[]) => r[1]).sort()).toEqual(['Diastolic blood pressure', 'Systolic blood pressure']);
     expect(s.vaccines).toMatchObject({ edition: expect.any(String), dueOrOverdue: expect.any(Array), notEvaluated: expect.any(Number), unmatched: 0, possibleDuplicates: 0, note: expect.stringContaining('vaccine_gaps') });
     expect(s.lastVisit).toMatchObject({ date: '2025-06-01', type: 'Office visit', class: 'ambulatory' });
     expect(s.imports.sources.map((x: { source: string }) => x.source)).toEqual(expect.arrayContaining(['Epic EHI export', 'Apple Health', 'PDF or photo', expect.stringMatching(/^hospital portal/)]));
     expect(s.imports.newest).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('concept tools', () => {
+  const key = `sync-${randomUUID()}`; // throwaway SMART source: cleanupTestMaps matches its map
+  const source = `smart:${key}`;
+  const LOCAL = 'urn:test:local-code';
+  let inproc: Client;
+  let offline: Client;
+  const seed = async (name: string, n: number, specimen?: string) => {
+    const obs = (i: number): Observation => ({
+      resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${pid}` },
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],
+      code: { coding: [{ system: LOCAL, code: name, display: name }], text: name },
+      valueQuantity: { value: i, unit: 'mg/dL' }, effectiveDateTime: '2024-01-02', ...(specimen && { specimen: { display: specimen } }),
+      identifier: [{ system: `urn:ga-server:id:smart:${key}`, value: `Observation/${randomUUID()}` }],
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-smart' }, { system: 'urn:ga-server:tag', code: 'concept-unmapped' }] },
+    });
+    const b = await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry: Array.from({ length: n }, (_, i) => ({ resource: obs(i), request: { method: 'POST', url: 'Observation' } })) });
+    expect(b.entry?.every((e) => e.response?.status?.startsWith('201'))).toBe(true);
+  };
+  const records = async (name: string) => client.searchResources('Observation', { subject: `Patient/${pid}`, code: `${LOCAL}|${name}`, _count: '1000' }, { cache: 'no-cache' });
+  const ga = (o: Observation) => o.code?.coding?.filter((c) => c.extension?.some((e) => e.url === 'urn:ga-server:ext:concept-source')) ?? [];
+  const tags = (o: Observation) => o.meta?.tag?.map((t) => t.code) ?? [];
+  const inCall = async (c: Client, name: string, args: Record<string, unknown>) => {
+    const r = await c.callTool({ name, arguments: args });
+    return { isError: !!r.isError, text: (r.content as { text: string }[])[0].text };
+  };
+  const loincOk = (async () => new Response(JSON.stringify([1, ['2345-7'], null, [['Glucose [Mass/volume] in Serum or Plasma']]]))) as unknown as typeof fetch;
+  const map = (name: string, extra: object = {}) => ({ source, name, unit: 'mg/dL', type: 'Observation', system: 'http://loinc.org', code: '2345-7', display: 'Glucose', equivalence: 'equivalent', confident: true, ...extra });
+  const connect = async (f: typeof fetch) => {
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([buildMcpServer({ client, cfg, patientId: pid, fetch: f, remote: { publicUrl: 'https://ga.invalid', clientName: 'Test Chat', log: async () => {} } }).connect(a), c.connect(b)]);
+    return c;
+  };
+
+  beforeAll(async () => {
+    await seed('Zeta many', 510);
+    await seed('Zeta fix', 3);
+    await seed('Zeta offline', 2);
+    await seed('Zeta urine', 2, 'Urine');
+    await seed('Zeta none', 2);
+    inproc = await connect(loincOk);
+    offline = await connect((async () => { throw new TypeError('fetch failed'); }) as unknown as typeof fetch);
+  }, 120_000);
+  afterAll(async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    if (!m) return;
+    for (const p of await client.searchResources('Provenance', { target: `ConceptMap/${m.id}` }, { cache: 'no-cache' })) await client.deleteResource('Provenance', p.id as string);
+    await cleanupTestMaps(client);
+  });
+
+  test('both tools are on stdio; concepts_to_review lists a seeded unmapped term, most frequent first, without values', async () => {
+    const names = (await mcp.listTools()).tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['concepts_to_review', 'map_concept']));
+    const r = await call('concepts_to_review', { type: 'Observation' });
+    expect(r.isError).toBe(false);
+    const terms = JSON.parse(r.text).terms.filter((t: { source: string }) => t.source === source);
+    expect(terms.map((t: { name: string; count: number }) => [t.name, t.count]).slice(0, 2)).toEqual([['Zeta many', 510], ['Zeta fix', 3]]); // then the two of 2, in either order
+    expect(terms[0]).toMatchObject({ unit: 'mg/dL', type: 'Observation', key: 'zeta many|mg/dl', examples: ['2024-01-02'] });
+    expect(terms.find((t: { name: string }) => t.name === 'Zeta urine').key).toBe('zeta urine|mg/dl|urine');
+    expect(r.text).not.toContain('"value"');
+    expect((await call('concepts_to_review', { type: 'Patient' })).isError).toBe(true);
+  });
+
+  test('map_concept confident and equivalent codes every matching record (more than one page) and empties its review entry; Provenance per mapping', async () => {
+    const r = await inCall(inproc, 'map_concept', map('Zeta many'));
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.text)).toEqual({ changed: 510, status: 'mapped' });
+    const rs = await records('Zeta many');
+    expect(rs).toHaveLength(510);
+    for (const o of rs) {
+      expect(ga(o).map((c) => [c.system, c.code, c.display])).toEqual([['http://loinc.org', '2345-7', 'Glucose [Mass/volume] in Serum or Plasma']]);
+      expect(tags(o)).not.toContain('concept-unmapped');
+      expect(tags(o)).not.toContain('concept-suggested');
+    }
+    const left = JSON.parse((await inCall(inproc, 'concepts_to_review', {})).text).terms.map((t: { name: string }) => t.name);
+    expect(left).not.toContain('Zeta many');
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    const provs = await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' });
+    expect(provs).toHaveLength(1);
+    expect(provs[0]).toMatchObject({ agent: [{ who: { display: 'Test Chat' } }], activity: { coding: [{ code: 'map_concept' }] } });
+  }, 300_000);
+
+  test('a second map_concept with another code moves every record to it; the source coding is untouched (Review Focus 3)', async () => {
+    await inCall(inproc, 'map_concept', map('Zeta fix'));
+    const fixOk = (async () => new Response(JSON.stringify([1, ['2339-0'], null, [['Glucose [Mass/volume] in Blood']]]))) as unknown as typeof fetch;
+    const r = await inCall(await connect(fixOk), 'map_concept', map('Zeta fix', { code: '2339-0', display: 'Glucose blood' }));
+    expect(JSON.parse(r.text)).toEqual({ changed: 3, status: 'mapped' });
+    for (const o of await records('Zeta fix')) {
+      expect(ga(o).map((c) => c.code)).toEqual(['2339-0']);
+      expect(o.code?.coding?.[0]).toEqual({ system: LOCAL, code: 'Zeta fix', display: 'Zeta fix' });
+      expect(o.code?.text).toBe('Zeta fix');
+    }
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    expect(await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' })).toHaveLength(3);
+  });
+
+  test('validation unavailable: applied as suggested with the reason (Review Focus 4)', async () => {
+    const r = await inCall(offline, 'map_concept', map('Zeta offline'));
+    expect(JSON.parse(r.text)).toEqual({ changed: 2, status: 'suggested', reason: 'validation unavailable' });
+    for (const o of await records('Zeta offline')) {
+      expect(ga(o).map((c) => c.code)).toEqual(['2345-7']);
+      expect(tags(o)).toContain('concept-suggested');
+    }
+  });
+
+  test('an Apple daily summary term, or a system wrong for the type, is refused without writing (Review Focus 5)', async () => {
+    const r = await inCall(inproc, 'map_concept', map('Heart rate, daily mean (Apple Health)', { source: 'apple-health', unit: 'count/min' }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/not in the concept layer's scope/);
+    const w = await inCall(inproc, 'map_concept', map('Zeta fix', { system: 'http://www.nlm.nih.gov/research/umls/rxnorm' }));
+    expect(w.isError).toBe(true);
+    expect((await records('Zeta fix')).every((o) => ga(o)[0]?.code === '2339-0')).toBe(true);
+  });
+
+  test('a specimen-bearing term is mapped by its key; a key not of that name and unit is refused; no records gives status no records', async () => {
+    const no = await inCall(inproc, 'map_concept', map('Zeta urine'));
+    expect(JSON.parse(no.text)).toMatchObject({ changed: 0, status: 'no records' });
+    const bad = await inCall(inproc, 'map_concept', map('Zeta urine', { key: 'zeta many|mg/dl' }));
+    expect(bad.isError).toBe(true);
+    const ok = await inCall(inproc, 'map_concept', map('Zeta urine', { key: 'zeta urine|mg/dl|urine', confident: false }));
+    expect(JSON.parse(ok.text)).toEqual({ changed: 2, status: 'suggested' });
+    for (const o of await records('Zeta urine')) expect(ga(o).map((c) => c.code)).toEqual(['2345-7']);
+  });
+
+  test('a code validation says does not exist is refused with the reason, no map write and no Provenance; unmatched returns status unmatched', async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    const provs = async () => (await client.searchResources('Provenance', { target: `ConceptMap/${m?.id}` }, { cache: 'no-cache' })).length;
+    const before = await provs();
+    const noSuch = await connect((async () => new Response(JSON.stringify([0, [], null, []]))) as unknown as typeof fetch);
+    const r = await inCall(noSuch, 'map_concept', map('Zeta none', { code: '99999-9' }));
+    expect(r).toMatchObject({ isError: true, text: expect.stringContaining('unknown LOINC code 99999-9') });
+    expect((await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' }))?.meta?.versionId).toBe(m?.meta?.versionId);
+    expect(await provs()).toBe(before);
+    expect((await records('Zeta none')).every((o) => !ga(o).length)).toBe(true);
+    expect(JSON.parse((await inCall(inproc, 'map_concept', map('Zeta none', { equivalence: 'unmatched' }))).text)).toMatchObject({ status: 'unmatched' });
+  });
+
+  test('malformed codes and oversized text are refused before any write', async () => {
+    const m = await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' });
+    for (const extra of [{ type: 'Condition', system: 'http://snomed.info/sct', code: '12' }, { type: 'Condition', system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'e11.9' }, { type: 'Procedure', system: 'http://www.ama-assn.org/go/cpt', code: '8006' }, { display: 'x'.repeat(301) }, { name: 'x'.repeat(201) }]) {
+      expect((await inCall(inproc, 'map_concept', map('Zeta odd', extra))).isError).toBe(true);
+    }
+    expect((await client.searchOne('ConceptMap', { url: `urn:ga-server:conceptmap:${source}` }, { cache: 'no-cache' }))?.meta?.versionId).toBe(m?.meta?.versionId);
   });
 });

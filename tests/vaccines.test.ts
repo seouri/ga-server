@@ -1,5 +1,7 @@
 import { expect, test } from 'vitest';
-import { evaluateVaccines, loadSchedule } from '../src/vaccines.ts';
+import type { Immunization } from '@medplum/fhirtypes';
+import { CONCEPT_SRC } from '../src/concept-apply.ts';
+import { doseOf, evaluateVaccines, loadSchedule } from '../src/vaccines.ts';
 
 // Synthetic histories; expected statuses follow the shipped schedule's own rules.
 const schedule = loadSchedule();
@@ -167,4 +169,12 @@ test('immunity needs a leading positive word, no negation, and an antibody test 
   expect(mmr(['Measles antibody', 'Mumps IgG', 'Rubella titer'])).toBe('immune');
   expect(mmr(['Measles IgM', 'Mumps IgG', 'Rubella titer'])).not.toBe('immune');
   expect(mmr(['Measles', 'Mumps', 'Rubella'])).not.toBe('immune');
+});
+
+test('doseOf: a GA-added CVX coding counts unless the record is concept-suggested; the CVX OID counts', () => {
+  const ga = { system: 'http://hl7.org/fhir/sid/cvx', code: '187', extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] };
+  const imm = (coding: object[], tags: string[] = []): Immunization => ({ resourceType: 'Immunization', status: 'completed', patient: {}, occurrenceDateTime: '2024-01-01', vaccineCode: { text: 'Shingles', coding: coding as never }, meta: { tag: tags.map((code) => ({ system: 'urn:ga-server:tag', code })) } });
+  expect(doseOf(imm([ga])).cvx).toBe('187');
+  expect(doseOf(imm([ga], ['concept-suggested'])).cvx).toBeUndefined();
+  expect(doseOf(imm([{ system: 'urn:oid:2.16.840.1.113883.12.292', code: '187' }, ga], ['concept-suggested'])).cvx).toBe('187');
 });

@@ -13,7 +13,7 @@ import type { SourceRec } from '../../src/smart/store.ts';
 import { isStale, readStatus, syncAll, syncSource } from '../../src/smart/sync.ts';
 import { serveFixtures, startMock } from '../smart/mock-server.ts';
 import type { MockSmart } from '../smart/mock-server.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const P = 'synthetic-patient-1';
 const clientId = 'synthetic-client';
@@ -62,6 +62,7 @@ beforeAll(async () => {
 
 // Endpoints, Binaries and the shared Medication live outside the patient compartment: delete them by hand.
 afterAll(async () => {
+  await cleanupTestMaps(client);
   for (const pid of pids) {
     for (const r of await compartment(pid)) {
       for (const c of (r as DocumentReference).content ?? []) {

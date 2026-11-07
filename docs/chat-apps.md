@@ -41,7 +41,7 @@ Or use `connected_apps` and `disconnect_app` in chat. Every remote call is logge
 
 ## What you can do in chat
 
-Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`) plus:
+Read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `concepts_to_review`) plus:
 
 | Area | Tools |
 |---|---|
@@ -49,6 +49,7 @@ Read tools (`health_summary`, `lab_results`, `current_medications`, `current_pro
 | Shares | `share_create`, `share_list`, `share_log`, `share_revoke` |
 | Imports | `upload_link`, `import_file`, `import_status`, `ga_import` |
 | Apps | `connected_apps`, `disconnect_app` |
+| Concepts | `map_concept` (maps a source term to a standard code; corrections are another call) |
 
 Creating a share and enabling a hospital's record types are two steps: a preview first, then the action after your yes. The agent carries that yes: see [SECURITY.md](../SECURITY.md).
 

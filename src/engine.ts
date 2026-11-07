@@ -1,5 +1,7 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
+import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
 import { APPLE, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
@@ -15,7 +17,14 @@ export type ImportReport = {
   invalid: number;
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
+  unmapped: Unmapped[]; // in-scope terms of this batch with no standard code, for review (src/concept-apply.ts)
 };
+const COUNTS = ['created', 'updated', 'skipped', 'merged', 'conflicts', 'possibleDuplicates', 'invalid'] as const;
+// Adds one importResources report into a running total (several files or batches of one import).
+export function addReport(total: ImportReport, r: ImportReport): void {
+  for (const k of COUNTS) total[k] += r[k];
+  addUnmapped(total.unmapped, r.unmapped);
+}
 type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
@@ -60,10 +69,10 @@ const canon = (x: unknown) =>
     v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
   );
 
-// Equality ignores id, meta, our bookkeeping extensions and identifiers; identifiers only need incoming ⊆ existing,
-// because existing accumulates extra identifiers from merges.
+// Equality ignores id, meta, our bookkeeping extensions, identifiers and GA-added codings; identifiers only need
+// incoming ⊆ existing, because existing accumulates extra identifiers from merges.
 function body(r: R): unknown {
-  const { id: _i, meta: _m, identifier: _id, extension, ...rest } = r;
+  const { id: _i, meta: _m, identifier: _id, extension, ...rest } = stripConcept(r);
   const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN);
   return ext.length ? { ...rest, extension: ext } : rest;
 }
@@ -104,6 +113,9 @@ function merge(ex: unknown, inc: unknown): unknown {
 }
 export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
   if (s.kind !== 'ehi' && s.kind !== 'smart') return incomingRes;
+  return onSource(existing, incomingRes, fillSource);
+}
+function fillSource<T extends Resource>(existing: T, incomingRes: T): T {
   // R21: a text-only medication never replaces a coded one (a Medication reference, or a concept with codings).
   const ex = existing as unknown as Record<string, { coding?: unknown[] } | undefined>;
   const med = (incomingRes as unknown as Record<string, { coding?: unknown[] } | undefined>).medicationCodeableConcept;
@@ -220,12 +232,13 @@ export function sameValue(a: Observation, b: Observation): boolean {
 }
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
-async function unionUpdate(client: MedplumClient, existing: R, incoming: R): Promise<void> {
+async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promise<Resource> {
+  const incoming = carryConcept(existing, coded);
   const ids = idList(existing);
   for (const i of idList(incoming)) if (!ids.some((x) => idKey(x) === idKey(i))) ids.push(i);
   const kept = (existing.meta?.tag ?? []).filter((t) => t.system === TAG && KEPT_TAGS.includes(t.code as string) && !hasTag(incoming, t.code as string));
   const dupOf = (existing.extension ?? []).filter((e) => e.url === DUP_OF);
-  await client.updateResource({
+  return client.updateResource({
     ...incoming,
     id: existing.id,
     identifier: SINGULAR_ID.has(incoming.resourceType) ? incoming.identifier : ids,
@@ -245,6 +258,7 @@ export async function importResources(
     created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0,
     ...(source.seenAt && { seen: 0 }),
     ...(source.kind === 'smart' && { byType: {} }),
+    unmapped: [],
   };
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
@@ -325,6 +339,23 @@ export async function importResources(
     return { dups: source.kind === 'ccda' ? [] : found };
   };
 
+  // Concepts: the batch's own codes teach the source maps first, so learning doesn't depend on record order. Learned
+  // entries are only added, never replacing one (upsertEntries re-checks the map it reads): a source never overrides an
+  // agent's mapping. Maps are read fresh: another process (an agent's map_concept) may have written since this one cached.
+  // An install whose access policy predates ConceptMap (ga setup re-run) still imports, uncoded, and learns nothing.
+  let mapsRead = true;
+  let maps = await loadMaps(client, true).catch((e: Error): Maps => {
+    console.error(`concept maps not read: ${e.message}`);
+    mapsRead = false;
+    return new Map();
+  });
+  const learned = mapsRead ? learnable(ordered, source, maps) : new Map<string, MapEntry[]>();
+  for (const [key, entries] of learned) {
+    // One read-modify-write per source, serially; a failed map write never fails the import.
+    await upsertEntries(client, key, entries).catch((e: Error) => console.error(`concept map ${key} not updated: ${e.message}`));
+  }
+  if (learned.size) maps = await loadMaps(client, true).catch(() => maps);
+
   const idMap = new Map<string, string>();
   for (const src of ordered) {
     const before = { ...report };
@@ -336,6 +367,9 @@ export async function importResources(
     const incoming = stamp(r, source, ident) as R;
     delete incoming.id;
     const type = incoming.resourceType;
+    // Identity and matching use the record as the source sent it; what is written carries GA's coding.
+    const concept = codeRecord(incoming, source, maps);
+    const coded = concept.resource as R;
     // Searches stay outside the try: only a write's validation failure is tolerated.
     // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
     const field = COMPARTMENT[type];
@@ -353,22 +387,36 @@ export async function importResources(
       ? await client.searchResources(
           'Observation',
           new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
-        )
+        ).then((ms) => ms.filter((m) => stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
+    // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
+    // Not a person's record, and never by a map other than its own: a record another GA source already coded keeps that coding,
+    // and a coded record is never stripped to unmapped. Returns ex itself when nothing would change.
+    const recode = (ex: R): R => {
+      if (personEdited(ex)) return ex;
+      const hasGa = gaCodings(ex).length > 0;
+      const others = idList(ex).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== ident.system);
+      if (hasGa && others) return ex;
+      const out = codeRecord(ex, source, maps);
+      return (hasGa && out.status === 'unmapped') || sameConcept(out.resource, ex) ? ex : (out.resource as R);
+    };
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
-    const fillOnto = async (ex: R): Promise<void> => {
+    const fillOnto = async (ex: R): Promise<R> => {
       if (personEdited(ex)) {
         report.skipped++;
-        return;
+        return ex;
       }
       const bases = new Set(Object.keys(ex).map(choiceBase));
-      const add = Object.entries(incoming).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
+      const add = Object.entries(coded).filter(([k, v]) => v !== undefined && !BOOKKEEPING.has(k) && !bases.has(choiceBase(k)));
       const have = new Set(idList(ex).map(idKey));
       const ids = idList(incoming).filter((i) => !have.has(idKey(i)));
       const added = add.length + ids.length > 0;
-      await keep({ ...ex, ...Object.fromEntries(add), identifier: [...idList(ex), ...ids] } as R, added);
+      const filled = { ...ex, ...Object.fromEntries(add), identifier: [...idList(ex), ...ids] } as R;
+      const out = recode(filled);
+      await keep(out, added || out !== filled);
       if (added) report.merged++;
       else report.skipped++;
+      return out;
     };
     // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF) wrote, on every sync.
     const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
@@ -380,7 +428,7 @@ export async function importResources(
       let target: Resource;
       if (existing) {
         target = existing;
-        const filled = fillFrom(existing, incoming, source);
+        const filled = fillFrom(existing, coded, source);
         const d = decide(existing, filled, author);
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
@@ -391,17 +439,20 @@ export async function importResources(
         } else if (d === 'conflict') {
           if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
           report.conflicts++;
-        } else if (fillOnly(existing)) await fillOnto(existing);
+        } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (d === 'update') {
-          await unionUpdate(client, existing, filled);
+          target = await unionUpdate(client, existing, filled);
           report.updated++;
         } else if (linked) {
           // Equal or older source: only record its identifiers, so the next import finds it by stable identifier.
           const have = new Set(idList(existing).map(idKey));
-          await keep({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] }, true);
+          target = recode({ ...existing, identifier: [...idList(existing), ...idList(incoming).filter((i) => !have.has(idKey(i)))] });
+          await keep(target as R, true);
           report.merged++;
         } else {
-          await keep(existing, false);
+          const out = recode(existing);
+          await keep(out, out !== existing); // a concept write only: still a skip
+          target = out;
           report.skipped++;
         }
       } else {
@@ -409,7 +460,7 @@ export async function importResources(
         const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
         if (same) {
           target = same;
-          const filled = fillFrom(same, incoming, source);
+          const filled = fillFrom(same, coded, source);
           const d = decide(same, filled, author);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
@@ -418,14 +469,14 @@ export async function importResources(
           else if (fillOnly(same)) await fillOnto(same);
           else {
             // Different writers (hospital record vs PDF extraction): keep the existing body, only record the second source.
-            if (otherOntoApple || (d === 'update' && !appleOntoOther && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent'))) await unionUpdate(client, same, filled);
+            if (otherOntoApple || (d === 'update' && !appleOntoOther && hasTag(same, 'writer-agent') === hasTag(incoming, 'writer-agent'))) target = await unionUpdate(client, same, filled);
             else await keep({ ...same, identifier: [...(same.identifier ?? []), ident] }, true);
             report.merged++;
           }
         } else if (matches.length) {
           const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
-            withTag({ ...incoming, extension: [...(incoming.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+            withTag({ ...coded, extension: [...(coded.extension ?? []), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
@@ -433,11 +484,13 @@ export async function importResources(
           }
           report.possibleDuplicates++;
         } else {
-          target = await client.createResource(incoming as Resource);
+          target = await client.createResource(coded as Resource);
           report.created++;
         }
       }
       for (const k of sourceKeys(src)) idMap.set(k, `${type}/${target.id}`);
+      // Review lines: only records stored (written or kept) still unmapped.
+      if (concept.status === 'unmapped' && hasTag(target, 'concept-unmapped')) countUnmapped(report.unmapped, coded, source);
     } catch (e) {
       if (!isValidationFailure(e)) throw e;
       // Element paths only: server diagnostics can echo values. References to this resource stay unresolved.

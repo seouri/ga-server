@@ -24,6 +24,7 @@ import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
 import { registerShareTools } from './tools/shares.ts';
+import { registerConceptTools } from './tools/concepts.ts';
 
 // Allow-list of types; the patient element is always set (and overridden) so an agent can't write to another patient.
 const PATIENT_FIELD: Record<string, string> = { AllergyIntolerance: 'patient', Immunization: 'patient' };
@@ -150,6 +151,7 @@ export type ToolDeps = {
   client: MedplumClient;
   cfg: GaConfig;
   patientId: string;
+  fetch?: typeof fetch; // code validation (NLM); tests inject one
   // dir: the gateway's state directory (uploads); default gatewayDir().
   remote?: { publicUrl: string; clientName: string; dir?: string; disconnect?: (clientId: string) => Promise<void>; log: (tool: string) => Promise<void> };
 };
@@ -287,11 +289,12 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       description:
         "The user's lab and test results from GA (blood tests, urine tests, A1c, cholesterol...): use this for any question about lab results " +
         '(the latest value, a trend, a year\'s results) instead of fhir_search. Finds labs from every source, including PDFs imported without a category; ' +
-        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"; a common test also matches its LOINC codes and other names, e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"); since/until: YYYY-MM-DD, inclusive. ' +
+        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "crp"); a concept name (A1c, Glucose, LDL, HDL, Total cholesterol, Triglycerides, Creatinine, eGFR, ALT, AST, Hemoglobin, Platelets, Potassium, Sodium, TSH) or a common synonym ("hba1c", "ldl cholesterol", "thyrotropin") finds every result coded as that test whatever its name (e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"), plus results not yet coded whose name contains it, which may be a different test (e.g. "LDL-P"); since/until: YYYY-MM-DD, inclusive. ' +
         'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
+        '"possibly <test> (suggested mapping)": GA only guessed this result is that test; say so. ' +
         'truncated: more results exist; narrow by name or dates. summary: true returns one entry per test instead (trends, "how has X changed"), ' +
-        'over every matching result: name, loinc, unit, latest {date, value, flag high/low/...}, previous {date, value}, change (latest − previous, same unit), ' +
+        'over every matching result: test (the concept, only for results coded as it), name, loinc, unit, latest {date, value, flag high/low/..., method}, previous {date, value, method} (method: the coded variant, e.g. eGFR race-free or race-based, LDL calculated or direct), change (latest − previous, same unit), ' +
         'count, outOfRange (results flagged high or low), first (date), source and flags of the latest.',
       inputSchema: {
         name: z.string().min(1).optional(),
@@ -395,6 +398,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     read(({ asOf }) => vaccineGaps(client, patientId, asOf)),
   );
+  registerConceptTools(server, deps);
   // Remote ga_import (by fileId) is in tools/imports.ts.
   if (!remote) server.registerTool(
     'ga_import',

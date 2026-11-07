@@ -26,8 +26,8 @@ test('vitals: readings query vital-signs; daily keeps only Apple summaries and s
   expect(seen[0].get('_tag')).toBeNull();
   expect(seen[0].getAll('date')).toEqual(['ge2024-01-01']);
   const d = await vitals(client, 'p', { daily: true, limit: 1 });
-  expect(seen[1].getAll('category')).toEqual(['activity']);
-  expect(seen[1].get('_tag')).toBe('urn:ga-server:tag|src-apple-health');
+  expect(seen[2].getAll('category')).toEqual(['activity']); // 'weight' searched twice: by text and by its concept codes
+  expect(seen[2].get('_tag')).toBe('urn:ga-server:tag|src-apple-health');
   expect(d).toMatchObject({ rows: [{ kind: 'daily total' }], truncated: true, hint: expect.any(String) });
   expect((await vitals(client, 'p', { daily: true })).rows.map((r) => r.kind)).toEqual(['daily total', 'nightly']);
   await expect(vitals(client, 'p', { until: '2024-13-01' })).rejects.toThrow(/until must be/);
@@ -39,4 +39,16 @@ test('vitals: readings query vital-signs; daily keeps only Apple summaries and s
   expect((await vitals(many, 'p', { name: 'weight', limit: 1 })).hint).toBe('more results: narrow the dates or the name');
   expect((await vitals(many, 'p', { name: 'heart rate', limit: 1 })).hint).toMatch(/use daily: true/);
   expect(await vitals(c2, 'p', { name: 'weight', daily: true })).toMatchObject({ rows: [{ name: 'Body weight', kind: 'reading' }], hint: 'no daily summaries for this; these are readings' });
+});
+
+test('vitals: a vital concept name ("weight") also finds its member codes; one row per record, newest first', async () => {
+  const seen: URLSearchParams[] = [];
+  const coded = o('Wt', { id: 'c', effectiveDateTime: '2025-02-01', code: { text: 'Wt', coding: [{ system: 'http://loinc.org', code: '29463-7' }] } });
+  const both = o('Body weight', { effectiveDateTime: '2024-01-01', code: { text: 'Body weight', coding: [{ system: 'http://loinc.org', code: '29463-7' }] } });
+  const client = { search: async (_t: string, q: URLSearchParams) => (seen.push(q), { resourceType: 'Bundle', entry: (q.has('code') ? [coded, both] : [both]).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await vitals(client, 'p', { name: 'weight' })).rows.map((r) => r.id)).toEqual(['c', 'Body weight']);
+  expect(seen.map((q) => q.get('code') ?? `text:${q.get('code:text')}`).sort()).toEqual(['http://loinc.org|29463-7', 'text:weight']);
+  seen.length = 0;
+  await vitals(client, 'p', { name: 'weight', daily: true });
+  expect(seen[0].get('code')).toBeNull(); // daily summaries carry no vital concept code
 });

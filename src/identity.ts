@@ -5,6 +5,7 @@ import { GaError } from './config.ts';
 export type SourceInfo = {
   kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'smart';
   file: string;
+  org?: string; // C-CDA custodian organisation name; keys the source's ConceptMap (src/conceptmap.ts)
   date: string;
   writer: 'importer' | 'agent';
   llm?: boolean;

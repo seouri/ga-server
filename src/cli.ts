@@ -68,8 +68,16 @@ try {
       await disconnectClient(createProvider({ publicUrl: process.env.GA_PUBLIC_URL?.replace(/\/+$/, '') || 'http://localhost', dir }), dir, id);
       console.log(`disconnected ${id}`);
     }
+  } else if (process.argv[2] === 'concepts' && /^( --suggested| apply( --migrate-keys)?| --agent( --since \S+)?)?$/.test(process.argv.slice(3).map((a) => ` ${a}`).join(''))) {
+    const { agentMappings, applyAll, migrateKeys, reviewList } = await import('./concepts-cli.ts');
+    const cfg = loadConfig();
+    const client = await getClient(cfg);
+    const pid = cfg.patientId as string;
+    const [arg, flag, since] = process.argv.slice(3);
+    if (arg === 'apply' && flag) console.log(JSON.stringify({ migrated: await migrateKeys(client, pid) }));
+    console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply [--migrate-keys]] | ga import <path> [--tz <IANA zone>] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

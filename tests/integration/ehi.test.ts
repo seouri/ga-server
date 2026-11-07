@@ -16,7 +16,7 @@ import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
 import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 // Synthetic fixtures sharing order 9000001 (C-CDA organizer id under an Epic order root, org number 99).
 const CCDA = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
@@ -35,6 +35,7 @@ beforeAll(async () => {
 
 // Same cleanup as ccda.test.ts: stable identifiers are global, delete what the fixture wrote (plus the patient compartment).
 afterAll(async () => {
+  await cleanupTestMaps(client);
   for (const r of await convertCcda(readFileSync(CCDA, 'utf8'), cfg.converterUrl)) {
     const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
@@ -114,7 +115,7 @@ test('an ambiguous CSN link counts as unlinked: the EHI Encounter gets class UNK
   const csn = `syn-${randomUUID()}`;
   const ids = [{ system: 'urn:oid:1.2.840.114350.1.13.99.2.7.3.698084.8', value: csn }];
   const ccdaEnc = (n: string): Resource => ({ resourceType: 'Encounter', id: n, identifier: [{ system: 'urn:test:src', value: n }, ...ids], status: 'finished', class: { code: 'AMB' }, subject: { reference: `Patient/${pid}` } }) as Resource;
-  await importResources(client, [ccdaEnc(`a-${csn}`), ccdaEnc(`b-${csn}`)], { kind: 'ccda', file: 'synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
+  await importResources(client, [ccdaEnc(`a-${csn}`), ccdaEnc(`b-${csn}`)], { kind: 'ccda', file: '/synthetic-clinic/synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
   const e = { resourceType: 'Encounter', id: 'x', identifier: [{ system: 'urn:ga-server:id:ehi:synthetic-health', value: `PAT_ENC|${csn}` }, ...ids], status: 'finished', subject: { reference: `Patient/${pid}` } } as Encounter;
   const { resources } = await resolveUnlinked(client, [e], pid);
   expect((resources[0] as Encounter).class?.code).toBe('UNK');
@@ -135,7 +136,7 @@ test('R21: an EHI text-only medication never replaces a coded C-CDA medication',
   const epic = { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.798268', value: order };
   const med = { resourceType: 'Medication', id: 'm1', identifier: [{ system: 'urn:test:med', value: order }], code: { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '0000' }], text: 'Synthetic drug' } } as Resource;
   const ccdaMr = { resourceType: 'MedicationRequest', id: 'r1', identifier: [{ system: 'urn:test:src', value: order }, epic], status: 'active', intent: 'order', medicationReference: { reference: 'Medication/m1' }, subject: { reference: `Patient/${pid}` } } as Resource;
-  await importResources(client, [med, ccdaMr], { kind: 'ccda', file: 'synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
+  await importResources(client, [med, ccdaMr], { kind: 'ccda', file: '/synthetic-clinic/synthetic.xml', date: '2024-01-01', writer: 'importer' }, pid, 'h');
   const ehiMr = { resourceType: 'MedicationRequest', id: 'x', identifier: [{ system: 'urn:ga-server:id:ehi:synthetic-health', value: `ORDER_MED|${order}` }, epic], status: 'active', intent: 'order', medicationCodeableConcept: { text: 'SYNTHETIC DRUG' }, subject: { reference: `Patient/${pid}` } } as Resource;
   const src: SourceInfo = { kind: 'ehi', file: EHI, date: '2026-01-17T08:30:00-05:00', writer: 'importer' };
   expect(await importResources(client, [ehiMr], src, pid, '')).toMatchObject({ invalid: 0, possibleDuplicates: 0, created: 0 });
@@ -167,7 +168,7 @@ test('an EHI update never replaces coded, referenced or more precise C-CDA value
     ccda('DiagnosticReport', 'd', '2.7.2.798268', { status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '57698-3' }] }, subject, effectivePeriod: { start: at, end: '2024-01-05T11:00:00-05:00' }, result: [{ reference: 'Observation/o1' }, { reference: 'Observation/o2' }] }),
     ccda('Immunization', 'i', '2.7.2.768076', { status: 'completed', vaccineCode: { coding: [{ system: 'http://hl7.org/fhir/sid/cvx', code: '141' }] }, patient: subject, occurrenceDateTime: '2023-10-01', route: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration', code: 'IM' }] } }),
   ];
-  expect(await importResources(client, seed, { kind: 'ccda', file: 'synthetic-fill.xml', date: '2024-01-06', writer: 'importer' }, pid, 'h')).toMatchObject({ created: 7, invalid: 0 });
+  expect(await importResources(client, seed, { kind: 'ccda', file: '/synthetic-clinic/synthetic-fill.xml', date: '2024-01-06', writer: 'importer' }, pid, 'h')).toMatchObject({ created: 7, invalid: 0 });
   const data: Record<string, Record<string, string>[]> = {
     PAT_ENC: [{ PAT_ENC_CSN_ID: csn, CONTACT_DATE: '1/5/2024 12:00:00 AM', VISIT_PROV_ID_PROV_NAME: 'DOCTOR, SYNTHETIC' }],
     PROBLEM_LIST: [{ PROBLEM_LIST_ID: prob, DESCRIPTION: 'Synthetic problem', PROBLEM_STATUS_C_NAME: 'Active' }],
