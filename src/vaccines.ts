@@ -61,7 +61,7 @@ const addMonths = (date: string, n: number) => {
   return d.toISOString().slice(0, 10);
 };
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
-const ageOn = (birth: string, asOf: string) => Number(asOf.slice(0, 4)) - Number(birth.slice(0, 4)) - (asOf.slice(5, 10) < birth.slice(5, 10) ? 1 : 0);
+export const ageOn = (birth: string, asOf: string) => Number(asOf.slice(0, 4)) - Number(birth.slice(0, 4)) - (asOf.slice(5, 10) < birth.slice(5, 10) ? 1 : 0);
 
 export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: string) {
   const day = asOf.slice(0, 10);
