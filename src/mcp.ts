@@ -14,6 +14,7 @@ import { type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
+import { healthSummary } from './health.ts';
 import { currentList, type Kind } from './lists.ts';
 import { vitals } from './vitals.ts';
 import { notesSearch } from './notes.ts';
@@ -177,7 +178,7 @@ const STDIO_INSTRUCTIONS =
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
         'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
-        'current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results, vitals vital signs, notes_search the text of notes and messages.';
+        'health_summary is the one-call snapshot to start with; current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results (summary: true for trends), vitals vital signs, notes_search the text of notes and messages.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
@@ -258,19 +259,44 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
   );
   server.registerTool(
+    'health_summary',
+    {
+      description:
+        "A one-call snapshot of the user's health record in GA: call this first for any personal health question, then drill down with the other tools. " +
+        'Returns age and sex; problems, medications and allergies (currency "current" or "unconfirmed" by the hospital currency rule); key labs ' +
+        '(A1c, glucose, lipids, creatinine, eGFR, ALT, AST, hemoglobin, platelets, potassium, sodium, TSH, whichever exist: the lab_results summary entry, ' +
+        'latest and previous value); latest weight, BMI, blood pressure and resting heart rate per setting (clinic/home); vaccines due or overdue ' +
+        '(from vaccine_gaps) and the count not evaluated; the last visit; imported sources with their last import date. Each item has its date and source. ' +
+        'Flag "read from a document by AI": the value was read from a document by AI; tell the user to check it. A section that failed holds {error}.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      try {
+        const eps = patientEndpoints(client, patientId);
+        return warned(await healthSummary(client, patientId, eps), eps);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+  server.registerTool(
     'lab_results',
     {
       description:
         "The user's lab and test results from GA (blood tests, urine tests, A1c, cholesterol...): use this for any question about lab results " +
         '(the latest value, a trend, a year\'s results) instead of fhir_search. Finds labs from every source, including PDFs imported without a category; ' +
-        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"); since/until: YYYY-MM-DD, inclusive. ' +
+        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "a1c", "ldl"; a common test also matches its LOINC codes and other names, e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"); since/until: YYYY-MM-DD, inclusive. ' +
         'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
-        'truncated: more results exist; narrow by name or dates.',
+        'truncated: more results exist; narrow by name or dates. summary: true returns one entry per test instead (trends, "how has X changed"), ' +
+        'over every matching result: name, loinc, unit, latest {date, value, flag high/low/...}, previous {date, value}, change (latest − previous, same unit), ' +
+        'count, outOfRange (results flagged high or low), first (date), source and flags of the latest.',
       inputSchema: {
         name: z.string().min(1).optional(),
         ...dates,
         limit: z.number().int().min(1).max(1000).default(200),
+        summary: z.boolean().default(false),
       },
       annotations: { readOnlyHint: true },
     },
