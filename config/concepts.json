@@ -189,12 +189,12 @@
    {
     "system": "http://loinc.org",
     "code": "88293-6",
-    "label": "race-based (CKD-EPI 2009)"
+    "label": "race-based, Black (CKD-EPI 2009)"
    },
    {
     "system": "http://loinc.org",
     "code": "88294-4",
-    "label": "race-based (CKD-EPI 2009)"
+    "label": "race-based, non-Black (CKD-EPI 2009)"
    }
   ]
  },
