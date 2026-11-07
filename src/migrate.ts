@@ -263,7 +263,8 @@ const vaccines = async (c: MedplumClient, pid: string, asOf: string) => {
   }
 };
 
-export async function migrate({ projectName }: { projectName?: string } = {}): Promise<{ rows: Row[] }> {
+// accept: switch even when counts differ, after printing them (the old copy is kept until --delete-old).
+export async function migrate({ projectName, accept = false }: { projectName?: string; accept?: boolean } = {}): Promise<{ rows: Row[] }> {
   const p = paths();
   if (existsSync(p.backup)) throw new GaError(`already migrated (${basename(p.backup)} exists): next step is ga migrate --delete-old`);
   const oldCfg = loadConfig(p.cfg);
@@ -310,7 +311,9 @@ export async function migrate({ projectName }: { projectName?: string } = {}): P
     const vOld = await vaccines(old, oldCfg.patientId, asOf);
     const sameVaccines = vOld !== undefined && vOld === (await vaccines(nc, newCfg.patientId, asOf));
     console.log(`vaccine_gaps: ${sameVaccines ? 'same' : 'DIFFERENT'}`);
-    if (mismatches(rows, true).length || !sameVaccines) throw new GaError(`verification failed: config not switched (the new copy is in ${basename(p.next)}'s project)`);
+    const differs = mismatches(rows, true).length > 0 || !sameVaccines;
+    if (differs && !accept) throw new GaError(`verification failed: config not switched (the new copy is in ${basename(p.next)}'s project). Rows marked <> differ; to switch anyway after reviewing them: ga migrate --accept`);
+    if (differs) console.log('differences accepted (--accept)');
 
     // Switch: shares follow the new patient (tokens unchanged, links keep working), then the config.
     const sd = shareDir(p.cfg);
@@ -328,7 +331,7 @@ export async function migrate({ projectName }: { projectName?: string } = {}): P
 
 // Deletes the old copy with the old (Super Admin) client. Every query is scoped to the old project and every record is
 // checked against it: that client can see every project, including the new one.
-export async function deleteOld(): Promise<Record<string, number>> {
+export async function deleteOld({ accept = false }: { accept?: boolean } = {}): Promise<Record<string, number>> {
   const p = paths();
   const cfg = loadConfig(p.cfg);
   if (!existsSync(p.backup)) throw new GaError(`${basename(p.backup)} not found: run ga migrate first`);
@@ -341,7 +344,7 @@ export async function deleteOld(): Promise<Record<string, number>> {
   if (project === cfg.projectId || (await projectOf(nc)) !== cfg.projectId) throw new GaError('the old project is the GA project: refusing');
   const rows = await countRows(old, project, oldCfg.patientId, nc, cfg.patientId);
   const short = mismatches(rows, false);
-  if (short.length) throw new GaError(`the GA project holds fewer records than the old copy (${short.map((r) => r.type).join(', ')}): refusing`);
+  if (short.length && !accept) throw new GaError(`the GA project holds fewer records than the old copy (${short.map((r) => r.type).join(', ')}): refusing; to delete anyway after reviewing: ga migrate --delete-old --accept`);
 
   console.log('listing the old copy...');
   const doomed = new Map<string, Resource>();
