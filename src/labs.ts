@@ -79,9 +79,9 @@ export async function collect<T extends Resource, R>(
 }
 
 // At most `limit` rows and BUDGET characters, so the remote cap never cuts JSON mid-row.
-export function fit<R>(rows: R[], limit: number, more = false): { rows: R[]; total: number; truncated?: true } {
+export function fit<R>(rows: R[], limit: number, more = false, budget = BUDGET): { rows: R[]; total: number; truncated?: true } {
   let size = 0;
-  const cut = rows.slice(0, limit).findIndex((r) => (size += JSON.stringify(r).length + 1) > BUDGET);
+  const cut = rows.slice(0, limit).findIndex((r) => (size += JSON.stringify(r).length + 1) > budget);
   const truncated = more || rows.length > limit || cut >= 0;
   const out = rows.slice(0, cut >= 0 ? cut : limit);
   return { rows: out, total: out.length, ...(truncated ? { truncated: true as const } : {}) };
