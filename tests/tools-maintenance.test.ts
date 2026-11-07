@@ -15,6 +15,7 @@ const setup = async (remote = true) => {
       if (type === 'Patient') return { resourceType: 'Patient', birthDate: '1970-01-01', gender: 'female' };
       if (id === 'd1') return doc('Patient/p');
       if (type === 'Communication' && id === 'm1') return { resourceType: 'Communication', id: 'm1', status: 'completed', subject: { reference: 'Patient/p' }, payload: [{ contentString: 'Started the new medicine. We will repeat your lab panel in 6 weeks.' }] };
+      if (type === 'DiagnosticReport' && id === 'r1') return { resourceType: 'DiagnosticReport', id: 'r1', status: 'final', code: { text: 'x' }, subject: { reference: 'Patient/p' }, conclusion: 'Stable nodule. Recommend follow-up CT chest in 12 months.' };
       if (id === 'other') return doc('Patient/q');
       throw new Error('not found');
     },
@@ -109,6 +110,9 @@ describe('record_followup', () => {
     const { created, call } = await setup();
     expect((await call('record_followup', { ...args, quote: 'in 5 years' })).error).toBe(true);
     expect((await call('record_followup', { ...args, documentRef: 'DocumentReference/other' })).error).toBe(true);
+    const rep = { ...args, topic: 'Chest CT', quote: 'follow-up CT chest in 12 months', documentRef: 'DiagnosticReport/r1' };
+    expect((await call('record_followup', rep)).error).toBeFalsy();
+    expect((await call('record_followup', { ...rep, quote: 'repeat colonoscopy' })).error).toBe(true);
     expect((await call('record_followup', { ...args, documentRef: 'DocumentReference/none' })).error).toBe(true);
     expect(created).toEqual([]);
   });

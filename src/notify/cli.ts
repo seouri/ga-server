@@ -57,7 +57,9 @@ export async function notifyCommand(args: string[], deps: NotifyDeps = {}): Prom
     const s = readSettings(dir);
     if (!s) return log('notify is not set up: ga notify setup --to <handle>');
     const st = readState(dir), running = await launchctl(['print', `${domain}/${LABEL}`]);
-    log([`to: ${s.to}${s.off ? ' (off)' : ''}`, ...(s.also?.length ? [`also (owner handles): ${s.also.join(', ')}`] : []), `digest: ${s.digestAt}`, `sleep: ${s.sleep.join('-')}`, `last send: ${st.lastSend ?? 'never'}`, `last error: ${st.lastError ?? 'none'}`, `outbox: ${pending(dir).length}`, `bridge running: ${running ? 'yes' : 'no'}`].join('\n'));
+    const old = existsSync(plist) ? readFileSync(plist, 'utf8').match(/<key>ProgramArguments<\/key><array><string>([^<]*)<\/string>/)?.[1] : undefined;
+    const moved = old && (old !== process.execPath || !existsSync(old)) ? [`node changed (${old} → ${process.execPath}): run ga notify setup again, then grant Full Disk Access and Automation > Messages to the new node`] : [];
+    log([...moved, `to: ${s.to}${s.off ? ' (off)' : ''}`, ...(s.also?.length ? [`also (owner handles): ${s.also.join(', ')}`] : []), `digest: ${s.digestAt}`, `sleep: ${s.sleep.join('-')}`, `last send: ${st.lastSend ?? 'never'}`, `last error: ${st.lastError ?? 'none'}`, `outbox: ${pending(dir).length}`, `bridge running: ${running ? 'yes' : 'no'}`].join('\n'));
   } else if (cmd === 'off' && !rest.length) {
     const s = readSettings(dir);
     if (s) writeJson(dir, 'settings.json', { ...s, off: true });

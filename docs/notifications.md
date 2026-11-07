@@ -60,5 +60,6 @@ Your text, and the records needed to answer it, go to the AI provider you chose.
 - Delivery is at least once: if the bridge dies mid-send, you may get one duplicate.
 - The conversation memory is kept for 30 minutes and is lost when the gateway restarts.
 - Vaccines can't be marked done by text.
+- After upgrading node, rerun `ga notify setup` and grant Full Disk Access and Automation > Messages again (macOS ties them to the node binary). `ga notify status` warns when the binary changed.
 - `TZ` must be set in `.env` (`setup.sh` writes it); otherwise the gateway runs on UTC and sleep and digest times shift.
 - `ga notify test` writes the outbox from the host; a rare overlap with an ack can resend one message.

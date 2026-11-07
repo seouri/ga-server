@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -77,5 +77,17 @@ describe('ga notify', () => {
     expect(existsSync(e.plist)).toBe(false);
     expect(readSettings(e.dir)?.off).toBe(true);
     expect(e.calls.some((c) => c[0] === 'bootout')).toBe(true);
+  });
+
+  it('status flags a node binary that changed since setup', async () => {
+    const e = setupEnv();
+    await notifyCommand(['setup', '--to', 'A@B.co'], e.deps);
+    e.out.length = 0;
+    await notifyCommand(['status'], e.deps);
+    expect(e.out.join('\n')).not.toContain('node changed');
+    writeFileSync(e.plist, readFileSync(e.plist, 'utf8').replace(process.execPath, '/gone/Cellar/node/1.0/bin/node'));
+    e.out.length = 0;
+    await notifyCommand(['status'], e.deps);
+    expect(e.out.join('\n')).toContain(`node changed (/gone/Cellar/node/1.0/bin/node → ${process.execPath}): run ga notify setup again, then grant Full Disk Access and Automation > Messages to the new node`);
   });
 });

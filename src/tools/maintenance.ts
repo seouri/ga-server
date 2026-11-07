@@ -1,7 +1,7 @@
 // postpone and record_followup (both transports): the person's reminders and the doctor's plan an agent found in a note, as GA-written Basic records
 // that healthMaintenance reads. Each write carries Provenance with the client's name, as map_concept does.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { Basic, Communication, DocumentReference, Extension, Provenance } from '@medplum/fhirtypes';
+import type { Basic, Communication, DiagnosticReport, DocumentReference, Extension, Provenance } from '@medplum/fhirtypes';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
 import { validDay } from '../labs.ts';
@@ -80,14 +80,14 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
     'record_followup',
     {
       description:
-        "Record a follow-up the clinician planned, found in a clinical note or a MyChart message in GA (never inferred by you): topic (a health_maintenance topic, or a new name), " +
+        "Record a follow-up the clinician planned, found in a clinical note, a MyChart message or a report's conclusion in GA (never inferred by you): topic (a health_maintenance topic, or a new name), " +
         'due (YYYY-MM-DD; for "in 6 weeks", count from the note or message date), quote (its own words, which must appear in it), ' +
-        'documentRef (DocumentReference/<id> of the note or Communication/<id> of the message). ' +
+        'documentRef (DocumentReference/<id> of the note or Communication/<id> of the message, DiagnosticReport/<id> of the report; its conclusion is checked). ' +
         (remote
           ? `${CONFIRM_ON_PAGE} `
           : 'Two steps: call without confirm to get a preview and a confirm code; show it to the user, and only after they agree call again with the same arguments plus confirm. ') +
         'It then shows in health_maintenance as the doctor\'s plan, dated today.',
-      inputSchema: { topic: z.string().min(1).max(100), due: DAY, quote: z.string().min(1).max(500), documentRef: z.string().regex(/^(DocumentReference|Communication)\/[\w.-]+$/), ...(!remote && { confirm: z.string().optional() }) },
+      inputSchema: { topic: z.string().min(1).max(100), due: DAY, quote: z.string().min(1).max(500), documentRef: z.string().regex(/^(DocumentReference|Communication|DiagnosticReport)\/[\w.-]+$/), ...(!remote && { confirm: z.string().optional() }) },
       annotations: { destructiveHint: true },
     },
     async ({ confirm, ...a }) => {
@@ -100,10 +100,10 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
           await record();
           return text({ recorded: 'followup', topic: a.topic, due: a.due });
         }
-        const [type, id] = a.documentRef.split('/') as ['DocumentReference' | 'Communication', string];
-        const doc = await client.readResource(type, id, { cache: 'no-cache' }).catch(() => undefined) as DocumentReference | Communication | undefined;
+        const [type, id] = a.documentRef.split('/') as ['DocumentReference' | 'Communication' | 'DiagnosticReport', string];
+        const doc = await client.readResource(type, id, { cache: 'no-cache' }).catch(() => undefined) as DocumentReference | Communication | DiagnosticReport | undefined;
         if (doc?.subject?.reference !== subject.reference) throw new GaError(`${a.documentRef} is not a document of this patient`);
-        const body = doc.resourceType === 'Communication' ? messageText(doc) : noteText(doc);
+        const body = doc.resourceType === 'Communication' ? messageText(doc) : doc.resourceType === 'DiagnosticReport' ? doc.conclusion : noteText(doc); // shortcut: report presentedForm text is not read
         if (!body) throw new GaError(`${a.documentRef} has no note text to check the quote against`);
         if (!norm(body).includes(norm(a.quote))) throw new GaError('the quote does not appear in that document');
         const view = { topic: a.topic, due: a.due, quote: a.quote, documentRef: a.documentRef };
