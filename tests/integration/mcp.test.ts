@@ -299,6 +299,18 @@ describe('purpose-built read tools', () => {
       await client.deleteResource('Medication', med.id as string);
     }
   });
+  test('current_medications: the newest Epic import comes from any record type (an EHI Encounter here)', async () => {
+    const subject = { reference: `Patient/${p}` };
+    const epic = (date: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }] });
+    const entry = [
+      { resourceType: 'MedicationStatement', status: 'active', subject, medicationCodeableConcept: { text: 'Synthetic drug D' }, ...epic('2026-11-02T00:00:00Z') },
+      { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, subject, ...epic('2026-11-03T00:00:00Z') },
+    ].map((resource) => ({ resource, request: { method: 'POST', url: resource.resourceType } }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry } as Bundle);
+    const d = (await tool('current_medications')).rows.find((r: { name: string }) => r.name === 'Synthetic drug D');
+    expect(d).toMatchObject({ currency: 'unconfirmed', reason: expect.stringContaining('2026-11-03') });
+  });
+
   test('vitals: clinic and home readings by default, Apple daily summaries only with daily', async () => {
     const cat = (code: string) => [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code }] }];
     const apple = { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] };

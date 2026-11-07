@@ -36,7 +36,7 @@ Use GA from claude.ai, ChatGPT, Gemini or Grok: see [docs/chat-apps.md](docs/cha
 ```mermaid
 flowchart LR
   you([You]) --> agent["Claude Code or any MCP agent<br/>/ga, /ga-import, /ga-lipids"]
-  agent -- "stdio MCP: lab_results, fhir_search, fhir_read,<br/>ga_import, vaccine_gaps, risk" --> mcp["ga mcp"]
+  agent -- "stdio MCP: lab_results, vitals, current meds/problems/allergies,<br/>notes_search, fhir_search, fhir_read, ga_import, vaccine_gaps, risk" --> mcp["ga mcp"]
   apps(["claude.ai, ChatGPT,<br/>Gemini, Grok"]) -- "Tailscale Funnel, /mcp" --> gateway
   agent -- "runs CLI: ga import, ga share" --> cli["ga CLI"]
   mcp --> fhir[("FHIR server<br/>Docker, local Postgres")]

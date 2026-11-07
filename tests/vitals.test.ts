@@ -34,5 +34,9 @@ test('vitals: readings query vital-signs; daily keeps only Apple summaries and s
   // No summary for the name (e.g. weight): the readings come back, labelled.
   const weight = [o('Body weight', { meta: apple })];
   const c2 = { search: async (_t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: (q.get('category') === 'vital-signs' ? weight : []).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await vitals(c2, 'p', { name: 'weight', limit: 1 })).hint).toBeUndefined();
+  const many = { search: async () => ({ resourceType: 'Bundle', entry: [weight[0], weight[0]].map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await vitals(many, 'p', { name: 'weight', limit: 1 })).hint).toBe('more results: narrow the dates or the name');
+  expect((await vitals(many, 'p', { name: 'heart rate', limit: 1 })).hint).toMatch(/use daily: true/);
   expect(await vitals(c2, 'p', { name: 'weight', daily: true })).toMatchObject({ rows: [{ name: 'Body weight', kind: 'reading' }], hint: 'no daily summaries for this; these are readings' });
 });

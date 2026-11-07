@@ -5,7 +5,7 @@ import type { Endpoint, Resource } from '@medplum/fhirtypes';
 import { currencyContext, explain, SMART_ID, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
 import { collect, fit, flagsOf } from './labs.ts';
-import { forPatient, SOURCE_ID } from './smart/sync.ts';
+import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
 export type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string };
@@ -42,24 +42,22 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,
     };
-    return [Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as ListRow];
+    return [row];
   });
   // Current first, then unconfirmed, unstated, inactive; newest first within each.
   return rows.sort((a, b) => rank(a) - rank(b) || (b.since ?? '').localeCompare(a.since ?? ''));
 }
 
-export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include?: 'all'): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {
+// eps: the patient's source Endpoints (the caller reads them once for the stale-source warning too).
+export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include: 'all' | undefined, eps: Endpoint[]): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {
   const all = (type: string, q: string[][]) => collect(client, type as 'Observation', new URLSearchParams([...q, ['_count', '1000']]), (r: Resource) => r, Infinity).then((x) => x.rows);
   const subject = ['subject', `Patient/${patientId}`];
-  // Every covered type, any status: the newest Epic import is read from their source dates.
-  // shortcut: an Epic import holding none of these four types is missed (the share scans the whole record); scan more types if that matters.
-  const [ms, mr, cond, alg, eps] = await Promise.all([
+  const [ms, mr, cond, alg, newest] = await Promise.all([
     all('MedicationStatement', [subject, ['_include', 'MedicationStatement:medication']]),
     all('MedicationRequest', [subject, ['_include', 'MedicationRequest:medication']]),
     all('Condition', [subject]),
     all('AllergyIntolerance', [['patient', `Patient/${patientId}`]]),
-    client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, { cache: 'no-cache' }),
+    newestEpicImport(client, patientId),
   ]);
-  const resources = [...ms, ...mr, ...cond, ...alg];
-  return fit(listRows(resources, currencyContext(resources, (eps as Endpoint[]).filter(forPatient(patientId))), kind, include), 1000);
+  return fit(listRows([...ms, ...mr, ...cond, ...alg], currencyContext([], eps, newest), kind, include), 1000);
 }

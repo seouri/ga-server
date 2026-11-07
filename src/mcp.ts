@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
-import type { Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -18,7 +18,7 @@ import { currentList, type Kind } from './lists.ts';
 import { vitals } from './vitals.ts';
 import { notesSearch } from './notes.ts';
 import { chatInstructions } from './instructions.ts';
-import { readStatus } from './smart/sync.ts';
+import { endpointStatus, patientEndpoints } from './smart/sync.ts';
 import { registerHospitalTools } from './tools/hospitals.ts';
 import { registerAppTools } from './tools/apps.ts';
 import { registerImportTools } from './tools/imports.ts';
@@ -154,7 +154,7 @@ export type ToolDeps = {
 };
 
 // One line per stale hospital source (SKILL.md step 0 rule, via readStatus), with the fix for this transport; undefined when none.
-export function portalWarning(sources: Awaited<ReturnType<typeof readStatus>>, remote: boolean): string | undefined {
+export function portalWarning(sources: ReturnType<typeof endpointStatus>[], remote: boolean): string | undefined {
   const stale = sources.filter((s) => s.stale);
   if (!stale.length) return undefined;
   const fix = (s: (typeof stale)[number]) =>
@@ -181,18 +181,16 @@ const STDIO_INSTRUCTIONS =
 
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
-  // Stale-source check for the read tools, cached 5 minutes; a failed check adds nothing.
-  let checked: { at: number; warning?: string } | undefined;
-  const warned = async (v: object) => {
-    if (!checked || Date.now() - checked.at > 300_000) {
-      try {
-        checked = { at: Date.now(), warning: portalWarning(await readStatus(client, patientId), !!remote) };
-      } catch {
-        checked = undefined;
-      }
+  // Stale-source check on every read tool result (one small Endpoint search; the gateway builds a server per request, so no cache).
+  const warned = async (v: object, eps = patientEndpoints(client, patientId)) => {
+    let warning: string | undefined;
+    try {
+      warning = portalWarning((await eps).map(endpointStatus), !!remote);
+    } catch {
+      warning = `Hospital connection status unknown: ${remote ? 'call hospital_status' : 'run `ga status`'}.`;
     }
     // First, so the remote cap (which cuts the end) never drops it.
-    return text(checked?.warning ? { portalWarning: checked.warning, ...v } : v);
+    return text(warning ? { portalWarning: warning, ...v } : v);
   };
   const server = new McpServer({ name: 'ga-server', version: '0.1.0' }, { instructions: remote ? chatInstructions() : STDIO_INSTRUCTIONS });
   if (remote) {
@@ -229,7 +227,9 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         b.entry = b.entry?.filter((e) => !ADMIN_TYPES.has(e.resource?.resourceType ?? ''));
         for (const e of b.entry ?? []) if (e.resource) e.resource = slim(e.resource) as typeof e.resource;
         const next = b.link?.find((l) => l.relation === 'next')?.url;
-        return warned({ ...(readable(b) as object), ...(next && { nextPage: pageToken(next) }) });
+        // nextPage first (the remote cap cuts the end); link dropped: nextPage replaces it, and its URLs carry Medplum's base.
+        const { link: _l, ...rest } = readable(b) as Bundle;
+        return warned({ ...(next && { nextPage: pageToken(next) }), ...rest });
       } catch (e) {
         return fail(e);
       }
@@ -242,7 +242,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       const no = refuseAdmin(resourceType);
       if (no) return no;
       try {
-        return text(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })));
+        return warned(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })) as object);
       } catch (e) {
         return fail(e);
       }
@@ -345,7 +345,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       },
       async ({ include }) => {
         try {
-          return warned(await currentList(client, patientId, kind, include));
+          const eps = patientEndpoints(client, patientId);
+          return warned(await currentList(client, patientId, kind, include, await eps), eps);
         } catch (e) {
           return fail(e);
         }
@@ -364,7 +365,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => text(cardiovascularRisk10yr(input)),
+    async (input) => warned(cardiovascularRisk10yr(input)),
   );
   server.registerTool(
     'vaccine_gaps',
@@ -379,7 +380,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     async ({ asOf }) => {
       try {
-        return text(await vaccineGaps(client, patientId, asOf));
+        return warned(await vaccineGaps(client, patientId, asOf));
       } catch (e) {
         return fail(e);
       }
