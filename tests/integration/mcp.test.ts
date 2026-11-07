@@ -200,3 +200,46 @@ test('ga_import of a vaccination certificate adds itself as a source of doses GA
   expect(after.identifier?.some((i) => i.system === 'urn:ga-server:id:pdf')).toBe(true);
   expect((await imms()).length).toBe(before + 1); // only the new dose was created
 });
+
+test('lab_results: labs incl. uncategorised AI-extracted, no Apple Health or vitals; name, dates, order, flags, paging', async () => {
+  const p = await createTestPatient(client);
+  try {
+    const cat = (code: string) => [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code }] }];
+    const tag = (...codes: string[]) => ({ tag: codes.map((code) => ({ system: 'urn:ga-server:tag', code })) });
+    const o = (text: string, date: string, extra: Partial<Observation> = {}): Observation =>
+      ({ resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${p}` }, code: { text }, effectiveDateTime: date, valueQuantity: { value: 5.6, unit: '%' }, ...extra });
+    const fixed = [
+      o('Hemoglobin A1c', '2023-06-01', { category: cat('laboratory') }),
+      o('HEMOGLOBIN A1C', '2024-12-31T15:00:00Z', { category: cat('laboratory'), meta: tag('possible-duplicate') }),
+      o('Glucose', '2024-03-01', { meta: tag('extracted-by-llm') }),
+      o('Hemoglobin A1c (Apple)', '2024-04-01', { category: cat('laboratory'), meta: tag('src-apple-health') }),
+      o('Body weight a1c', '2024-05-01', { category: cat('vital-signs'), meta: tag('extracted-by-llm') }),
+    ];
+    // A panel on one day, more than one 100-row page: ties must neither repeat nor go missing across pages.
+    const panel = Array.from({ length: 110 }, (_, n) => o(`Panel item ${n}`, '2022-01-01', { category: cat('laboratory') }));
+    await client.executeBatch({ resourceType: 'Bundle', type: 'batch', entry: [...fixed, ...panel].map((resource) => ({ resource, request: { method: 'POST', url: 'Observation' } })) });
+    const sub = new Client({ name: 'test', version: '0' });
+    await sub.connect(new StdioClientTransport({ command: 'node', args: [CLI, 'mcp'], env: { ...process.env, GA_PATIENT_ID: p } as Record<string, string> }));
+    const labs = async (args: Record<string, unknown>) => JSON.parse(((await sub.callTool({ name: 'lab_results', arguments: args })).content as { text: string }[])[0].text);
+    try {
+      const all = await labs({ limit: 1000 });
+      expect(all.total).toBe(113);
+      expect(all.truncated).toBeUndefined();
+      expect(new Set(all.rows.map((r: { id: string }) => r.id)).size).toBe(113);
+      expect(all.rows.slice(0, 3).map((r: { name: string }) => r.name)).toEqual(['HEMOGLOBIN A1C', 'Glucose', 'Hemoglobin A1c']);
+      expect(all.rows.some((r: { name: string }) => /Apple|weight/.test(r.name))).toBe(false);
+      expect(all.rows[0]).toMatchObject({ date: '2024-12-31', value: '5.6 %', flags: ['possible-duplicate'] });
+      expect(all.rows[1].flags).toEqual(['read from a document by AI']);
+      expect((await labs({ name: 'a1c' })).rows.map((r: { date: string }) => r.date)).toEqual(['2024-12-31', '2023-06-01']);
+      expect((await labs({ since: '2024-01-01', until: '2024-12-31' })).rows.map((r: { name: string }) => r.name)).toEqual(['HEMOGLOBIN A1C', 'Glucose']);
+      expect((await labs({ until: '2024-02-29', name: 'a1c' })).rows.map((r: { date: string }) => r.date)).toEqual(['2023-06-01']);
+      expect(await labs({ limit: 2 })).toMatchObject({ total: 2, truncated: true });
+      const bad = await sub.callTool({ name: 'lab_results', arguments: { since: '2024' } });
+      expect(bad.isError).toBe(true);
+    } finally {
+      await sub.close();
+    }
+  } finally {
+    await cleanupTestPatient(client, p);
+  }
+});
