@@ -99,10 +99,15 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     if (!item.doctorsPlan || (when(plan) && (!when(item.doctorsPlan) || when(plan)! < when(item.doctorsPlan)!))) item.doctorsPlan = plan;
   }
 
+  // A done reminder clears a plan written on or before the day the person told GA; the plan stays visible but no longer drives status or dueDate.
+  const doneAt = (i: Item) => reminders.filter((b) => b.code?.coding?.[0]?.code === 'done' && cleanName(text(b.extension?.find((e) => e.url === X.topic)) ?? '').toLowerCase() === i.topic.toLowerCase())
+    .map((b) => (b.created ?? '').slice(0, 10)).sort().pop();
   const out = items.flatMap((i) => {
-    const p = i.doctorsPlan;
+    const cleared = !!i.doctorsPlan && i.doctorsPlan.asOf <= (doneAt(i) ?? '');
+    if (cleared && i.kind === 'follow-up') i.nextMention = null;
+    const p = cleared ? undefined : i.doctorsPlan;
     // Epic's "Aged Out" says not for you: it changes nothing on a joined item and a follow-up of its own is dropped.
-    if (!p || p.status?.toLowerCase() === 'aged out') return i.status === 'not for you' || i.kind === 'follow-up' ? [] : [i];
+    if (!p || p.status?.toLowerCase() === 'aged out') return i.status === 'not for you' || (i.kind === 'follow-up' && !cleared) ? [] : [i];
     const dueDate = [i.guideline?.dueDate, p.due].filter(Boolean).sort()[0];
     if (dueDate) i.dueDate = dueDate;
     // By date, or overdue when Epic says so without a date; the dateless guideline status below keeps its meaning.
@@ -126,10 +131,6 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     if (!newest.has(topic) || when(b) > when(newest.get(topic)!)) newest.set(topic, b);
   }
   for (const i of out) {
-    // The person says they had a follow-up on or after the plan's date: it is done.
-    const doneOn = reminders.filter((b) => b.code?.coding?.[0]?.code === 'done' && cleanName(text(b.extension?.find((e) => e.url === X.topic)) ?? '').toLowerCase() === i.topic.toLowerCase())
-      .map((b) => fullDay(text(b.extension?.find((e) => e.url === X.doneDate)) ?? '')).sort().pop();
-    if (i.kind === 'follow-up' && i.doctorsPlan && doneOn && doneOn >= i.doctorsPlan.asOf) [i.status, i.nextMention] = ['done', null];
     const b = newest.get(i.topic.toLowerCase());
     const code = b?.code?.coding?.[0]?.code;
     if (!b) continue;
@@ -173,6 +174,7 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
       ...(type === 'Procedure' ? { performedDateTime: fullDay(date) } : { effectiveDateTime: fullDay(date) }) } as unknown as Resource];
   });
   const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions, ...told] }, asOf);
+  for (const g of guideline) if (g.last?.source === 'you told GA' && g.last.id) g.last.id = g.last.id.replace(/^\w+\//, 'Basic/'); // the synthetic record is the Basic
   const items = combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf);
   return { asOf, edition: rules.edition, items, upcoming: upcoming(items, asOf, months), byTheWay: byTheWay(items, asOf), note: NOTE };
 }

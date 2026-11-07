@@ -233,8 +233,16 @@ test('every screening method a done reminder can name is read back by its rule',
   }
 });
 
-test('combine: done on a follow-up counts only on or after the plan date', () => {
+test('a done reminder clears a joined plan written on or before it was told; a newer plan still applies', async () => {
   const plans = epicPlans([hm('LIPID PANEL - YEARLY', '2026-10-01', 'Overdue')]);
-  expect(run([], plans, [doneBasic('LIPID PANEL - YEARLY', '2026-10-15')])[0]).toMatchObject({ status: 'done', nextMention: null });
-  expect(run([], plans, [doneBasic('LIPID PANEL - YEARLY', '2026-09')])[0].status).toBe('overdue');
+  expect(run([], plans, [doneBasic('LIPID PANEL - YEARLY', '2026-09')])[0]).toMatchObject({ status: 'done', nextMention: null });
+  const told = (created: string) => ({ ...doneBasic('colorectal', '2024', 'colonoscopy'), created });
+  const bad = [hm('CRCS SCREENING', '2025-01-01', 'Overdue'), hm('COLORECTAL CANCER SCREENING', undefined, 'Overdue')]; // asOf 2026-10-15
+  for (const p of bad) {
+    const [i] = run([g('colorectal', 'A', 'done', '2034-01-01')], epicPlans([p]), [told('2026-11-07')], '2026-11-07');
+    expect(i).toMatchObject({ status: 'done', dueDate: '2034-01-01' });
+    expect(run([g('colorectal', 'A', 'done', '2034-01-01')], epicPlans([p]), [told('2026-10-01')], '2026-11-07')[0].status).toBe('overdue');
+  }
+  const real = (await withBasics([{ ...doneBasic('colorectal', '2024', 'colonoscopy'), created: '2026-11-07' }], '1971-01-01', 'female', '2026-11-07')).items.find((x) => x.topic === 'colorectal');
+  expect(real?.evidence[0].id).toBe('Basic/b1');
 });

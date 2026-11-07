@@ -62,7 +62,7 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
           if (kind === 'vaccine') throw new GaError('vaccines: import the vaccination record instead');
           const options = loadRules().topics.find((x) => x.id === t)?.doneBy.map((d) => d.name);
           const method = options?.find((m) => m.toLowerCase() === done.method?.trim().toLowerCase());
-          if (options && !method) throw new GaError(`method must be one of: ${options.join(', ')}`);
+          if (kind === 'screening' ? !method : options && !method) throw new GaError(`method must be one of: ${options?.join(', ')}`);
           const m = method ?? done.method;
           await write('done', t, [{ url: 'urn:ga-server:ext:done-date', valueString: done.date }, ...(m ? [{ url: 'urn:ga-server:ext:method', valueString: m }] : []),
             ...(done.where ? [{ url: 'urn:ga-server:ext:where', valueString: done.where }] : [])], `done "${t}" ${done.date}${m ? ` ${m}` : ''}${done.where ? ` at ${done.where}` : ''}${reason ? `: ${reason}` : ''}`);

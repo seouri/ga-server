@@ -128,6 +128,10 @@ describe('postpone done', () => {
       { url: 'urn:ga-server:ext:method', valueString: 'colonoscopy' }, { url: 'urn:ga-server:ext:where', valueString: 'City GI' }] });
     expect(created[1].reason[0].text).toBe('done "colorectal" 2024-05 colonoscopy at City GI: told me');
   });
+  it('refuses a screening done with no method', async () => {
+    const { call } = await setup();
+    expect((await call('postpone', { topic: 'colorectal', done: { date: '2024' } })).error).toBe(true);
+  });
   it('refuses until, dismiss, a future date and a bad date', async () => {
     const { created, call } = await setup();
     const done = { date: '2024', method: 'colonoscopy' };
