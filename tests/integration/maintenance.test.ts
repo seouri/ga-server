@@ -36,3 +36,19 @@ test('healthMaintenance joins guideline, Epic plan and reminder from the record'
   expect(c?.nextMention).toBe('2026-11-15'); // not-now 2026-11-01 + 14 days (grade A)
   expect(r.note).toMatch(/^Guideline items cite/);
 });
+
+test('postpone writes a Basic the real server accepts (Basic.created is a date)', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { buildMcpServer } = await import('../../src/mcp.ts');
+  const cfg = loadConfig();
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await buildMcpServer({ client, cfg, patientId: pid }).connect(a);
+  const mcp = new Client({ name: 'test', version: '0' });
+  await mcp.connect(b);
+  const res = await mcp.callTool({ name: 'postpone', arguments: { topic: 'colorectal', until: '2030-01-01' } });
+  expect(res.isError).toBeFalsy();
+  const [basic] = await client.searchResources('Basic', { subject: `Patient/${pid}`, code: `${REMINDER}|postpone` }, { cache: 'no-cache' });
+  expect(basic.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await mcp.close();
+});
