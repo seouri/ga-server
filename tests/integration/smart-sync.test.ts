@@ -158,16 +158,24 @@ describe('syncSource', () => {
     ]);
   });
 
-  it('an unchanged second sync creates and updates nothing and advances last-seen', async () => {
-    const binsBefore = bins(await compartment(pid));
+  it('an unchanged second sync creates and updates nothing and advances last-seen on medications and problems only', async () => {
+    const before = await compartment(pid);
+    const binsBefore = bins(before);
     expect(binsBefore).toHaveLength(1);
     const r = await syncSource(client, dir, src, pid, { now: t2 });
     expect(r.status).toBe('active');
-    expect(r.report).toMatchObject({ created: 0, updated: 0, invalid: 0 });
-    expect(r.report?.seen).toBeGreaterThan(0);
+    expect(r.report).toMatchObject({ created: 0, updated: 0, invalid: 0, seen: 3 });
     const mine = (await compartment(pid)).filter((x) => smartIds(x, src.key).length);
     expect(mine).toHaveLength(12);
-    for (const x of mine) expect(ext(x as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t2.toISOString());
+    const dated = ['MedicationRequest', 'Condition'];
+    expect(mine.filter((x) => dated.includes(x.resourceType))).toHaveLength(3);
+    for (const x of mine) {
+      if (dated.includes(x.resourceType)) expect(ext(x as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t2.toISOString());
+      else {
+        expect(ext(x as { extension?: Extension[] }, LAST_SEEN)).toBeUndefined();
+        expect(x.meta?.versionId).toBe(before.find((y) => y.id === x.id)?.meta?.versionId); // not rewritten
+      }
+    }
     expect(bins(mine)).toEqual(binsBefore);
     expect((await readStatus(client, pid))[0].lastSuccess).toBe(t2.toISOString());
   });
@@ -305,6 +313,27 @@ describe('syncAll', () => {
     expect(ext(ep, 'urn:ga-server:ext:smart-last-success')).toBeUndefined();
     expect(await compartment(pid)).toEqual([]);
     expect(await readStatus(client, pid, dir)).toEqual([{ source: src.key, name: 'New Hospital', status: 'off', error: 'invalid_grant', stale: true, enabledTypes: [] }]);
+  });
+});
+
+describe('a cut-short fetch', () => {
+  it('a 429 fails the sync: Endpoint error, last success and last-seen stay where they were', async () => {
+    const pid = await newPatient();
+    const { publicJwks } = await ensureKeys(dir);
+    const mock = await startMock({ clientId, jwks: publicJwks });
+    serveFixtures(mock);
+    const src: SourceRec = { key: newKey('cut'), name: 'Cut Hospital', fhirBase: mock.fhirBase, patient: P, enabledTypes: ['MedicationRequest'] };
+    fresh(src.key, mock);
+    const t1 = new Date(Date.now() - 60_000);
+    expect((await syncSource(client, dir, src, pid, { now: t1 })).status).toBe('active');
+    mock.route('/fhir/MedicationRequest', (_q, res) => void res.writeHead(429).end());
+    expect(await syncSource(client, dir, src, pid)).toEqual({ source: src.key, status: 'error', error: 'fetch_error' });
+    await mock.close();
+    const [ep] = await endpoints(src.key);
+    expect(ep.status).toBe('error');
+    expect(ext(ep, 'urn:ga-server:ext:smart-last-success')?.valueDateTime).toBe(t1.toISOString());
+    const [mr] = (await compartment(pid)).filter((x) => x.resourceType === 'MedicationRequest');
+    expect(ext(mr as { extension?: Extension[] }, LAST_SEEN)?.valueDateTime).toBe(t1.toISOString());
   });
 });
 

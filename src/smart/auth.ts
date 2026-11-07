@@ -1,5 +1,5 @@
 // SMART standalone launch: PKCE S256 + state, private_key_jwt (RS384), rotating refresh tokens.
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { closeSync, openSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -9,6 +9,7 @@ import { GaError } from '../config.ts';
 import { deleteSecret, loadSecret, readSources, saveSecret, signingKey, writeSources } from './store.ts';
 import type { SourceRec } from './store.ts';
 import type { SyncResult } from './sync.ts';
+import { sha256 as hash } from '../identity.ts';
 
 export type Tokens = { access_token: string; refresh_token?: string; expires_at: number; patient: string; scope?: string };
 
@@ -161,7 +162,6 @@ export async function connect(
 }
 
 // Login in two halves through encrypted files, so the process that receives the redirect (the gateway) need not be the one that started it.
-const hash = (state: string): string => createHash('sha256').update(state).digest('hex');
 export const pendingName = (state: string): string => `pending-${hash(state)}`;
 export const resultName = (state: string): string => `result-${hash(state)}`;
 export type LoginResult = { source: SourceRec; result: SyncResult } | { error: string; fhirBase: string };

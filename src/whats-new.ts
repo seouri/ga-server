@@ -2,17 +2,17 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
-import { hasTag } from './engine.ts';
-import { arrivedAt, TAG } from './identity.ts';
+import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { collect, fit, groupLabs, highLow, labRow } from './labs.ts';
-import { concept, listRows, loadLists } from './lists.ts';
+import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
+import { concept, listRows, loadLists, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
+import { addDays } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
 
@@ -41,10 +41,9 @@ export function clinicalDate(r: Resource): string | undefined {
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 }
 
-const daysBefore = (asOf: string, n: number) => new Date(Date.parse(asOf) - n * 864e5).toISOString().slice(0, 10);
 
 export function tally(arrived: Resource[], asOf: string) {
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const byKind: Partial<Record<Kind, number>> = {};
   const sources = new Set<string>();
   let historical = 0, noRangeGiven = 0;
@@ -70,11 +69,15 @@ const TYPES: [Resource['resourceType'], 'subject' | 'patient'][] = [
 ];
 
 // Records without the arrival extension predate tracking and are never returned.
+// Apple Health readings are most records and only counted (tally reads these fields), so they come back as a subset.
+const APPLE_FIELDS = 'meta,extension,identifier,effectiveDateTime,effectivePeriod,issued';
 export async function arrivedSince(client: MedplumClient, patientId: string, since: string): Promise<Resource[]> {
   const out: Resource[] = [];
+  const apple = `${TAG}|src-apple-health`;
   for (const [type, param] of TYPES) {
-    const q = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' };
-    for await (const page of client.searchResourcePages(type as 'Observation', q, { cache: 'no-cache' })) out.push(...page.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
+    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}` };
+    const qs = type === 'Observation' ? [{ ...base, '_tag:not': apple }, { ...base, _tag: apple, _elements: APPLE_FIELDS }] : [base];
+    for (const q of qs) out.push(...(await searchAll(client, type as ResourceType, q)).filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
   }
   return out;
 }
@@ -100,7 +103,7 @@ export type ReviewItem = {
 };
 
 export function labItems(arrived: Observation[], allLabs: Observation[], asOf: string): ReviewItem[] {
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const groups = groupLabs(allLabs);
   return arrived.flatMap((o): ReviewItem[] => {
     const flag = highLow(o), date = clinicalDate(o);
@@ -128,7 +131,6 @@ const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
   return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
 };
 const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);
-const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
 // all: every medication record (any source) plus the Medication resources they reference.
 // A first-import burst lists only active drugs or ones dated within a year; older ones stay in the tally.
@@ -136,7 +138,7 @@ export function medicationItems(arrived: Resource[], all: Resource[], since: str
   const meds = medMap(all);
   const keysOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKeys(cc, owner); };
   const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).flatMap(keysOf));
-  const cutoff = daysBefore(asOf, 365);
+  const cutoff = addDays(asOf, -365);
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
     const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
@@ -164,11 +166,13 @@ export async function statusItems(client: MedplumClient, patientId: string, sinc
   const changed: { type: 'Condition'; r: Resource; kind: ReviewItem['kind']; from: string; to: string }[] = [];
   for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
     for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
-      for (const r of page) {
+      // Every portal medication and problem is rewritten on each sync (last-seen): read their histories a few at a time.
+      const found = await pool(page, 5, async (r) => {
         const prev = await versionBefore(client, type as 'Condition', r.id as string, since);
         const from = prev && statusOf(prev), to = statusOf(r);
-        if (from && to && from !== to) changed.push({ type: type as 'Condition', r, kind, from, to });
-      }
+        return from && to && from !== to ? [{ type: type as 'Condition', r, kind, from, to }] : [];
+      });
+      changed.push(...found.flat());
     }
   }
   const meds = medMap(await all);
@@ -218,7 +222,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const now = new Date();
   const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
   const stored = opts.since ? undefined : readLastSeen(opts.dir);
-  const since = opts.since ?? stored ?? daysBefore(asOf, 90);
+  const since = opts.since ?? stored ?? addDays(asOf, -90);
   const subject = `Patient/${patientId}`;
   const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
   const listsP = eps.then((e) => loadLists(client, patientId, e));

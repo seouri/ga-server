@@ -1,9 +1,8 @@
 // Hospital (Epic SMART) tools for chat apps (remote servers only). The login itself finishes at the gateway's /callback (completeLogin).
-import { isDeepStrictEqual } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
-import { preview, takeConfirmed } from '../confirm.ts';
+import { CONFIRM_ON_PAGE, previewLink } from '../confirm.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { checkTypes, disconnectSource, enableTypes, listLogins } from '../smart/actions.ts';
 import { startLogin } from '../smart/auth.ts';
@@ -65,26 +64,26 @@ export function registerHospitalTools(server: McpServer, deps: ToolDeps, dir = s
     'hospital_enable',
     {
       description:
-        'Enable record types to sync from a source. Two steps: call without confirm to see what the portal returned for those types, show it to the user ' +
-        '(enable only types that are new to GA or link to what it holds; a type GA already holds from Epic C-CDA/EHI likely duplicates), and only after they agree call again ' +
-        'with the same arguments plus confirm. types: type names or "all".',
-      inputSchema: { source: z.string(), types: z.union([z.literal('all'), z.array(z.string())]), confirm: z.string().optional() },
+        `Enable record types to sync from a source. ${CONFIRM_ON_PAGE} The preview shows what the portal returned for those types ` +
+        '(enable only types that are new to GA or link to what it holds; a type GA already holds from Epic C-CDA/EHI likely duplicates). ' +
+        'Confirming enables them and syncs; then hospital_status shows the result. types: type names or "all".',
+      inputSchema: { source: z.string(), types: z.union([z.literal('all'), z.array(z.string())]) },
       annotations: { destructiveHint: true },
     },
-    async ({ source, types, confirm }: { source: string; types: string[] | 'all'; confirm?: string }) => {
+    async ({ source, types }: { source: string; types: string[] | 'all' }) => {
       try {
         const src = find(source);
         const want = checkTypes(types);
-        const args = { source: src.key, types: want };
-        if (!confirm) {
-          const done = listLogins(dir).find((l) => l.sourceKey === src.key && l.fetched);
-          const fetched = done?.fetched ?? (await sync(client, dir, src, patientId, { dryRun: true })).fetched ?? {};
-          return text({ source: src.key, types: want, fetched: Object.fromEntries(want.map((t) => [t, fetched[t] ?? 0])), ...preview('enable', args) });
-        }
-        if (!isDeepStrictEqual(takeConfirmed<typeof args>('enable', confirm), args)) throw new GaError('arguments changed since the preview; ask for a new preview');
-        const rec = enableTypes(dir, src.key, want);
-        for (const l of listLogins(dir)) if (l.sourceKey === src.key) deleteSecret(dir, l.name); // its dry run is out of date now
-        return text(await sync(client, dir, rec, patientId));
+        const done = listLogins(dir).find((l) => l.sourceKey === src.key && l.fetched);
+        const fetched = done?.fetched ?? (await sync(client, dir, src, patientId, { dryRun: true })).fetched ?? {};
+        const view = { source: src.key, types: want, fetched: Object.fromEntries(want.map((t) => [t, fetched[t] ?? 0])) };
+        const run = async () => {
+          const rec = enableTypes(dir, src.key, want);
+          for (const l of listLogins(dir)) if (l.sourceKey === src.key) deleteSecret(dir, l.name); // its dry run is out of date now
+          const r = await sync(client, dir, rec, patientId);
+          return { done: `Enabled ${want.join(', ')} for ${src.key}. Sync: ${r.status}${r.error ? ` (${r.error})` : ''}.` };
+        };
+        return text({ ...view, ...previewLink(remote.publicUrl, { title: 'Enable hospital record types', view, run }) });
       } catch (e) {
         return fail(e);
       }

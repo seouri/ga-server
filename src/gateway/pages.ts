@@ -1,4 +1,4 @@
-// Gateway pages: owner sign-in, consent, passkey enrollment, file upload, hospital login return. Every interpolated value goes through esc;
+// Gateway pages: owner sign-in, consent, passkey enrollment, file upload, confirming a chat app's preview, hospital login return. Every interpolated value goes through esc;
 // the one script per page carries a nonce and calls only WebAuthn and this origin.
 import { doc, esc } from '../share/page.ts';
 
@@ -41,9 +41,16 @@ export const enrollPage = (nonce: string, options: unknown): string =>
   doc('Save a passkey for GA', `<h1>Save a passkey for GA</h1><p>This passkey signs you in when a chat app connects to GA.</p><button id="go">Save passkey</button>` +
     ceremony(nonce, options, 'navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(OPTIONS) })', ''));
 
-export const consentPage = (app: string, uid: string): string =>
+// Registration is open: the redirect host and the registration age let the owner spot a connect they did not start.
+const ago = (ms: number): string => {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  return m < 120 ? `${m} minute${m === 1 ? '' : 's'}` : m < 2880 ? `${Math.round(m / 60)} hours` : `${Math.round(m / 1440)} days`;
+};
+export const consentPage = (app: string, uid: string, redirectHost: string, registeredMsAgo: number): string =>
   doc('Allow access to GA', `<h1>${esc(app)} wants to use your GA record</h1>
 <p>It can read your health records, import documents, and manage shares and hospital connections. You can disconnect it at any time.</p>
+<p>Access goes to <strong>${esc(redirectHost)}</strong>. This app registered with GA ${ago(registeredMsAgo)} ago.</p>
+<p><strong>Only allow if you just clicked Connect in this app.</strong></p>
 <form method="post" action="/interaction/${esc(uid)}/consent"><button name="decision" value="allow">Allow</button> <button name="decision" value="deny">Deny</button></form>`);
 
 export const uploadInvalid = (): string => msg('Link not valid', 'This upload link is no longer valid. Ask your chat for a new one.');
@@ -67,3 +74,18 @@ document.getElementById('go').addEventListener('click', async () => {
   }
 });
 </script>`);
+
+export const confirmInvalid = (): string => msg('Link not valid', 'This confirmation link is no longer valid. Ask your chat for a new preview.');
+
+// A plain form post: no script, and the SameSite=Lax owner cookie never rides a cross-site post.
+export const confirmPage = (title: string, view: Record<string, unknown>, path: string): string =>
+  doc(title, `<h1>${esc(title)}</h1><p>Your chat app asked for this. Confirm only if you asked for it.</p><dl>${Object.entries(view)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'string' ? v : JSON.stringify(v))}</dd>`)
+    .join('')}</dl>
+<form method="post" action="${esc(path)}"><button>Confirm</button></form>`);
+
+export const confirmDone = (r: { done: string; link?: string; qr?: string }): string =>
+  doc('Done', `<h1>${esc(r.done)}</h1>${r.link ? `<p><a href="${esc(r.link)}">${esc(r.link)}</a></p>` : ''}${r.qr ? `<p><img src="${esc(r.qr)}" alt="QR code of the link"></p>` : ''}<p>You can close this window and return to your chat.</p>`);
+
+export const confirmFailed = (why: string): string => msg('Not done', `That did not work: ${why}`);

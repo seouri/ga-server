@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
@@ -9,8 +8,9 @@ import { z } from 'zod';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
+import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
-import { type SourceInfo, stableIdentifier } from './identity.ts';
+import { sha256, type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
@@ -80,7 +80,7 @@ export async function importExtracted(
     }
   }
   // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates.
-  const hash = createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
+  const hash = sha256(readFileSync(sourceFile));
   const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
   if (seen) throw new GaError(`already imported: ${basename(sourceFile)} (if that import failed, delete DocumentReference/${seen.id} to retry)`);
   const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
@@ -97,7 +97,7 @@ export async function importExtracted(
     if (m) await client.updateResource<Immunization>({ ...m, identifier: [...(m.identifier ?? []), stableIdentifier(imms[n], source, fileHash, patientId)] });
   }
   const paired = new Set(imms.filter((_, n) => pairs[n]));
-  const report = await importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash);
+  const report = await withImportLock(() => importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash));
   report.merged += paired.size;
   return report;
 }
@@ -182,7 +182,7 @@ const STDIO_INSTRUCTIONS =
         'answer with one line naming it, its last success and the fix: `ga connect <its address>` when off (error disconnected: the user disconnected it on purpose, say so; error not_enabled: no types enabled yet, nothing synced from it, fix `ga sync --enable <Type,...> <source>`), else `ga sync`. ' +
         'Medications (and problems, allergies) from a portal: current only if active and its urn:ga-server:ext:last-seen equals the smart-last-success ' +
         'of the Endpoint whose identifier value is the <key> in its urn:ga-server:id:smart:<key> identifier (any of them, if several); otherwise unconfirmed (may have stopped). ' +
-        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest Epic import is unconfirmed. ' +
+        'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest C-CDA or EHI import, or than the newest sync of a portal with that record type in its urn:ga-server:ext:smart-enabled-types (MedicationStatement and MedicationRequest count as one), is unconfirmed. ' +
         'health_summary is the one-call snapshot to start with; current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results (summary: true for trends), vitals vital signs, notes_search the text of notes and messages.';
 
 export function buildMcpServer(deps: ToolDeps): McpServer {

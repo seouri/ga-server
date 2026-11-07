@@ -31,7 +31,13 @@ function sourceResolver(client: MedplumClient, patientId: string, maps: () => Ma
   const orgs = new Map<string, Promise<{ org?: string } | undefined>>();
   const orgOf = (file: string) => {
     const find = async () => {
-      docs ??= client.searchResources('DocumentReference', { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', _count: '1000' }, { cache: 'no-cache' });
+      // Only C-CDA files, every page: an install with over 1000 stored files must still find each custodian.
+      docs ??= (async () => {
+        const out: DocumentReference[] = [];
+        const q = { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml', _sort: '_lastUpdated', _count: '1000' };
+        for await (const page of client.searchResourcePages('DocumentReference', q, { cache: 'no-cache' })) out.push(...page);
+        return out;
+      })();
       const mine = (await docs).filter((d) => d.content?.[0]?.attachment?.title === basename(file) && d.content[0].attachment.url);
       const names = new Set<string | undefined>();
       for (const d of mine) names.add(custodian(await (await client.download(d.content?.[0].attachment?.url as string)).text()));
@@ -75,7 +81,8 @@ export async function* scan(client: MedplumClient, patientId: string, types: str
   }
 }
 
-export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
+// review: only records up for review (unmapped or suggested), for a term first mapped now; a correction re-reads every record of the source.
+export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string; review?: boolean } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
   let maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
   // A write onto a record a person last changed would make GA its author and drop the person-edit protection (engine decide/protect): leave those.
@@ -110,7 +117,8 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
   };
   const kind = opts.source?.split(':')[0];
   const n = { scanned: 0, matched: 0, coded: 0, suggested: 0, unmapped: 0, changed: 0 };
-  for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES, kind ? { _tag: `${TAG}|src-${kind}` } : {})) {
+  const only: Record<string, string> = opts.review ? { _tag: `${TAG}|concept-unmapped,${TAG}|concept-suggested` } : kind ? { _tag: `${TAG}|src-${kind}` } : {}; // infoOf still checks the source
+  for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES, only)) {
     for (const r of page) {
       n.scanned++;
       if (opts.source && termKey(r) !== opts.key) continue; // before infoOf: no source file is read for other terms

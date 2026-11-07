@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Identifier, Resource } from '@medplum/fhirtypes';
-import { APPLE } from '../identity.ts';
+import { APPLE, sha256 as sha } from '../identity.ts';
 import { appleDate, type AhClinical } from './read.ts';
-import { sha, SUBJECT } from './readings.ts';
+import { SUBJECT } from './readings.ts';
 
 // Replace every Reference with its display only (hospital ids mean nothing in GA); no display -> dropped.
 function stripRefs(v: unknown): unknown {

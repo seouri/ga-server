@@ -5,9 +5,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
+import { searchAll, validDay } from './labs.ts';
 import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
-import { TAG } from './engine.ts';
+import { TAG } from './identity.ts';
 
 type Match = { cvx: string[]; names: string[] };
 type Rule = {
@@ -142,19 +143,13 @@ export function doseOf(i: Immunization): Dose {
 
 // Reads the patient's own GA data so values never pass through the agent.
 export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || Number.isNaN(Date.parse(asOf)) || !new Date(asOf).toISOString().startsWith(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
+  if (!validDay(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
-  // Every page: a patient can hold more than one page of Observations. _sort=_lastUpdated (ascending, _count >= 20) makes Medplum
-  // page by _cursor instead of _offset, which it caps at 10000.
-  const all = async (type: 'Immunization' | 'Observation', q: Record<string, string>) => {
-    const out: unknown[] = [];
-    for await (const page of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
-    return out;
-  };
+  const all = (type: 'Immunization' | 'Observation', q: Record<string, string>) => searchAll(client, type, q);
   const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
-  const obs = ((await all('Observation', { subject: `Patient/${patientId}` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
+  const obs = ((await all('Observation', { subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
   const immunizations = imms.map(doseOf);
   const immunity = obs.flatMap((o) => {
     const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;

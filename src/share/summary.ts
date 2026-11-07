@@ -2,7 +2,7 @@
 import { basename } from 'node:path';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
 import { currency, currencyContext, type Ctx } from '../current.ts';
-import { hasTag } from '../engine.ts';
+import { hasTag } from '../identity.ts';
 import { BINARY_URL, dateOf, groupOf, hasCategory, trimPatient } from './scope.ts';
 import type { Scoped } from './scope.ts';
 

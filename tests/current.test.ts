@@ -1,17 +1,17 @@
 import { expect, test } from 'vitest';
-import type { Endpoint, MedicationStatement, Observation } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Endpoint, MedicationStatement, Observation } from '@medplum/fhirtypes';
 import { currency, currencyContext } from '../src/current.ts';
 
 const T1 = '2026-11-01T00:00:00Z';
 const T0 = '2026-10-01T00:00:00Z';
-const ep = (key: string, last: string): Endpoint => ({
+const ep = (key: string, last: string, types = 'MedicationRequest,Condition'): Endpoint => ({
   resourceType: 'Endpoint',
   status: 'active',
   connectionType: { code: 'hl7-fhir-rest' },
   payloadType: [{ text: 'x' }],
   address: 'https://x.example/fhir',
   identifier: [{ system: 'urn:ga-server:id:smart-source', value: key }],
-  extension: [{ url: 'urn:ga-server:ext:smart-last-success', valueDateTime: last }],
+  extension: [{ url: 'urn:ga-server:ext:smart-last-success', valueDateTime: last }, { url: 'urn:ga-server:ext:smart-enabled-types', valueString: types }],
 });
 const med = (o: { seen?: string; date?: string; keys?: string[]; status?: 'active' | 'stopped'; tag?: string }): MedicationStatement => ({
   resourceType: 'MedicationStatement',
@@ -43,6 +43,16 @@ test('no last-seen: source-date vs newest import', () => {
 test('newest import also counts tagged resources', () => {
   const c = currencyContext([med({ date: '2026-12-01T00:00:00Z', tag: 'src-ehi' })], [ep('a', T1)]);
   expect(currency(med({ date: T1 }), c)).toBe('unconfirmed');
+});
+test('a portal sync raises the cutoff only for the types it syncs; its medication list covers MedicationStatement too', () => {
+  const labsOnly = currencyContext([], [ep('a', T1, 'Observation')]);
+  const allergy = { resourceType: 'AllergyIntolerance', clinicalStatus: { coding: [{ code: 'active' }] }, patient: { reference: 'Patient/p' }, extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: T0 }] } as AllergyIntolerance;
+  expect(currency(allergy, labsOnly)).toBe('current');
+  expect(currency(med({ date: T0 }), labsOnly)).toBe('current');
+  expect(currency(med({ date: T0 }), currencyContext([], [ep('a', T1, 'MedicationRequest')]))).toBe('unconfirmed');
+  expect(currency(allergy, currencyContext([], [ep('a', T1, 'MedicationRequest')]))).toBe('current');
+  // A portal record's own date is no whole-record import.
+  expect(currency(med({ date: T0 }), currencyContext([med({ date: T1, tag: 'src-smart' })], []))).toBe('current');
 });
 test('inactive and uncovered types are undefined', () => {
   expect(currency(med({ status: 'stopped', seen: T1, keys: ['a'] }), ctx)).toBeUndefined();

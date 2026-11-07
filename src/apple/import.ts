@@ -3,6 +3,8 @@ import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import { GaError, type GaConfig } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
+import { sorted } from '../identity.ts';
+import { withImportLock } from '../lock.ts';
 import { mapClinical, mapEcgs } from './clinical.ts';
 import { Daily } from './daily.ts';
 import { type AhClinical, readExport } from './read.ts';
@@ -12,10 +14,8 @@ const TAGGED = 'urn:ga-server:tag|src-apple-health';
 // Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id) and the search param naming the patient.
 const TYPES: [string, string][] = [['Observation', 'subject'], ['DocumentReference', 'subject']];
 
-const canon = (v: unknown): unknown =>
-  Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canon(x)])) : v;
 const projection = (r: Record<string, unknown>) =>
-  JSON.stringify(canon({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }));
+  JSON.stringify({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }, sorted);
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
 // Medplum refuses search offsets past 10000 ("Search offset exceeds maximum", measured), and a real export is far larger,
@@ -86,7 +86,7 @@ export async function importAppleHealth(
     if (same) unchanged++;
     return !same;
   });
-  const report = await importResources(client, rest, { kind: 'apple-health', file: dir, date: exportDate, writer: 'importer' }, patientId, '');
+  const report = await withImportLock(() => importResources(client, rest, { kind: 'apple-health', file: dir, date: exportDate, writer: 'importer' }, patientId, ''));
   const skips = { nested, archiveOnly, ...rd.skips, ...dl.skips, ...cl.skips, ...ecg.skips };
   return { ...report, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips };
 }

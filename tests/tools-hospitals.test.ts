@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MedplumClient } from '@medplum/core';
+import { takeConfirmPage } from '../src/confirm.ts';
 import { registerHospitalTools } from '../src/tools/hospitals.ts';
 import { resultName } from '../src/smart/auth.ts';
 import { readApp, readSources, saveSecret, writeApp, writeSources } from '../src/smart/store.ts';
@@ -46,16 +47,16 @@ describe('hospital tools', () => {
     const ok = await setup({ clientId: 'c', redirectUri: 'https://x.example/callback' });
     expect((await ok.call('hospital_connect', { fhirBase: src.fhirBase })).json.url).toMatch(/^https:/);
   });
-  it('enable previews without writing, then confirm sets types and syncs', async () => {
+  it('enable previews without writing; only the page confirm sets types and syncs', async () => {
     const { dir, call, calls } = await setup();
     const p = await call('hospital_enable', { source: src.key, types: ['Condition', 'Procedure'] });
     expect(p.json.fetched).toEqual({ Condition: 4, Procedure: 0 });
     expect(readSources(dir)[0].enabledTypes).toBeUndefined();
-    const bad = await call('hospital_enable', { source: src.key, types: ['Condition'], confirm: p.json.confirm });
-    expect(bad.msg).toContain('arguments changed');
-    const p2 = await call('hospital_enable', { source: src.key, types: ['Condition', 'Procedure'] });
-    const r = await call('hospital_enable', { source: src.key, types: ['Condition', 'Procedure'], confirm: p2.json.confirm });
-    expect(r.isError).toBeUndefined();
+    const code = p.json.confirmUrl.split('/').pop();
+    await call('hospital_enable', { source: src.key, types: ['Condition', 'Procedure'], confirm: code }); // the agent cannot confirm
+    expect(readSources(dir)[0].enabledTypes).toBeUndefined();
+    const r = await takeConfirmPage(code)!.run();
+    expect(r.done).toContain('Enabled Condition, Procedure');
     expect(readSources(dir)[0].enabledTypes).toEqual(['Condition', 'Procedure']);
     expect(calls).toEqual(['dry', 'dry', 'real']);
   });

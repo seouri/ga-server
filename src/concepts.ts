@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { Coding } from '@medplum/fhirtypes';
+import type { CodeableConcept, Coding } from '@medplum/fhirtypes';
 
 export const LOINC = 'http://loinc.org';
 export const CVX = 'http://hl7.org/fhir/sid/cvx';
@@ -51,3 +51,6 @@ export const cvxFor = (name: string): Coding | undefined => {
   return v && { system: CVX, code: v.code, display: v.short };
 };
 export const cvxShort = (code: string): string | undefined => cvx.find((x) => x.code === code)?.short;
+
+// A code (or, uncoded, its text) of a vital concept: an uncategorised PDF result read as a vital sign, not a lab.
+export const isVitalCode = (code: CodeableConcept | undefined): boolean => (conceptOf(code?.coding)?.concept ?? conceptNamed(code?.text ?? ''))?.kind === 'vital';

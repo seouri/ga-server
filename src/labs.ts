@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, Observation, Quantity, Resource, ResourceType } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { termKey } from './conceptmap.ts';
-import { type Concept, codesFor, concepts, conceptNamed, conceptOf, LOINC } from './concepts.ts';
+import { type Concept, codesFor, concepts, conceptNamed, conceptOf, isVitalCode, LOINC } from './concepts.ts';
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
 
@@ -48,7 +48,7 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   };
 }
 
-const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
+export const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
 
 // since/until (YYYY-MM-DD, inclusive) as repeated date params; le<day> would drop results later on that day, so lt the next day.
 export function dateRange(q: URLSearchParams, param: string, since?: string, until?: string): void {
@@ -59,6 +59,13 @@ export function dateRange(q: URLSearchParams, param: string, since?: string, unt
 
 // Reads pages until more than `limit` rows are kept (row() returns undefined to skip) or `scan` records were read.
 // more: rows or pages were left unread.
+// Every page of a search. _sort=_lastUpdated (ascending, _count >= 20) makes Medplum page by _cursor: it caps _offset at 10000.
+export async function searchAll(client: MedplumClient, type: ResourceType, q: Record<string, string>): Promise<Resource[]> {
+  const out: Resource[] = [];
+  for await (const page of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
+  return out;
+}
+
 export async function collect<T extends Resource, R>(
   client: MedplumClient, type: ResourceType, q: URLSearchParams, row: (r: T) => R | undefined, limit: number, scan = Infinity,
 ): Promise<{ rows: R[]; more: boolean }> {
@@ -190,8 +197,8 @@ export async function labResults(
   const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
   if (name && !key) q.append('code:text', name);
   dateRange(q, 'date', since, until);
-  // An extracted result with some other category (e.g. a vital sign) is not a lab.
-  const isLab = (o: Observation) => !o.category?.length || o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory'));
+  // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
+  const isLab = (o: Observation) => (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
   const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
   if (summary || key) {
     // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.

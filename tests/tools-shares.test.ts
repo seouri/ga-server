@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MedplumClient } from '@medplum/core';
+import { takeConfirmPage } from '../src/confirm.ts';
 import { registerShareTools } from '../src/tools/shares.ts';
 import { listShares } from '../src/share/store.ts';
 
@@ -24,25 +25,29 @@ const setup = async () => {
   return { dir, call };
 };
 const args = { audience: 'family', label: 'Mom', scope: ['labs'] };
+// The person pressing Confirm on the gateway page.
+const confirmOnPage = (p: { json: { confirmUrl: string } }) => takeConfirmPage(p.json.confirmUrl.split('/').pop()!)!.run();
 
 describe('share tools', () => {
-  it('preview shows the exact expiry and confirm creates the same one', async () => {
+  it('preview shows the exact expiry and confirming creates the same one', async () => {
     const { dir, call } = await setup();
     const p = await call('share_create', { ...args, expires: '1d' });
     expect(Math.abs(Date.parse(p.json.expires) - Date.now() - 864e5)).toBeLessThan(5000);
     expect((await call('share_create', args)).json.expires).toBe('never');
-    await call('share_create', { ...args, expires: '1d', confirm: p.json.confirm });
+    await confirmOnPage(p);
     expect(listShares(dir)[0].expires).toBe(p.json.expires);
   });
-  it('preview creates nothing; confirm creates one share at publicUrl with a QR', async () => {
+  it('preview creates nothing; the page confirm creates one share at publicUrl with a QR', async () => {
     const { dir, call } = await setup();
     const p = await call('share_create', args);
     expect(p.json.scope).toBe('labs');
+    expect(p.json.confirmUrl).toMatch(/^https:\/\/x\.example\/confirm\/[A-Za-z0-9_-]{43}$/);
+    expect(p.json.confirm).toBeUndefined();
     expect(listShares(dir)).toEqual([]);
     expect(readdirSync(dir)).toEqual([]);
-    const r = await call('share_create', { ...args, confirm: p.json.confirm });
-    expect(r.json.link).toMatch(/^https:\/\/x\.example\/s\/.+/);
-    expect(r.content.some((c) => c.type === 'image')).toBe(true);
+    const r = await confirmOnPage(p);
+    expect(r.link).toMatch(/^https:\/\/x\.example\/s\/.+/);
+    expect(r.qr).toMatch(/^data:image\/png;base64,/);
     const all = listShares(dir);
     expect(all).toHaveLength(1);
     expect(all[0].baseUrl).toBe('https://x.example');
@@ -53,22 +58,17 @@ describe('share tools', () => {
     expect(Date.parse(p.json.expires) - Date.now()).toBeGreaterThan(7 * 864e5 - 5000);
     expect(Date.parse(p.json.expires) - Date.now()).toBeLessThanOrEqual(7 * 864e5);
   });
-  it('refuses changed arguments and reused codes', async () => {
+  it('the agent cannot confirm: the code from the link creates nothing in a tool call', async () => {
     const { dir, call } = await setup();
     const p = await call('share_create', args);
-    const bad = await call('share_create', { ...args, label: 'Dad', confirm: p.json.confirm });
-    expect(bad.isError).toBe(true);
-    expect(bad.msg).toContain('arguments changed since the preview');
+    const code = p.json.confirmUrl.split('/').pop();
+    const again = await call('share_create', { ...args, confirm: code });
+    expect(again.json?.link).toBeUndefined();
     expect(listShares(dir)).toEqual([]);
-    const p2 = await call('share_create', args);
-    expect((await call('share_create', { ...args, confirm: p2.json.confirm })).isError).toBeUndefined();
-    expect((await call('share_create', { ...args, confirm: p2.json.confirm })).isError).toBe(true);
-    expect(listShares(dir)).toHaveLength(1);
   });
   it('revoke shows in list; log works', async () => {
     const { call } = await setup();
-    const p = await call('share_create', args);
-    await call('share_create', { ...args, confirm: p.json.confirm });
+    await confirmOnPage(await call('share_create', args));
     const [row] = (await call('share_list')).json;
     expect(row.status).toBe('active');
     expect(row.accesses).toBe(0);

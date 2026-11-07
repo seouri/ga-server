@@ -24,6 +24,11 @@ test('one all-day event per item still on the list, topic names only', () => {
   expect(s).not.toMatch(/DESCRIPTION|AAA|Zoster|Prostate|Lung|Partial/);
 });
 
+test('an item put off until after today is left out until then', () => {
+  expect(events(ics([item('a', 'Hep B', 'overdue', '2026-01-01', '2026-11-20')]))).toHaveLength(0);
+  expect(events(ics([item('a', 'Hep B', 'overdue', '2026-01-01', '2026-11-07')]))).toHaveLength(1);
+});
+
 test('overdue items, and due items with no date, sit on today; UIDs differ per topic', () => {
   const s = ics([item('a', 'Hep B', 'overdue', '2026-01-01'), item('b', 'Hep-B', 'overdue'), item('c', 'HIV', 'due')]);
   expect(events(s).map((e) => /DTSTART;VALUE=DATE:(\d+)/.exec(e)?.[1])).toEqual(['20261107', '20261107', '20261107']);

@@ -11,17 +11,22 @@ export type SourceInfo = {
   llm?: boolean;
   dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
-  seenAt?: string; // stamp/refresh LAST_SEEN on every record this import touches or skips
+  seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
 };
+// On the Patient: the newest source date of any C-CDA or EHI import, so list reads need not scan every Epic record (src/share/scope.ts newestEpicImport).
+export const NEWEST_IMPORT = 'urn:ga-server:ext:newest-epic-import';
 export const LAST_SEEN = 'urn:ga-server:ext:last-seen';
+// Medications, problems and allergies: the records the currency rule (src/current.ts) dates, and the only ones that carry LAST_SEEN.
+export const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 // The instant GA first stored a record; set on create only and kept by every later write.
 export const ARRIVED = 'urn:ga-server:ext:arrived';
 export const arrivedAt = (r: Resource): string | undefined => (r as Resource & { extension?: Extension[] }).extension?.find((e) => e.url === ARRIVED)?.valueInstant;
 
-const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+export const sha256 = (s: string | Buffer): string => createHash('sha256').update(s).digest('hex');
 export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
+export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
@@ -39,7 +44,18 @@ export function contentKey(o: Observation): string | undefined {
   return code && day ? `${code}|${day}` : undefined;
 }
 
-const sorted = (_k: string, v: unknown) =>
+// Same calendar day, read in a's own offset: 2024-03-01T19:30-05:00 and 2024-03-02T00:30Z are one day. A side without a time
+// or offset compares as written.
+export function sameDay(a: string, b: string): boolean {
+  const off = /(Z|([+-])(\d\d):(\d\d))$/.exec(a);
+  const t = Date.parse(b);
+  if (a.length <= 10 || b.length <= 10 || !off || Number.isNaN(t)) return a.slice(0, 10) === b.slice(0, 10);
+  const mins = off[1] === 'Z' ? 0 : (off[2] === '-' ? -1 : 1) * (Number(off[3]) * 60 + Number(off[4]));
+  return new Date(t + mins * 60_000).toISOString().slice(0, 10) === a.slice(0, 10);
+}
+
+// JSON.stringify replacer: object keys in sorted order, so equal content stringifies equally.
+export const sorted = (_k: string, v: unknown) =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
 
 // Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
@@ -105,7 +121,7 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   out.extension = [
     ...(out.extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== LAST_SEEN),
     { url: SRC_DATE, valueDateTime: s.dateOf?.(r) ?? s.date },
-    ...(s.seenAt ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
+    ...(s.seenAt && DATED.has(r.resourceType) ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
   ];
   return out;
 }

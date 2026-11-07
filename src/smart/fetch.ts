@@ -66,6 +66,8 @@ export async function fetchAll(
       const r = await get(url, what);
       if (!r.ok) {
         await r.body?.cancel();
+        // Only a refused first page means the type isn't offered; a later page or a rate limit would cut the list short.
+        if (r.status === 429 || seen.size > 1) throw new GaError(`${what}: HTTP ${r.status}`);
         return `HTTP ${r.status}`;
       }
       const b = await parse<Bundle>(r, what);

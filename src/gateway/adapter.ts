@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { sha256 } from '../identity.ts';
 import { writeAtomic } from '../smart/store.ts';
 
 type Payload = Record<string, unknown>;
@@ -20,7 +20,7 @@ export class FileAdapter {
   }
 
   file(id: string, model = this.model): string {
-    return join(this.root, model, `${createHash('sha256').update(id).digest('hex')}.json`);
+    return join(this.root, model, `${sha256(id)}.json`);
   }
 
   read(file: string): Payload | undefined {
@@ -58,10 +58,6 @@ export class FileAdapter {
 
   async findByUid(uid: string): Promise<Payload | undefined> {
     return this.scan([this.model]).find(([, p]) => p.uid === uid)?.[1];
-  }
-
-  async findByUserCode(userCode: string): Promise<Payload | undefined> {
-    return this.scan([this.model]).find(([, p]) => p.userCode === userCode)?.[1];
   }
 
   async consume(id: string): Promise<void> {

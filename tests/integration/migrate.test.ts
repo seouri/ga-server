@@ -1,13 +1,15 @@
 // ga migrate end to end on synthetic fixtures: the long-lived ga-test-old project (its client a project admin, standing in
 // for the Super Admin client) -> the long-lived ga-test project, then --delete-old; both emptied before and after. Never the
 // user's record or config. Two projects: migrate moves between them.
+import { randomUUID } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MedplumClient } from '@medplum/core';
-import type { Observation, ProjectMembership, Resource } from '@medplum/fhirtypes';
+import type { Observation, ProjectMembership, Provenance, Resource } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { importAppleHealth } from '../../src/apple/import.ts';
 import { importPath } from '../../src/ccda.ts';
+import { loadMaps, lookup, mapUrl, upsertEntry } from '../../src/conceptmap.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { importEhi } from '../../src/ehi/import.ts';
 import { logRemote } from '../../src/gateway/remote-log.ts';
@@ -53,6 +55,10 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
       { resourceType: 'DiagnosticReport', status: 'final', code: { text: 'Synthetic panel' }, result: [{ reference: 'Observation/o1' }] },
       { resourceType: 'Condition', code: { text: 'Synthetic condition' } },
     ] as Resource[], join(src, 'labs.pdf'), '2024-01-03');
+    // An agent's mapping and its Provenance: not re-derivable from any source file.
+    const mapSrc = `smart:migrate-${randomUUID()}`;
+    const agentMap = await upsertEntry(old, mapSrc, { key: 'synthetic analyte|mg/dl', target: { system: 'http://loinc.org', code: '2345-7' }, equivalence: 'equivalent', confident: true, by: 'agent' });
+    await old.createResource<Provenance>({ resourceType: 'Provenance', target: [{ reference: `ConceptMap/${agentMap?.id}` }], recorded: '2026-01-01T00:00:00Z', agent: [{ who: { display: 'Test' } }], reason: [{ text: `${mapSrc} "synthetic analyte|mg/dl" (Observation): mapped` }] });
     const share = { id: 'share1', label: 'Dr Test', patientId: legacy.patientId, tokenHash: 'h' } as Share;
     await logAccess(old, share, { kind: 'view' });
     await logRemote(old, 'fhir_search', 'test app');
@@ -75,6 +81,9 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
     const ref = rep?.result?.[0]?.reference as string; // the engine re-linked the report to the new Observation
     expect(ref).toMatch(/^Observation\//);
     expect(((await nc.readReference({ reference: ref })) as Observation).valueQuantity?.value).toBe(42);
+    const moved = await nc.searchOne('ConceptMap', { url: mapUrl(mapSrc) }, { cache: 'no-cache' });
+    expect(lookup(await loadMaps(nc, true), mapSrc, 'synthetic analyte|mg/dl')).toMatchObject({ by: 'agent', target: { code: '2345-7' } });
+    expect((await nc.searchResources('Provenance', { target: `ConceptMap/${moved?.id}` }, { cache: 'no-cache' })).map((p) => p.reason?.[0]?.text)).toEqual([`${mapSrc} "synthetic analyte|mg/dl" (Observation): mapped`]);
     await expect(migrate()).rejects.toThrow('already migrated');
 
     const counts = await deleteOld();

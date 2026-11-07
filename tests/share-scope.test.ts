@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Patient, Resource } from '@medplum/fhirtypes';
-import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
+import type { MedplumClient } from '@medplum/core';
+import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, newestEpicImport, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Group, Share } from '../src/share/store.ts';
 
@@ -28,7 +29,6 @@ test.each<[Resource, Group | undefined]>([
   [r({ resourceType: 'Immunization' }), 'immunizations'],
   [r({ resourceType: 'Encounter' }), 'visits'],
   [r({ resourceType: 'DocumentReference' }), 'notes'],
-  [r({ resourceType: 'Composition' }), undefined], // C-CDA narrative holds every section: `all` shares only
   [r({ resourceType: 'Procedure' }), 'procedures'],
   [r({ resourceType: 'FamilyMemberHistory' }), 'family'],
   [r({ resourceType: 'Communication' }), 'messages'],
@@ -68,6 +68,7 @@ test.each([
   r({ resourceType: 'CoverageEligibilityRequest' }),
   r({ resourceType: 'CoverageEligibilityResponse' }),
   r({ resourceType: 'EnrollmentRequest' }),
+  r({ resourceType: 'Composition', section: [{ title: 'Insurance Providers', text: { status: 'generated', div: '<div>member ID</div>' } }] }), // C-CDA narrative incl. payers
   archive('urn:ga-server:id:ehi-archive'),
   archive('urn:ga-server:id:apple-health-archive'),
   archive('urn:ga-server:id:file'),
@@ -148,7 +149,7 @@ test("selectScoped drops records not in the share patient's compartment", () => 
 });
 
 test('never-shared types are not even fetched', () => {
-  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest', 'Binary', 'Medication']) {
+  for (const t of ['Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest', 'Composition', 'Binary', 'Medication']) {
     expect(COMPARTMENT_TYPES).not.toContain(t);
   }
   for (const t of ['Observation', 'MedicationStatement', 'DocumentReference', 'Communication', 'Condition']) expect(COMPARTMENT_TYPES).toContain(t);
@@ -175,8 +176,12 @@ test('scopedCache shares one load per share until the TTL passes, and drops fail
   await cached(c, share({ tokenHash: 'other' }));
   expect(load).toHaveBeenCalledTimes(4);
   vi.advanceTimersByTime(1001);
+  const del = vi.spyOn(Map.prototype, 'delete');
   await cached(c, share());
   expect(load).toHaveBeenCalledTimes(5);
+  expect(del.mock.calls.map(([k]) => k).sort()).toEqual(['s1:h', 's1:other', 's2:h']); // every expired entry evicted
+  del.mockRestore();
+  vi.useRealTimers();
 });
 
 test('selectScoped: a source-file DocumentReference is dropped and its Binary never followed; an inline note stays', () => {
@@ -196,4 +201,31 @@ test('selectScoped: newestImport covers the whole compartment, not just the shar
   const out = selectScoped([med, lab], share({ groups: ['medications'] }));
   expect(out.resources).toEqual([med]);
   expect(out.newestImport).toBe(Date.parse('2025-01-01T00:00:00Z'));
+});
+
+test('loadScoped fetches no Apple data for a share without the apple group', async () => {
+  const queries = async (groups: Share['groups']) => {
+    const qs: Record<string, string>[] = [];
+    const client = {
+      readResource: async () => ({ resourceType: 'Patient', id: 'p' }),
+      searchResourcePages: async function* (_t: string, q: Record<string, string>) { qs.push(q); yield []; },
+      searchResources: async () => [],
+    } as unknown as MedplumClient;
+    await loadScoped(client, share({ groups }));
+    return qs;
+  };
+  for (const q of await queries(['labs', 'vitals'])) expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health');
+  for (const g of ['all', ['labs', 'apple']] as Share['groups'][]) for (const q of await queries(g)) expect(q['_tag:not']).toBeUndefined();
+});
+
+test('newestEpicImport reads the date stored on the Patient and scans nothing; without it, it scans', async () => {
+  let scans = 0;
+  const client = (extension?: object[]) => ({
+    readResource: async () => ({ resourceType: 'Patient', id: 'p', extension }),
+    searchResourcePages: async function* () { scans++; yield []; },
+  }) as unknown as MedplumClient;
+  expect(await newestEpicImport(client([{ url: 'urn:ga-server:ext:newest-epic-import', valueDateTime: '2025-01-01T00:00:00.000Z' }]), 'p')).toBe(Date.parse('2025-01-01T00:00:00Z'));
+  expect(scans).toBe(0);
+  expect(await newestEpicImport(client(), 'p')).toBe(-Infinity);
+  expect(scans).toBeGreaterThan(0);
 });

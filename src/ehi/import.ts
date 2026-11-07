@@ -3,6 +3,7 @@ import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
 import { addReport, importResources, type ImportReport } from '../engine.ts';
+import { withImportLock } from '../lock.ts';
 import { mapConditions } from './conditions.ts';
 import { importDocuments } from './documents.ts';
 import { mapEncounters } from './encounters.ts';
@@ -74,7 +75,7 @@ export async function importEhi(
   const archived = await archiveFolder(client, dir, patientId, ARCHIVE);
   const t = new EhiTables(dir);
   const { resources, skips } = await prepareEhi(client, t, ctx, patientId);
-  const report = await importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, '');
+  const report = await withImportLock(() => importResources(client, resources, { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' }, patientId, ''));
   const files = { mediaUnknownType: 0, rtfNoNote: 0 };
   const docs = await importDocuments(client, dir, t, ctx, patientId, files);
   addReport(report, docs);

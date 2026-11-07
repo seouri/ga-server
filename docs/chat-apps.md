@@ -28,7 +28,7 @@ Back to the [README](../README.md).
    GA_PUBLIC_URL=https://<machine>.<tailnet>.ts.net ga passkey link
    ```
 
-5. In the chat app, add a custom connector with the URL `https://<machine>.<tailnet>.ts.net/mcp`. The app sends you to GA's login page: sign in with your passkey and approve the app by name.
+5. In the chat app, add a custom connector with the URL `https://<machine>.<tailnet>.ts.net/mcp`. The app sends you to GA's login page: sign in with your passkey and approve the app. The page names the app, where access goes and when it registered: allow only right after you clicked Connect yourself.
 
 Only you get in: every call needs your login. See which apps are connected and cut one off:
 
@@ -37,7 +37,7 @@ ga apps
 ga apps disconnect <clientId>
 ```
 
-Or use `connected_apps` and `disconnect_app` in chat. Every remote call is logged locally (tool, app, time; never the content).
+Or use `connected_apps` and `disconnect_app` in chat. Only apps you approved are listed; a registration never approved is deleted after a day. Every remote call is logged locally (tool, app, time; never the content).
 
 ## What you can do in chat
 
@@ -52,7 +52,7 @@ Read tools (`health_summary`, `lab_results`, `current_medications`, `current_pro
 | Concepts | `map_concept` (maps a source term to a standard code; corrections are another call) |
 | Health maintenance | `postpone` (not now, until a date, or dismiss), `record_followup` (a follow-up from a note; preview first) |
 
-Creating a share, enabling a hospital's record types and recording a follow-up are two steps: a preview first, then the action after your yes. The agent carries that yes: see [SECURITY.md](../SECURITY.md).
+Creating a share, enabling a hospital's record types and recording a follow-up are two steps: the chat shows a preview and a link to GA's confirm page; you open it, sign in with your passkey, check the details and press Confirm. The chat cannot confirm for you: see [SECURITY.md](../SECURITY.md). A new share's link and QR code show on that page.
 
 **Importing files.** The chat app can't hand GA a file, so ask it to import one: `upload_link` returns a link (single use, 15 minutes). Open it, sign in with your passkey, and pick the file. For a PDF or photo you pick it in the chat too, so the agent can read it. Apple Health, Epic EHI and C-CDA exports go up as a zip and import in the background; ask for the status. ChatGPT attachments are off until a file host is added to `config/chat-apps.json` (`fileHosts`, empty now), so use the upload link there too.
 

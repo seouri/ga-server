@@ -1,5 +1,5 @@
-// Internet-facing share server (behind Tailscale Funnel). Only /s/<token>/... exists; the token is re-checked against shares.json on every request.
-import http from 'node:http';
+// Internet-facing share pages (behind Tailscale Funnel, served by ga gateway serve). Only /s/<token>/... exists; the token is re-checked against shares.json on every request.
+import type http from 'node:http';
 import type { Attachment, DocumentReference } from '@medplum/fhirtypes';
 import type { AccessEvent } from './audit.ts';
 import { toPdf } from './export.ts';
@@ -104,13 +104,13 @@ async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: Sha
 
 // Failed token lookups per client IP, fixed window from the first failure. fail() records one and says whether the IP is over the limit.
 // Bounded: at maxIps the oldest IP is evicted (Map insertion order), O(1) per request.
-export function failLimiter(maxIps = MAX_IPS): { fail: (ip: string, t: number) => boolean; size: () => number } {
+export function failLimiter(maxIps = MAX_IPS, maxFails = MAX_FAILS): { fail: (ip: string, t: number) => boolean; size: () => number } {
   const fails = new Map<string, { start: number; n: number }>();
   return {
     fail(ip, t) {
       let f = fails.get(ip);
       if (f && t - f.start >= WINDOW) { fails.delete(ip); f = undefined; }
-      if (f) return ++f.n > MAX_FAILS;
+      if (f) return ++f.n > maxFails;
       if (fails.size >= maxIps) fails.delete(fails.keys().next().value!);
       fails.set(ip, { start: t, n: 1 });
       return false;
@@ -126,10 +126,20 @@ export function clientIp(req: http.IncomingMessage): string {
   return (Array.isArray(xff) ? xff.at(-1) : xff)?.split(',').at(-1)?.trim() || req.socket.remoteAddress || 'unknown';
 }
 
-// The /s/... routes, for createServer and the gateway.
+// The /s/... routes, served by the gateway.
 export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: Res) => Promise<void> {
   const now = deps.now ?? (() => new Date());
   const limiter = failLimiter();
+  // The summary PDF, rendered once per loaded scope (the load cache keeps a share's Scoped for its TTL), not per download.
+  const pdfs = new WeakMap<Scoped, { id: string; pdf: Promise<Buffer> }>();
+  const pdfOf = (s: Scoped, share: Share): Promise<Buffer> => {
+    const hit = pdfs.get(s);
+    if (hit?.id === share.id) return hit.pdf;
+    const pdf = toPdf(summarize(s), recordRows(s), { label: share.label, created: share.created, scope: scopeWords(share) });
+    pdfs.set(s, { id: share.id, pdf });
+    pdf.catch(() => pdfs.get(s)?.pdf === pdf && pdfs.delete(s));
+    return pdf;
+  };
 
   return async function handle(req: http.IncomingMessage, res: Res): Promise<void> {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v);
@@ -190,7 +200,7 @@ export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: 
       return streamBundle(res, s, downloadName(s, 'health-records-FHIR.json', now()));
     }
     if (route === '/download/summary.pdf') {
-      const pdf = await toPdf(summarize(s), recordRows(s), { label: share.label, created: share.created, scope: scopeWords(share) });
+      const pdf = await pdfOf(s, share);
       log({ kind: 'download', detail: 'summary.pdf' });
       return send(res, 200, pdf, 'application/pdf', attach(downloadName(s, 'health-summary.pdf', now())));
     }
@@ -210,18 +220,4 @@ export function shareHandler(deps: ShareDeps): (req: http.IncomingMessage, res: 
       askEnabled: !!deps.ask,
     }));
   };
-}
-
-export function createServer(deps: ShareDeps): http.Server {
-  const handle = shareHandler(deps);
-  const server = http.createServer((req, res) => {
-    handle(req, res).catch(() => {
-      // Never a stack trace on the wire.
-      if (!res.headersSent) send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8');
-      else res.destroy();
-    });
-  });
-  server.requestTimeout = 30_000;
-  server.headersTimeout = 20_000;
-  return server;
 }

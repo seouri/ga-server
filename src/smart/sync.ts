@@ -1,12 +1,12 @@
 // Sync one or all SMART sources into GA: token -> fetch -> map -> Binaries -> importResources -> Endpoint status.
 import { randomUUID } from 'node:crypto';
-import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
 import { GaError } from '../config.ts';
 import { importResources, type ImportReport } from '../engine.ts';
+import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
 import { fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
 import { loadSecret, readApp, readSources, type SourceRec } from './store.ts';
@@ -28,7 +28,7 @@ export const LAST_SUCCESS = `${X}last-success`;
 const LAST_ATTEMPT = `${X}last-attempt`;
 const LAST_ERROR = `${X}last-error`;
 const ACCESS_EXPIRES = `${X}access-expires`;
-const ENABLED_TYPES = `${X}enabled-types`;
+export const ENABLED_TYPES = `${X}enabled-types`;
 const PATIENT = `${X}patient`;
 const PENDING = 'urn:ga-server:pending-binary:';
 const STALE_MS = 48 * 3_600_000;
@@ -133,48 +133,6 @@ export async function writeEndpoint(
 
 const lastUpdated = (r: Resource): string | undefined => r.meta?.lastUpdated;
 
-const LOCK_STALE_MS = 2 * 3_600_000;
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
-// Per-source sync lock (O_EXCL), so a daemon run and a manual ga sync never both create the same record. Shared .ga/ with
-// the ga-sync container: a pid is only checked on the host that wrote it; elsewhere only the 2 h age frees the lock.
-async function takeSyncLock(dir: string, key: string, waitMs: number): Promise<string | undefined> {
-  const f = join(dir, `${key}.sync.lock`);
-  for (const end = Date.now() + waitMs; ; ) {
-    try {
-      const fd = openSync(f, 'wx', 0o600);
-      writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), started: Date.now() }));
-      closeSync(fd);
-      return f;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    }
-    let held: { pid?: number; host?: string; started?: number } = {};
-    let started = Date.now();
-    try {
-      started = statSync(f).mtimeMs;
-      held = JSON.parse(readFileSync(f, 'utf8'));
-    } catch {
-      // vanished or mid-write: held, aged by its mtime
-    }
-    const stale =
-      (held.host === hostname() && typeof held.pid === 'number' && !alive(held.pid)) ||
-      // our own pid but written before we started: a restarted container that reused the pid (SIGTERM skips finally)
-      (held.host === hostname() && held.pid === process.pid && (held.started ?? started) < Date.now() - process.uptime() * 1000) ||
-      Date.now() - (held.started ?? started) > LOCK_STALE_MS;
-    if (stale) rmSync(f, { force: true });
-    else if (Date.now() >= end) return undefined;
-    else await new Promise((r) => setTimeout(r, 250));
-  }
-}
-
 export async function syncSource(
   client: MedplumClient,
   dir: string,
@@ -182,17 +140,20 @@ export async function syncSource(
   patientId: string,
   opts: { dryRun?: boolean; now?: Date; lockWaitMs?: number } = {},
 ): Promise<SyncResult> {
-  const lock = await takeSyncLock(dir, src.key, opts.lockWaitMs ?? 30_000);
-  if (!lock) {
-    // Another sync of this source is running: leave its Endpoint alone and report the status it has.
-    const ep = await findEndpoint(client, src.key, patientId).catch(() => undefined);
-    return { source: src.key, status: (ep?.status as SyncResult['status'] | undefined) ?? 'pending', error: 'busy' };
-  }
+  // Per source, so a daemon run and a manual ga sync never both run it; imports are kept apart by the import lock (runSync).
+  const lock = await takeLock(join(dir, `${src.key}.sync.lock`), opts.lockWaitMs ?? 30_000);
+  if (!lock) return busy(client, src, patientId);
   try {
     return await runSync(client, dir, src, patientId, opts);
   } finally {
     rmSync(lock, { force: true });
   }
+}
+
+// Another sync of this source, or an import, is running: leave the Endpoint alone and report the status it has.
+async function busy(client: MedplumClient, src: SourceRec, patientId: string): Promise<SyncResult> {
+  const ep = await findEndpoint(client, src.key, patientId).catch(() => undefined);
+  return { source: src.key, status: (ep?.status as SyncResult['status'] | undefined) ?? 'pending', error: 'busy' };
 }
 
 async function runSync(client: MedplumClient, dir: string, src: SourceRec, patientId: string, opts: { dryRun?: boolean; now?: Date }): Promise<SyncResult> {
@@ -211,14 +172,17 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     const { resources, binaries } = mapForGa(fetched.resources, src);
     stage = 'import_error';
     const c = dryRun ? dryRunClient(client) : client;
-    await uploadBinaries(c, resources, binaries, src, patientId);
-    const report = await importResources(
-      c,
-      resources,
-      { kind: 'smart', file: src.fhirBase, date: at, writer: 'importer', dateOf: lastUpdated, fillOnly: (r) => !lastUpdated(r), seenAt: at },
-      patientId,
-      '',
-    );
+    const write = async () => {
+      await uploadBinaries(c, resources, binaries, src, patientId);
+      return importResources(
+        c,
+        resources,
+        { kind: 'smart', file: src.fhirBase, date: at, writer: 'importer', dateOf: lastUpdated, fillOnly: (r) => !lastUpdated(r), seenAt: at },
+        patientId,
+        '',
+      );
+    };
+    const report = dryRun ? await write() : await withImportLock(write);
     const ok: SyncResult = {
       source: src.key,
       status: pending ? 'pending' : 'active',
@@ -238,6 +202,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     }
     return ok;
   } catch (e) {
+    if (e instanceof GaError && e.message === IMPORT_BUSY) return busy(client, src, patientId);
     // Error codes only: messages from servers or the engine may carry content.
     const code = e instanceof GaError && /^[a-z_]+$/.test(e.message) ? e.message : stage;
     // No usable refresh token: only reconnecting helps.

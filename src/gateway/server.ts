@@ -1,5 +1,5 @@
 // ga-gateway: the one public service behind Tailscale Funnel. OAuth (oidc-provider), owner sign-in and consent, passkey enrollment,
-// MCP over HTTP at /mcp (bearer token), one-time upload pages at /upload/<token>, the hospital login return at /callback and the share pages at /s/...
+// MCP over HTTP at /mcp (bearer token), one-time upload pages at /upload/<token>, owner confirmation of chat-app previews at /confirm/<code>, the hospital login return at /callback and the share pages at /s/...
 // Without a public URL it serves only /s/... and /callback.
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
@@ -9,13 +9,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { GaError, getClient, loadConfig } from '../config.ts';
+import { findConfirmPage, takeConfirmPage } from '../confirm.ts';
 import type { ToolDeps } from '../mcp.ts';
 import { completeLogin } from '../smart/actions.ts';
 import { smartDir } from '../smart/store.ts';
 import { renderInactive } from '../share/page.ts';
 import { HEADERS, type ShareDeps, TooLarge, clientIp, failLimiter, readBody, send, shareHandler } from '../share/server.ts';
 import { shareDeps } from '../share/cli.ts';
-import { appName, createProvider, disconnectClient } from './oauth.ts';
+import { appName, createProvider, disconnectClient, sweepClients } from './oauth.ts';
 import * as pages from './pages.ts';
 import { authenticationOptions, enrollTokenValid, isOwner, ownerCookie, registrationOptions, verifyAuthentication, verifyRegistration } from './passkey.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
@@ -56,7 +57,7 @@ export function createGateway(deps: GatewayDeps): http.Server {
   const verifyPasskey = deps.verifyPasskey ?? ((r, c) => verifyAuthentication(deps.dir, pub!, r, c));
   const fails = failLimiter();
   const registrations = failLimiter();
-  const authorizations = failLimiter();
+  const authorizations = failLimiter(undefined, 300);
 
   // WebAuthn challenges, server side only: one per interaction or enroll token, single use, short-lived.
   const challenges = new Map<string, { challenge: string; exp: number }>();
@@ -139,10 +140,11 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (action === '' && req.method === 'GET') {
       if (prompt === 'consent') {
         // The code goes to this redirect, so it names the app (a client may register redirects of several apps).
-        const origin = new URL(details.params.redirect_uri).origin;
+        const redirect = new URL(details.params.redirect_uri);
         // Chrome applies form-action to the redirects after the post, which end at the app.
-        const csp = { 'Content-Security-Policy': HEADERS['Content-Security-Policy'].replace("form-action 'self'", `form-action 'self' ${origin}`) };
-        return send(res, 200, pages.consentPage(appName(details.params.redirect_uri), uid), undefined, csp);
+        const csp = { 'Content-Security-Policy': HEADERS['Content-Security-Policy'].replace("form-action 'self'", `form-action 'self' ${redirect.origin}`) };
+        const issued = (await provider.Client.adapter.find(details.params.client_id))?.client_id_issued_at ?? 0;
+        return send(res, 200, pages.consentPage(appName(details.params.redirect_uri), uid, redirect.host, Date.now() - issued * 1000), undefined, csp);
       }
       if (prompt !== 'login') return send(res, 400, pages.interactionExpired());
       // A signed-in owner skips the passkey, never the consent.
@@ -193,24 +195,52 @@ export function createGateway(deps: GatewayDeps): http.Server {
     json(res, 200, { done: 'Passkey saved. You can close this window.' }, { 'Set-Cookie': ownerCookie(deps.dir) });
   }
 
+  // The passkey page for a signed-out visitor of an owner-only link (key: the link's challenge slot), and its POST.
+  async function signInPage(res: Res, key: string): Promise<void> {
+    if (!readJson<unknown[]>(deps.dir, 'passkeys.json', []).length) return send(res, 200, pages.noPasskey());
+    const options = await authenticationOptions(deps.dir, pub!);
+    putChallenge(key, options.challenge);
+    const nonce = randomBytes(16).toString('base64');
+    return send(res, 200, pages.loginPage(nonce, options), undefined, scriptCsp(nonce));
+  }
+  async function signIn(req: Req, res: Res, ip: string, key: string, redirect: string): Promise<void> {
+    const challenge = takeChallenge(key);
+    const response = parse(await body(req));
+    if (!challenge || !response || !(await verifyPasskey(response, challenge))) return failed(res, ip, () => json(res, 400, { done: 'Sign-in failed. Reload the page to try again.' }));
+    return json(res, 200, { redirect }, { 'Set-Cookie': ownerCookie(deps.dir) });
+  }
+
+  // A chat app's preview: the owner reviews it and confirms here; GET never uses the code (link previews), only the owner's POST does.
+  async function confirm(req: Req, res: Res, ip: string, code: string, action: string): Promise<void> {
+    const page = findConfirmPage(code);
+    if (!page) return failed(res, ip, () => send(res, 404, pages.confirmInvalid()));
+    const path = `/confirm/${code}`;
+    const owner = isOwner(deps.dir, req.headers.cookie);
+    if (action === '' && req.method === 'GET') return owner ? send(res, 200, pages.confirmPage(page.title, page.view, path)) : signInPage(res, `confirm:${code}`);
+    if (action === '/login' && req.method === 'POST') return signIn(req, res, ip, `confirm:${code}`, path);
+    if (action === '' && req.method === 'POST') {
+      if (!owner) return signInPage(res, `confirm:${code}`);
+      const p = takeConfirmPage(code);
+      if (!p) return send(res, 404, pages.confirmInvalid());
+      try {
+        return send(res, 200, pages.confirmDone(await p.run()));
+      } catch (e) {
+        if (e instanceof GaError) return send(res, 400, pages.confirmFailed(e.message));
+        throw e;
+      }
+    }
+    return send(res, 404, renderInactive());
+  }
+
   // The link is checked without being used (link previews); only the owner's POST uses it, then streams the file.
   async function upload(req: Req, res: Res, ip: string, token: string, action: string, name: string): Promise<void> {
     if (!uploadLinkValid(deps.dir, token)) return failed(res, ip, () => send(res, 404, pages.uploadInvalid()));
     const owner = isOwner(deps.dir, req.headers.cookie);
     if (action === '' && req.method === 'GET') {
       const nonce = randomBytes(16).toString('base64');
-      if (owner) return send(res, 200, pages.uploadPage(nonce), undefined, scriptCsp(nonce));
-      if (!readJson<unknown[]>(deps.dir, 'passkeys.json', []).length) return send(res, 200, pages.noPasskey());
-      const options = await authenticationOptions(deps.dir, pub!);
-      putChallenge(`upload:${token}`, options.challenge);
-      return send(res, 200, pages.loginPage(nonce, options), undefined, scriptCsp(nonce));
+      return owner ? send(res, 200, pages.uploadPage(nonce), undefined, scriptCsp(nonce)) : signInPage(res, `upload:${token}`);
     }
-    if (action === '/login' && req.method === 'POST') {
-      const challenge = takeChallenge(`upload:${token}`);
-      const response = parse(await body(req));
-      if (!challenge || !response || !(await verifyPasskey(response, challenge))) return failed(res, ip, () => json(res, 400, { done: 'Sign-in failed. Reload the page to try again.' }));
-      return json(res, 200, { redirect: `/upload/${token}` }, { 'Set-Cookie': ownerCookie(deps.dir) });
-    }
+    if (action === '/login' && req.method === 'POST') return signIn(req, res, ip, `upload:${token}`, `/upload/${token}`);
     if (action === '' && req.method === 'POST') {
       if (!owner) return json(res, 403, { done: 'Sign in first: reload the page.' });
       const big = () => json(res, 413, { done: 'The file is over the 2 GB limit.' }, { Connection: 'close' });
@@ -261,7 +291,10 @@ export function createGateway(deps: GatewayDeps): http.Server {
     if (e) return enroll(req, res, ip, e[1]);
     const u = /^\/upload\/([A-Za-z0-9_-]+)(\/login)?$/.exec(path);
     if (u) return upload(req, res, ip, u[1], u[2] ?? '', url.searchParams.get('name') ?? 'upload');
-    // Each registration or authorization request writes a file: 20 of each per IP per 10 minutes.
+    const k = /^\/confirm\/([A-Za-z0-9_-]{43})(\/login)?$/.exec(path);
+    if (k) return confirm(req, res, ip, k[1], k[2] ?? '');
+    // Each registration writes a client file: 20 per IP per 10 minutes. Each /auth writes a sign-in file: 300 per IP per 10 minutes,
+    // far above an owner's own sign-ins even if every request reaches us from one IP (Funnel without X-Forwarded-For).
     const writes = path === '/reg' && req.method === 'POST' ? registrations : path === '/auth' ? authorizations : undefined;
     if (writes?.fail(ip, Date.now())) return send(res, 429, 'Too many requests', 'text/plain; charset=utf-8');
     return oidc(req, res);
@@ -305,6 +338,7 @@ export async function serveGateway(): Promise<void> {
       cleanUploads(gatewayDir());
     } catch {} // must not skip sweepExpired or crash the interval
     sweepExpired(gatewayDir());
+    sweepClients(gatewayDir());
   };
   sweep();
   setInterval(sweep, 3600_000).unref();

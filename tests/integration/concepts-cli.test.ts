@@ -81,7 +81,16 @@ test('C-CDA records are keyed by the custodian read from the stored source file;
   const a = await client.createResource(withSrc(lab('Glucose', '2024-04-01'), ['ccda'], file, []));
   // A file with no stored copy: its key can't be derived, so nothing is written.
   const lost = await client.createResource(withSrc(lab('Glucose', '2024-04-02'), ['ccda'], '/nowhere/lost/gone.xml', []));
-  await applyAll(client, pid);
+  // The file lookup pages through C-CDA files only (one page used to miss files past the first 1000).
+  const docQueries: string[] = [];
+  const spy = new Proxy(client, {
+    get: (t, p) => (p === 'searchResourcePages'
+      ? (type: string, q: Record<string, string>, o: object) => { if (type === 'DocumentReference') docQueries.push(JSON.stringify(q)); return t.searchResourcePages(type as 'DocumentReference', q, o); }
+      : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+  });
+  await applyAll(spy, pid);
+  expect(docQueries).toHaveLength(1);
+  expect(JSON.parse(docQueries[0])).toMatchObject({ contenttype: 'application/xml', _sort: '_lastUpdated' });
   expect(gaCode(await client.readResource('Observation', a.id as string))?.code).toBe('2345-7');
   const l = await client.readResource('Observation', lost.id as string);
   expect(gaCode(l)).toBeUndefined();
@@ -170,4 +179,25 @@ test('a stale backfill write gets 412: re-read and re-coded once (the other chan
   bumps = 2;
   expect((await applyAll(racing, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(0);
   expect(gaCode(await client.readResource('Observation', r2.id as string))).toBeUndefined();
+});
+
+test('review: a first mapping reads only records up for review; a correction reads every record of the source', async () => {
+  const k = `good-${randomUUID()}`;
+  const mk = (day: string) => client.createResource(withSrc(lab('Glucose', day), ['smart'], 'x', [`urn:ga-server:id:smart:${k}`]));
+  const flagged = await mk('2024-08-01');
+  await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' }); // tags it concept-unmapped
+  const quiet = await mk('2024-08-02'); // no concept tag (a record from before the concept layer)
+  await agentGlucose(`smart:${k}`, '2345-7');
+  const queries: string[] = [];
+  const spy = new Proxy(client, {
+    get: (t, p) => (p === 'searchResourcePages'
+      ? (type: string, q: Record<string, string>, o: object) => (queries.push(JSON.stringify(q)), t.searchResourcePages(type as 'Observation', q, o))
+      : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
+  });
+  expect((await applyAll(spy, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation', review: true })).changed).toBe(1);
+  expect(queries.every((q) => q.includes('"_tag":"urn:ga-server:tag|concept-unmapped,urn:ga-server:tag|concept-suggested"'))).toBe(true);
+  expect(gaCode(await client.readResource('Observation', flagged.id as string))?.code).toBe('2345-7');
+  expect(gaCode(await client.readResource('Observation', quiet.id as string))).toBeUndefined();
+  expect((await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(1);
+  expect(gaCode(await client.readResource('Observation', quiet.id as string))?.code).toBe('2345-7');
 });

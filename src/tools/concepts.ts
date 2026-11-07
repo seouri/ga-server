@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { field, TARGET } from '../concept-apply.ts';
 import { validate, wellFormed } from '../concept-validate.ts';
 import { agentMappings, applyAll, reviewList } from '../concepts-cli.ts';
-import { inScope, termKey, upsertEntry } from '../conceptmap.ts';
+import { inScope, loadMaps, lookup, termKey, upsertEntry } from '../conceptmap.ts';
 import { GaError } from '../config.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 
@@ -82,6 +82,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
         const v = unmatched ? { ok: true } : await validate(system, code, { fetch: deps.fetch });
         if (!v.ok && v.reason !== 'validation unavailable') throw new GaError(`${v.reason}: not mapped`); // the code does not exist
         const sure = confident && v.ok && !v.reason; // an unavailable or skipped validation is applied as suggested
+        const correction = !!lookup(await loadMaps(client, true), source, key); // a term mapped before may be coded on any record
         const map = await upsertEntry(client, source, {
           key, equivalence, confident: sure, by: 'agent',
           ...(!unmatched && { target: { system, code, display: v.display ?? display } }),
@@ -95,7 +96,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
           agent: [{ who: { display: who } }],
           reason: [{ text: `${source} "${key}" (${type}): ${unmatched ? 'unmatched' : `${system}|${code} ${equivalence}${sure ? '' : ', suggested'}`}` }],
         });
-        const { changed, matched } = await applyAll(client, patientId, { source, key, type });
+        const { changed, matched } = await applyAll(client, patientId, { source, key, type, review: !correction });
         if (!matched) return text({ changed, status: 'no records', reason: `no ${type} records of "${key}" from ${source}; the mapping is kept for later imports` });
         return text({ changed, status: unmatched ? 'unmatched' : sure && equivalence === 'equivalent' ? 'mapped' : 'suggested', ...(v.reason && { reason: v.reason }) });
       } catch (e) {

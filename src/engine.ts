@@ -3,8 +3,9 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, contentHash, contentKey, EPIC_OID, effective, LAST_SEEN, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
+import { newestEpicImport } from './share/scope.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
 export type ImportReport = {
@@ -28,9 +29,6 @@ export function addReport(total: ImportReport, r: ImportReport): void {
 type TypeCounts = { created: number; linked: number; updated: number; flagged: number; seen: number };
 
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
-export const TAG = 'urn:ga-server:tag';
-const SRC_DATE = 'urn:ga-server:ext:source-date';
-const DATED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
 // Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
@@ -58,16 +56,14 @@ const isValidationFailure = (e: unknown): e is OperationOutcomeError => {
   return getStatus(e.outcome) === 400 && issues.length > 0 && issues.every((i) => VALIDATION.includes(i.code) && !!i.expression?.length);
 };
 
-export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
+// Sticky protection: source-conflict (a newer source differed) or person-edited (GA wrote only bookkeeping onto a person's edit, becoming its author).
+const shielded = (r: Resource) => hasTag(r, 'source-conflict') || hasTag(r, 'person-edited');
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
 const idList = (r: R): Identifier[] => [r.identifier ?? []].flat(); // singular on SINGULAR_ID types
 const isApple = (r: R) => idList(r).some((i) => i.system === APPLE);
 const hasNonApple = (r: R) => idList(r).some((i) => i.system !== APPLE);
-const canon = (x: unknown) =>
-  JSON.stringify(x, (_k, v) =>
-    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v,
-  );
+const canon = (x: unknown) => JSON.stringify(x, sorted);
 
 // Equality ignores id, meta, our bookkeeping extensions, identifiers and GA-added codings; identifiers only need
 // incoming ⊆ existing, because existing accumulates extra identifiers from merges.
@@ -182,12 +178,12 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource,
   // Unchanged content skips, except that a newer source re-confirms an importer-owned medication, problem or allergy: the currency rule
   // reads its source date, and a stale one would call an item still on the latest list "unconfirmed".
   const lastBy = existing.meta?.author?.reference;
-  const importerOwned = hasTag(existing, 'writer-importer') && !hasTag(existing, 'source-conflict') && !(author && lastBy && lastBy !== author);
+  const importerOwned = hasTag(existing, 'writer-importer') && !shielded(existing) && !(author && lastBy && lastBy !== author);
   // Portal-synced records are confirmed by last-seen instead (advanced separately), so only file imports need the refresh.
   const dated = DATED.has(incoming.resourceType) && !existing.extension?.some((e) => e.url === LAST_SEEN);
   if (subset && canon(body(existing)) === canon(body(incoming))) return id && importerOwned && dated ? 'update' : 'skip';
-  // Only a write that would actually happen is a conflict. The source-conflict tag sticks: tagging it made GA the author.
-  if ((author && lastBy && lastBy !== author) || hasTag(existing, 'source-conflict')) return 'conflict';
+  // Only a write that would actually happen is a conflict. The protection tags stick: writing them made GA the author.
+  if ((author && lastBy && lastBy !== author) || shielded(existing)) return 'conflict';
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
 
@@ -260,7 +256,8 @@ export async function importResources(
     ...(source.kind === 'smart' && { byType: {} }),
     unmapped: [],
   };
-  const arrived: Extension = { url: ARRIVED, valueInstant: new Date().toISOString() };
+  // Stamped at each create, not once per import: a whats_new markSeen during a long import must not hide its later records.
+  const arrived = (): Extension => ({ url: ARRIVED, valueInstant: new Date().toISOString() });
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
@@ -269,14 +266,15 @@ export async function importResources(
     const lastBy = r.meta?.author?.reference;
     return !!(author && lastBy && lastBy !== author);
   };
-  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky source-conflict tag.
-  const protect = (r: Resource): Resource => (byOther(r) && !hasTag(r, 'source-conflict') ? withTag(r, 'source-conflict') : r);
-  // A person (or the agent) last shaped this record: smart fill-only and last-seen writes leave it alone.
-  const personEdited = (r: Resource): boolean => byOther(r) || hasTag(r, 'source-conflict') || hasTag(r, 'writer-agent');
+  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky person-edited tag
+  // (not source-conflict: nothing differs yet; a later differing source turns it into a conflict through decide()).
+  const protect = (r: Resource): Resource => (byOther(r) && !shielded(r) ? withTag(r, 'person-edited') : r);
+  // A person (or the agent) last shaped this record: smart fill-only writes leave it alone (last-seen still advances).
+  const personEdited = (r: Resource): boolean => byOther(r) || shielded(r) || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;
-    const seen = !!source.seenAt && !personEdited(r) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
+    const seen = !!source.seenAt && DATED.has(r.resourceType) && ext.find((e) => e.url === LAST_SEEN)?.valueDateTime !== source.seenAt;
     if (!changed && !seen) return;
     const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
     const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];
@@ -366,6 +364,8 @@ export async function importResources(
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
     if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };
     const incoming = stamp(r, source, ident) as R;
+    // Last-seen goes only on a record already linked to this source: on any other it would read "no longer returned".
+    const carries = (ex: R) => idList(ex).some((i) => idKey(i) === idKey(ident));
     delete incoming.id;
     const type = incoming.resourceType;
     // Identity and matching use the record as the source sent it; what is written carries GA's coding.
@@ -375,20 +375,23 @@ export async function importResources(
     // Scoped to the patient: Apple (and some C-CDA) identifiers carry no patient, so a global search crosses patients.
     const field = COMPARTMENT[type];
     // A record stored without a patient (the converter emits some C-CDA Encounters/Devices so) belongs to no other patient: match it too.
+    // Only C-CDA stores such records, and the stable identifier is per source kind, so other sources skip this search.
     const byStable = (await client.searchOne(type, { identifier: idKey(ident), ...(field && { [field]: `Patient/${patientId}` }) }, { cache: 'no-cache' }) ??
-      (field ? await client.searchOne(type, { identifier: idKey(ident), [`${field}:missing`]: 'true' }, { cache: 'no-cache' }) : undefined)) as R | undefined;
+      (field && source.kind === 'ccda' ? await client.searchOne(type, { identifier: idKey(ident), [`${field}:missing`]: 'true' }, { cache: 'no-cache' }) : undefined)) as R | undefined;
     const link = byStable ? { dups: [] } : await linkHit(incoming, ident);
     const linked = link.hit;
     const existing = byStable ?? linked;
     const key = !existing && type === 'Observation' ? contentKey(incoming as Observation) : undefined;
-    // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time on that (UTC) day.
+    // Medplum's date=<day> matches only date-only values; a ge/lt range finds every time. One day wider each side, as UTC
+    // and the record's own offset can disagree on the day; sameDay then keeps those on the incoming record's day.
     const day = key?.split('|')[2];
-    const next = day && new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10);
+    const shift = (n: number) => day && new Date(Date.parse(day) + n * 86_400_000).toISOString().slice(0, 10);
+    const when = effective(incoming as Observation) ?? '';
     const contentMatches = key
       ? await client.searchResources(
           'Observation',
-          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${day}`], ['date', `lt${next}`]]),
-        ).then((ms) => ms.filter((m) => stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
+          new URLSearchParams([['subject', `Patient/${patientId}`], ['code', key.split('|').slice(0, 2).join('|')], ['date', `ge${shift(-1)}`], ['date', `lt${shift(2)}`], ['_count', '1000']]), // Apple readings under one code fill the default page
+        ).then((ms) => ms.filter((m) => sameDay(when, effective(m) ?? '') && stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
     // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
     // Not a person's record, and never by a map other than its own: a record another GA source already coded keeps that coding,
@@ -404,6 +407,7 @@ export async function importResources(
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
     const fillOnto = async (ex: R): Promise<R> => {
       if (personEdited(ex)) {
+        if (carries(ex)) await keep(ex, false);
         report.skipped++;
         return ex;
       }
@@ -438,7 +442,10 @@ export async function importResources(
           await keep(existing, false);
           report.skipped++;
         } else if (d === 'conflict') {
-          if (!hasTag(existing, 'source-conflict')) await client.updateResource(withTag(existing, 'source-conflict'));
+          // The tag and last-seen in one write: a person's edit must not make a portal medication read "may have been stopped".
+          const tagged = (hasTag(existing, 'source-conflict') ? existing : withTag(existing, 'source-conflict')) as R;
+          if (carries(existing)) await keep(tagged, tagged !== existing);
+          else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (d === 'update') {
@@ -458,7 +465,9 @@ export async function importResources(
         }
       } else {
         // Spec §5: only an exact effective time merges; a day-only match is a possible duplicate.
-        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && effective(m) === effective(incoming as Observation)) as R | undefined;
+        // Instants when both carry a time (offsets may differ); a date-only value matches only the same date-only value.
+        const exact = (a = '', b = '') => (a.length > 10 && b.length > 10 ? Date.parse(a) === Date.parse(b) : a === b); // NaN never equals
+        const same = contentMatches.find((m) => sameValue(m, incoming as Observation) && exact(effective(m), effective(incoming as Observation))) as R | undefined;
         if (same) {
           target = same;
           const filled = fillFrom(same, coded, source);
@@ -477,7 +486,7 @@ export async function importResources(
         } else if (matches.length) {
           const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
-            withTag({ ...coded, extension: [...(coded.extension ?? []), arrived, ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+            withTag({ ...coded, extension: [...(coded.extension ?? []), arrived(), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
@@ -485,7 +494,7 @@ export async function importResources(
           }
           report.possibleDuplicates++;
         } else {
-          target = await client.createResource({ ...coded, extension: [...(coded.extension ?? []), arrived] } as Resource);
+          target = await client.createResource({ ...coded, extension: [...(coded.extension ?? []), arrived()] } as Resource);
           report.created++;
         }
       }
@@ -506,6 +515,14 @@ export async function importResources(
       t.flagged += report.possibleDuplicates - before.possibleDuplicates + report.conflicts - before.conflicts;
       t.seen += (report.seen ?? 0) - (before.seen ?? 0);
     }
+  }
+  if (source.kind === 'ccda' || source.kind === 'ehi') {
+    const newest = Math.max(...ordered.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
+    const p = await client.readResource('Patient', patientId, { cache: 'no-cache' });
+    const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+    // No stored date yet: seeded from the scan of Epic records, else an older import would hide a newer one already stored.
+    const value = Math.max(newest, Number.isNaN(had) ? await newestEpicImport(client, patientId) : had);
+    if (value !== had && Number.isFinite(value)) await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(value).toISOString() }] });
   }
   return report;
 }

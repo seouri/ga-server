@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { Observation, Resource } from '@medplum/fhirtypes';
-import { APPLE, contentKey, LAST_SEEN, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import { APPLE, contentKey, LAST_SEEN, sameDay, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const ccda: SourceInfo = { kind: 'ccda', file: 'a.xml', date: '2024-07-26T00:00:00Z', writer: 'importer' };
 const pdf: SourceInfo = { kind: 'pdf', file: 'b.pdf', date: '2024-08-01', writer: 'agent', llm: true };
@@ -106,10 +106,21 @@ test('stamp uses the per-resource source date and writes last-seen', () => {
   const dated = stamp(r, { ...smart, dateOf: () => '2026-01-02T00:00:00Z' }, SMART_ID) as Observation;
   expect(dated.extension).toEqual([{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-01-02T00:00:00Z' }]);
   expect(dated.meta?.tag?.map((t) => t.code)).toContain('src-smart');
-  const seen = stamp(r, { ...smart, dateOf: () => undefined, seenAt: '2026-11-05T00:00:00Z' }, SMART_ID) as Observation;
+  const at = { ...smart, dateOf: () => undefined, seenAt: '2026-11-05T00:00:00Z' };
+  // Only medications, problems and allergies carry last-seen: no daily rewrite of every portal lab.
+  expect((stamp(r, at, SMART_ID) as Observation).extension).toEqual([{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-05T00:00:00Z' }]);
+  const seen = stamp({ resourceType: 'Condition', subject: r.subject, identifier: [SMART_ID] } as Resource, at, SMART_ID) as Observation;
   expect(LAST_SEEN).toBe('urn:ga-server:ext:last-seen');
   expect(seen.extension).toEqual([
     { url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-05T00:00:00Z' },
     { url: LAST_SEEN, valueDateTime: '2026-11-05T00:00:00Z' },
   ]);
+});
+
+test('sameDay reads the instant in the first value\'s offset; a date-only side compares as written', () => {
+  expect(sameDay('2024-03-01T19:30:00-05:00', '2024-03-02T00:30:00Z')).toBe(true);
+  expect(sameDay('2024-03-01T19:30:00-05:00', '2024-03-02T15:00:00Z')).toBe(false); // next local day
+  expect(sameDay('2024-03-01T23:00:00+09:00', '2024-03-01T14:30:00Z')).toBe(true);
+  expect(sameDay('2024-03-01', '2024-03-01T22:00:00-05:00')).toBe(true);
+  expect(sameDay('2024-03-01', '2024-03-02')).toBe(false);
 });

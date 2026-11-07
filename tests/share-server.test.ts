@@ -2,12 +2,18 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Server } from 'node:http';
+import { createServer as httpServer, type Server } from 'node:http';
 import type { Resource } from '@medplum/fhirtypes';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
+const pdfRenders = vi.hoisted(() => ({ n: 0 }));
+vi.mock('../src/share/export.ts', async (orig) => {
+  const m = await orig<typeof import('../src/share/export.ts')>();
+  return { ...m, toPdf: (...a: Parameters<typeof m.toPdf>) => (pdfRenders.n++, m.toPdf(...a)) };
+});
 import { logAccess, readLog } from '../src/share/audit.ts';
 import type { Scoped } from '../src/share/scope.ts';
-import { createServer, downloadName, failLimiter } from '../src/share/server.ts';
+import { downloadName, failLimiter, send, shareHandler, type ShareDeps } from '../src/share/server.ts';
 import { createShare, revokeShare, type Share } from '../src/share/store.ts';
 
 const HEADERS = {
@@ -32,7 +38,12 @@ let base: string;
 let logs: { share: Share; e: { kind: string; detail?: string; ip?: string; ua?: string; answerLength?: number } }[];
 let asked: string[];
 
-function start(deps: Partial<Parameters<typeof createServer>[0]> = {}): Promise<void> {
+// The share routes as the gateway serves them (src/gateway/server.ts): a rejected handler is a bare 500.
+const createServer = (deps: ShareDeps): Server => {
+  const handle = shareHandler(deps);
+  return httpServer((req, res) => handle(req, res).catch(() => send(res, 500, 'Something went wrong', 'text/plain; charset=utf-8')));
+};
+function start(deps: Partial<ShareDeps> = {}): Promise<void> {
   server = createServer({
     dir,
     load: async () => scoped,
@@ -150,6 +161,20 @@ test('downloads: records.json is the scoped Bundle, summary.pdf is a PDF', async
   expect(pdf.headers.get('content-disposition')).toMatch(/filename="Test_Person_health-summary_\d{4}-\d{2}-\d{2}_\d{4}\.pdf"$/);
   expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString()).toBe('%PDF-');
   expect(logs.map((l) => [l.e.kind, l.e.detail])).toEqual([['download', 'records.json'], ['download', 'summary.pdf']]);
+});
+
+test('summary.pdf renders once per loaded scope, not per download', async () => {
+  await start();
+  const { token } = share();
+  const before = pdfRenders.n;
+  const a = Buffer.from(await (await get(`/s/${token}/download/summary.pdf`)).arrayBuffer());
+  const b = Buffer.from(await (await get(`/s/${token}/download/summary.pdf`)).arrayBuffer());
+  expect(pdfRenders.n - before).toBe(1);
+  expect(b.equals(a)).toBe(true);
+  expect(logs.filter((l) => l.e.detail === 'summary.pdf')).toHaveLength(2);
+  const other = share(); // another share on the same loaded scope gets its own cover
+  await get(`/s/${other.token}/download/summary.pdf`);
+  expect(pdfRenders.n - before).toBe(2);
 });
 
 test('downloadName: patient name, kind and local timestamp; unsafe characters replaced', () => {

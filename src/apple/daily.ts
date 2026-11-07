@@ -1,8 +1,8 @@
 import type { Observation, ObservationComponent } from '@medplum/fhirtypes';
 import { offsetAt } from '../ehi/dates.ts';
-import { APPLE } from '../identity.ts';
+import { APPLE, sha256 as sha } from '../identity.ts';
 import type { AhRecord, AhSummary } from './read.ts';
-import { SUBJECT, UCUM, sha, short } from './readings.ts';
+import { SUBJECT, UCUM, short } from './readings.ts';
 
 const r = (n: number, d: number) => Number(n.toFixed(d));
 const q = (value: number, code: string) => ({ value, unit: code, system: UCUM, code });

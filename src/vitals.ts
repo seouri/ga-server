@@ -1,7 +1,7 @@
 // vitals: clinic and Apple Health vital signs as compact rows; Apple's daily summaries only on request (AGENTS.md "Apple Health data").
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
-import { codesFor, conceptNamed } from './concepts.ts';
+import { codesFor, conceptNamed, isVitalCode } from './concepts.ts';
 import { TAG } from './identity.ts';
 import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
 
@@ -40,17 +40,21 @@ export async function vitals(
   patientId: string,
   { name, since, until, limit = 200, daily = false }: { name?: string; since?: string; until?: string; limit?: number; daily?: boolean },
 ): Promise<{ rows: VitalRow[]; total: number; truncated?: true; hint?: string }> {
-  // Summaries are Apple 'activity' rows; every vital-sign row (clinic or a home reading) is a reading. _id breaks date ties for paging.
+  // Summaries are Apple 'activity' rows. Readings: every vital-sign row (clinic or home), Apple's activity readings (walking steadiness,
+  // six-minute walk, heart-rate recovery) and uncategorised PDF results of a vital concept (lab_results leaves those out). _id breaks date ties for paging.
   const q = new URLSearchParams([['subject', `Patient/${patientId}`], ['_sort', '-date,_id'], ['_count', '100']]);
   if (daily) q.append('_tag', `${TAG}|src-apple-health`);
-  q.append('category', daily ? 'activity' : 'vital-signs');
+  if (daily) q.append('category', 'activity');
+  else q.append('_filter', `category eq vital-signs or category eq activity or _tag eq ${TAG}|extracted-by-llm`);
+  const cats = (o: Observation) => o.category?.flatMap((c) => c.coding?.map((x) => x.code) ?? []) ?? [];
+  const reading = (o: Observation) => !o.category?.length ? isVitalCode(o.code) : cats(o).includes('vital-signs') || (cats(o).includes('activity') && !SUMMARY.test(o.code?.text ?? ''));
   dateRange(q, 'date', since, until);
   // Daily summaries carry no vital concept code: by text only.
   const by = !name ? [] : daily ? [['code:text', name] as [string, string]] : vitalSearches(name);
   const found = await Promise.all((by.length ? by : [undefined]).map((p) => {
     const s = new URLSearchParams(q);
     if (p) s.append(...p);
-    return collect(client, 'Observation', s, (o: Observation) => (!daily || SUMMARY.test(o.code?.text ?? '') ? vitalRow(o) : undefined), limit);
+    return collect(client, 'Observation', s, (o: Observation) => ((daily ? SUMMARY.test(o.code?.text ?? '') : reading(o)) ? vitalRow(o) : undefined), limit);
   }));
   const rows = newestFirst(found.flatMap((f) => f.rows));
   // Weight, BP and most vitals have no Apple daily summary: an empty daily answer would read as "no data".

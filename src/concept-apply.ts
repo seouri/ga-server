@@ -2,7 +2,7 @@
 import type { CodeableConcept, Coding, Observation, Resource } from '@medplum/fhirtypes';
 import { CPT, CVX, cvxFor, HCPCS, ICD10CM, LOINC, RXNORM, SNOMED, vitalSpecCode } from './concepts.ts';
 import { inScope, lookup, type MapEntry, type Maps, sourceKey, termKey } from './conceptmap.ts';
-import { type SourceInfo, TAG } from './identity.ts';
+import { hasTag, type SourceInfo, TAG } from './identity.ts';
 
 export const CONCEPT_SRC = 'urn:ga-server:ext:concept-source';
 const CONCEPT_TAGS = ['concept-suggested', 'concept-unmapped', 'concept-unmatched']; // unmatched: its map says it has no standard code
@@ -24,7 +24,6 @@ export const gaCodings = (r: Resource) => cc(r)?.coding?.filter(isGa) ?? [];
 const ALIAS: Record<string, string> = { 'urn:oid:2.16.840.1.113883.12.292': CVX }; // CVX by its HL7 OID
 const sys = (s?: string) => (s && ALIAS[s]) ?? s ?? '';
 const own = (r: Resource) => cc(r)?.coding?.find((c) => !isGa(c) && c.code && TARGET[r.resourceType]?.includes(sys(c.system)));
-const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 // The codings a matcher may trust: on a record tagged concept-suggested, GA's own coding is only a guess.
 export const trusted = (r: Resource, codings: Coding[] = []): Coding[] => (hasTag(r, 'concept-suggested') ? codings.filter((c) => !isGa(c)) : codings);
 // Same GA codings and concept tags (order-insensitive): whether re-coding would change a stored record.

@@ -11,7 +11,7 @@ Back to the [README](../README.md).
 | `doctor` (default) | labs, medications, problems, allergies, immunizations, vitals | 7 days | A (one page) | 20 |
 | `family` | all | never | B (tabs) | 20 |
 
-Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log, the full EHI and Apple Health archives, and imported source files (the original PDFs, C-CDA and EHI files) are never shared; only the records extracted from them are.
+Groups for `--scope`: labs, vitals, medications, problems, allergies, immunizations, visits, notes, procedures, family, messages, apple, or `all`. `--since 12m|2y|YYYY-MM-DD` and `--until YYYY-MM-DD` limit dated events; active problems, medications and allergies show whatever their date. `--expires 7d|12h|YYYY-MM-DD|never` (a date means through the end of that day). Portal status entries, provenance, the access log, the full EHI and Apple Health archives, imported source files (the original PDFs, C-CDA and EHI files) and the C-CDA document narrative (Composition, which includes insurance) are never shared; only the records extracted from them are.
 
 ```sh
 ga share --for doctor --label "Dr. Kim"                 # link + QR code, scope and expiry
@@ -25,7 +25,7 @@ ga share export <id> [--out dir]                        # <Name>_health-summary_
 
 **From Claude Code.** Ask in plain words, with or without `/ga`: "/ga share my labs and medications from the last 2 years with Dr. Kim for a week", "share everything with Mom, no expiry", "list my shares", "revoke the Dr. Kim share", "who opened Mom's link?". Claude shows the parsed audience, scope, dates and expiry and runs `ga share …` only after you confirm. The terminal QR code may not survive in the chat; ask for the link, open it on your phone, and tap **Show QR**.
 
-**From chat apps.** Connected apps ([GA from chat apps](chat-apps.md)) have `share_create`, `share_list`, `share_log` and `share_revoke`. `share_create` first returns a preview (audience, scope, dates, expiry); the share is made only after your yes.
+**From chat apps.** Connected apps ([GA from chat apps](chat-apps.md)) have `share_create`, `share_list`, `share_log` and `share_revoke`. `share_create` first returns a preview (audience, scope, dates, expiry) and a link to GA's confirm page; the share is made only when you press Confirm there (passkey sign-in), and the page shows its link and QR code.
 
 **Turning on links.** `docker compose up -d` starts `ga-gateway`, which serves the links on `127.0.0.1:8110` only. Tailscale Funnel puts it on the internet over HTTPS:
 

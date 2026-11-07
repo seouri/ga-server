@@ -14,6 +14,7 @@ import { enrollLink, ownerCookie } from '../src/gateway/passkey.ts';
 import { writeJson } from '../src/gateway/store.ts';
 import { newCalendarToken, revokeCalendar } from '../src/calendar.ts';
 import { newUpload, uploadPath } from '../src/gateway/uploads.ts';
+import { previewLink } from '../src/confirm.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const RESOURCE = `${PUBLIC}/mcp`;
@@ -184,6 +185,27 @@ test('interaction and enroll pages refuse strangers', async () => {
   expect((await fetch(`${base}/enroll/nope`, { method: 'POST', body: '{}' })).status).toBe(400);
 });
 
+test('the consent page names the redirect host, the registration age and warns', async () => {
+  await start();
+  const redirect = 'https://claude.ai/api/mcp/auth_callback';
+  const reg = await (await fetch(`${base}/reg`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ redirect_uris: [redirect] }) })).json();
+  const q = new URLSearchParams({ client_id: reg.client_id, response_type: 'code', redirect_uri: redirect, scope: 'ga', resource: RESOURCE, code_challenge: 'x'.repeat(43), code_challenge_method: 'S256' });
+  const jar = new Map<string, string>([['ga_owner', ownerCookie(dir).split(';')[0].slice(9)]]); // signed in: login skipped, consent shown
+  let url = `${base}/auth?${q}`;
+  let html = '';
+  for (let i = 0; i < 6 && !html; i++) {
+    const r = await fetch(url, { redirect: 'manual', headers: { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; ') } });
+    for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const k = kv.slice(0, kv.indexOf('=')); jar.set(k, kv.slice(k.length + 1)); }
+    const loc = r.headers.get('location');
+    if (loc) url = base + new URL(loc, base).pathname + new URL(loc, base).search;
+    else html = await r.text();
+  }
+  expect(html).toContain('claude.ai wants to use your GA record');
+  expect(html).toContain('Access goes to <strong>claude.ai</strong>');
+  expect(html).toContain('registered with GA 0 minutes ago');
+  expect(html).toContain('Only allow if you just clicked Connect in this app.');
+});
+
 test('a valid enroll link shows the registration page and keeps its token', async () => {
   await start();
   const link = enrollLink(dir, PUBLIC);
@@ -211,11 +233,11 @@ test('without a public URL only share pages and /callback exist', async () => {
   expect((await fetch(`${base}/callback?state=good`)).status).toBe(200);
 });
 
-test('authorization and registration requests are limited per IP', async () => {
+test('registration requests are limited per IP; authorization requests only far above an owner\'s sign-ins', async () => {
   await start();
   const h = { 'x-forwarded-for': '203.0.113.20' };
-  for (let i = 0; i < 20; i++) expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).not.toBe(429);
-  expect((await fetch(`${base}/auth`, { headers: h })).status).toBe(429);
+  for (let i = 0; i < 300; i++) expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).not.toBe(429);
+  expect((await fetch(`${base}/auth`, { headers: h, redirect: 'manual' })).status).toBe(429);
   for (let i = 0; i < 20; i++) expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).not.toBe(429);
   expect((await fetch(`${base}/reg`, { method: 'POST', headers: h, body: '{}' })).status).toBe(429);
 });
@@ -260,6 +282,39 @@ test('upload links: passkey first, owner POST stores once, strangers store nothi
   // Used: refused, nothing more stored.
   expect((await post(cookie)).status).toBe(404);
   expect(readdirSync(join(dir, 'uploads'))).toEqual([fileId]);
+});
+
+test('confirm links: only the signed-in owner sees the preview and confirms; GET never uses the code', async () => {
+  await start();
+  writeJson(dir, 'passkeys.json', [{ id: 'AAAA', publicKey: 'AAAA', counter: 0 }]);
+  let runs = 0;
+  const { confirmUrl } = previewLink(PUBLIC, { title: 'Create a share link', view: { label: '<b>Mom</b>', scope: 'labs' }, run: async () => (runs++, { done: 'Share created.', link: `${PUBLIC}/s/tok` }) });
+  const path = new URL(confirmUrl).pathname;
+  const post = (cookie = '') => fetch(base + path, { method: 'POST', headers: { cookie }, body: '' });
+
+  expect((await fetch(`${base}/confirm/${'x'.repeat(43)}`)).status).toBe(404);
+  // A stranger (or the agent) gets the passkey page, and its POST runs nothing.
+  expect(await (await fetch(base + path)).text()).toContain('Sign in with passkey');
+  expect(await (await post()).text()).toContain('Sign in with passkey');
+  expect(runs).toBe(0);
+
+  passkeyOk = true;
+  const signed = await fetch(`${base}${path}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":"AAAA"}' });
+  expect(await signed.json()).toEqual({ redirect: path });
+  const cookie = signed.headers.getSetCookie()[0].split(';')[0];
+  const page = await (await fetch(base + path, { headers: { cookie } })).text();
+  expect(page).toContain('&lt;b&gt;Mom&lt;/b&gt;');
+  expect(page).toContain(`<form method="post" action="${path}">`);
+  expect(runs).toBe(0);
+
+  const ok = await post(cookie);
+  expect(ok.status).toBe(200);
+  const done = await ok.text();
+  expect(done).toContain('Share created.');
+  expect(done).toContain(`${PUBLIC}/s/tok`);
+  expect(runs).toBe(1);
+  expect((await post(cookie)).status).toBe(404); // single use
+  expect(runs).toBe(1);
 });
 
 test('an upload over 2 GB is refused with 413 before the link is used', async () => {

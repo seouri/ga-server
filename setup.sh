@@ -22,6 +22,17 @@ fi
 
 echo "==> npm install"
 npm install
+# The containers run on UTC unless .env names the host's time zone; dates and "today" then follow your clock.
+if ! grep -q '^TZ=' .env 2>/dev/null; then
+  tz=$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*zoneinfo/||p')
+  if [ -n "$tz" ] && node -e 'new Intl.DateTimeFormat("en", { timeZone: process.argv[1] })' "$tz" 2>/dev/null; then
+    [ -s .env ] && [ -n "$(tail -c1 .env)" ] && echo >> .env # a last line without newline would swallow TZ
+    echo "TZ=$tz" >> .env
+    echo "==> time zone $tz written to .env"
+  else
+    echo "Could not tell this computer's time zone: add TZ=<zone, e.g. America/New_York> to .env"
+  fi
+fi
 echo "==> docker compose up -d (waits until the FHIR server is healthy)"
 docker compose up -d --wait --wait-timeout 300
 echo "==> ga setup"

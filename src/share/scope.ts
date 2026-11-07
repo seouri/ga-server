@@ -2,8 +2,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
-import { hasTag } from '../engine.ts';
-import { TAG } from '../identity.ts';
+import { hasTag, NEWEST_IMPORT, TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
@@ -11,9 +10,11 @@ import type { Group, Share } from './store.ts';
 export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[]; newestImport?: number };
 
 // Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
+// Composition: the C-CDA narrative, every section including insurance (payer name, member ID).
 const NEVER = new Set([
   'Endpoint', 'Provenance', 'AuditEvent', 'Patient', 'Coverage', 'RelatedPerson', 'Account', 'Claim', 'ExplanationOfBenefit', 'Person',
   'Basic', 'Group', 'ClaimResponse', 'Invoice', 'ChargeItem', 'CoverageEligibilityRequest', 'CoverageEligibilityResponse', 'EnrollmentRequest',
+  'Composition',
 ]);
 // FHIR R4 Patient CompartmentDefinition types with a compartment param (as in Medplum's definitions), never-shared ones not fetched.
 export const PATIENT_COMPARTMENT = [
@@ -135,8 +136,10 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
 }
 
 // Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
-// the same types, only Epic-tagged records, only the fields currencyContext reads.
+// the date importResources stored on the Patient, else (installs that predate it) a scan of the Epic-tagged records, only the fields currencyContext reads.
 export async function newestEpicImport(client: MedplumClient, patientId: string): Promise<number> {
+  const stored = Date.parse((await client.readResource('Patient', patientId, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+  if (!Number.isNaN(stored)) return stored;
   let newest = -Infinity;
   const _tag = [...EPIC_TAGS].map((c) => `${TAG}|${c}`).join(',');
   for (const type of COMPARTMENT_TYPES) {
@@ -151,8 +154,10 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
   const p = await client.readResource('Patient', share.patientId, opts);
   // Per type, not $everything: Medplum caps _offset at 10000. _sort=_lastUpdated with _count >= 20 makes it page by _cursor.
   const compartment: Resource[] = [];
+  // Apple data is most of the record: not even fetched for a share without it.
+  const noApple = share.groups !== 'all' && !share.groups.includes('apple') ? { '_tag:not': `${TAG}|src-apple-health` } : {};
   for (const type of COMPARTMENT_TYPES) {
-    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000' };
+    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...noApple };
     for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
   const { resources, refs, newestImport } = selectScoped(compartment, share);
@@ -185,6 +190,7 @@ export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof lo
     const key = `${share.id}:${share.tokenHash}`;
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < ttlMs) return hit.p;
+    for (const [k, v] of cache) if (Date.now() - v.at >= ttlMs) cache.delete(k); // expired loads hold a whole record each
     const p = load(client, share);
     cache.set(key, { at: Date.now(), p });
     p.catch(() => cache.get(key)?.p === p && cache.delete(key));
