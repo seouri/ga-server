@@ -2,14 +2,13 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Basic, Condition, Extension, Observation, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { GaError } from './config.ts';
-import { evaluateScreenings, loadRules } from './screenings.ts';
+import { evaluateScreenings, loadRules, SOON_DAYS } from './screenings.ts';
+import { SRC_DATE } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
 import { addDays, vaccineGaps } from './vaccines.ts';
 
 export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, followup
 const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote' };
-const SRC_DATE = 'urn:ga-server:ext:source-date';
-const SOON_DAYS = 90; // same window as evaluateScreenings
 
 export type Plan = { topic?: string; due?: string; status?: string; asOf: string; from: 'epic' | 'agent'; source?: string; id?: string; quote?: string };
 type Importance = 'high' | 'medium' | 'low';
@@ -18,7 +17,6 @@ export type Item = {
   guideline?: { dueDate?: string; grade?: string; citation: string; reason: string }; doctorsPlan?: Plan;
   evidence: { date: string; by: string; source?: string; id?: string }[]; why?: string; cost?: string; nextMention?: string | null;
 };
-type Planned = { topic: string; plan: Plan };
 
 // Epic topic names (upper-case substrings) per CDC vaccine id; Haemophilus influenzae is not flu.
 const VACCINE_EPIC: Record<string, string[]> = {
@@ -47,7 +45,7 @@ export function vaccineItems(v: Awaited<ReturnType<typeof vaccineGaps>>): Item[]
   });
 }
 
-export function epicPlans(hm: Observation[], birthDate?: string): Planned[] {
+export function epicPlans(hm: Observation[], birthDate?: string): Plan[] {
   const P = 'Health maintenance: ';
   return hm.flatMap((o) => {
     const t = o.code?.text;
@@ -55,7 +53,7 @@ export function epicPlans(hm: Observation[], birthDate?: string): Planned[] {
     const next = o.component?.find((c) => c.code?.text === 'Next due date')?.valueDateTime?.slice(0, 10);
     const due = next && !(birthDate && next < birthDate) ? next : undefined; // a date before birth is a placeholder
     const asOf = val(o.extension?.find((e) => e.url === SRC_DATE));
-    return [{ topic: cleanName(t.slice(P.length)), plan: { topic: cleanName(t.slice(P.length)), asOf, from: 'epic', ...(due && { due }), ...(o.valueString && { status: o.valueString }), ...(o.id && { id: `Observation/${o.id}` }) } }];
+    return [{ topic: cleanName(t.slice(P.length)), asOf, from: 'epic', ...(due && { due }), ...(o.valueString && { status: o.valueString }), ...(o.id && { id: `Observation/${o.id}` }) } as Plan];
   });
 }
 
@@ -63,7 +61,7 @@ const ORDER: Status[] = ['overdue', 'due', 'due soon', 'discuss', 'postponed', '
 const RANK: Importance[] = ['high', 'medium', 'low'];
 const DAYS: Record<Importance, number> = { high: 14, medium: 60, low: 365 };
 
-export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Planned[], reminders: Basic[], rules: Rules, asOf: string): Item[] {
+export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Plan[], reminders: Basic[], rules: Rules, asOf: string): Item[] {
   const day = asOf.slice(0, 10);
   const items: Item[] = [
     ...guideline.map((g): Item => ({
@@ -73,28 +71,27 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     })),
     ...vaccines,
   ];
-  const byTopic = (name: string) => {
-    // A plan never revives a "not for you" item: it becomes a follow-up of its own.
-    return items.find((i) => i.kind !== 'follow-up' && i.status !== 'not for you' && (i.topic.toLowerCase() === name.toLowerCase()
-      || (!hasWord(name, 'HAEMOPHILUS') && (VACCINE_EPIC[i.topic] ?? rules.topics.find((t) => t.id === i.topic)?.epic)?.some((e) => hasWord(name, e)))));
-  };
+  // A plan never revives a "not for you" item: it becomes a follow-up of its own.
+  const byTopic = (name: string) => items.find((i) => i.kind !== 'follow-up' && i.status !== 'not for you' && (i.topic.toLowerCase() === name.toLowerCase()
+    || (!hasWord(name, 'HAEMOPHILUS') && (VACCINE_EPIC[i.topic] ?? rules.topics.find((t) => t.id === i.topic)?.epic)?.some((e) => hasWord(name, e)))));
 
-  const agent = reminders.filter((b) => b.code?.coding?.[0]?.code === 'followup').flatMap((b): Planned[] => {
+  const agent = reminders.filter((b) => b.code?.coding?.[0]?.code === 'followup').flatMap((b): Plan[] => {
     const topic = text(b.extension?.find((e) => e.url === X.topic));
     if (!topic) return [];
     const due = val(b.extension?.find((e) => e.url === X.due));
     const quote = text(b.extension?.find((e) => e.url === X.quote));
-    return [{ topic: cleanName(topic), plan: { topic: cleanName(topic), asOf: (b.created ?? '').slice(0, 10), from: 'agent', ...(due && { due }), ...(quote && { quote }) } }];
+    return [{ topic: cleanName(topic), asOf: (b.created ?? '').slice(0, 10), from: 'agent', ...(due && { due }), ...(quote && { quote }) }];
   });
-  for (const { topic, plan } of [...plans, ...agent]) {
+  // Several plans for one topic: the earliest is kept; an Epic "Overdue" without a date counts as earliest, so a dated plan never hides it.
+  // An undated "Due" ranks as today, after an undated Overdue and before any later date.
+  const when = (x: Plan) => x.due ?? (x.status?.toLowerCase() === 'overdue' ? '0000-00-00' : /^due/i.test(x.status ?? '') ? day : undefined);
+  for (const plan of [...plans, ...agent]) {
+    const topic = plan.topic ?? '';
     let item = byTopic(topic) ?? items.find((i) => i.kind === 'follow-up' && i.topic.toLowerCase() === topic.toLowerCase());
     if (!item) {
       item = { topic, name: topic, kind: 'follow-up', status: 'done', importance: 'medium', evidence: [] };
       items.push(item);
     }
-    // Several plans for one topic: the earliest is kept; an Epic "Overdue" without a date counts as earliest, so a dated plan never hides it.
-    // An undated "Due" ranks as today, after an undated Overdue and before any later date.
-    const when = (x: Plan) => x.due ?? (x.status?.toLowerCase() === 'overdue' ? '0000-00-00' : /^due/i.test(x.status ?? '') ? day : undefined);
     if (!item.doctorsPlan || (when(plan) && (!when(item.doctorsPlan) || when(plan)! < when(item.doctorsPlan)!))) item.doctorsPlan = plan;
   }
 

@@ -38,6 +38,7 @@ const NOT_DONE = ['refus*', 'declin*', 'not performed', 'not done', 'order*', 'd
   'risk assessment', 'risk factor*', 'education', 'reminder', 'due', 'overdue', 'scheduled', 'cancel*'];
 const matches = (m: Method, f: Found) => m.types.includes(f.r.resourceType) && (m.codes.some((c) => f.codes.has(c))
   || (!!m.text?.some((p) => phrase(f, p)) && ![...NOT_DONE, ...(m.not ?? [])].some((p) => phrase(f, p))));
+export const SOON_DAYS = 90; // "due soon" window, shared with the doctor's-plan dates in maintenance.ts
 const NEVER = '9999-12-31'; // a once-in-a-lifetime test never falls due again
 
 export function evaluateScreenings(rules: Rules, input: ScreenInput, asOf: string): GuidelineItem[] {
@@ -88,7 +89,7 @@ export function evaluateScreenings(rules: Rules, input: ScreenInput, asOf: strin
     if (!best) [status, reason] = ['due', `No ${[...new Set(t.doneBy.map((d) => d.name))].join(' or ')} on record.`];
     else if (!dueDate) [status, reason] = ['done', `${best.by} on ${best.date}; needed once.`];
     else if (dueDate < day) [status, reason] = ['overdue', `Last ${best.by} on ${best.date}; was due ${dueDate}.`];
-    else [status, reason] = [dueDate <= addDays(day, 90) ? 'due soon' : 'done', `Last ${best.by} on ${best.date}; next due ${dueDate}.`];
+    else [status, reason] = [dueDate <= addDays(day, SOON_DAYS) ? 'due soon' : 'done', `Last ${best.by} on ${best.date}; next due ${dueDate}.`];
     // GA cannot check the risk factor: only a current screening on record answers it.
     if (t.riskBased && status !== 'done' && status !== 'due soon') {
       return out('discuss', `For people with "${t.riskBased}" (the guideline's words); whether that applies to you is worth discussing with your doctor.${seen}`, { ...(last && { last }) });
