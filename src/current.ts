@@ -7,8 +7,8 @@ type Currency = 'current' | 'unconfirmed';
 export type Ctx = { lastSuccess: Map<string, number>; newestImport: number };
 
 const COVERED = new Set(['MedicationStatement', 'MedicationRequest', 'Condition', 'AllergyIntolerance']);
-const SMART_ID = 'urn:ga-server:id:smart:';
-const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
+export const SMART_ID = 'urn:ga-server:id:smart:';
+export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-smart']);
 
 type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] } };
 const extDate = (r: Resource, url: string): number | undefined => {
@@ -41,15 +41,25 @@ export function isActive(r: Resource): boolean {
   return COVERED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 
-export function currency(r: Resource, ctx: Ctx): Currency | undefined {
+const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+// currency plus the reason in plain words.
+export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: string } | undefined {
   if (!isActive(r)) return undefined;
   const seen = extDate(r, LAST_SEEN);
   if (seen !== undefined) {
     const keys = ((r as { identifier?: { system?: string; value?: string }[] }).identifier ?? [])
       .filter((i) => i.system?.startsWith(SMART_ID))
       .map((i) => i.system!.slice(SMART_ID.length));
-    return keys.some((k) => ctx.lastSuccess.get(k) === seen) ? 'current' : 'unconfirmed';
+    const k = keys.find((k) => ctx.lastSuccess.get(k) === seen);
+    return k
+      ? { currency: 'current', reason: `on the list at the latest ${k} portal sync` }
+      : { currency: 'unconfirmed', reason: `the hospital portal stopped returning it (last returned ${day(seen)}); it may have been stopped` };
   }
   const d = extDate(r, SRC_DATE);
-  return d !== undefined && d < ctx.newestImport ? 'unconfirmed' : 'current';
+  return d !== undefined && d < ctx.newestImport
+    ? { currency: 'unconfirmed', reason: `last listed ${day(d)}, before the newest hospital record (${day(ctx.newestImport)}); it may have been stopped` }
+    : { currency: 'current', reason: 'no newer hospital record leaves it out' };
 }
+
+export const currency = (r: Resource, ctx: Ctx): Currency | undefined => explain(r, ctx)?.currency;

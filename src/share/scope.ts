@@ -1,8 +1,9 @@
 // What a share may show: the security core. Every share route and Ask tool reads only loadScoped's result.
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
-import { currencyContext, isActive } from '../current.ts';
+import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
 import { hasTag } from '../engine.ts';
+import { TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
@@ -29,7 +30,7 @@ export const PATIENT_COMPARTMENT = [
 export const COMPARTMENT_TYPES = PATIENT_COMPARTMENT.filter((t) => !NEVER.has(t));
 // Archives and imported source files (C-CDA, EHI media, PDFs): untrimmed demographics, MRN, insurance and out-of-scope data.
 // Only the records extracted from them are shared; their Binary is never followed because they never enter `resources`.
-const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:file']);
+export const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:file']);
 const BY_TYPE: Record<string, Group> = {
   DiagnosticReport: 'labs',
   MedicationStatement: 'medications',
@@ -131,6 +132,18 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
   const refs = new Set<string>();
   for (const r of resources) supportRefs(r, refs);
   return { resources, refs: [...refs], newestImport: currencyContext(own, []).newestImport };
+}
+
+// Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
+// the same types, only Epic-tagged records, only the fields currencyContext reads.
+export async function newestEpicImport(client: MedplumClient, patientId: string): Promise<number> {
+  let newest = -Infinity;
+  const _tag = [...EPIC_TAGS].map((c) => `${TAG}|${c}`).join(',');
+  for (const type of COMPARTMENT_TYPES) {
+    const q = { _compartment: `Patient/${patientId}`, _tag, _elements: 'extension,meta', _sort: '_lastUpdated', _count: '1000' };
+    for await (const page of client.searchResourcePages(type, q, { cache: 'no-cache' })) newest = Math.max(newest, currencyContext(page, []).newestImport);
+  }
+  return newest;
 }
 
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {
