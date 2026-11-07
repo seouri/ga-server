@@ -113,3 +113,28 @@ describe('record_followup', () => {
     expect(created).toEqual([]);
   });
 });
+
+describe('postpone done', () => {
+  it('needs a method from the rule, then records', async () => {
+    const { created, call } = await setup();
+    const miss = await call('postpone', { topic: 'colorectal', done: { date: '2024' } });
+    expect(miss.error).toBe(true);
+    expect(miss.msg).toContain('method must be one of: colonoscopy, stool test (FIT or gFOBT)');
+    expect(created).toEqual([]);
+    const r = await call('postpone', { topic: 'colorectal', done: { date: '2024-05', method: 'Colonoscopy', where: 'City GI' }, reason: 'told me' });
+    expect(r.json).toEqual({ topic: 'colorectal', recorded: 'done', date: '2024-05' });
+    expect(created[0]).toMatchObject({ code: { coding: [{ code: 'done' }] }, extension: [
+      { url: 'urn:ga-server:ext:topic', valueString: 'colorectal' }, { url: 'urn:ga-server:ext:done-date', valueString: '2024-05' },
+      { url: 'urn:ga-server:ext:method', valueString: 'colonoscopy' }, { url: 'urn:ga-server:ext:where', valueString: 'City GI' }] });
+    expect(created[1].reason[0].text).toBe('done "colorectal" 2024-05 colonoscopy at City GI: told me');
+  });
+  it('refuses until, dismiss, a future date and a bad date', async () => {
+    const { created, call } = await setup();
+    const done = { date: '2024', method: 'colonoscopy' };
+    expect((await call('postpone', { topic: 'colorectal', done, until: '2027-03-01' })).error).toBe(true);
+    expect((await call('postpone', { topic: 'colorectal', done, dismiss: true })).error).toBe(true);
+    expect((await call('postpone', { topic: 'colorectal', done: { ...done, date: '2999-01' } })).error).toBe(true);
+    expect((await call('postpone', { topic: 'colorectal', done: { ...done, date: '2024-13' } })).error).toBe(true);
+    expect(created).toEqual([]);
+  });
+});

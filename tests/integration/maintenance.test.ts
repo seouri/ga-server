@@ -50,5 +50,9 @@ test('postpone writes a Basic the real server accepts (Basic.created is a date)'
   expect(res.isError).toBeFalsy();
   const [basic] = await client.searchResources('Basic', { subject: `Patient/${pid}`, code: `${REMINDER}|postpone` }, { cache: 'no-cache' });
   expect(basic.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  const done = await mcp.callTool({ name: 'postpone', arguments: { topic: 'colorectal', done: { date: '2024-05', method: 'colonoscopy' } } });
+  expect(done.isError).toBeFalsy();
+  const [d] = await client.searchResources('Basic', { subject: `Patient/${pid}`, code: `${REMINDER}|done` }, { cache: 'no-cache' });
+  expect(d.created).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   await mcp.close();
 });

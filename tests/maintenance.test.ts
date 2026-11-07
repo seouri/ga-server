@@ -210,3 +210,31 @@ test('two reminders on the same day: the later save wins', () => {
   const pp = { ...rem('postpone', 'colorectal', '2026-11-01', [{ url: 'urn:ga-server:ext:until', valueDate: '2027-06-01' }]), meta: { lastUpdated: '2026-11-01T15:00:00Z' } };
   for (const order of [[nn, pp], [pp, nn]]) expect(run([g('colorectal', 'A', 'overdue', '2026-03-01')], epicPlans([]), order)[0].status).toBe('postponed');
 });
+
+const doneBasic = (topic: string, date: string, method?: string): Basic => ({
+  ...rem('done', topic, '2026-11-03', [{ url: 'urn:ga-server:ext:done-date', valueString: date }, ...(method ? [{ url: 'urn:ga-server:ext:method', valueString: method }] : [])]), id: 'b1',
+});
+const withBasics = (basics: Basic[], birthDate = '1971-01-01', gender = 'female', asOf = '2026-11-03') => healthMaintenance({
+  readResource: async () => ({ resourceType: 'Patient', birthDate, gender }),
+  searchResourcePages: async function* (type: string) { yield type === 'Basic' ? basics : []; },
+} as unknown as MedplumClient, 'p', asOf);
+
+test('combine: a done reminder counts as evidence', async () => {
+  const c = (await withBasics([doneBasic('colorectal', '2024-05', 'colonoscopy')])).items.find((i) => i.topic === 'colorectal');
+  expect(c).toMatchObject({ status: 'done', dueDate: '2034-05-01', evidence: [{ date: '2024-05-01', by: 'colonoscopy', source: 'you told GA' }] });
+  expect((await withBasics([doneBasic('colorectal', '2024', 'colonoscopy')])).items.find((i) => i.topic === 'colorectal')?.evidence[0].date).toBe('2024-01-01');
+});
+
+test('every screening method a done reminder can name is read back by its rule', async () => {
+  for (const t of loadRules().topics) for (const d of t.doneBy) {
+    const birth = `${2026 - Math.max(t.ages[0], d.minAge ?? 0) - 1}-01-01`;
+    const i = (await withBasics([doneBasic(t.id, '2026-09', d.name)], birth, t.sex ?? 'female')).items.find((x) => x.topic === t.id);
+    expect(i?.evidence[0]?.by, `${t.id}: ${d.name}`).toBe(d.name);
+  }
+});
+
+test('combine: done on a follow-up counts only on or after the plan date', () => {
+  const plans = epicPlans([hm('LIPID PANEL - YEARLY', '2026-10-01', 'Overdue')]);
+  expect(run([], plans, [doneBasic('LIPID PANEL - YEARLY', '2026-10-15')])[0]).toMatchObject({ status: 'done', nextMention: null });
+  expect(run([], plans, [doneBasic('LIPID PANEL - YEARLY', '2026-09')])[0].status).toBe('overdue');
+});

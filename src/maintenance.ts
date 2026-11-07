@@ -8,8 +8,9 @@ import { SRC_DATE, TAG } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
 import { addDays, addMonths, loadSchedule, vaccineGaps } from './vaccines.ts';
 
-export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, followup
-const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote' };
+export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, done, followup
+const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote', doneDate: 'urn:ga-server:ext:done-date', method: 'urn:ga-server:ext:method', where: 'urn:ga-server:ext:where' };
+export const fullDay = (d: string) => `${d}${'-01-01'.slice(d.length - 4)}`; // 'YYYY' and 'YYYY-MM' count from their first day
 
 export type Plan = { topic?: string; due?: string; status?: string; asOf: string; from: 'epic' | 'agent'; source?: string; id?: string; quote?: string };
 type Importance = 'high' | 'medium' | 'low';
@@ -62,7 +63,7 @@ export function epicPlans(hm: Observation[], birthDate?: string): Plan[] {
 
 const ORDER: Status[] = ['overdue', 'due', 'due soon', 'discuss', 'postponed', 'done', 'not for you'];
 const RANK: Importance[] = ['high', 'medium', 'low'];
-const DAYS: Record<Importance, number> = { high: 14, medium: 60, low: 365 };
+export const DAYS: Record<Importance, number> = { high: 14, medium: 60, low: 365 };
 
 export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Plan[], reminders: Basic[], rules: Rules, asOf: string): Item[] {
   const day = asOf.slice(0, 10);
@@ -125,6 +126,10 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
     if (!newest.has(topic) || when(b) > when(newest.get(topic)!)) newest.set(topic, b);
   }
   for (const i of out) {
+    // The person says they had a follow-up on or after the plan's date: it is done.
+    const doneOn = reminders.filter((b) => b.code?.coding?.[0]?.code === 'done' && cleanName(text(b.extension?.find((e) => e.url === X.topic)) ?? '').toLowerCase() === i.topic.toLowerCase())
+      .map((b) => fullDay(text(b.extension?.find((e) => e.url === X.doneDate)) ?? '')).sort().pop();
+    if (i.kind === 'follow-up' && i.doctorsPlan && doneOn && doneOn >= i.doctorsPlan.asOf) [i.status, i.nextMention] = ['done', null];
     const b = newest.get(i.topic.toLowerCase());
     const code = b?.code?.coding?.[0]?.code;
     if (!b) continue;
@@ -157,7 +162,17 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
   const evidence = [...new Map([...labs, ...uncategorised].map((o) => [o.id, o])).values()].filter((o) => !planIds.has(o.id));
   const rules = loadRules();
   const vaccines = await vaccineGaps(client, patientId, asOf);
-  const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions] }, asOf);
+  // "I already did this" (done) for a screening becomes a record the rule's own text match and interval read.
+  const told = basics.flatMap((b): Resource[] => {
+    const get = (url: string) => b.extension?.find((e) => e.url === url)?.valueString;
+    const method = get(X.method), date = get(X.doneDate);
+    const t = rules.topics.find((x) => x.id === get(X.topic)?.toLowerCase());
+    if (b.code?.coding?.[0]?.code !== 'done' || !method || !date || !t) return [];
+    const type = t.doneBy.find((d) => d.name === method)?.types[0] ?? 'Procedure';
+    return [{ resourceType: type, id: b.id, status: type === 'Procedure' ? 'completed' : 'final', code: { text: method }, meta: { source: 'you told GA' },
+      ...(type === 'Procedure' ? { performedDateTime: fullDay(date) } : { effectiveDateTime: fullDay(date) }) } as unknown as Resource];
+  });
+  const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions, ...told] }, asOf);
   const items = combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf);
   return { asOf, edition: rules.edition, items, upcoming: upcoming(items, asOf, months), byTheWay: byTheWay(items, asOf), note: NOTE };
 }

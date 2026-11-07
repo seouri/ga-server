@@ -143,7 +143,7 @@
    "published": "2019-06-11",
    "ages": [15, 65],
    "doneBy": [
-    { "name": "HIV test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|56888-1", "http://loinc.org|7917-8", "http://loinc.org|31201-7", "http://loinc.org|89365-1", "http://loinc.org|80387-4", "http://www.ama-assn.org/go/cpt|87389"], "text": ["hiv ab", "hiv ag", "hiv antibod*", "hiv antigen*"], "years": null, "not": ["genotyp*", "resistance", "prep", "vaccin*"] }
+    { "name": "HIV test", "types": ["Observation", "DiagnosticReport", "Procedure"], "codes": ["http://loinc.org|56888-1", "http://loinc.org|7917-8", "http://loinc.org|31201-7", "http://loinc.org|89365-1", "http://loinc.org|80387-4", "http://www.ama-assn.org/go/cpt|87389"], "text": ["hiv test", "hiv ab", "hiv ag", "hiv antibod*", "hiv antigen*"], "years": null, "not": ["genotyp*", "resistance", "prep", "vaccin*"] }
    ],
    "why": "Approximately 15% of persons living with HIV are unaware of their infection.",
    "cost": "Early initiation of ART and other interventions effectively reduce the risk of clinical progression to AIDS, AIDS-defining clinical events, and mortality.",

@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { GaError } from '../config.ts';
 import { validDay } from '../labs.ts';
 import { CONFIRM_ON_PAGE, preview, previewLink, takeConfirmed } from '../confirm.ts';
-import { healthMaintenance, REMINDER } from '../maintenance.ts';
+import { DAYS, fullDay, healthMaintenance, REMINDER } from '../maintenance.ts';
+import { loadRules } from '../screenings.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 import { messageText, noteText } from '../notes.ts';
 
@@ -43,15 +44,30 @@ export function registerMaintenanceTools(server: McpServer, deps: ToolDeps): voi
       description:
         'Record that the person does not want a health_maintenance item raised now. topic: the item\'s topic exactly as health_maintenance lists it. ' +
         'until (YYYY-MM-DD): hold it until that date; dismiss: true: never mention a low-importance item again (refused for medium or high importance: use not now or a date); neither: "not now", ' +
-        'it comes back after 14 days (high importance), 60 (medium) or 365 (low). Use it when the person says so; no confirmation step. reason: their words, optional.',
-      inputSchema: { topic: z.string().min(1), until: DAY.optional(), dismiss: z.boolean().optional(), reason: z.string().max(300).optional() },
+        `it comes back after ${DAYS.high} days (high importance), ${DAYS.medium} (medium) or ${DAYS.low} (low). Use it when the person says so; no confirmation step. reason: their words, optional. ` +
+        'done: the person says they already had it (date at least a year; method one of the screening\'s options); not with until or dismiss; not for vaccines.',
+      inputSchema: { topic: z.string().min(1), until: DAY.optional(), dismiss: z.boolean().optional(),
+        done: z.object({ date: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/), method: z.string().max(100).optional(), where: z.string().max(100).optional() }).optional(), reason: z.string().max(300).optional() },
       annotations: { destructiveHint: false },
     },
-    async ({ topic, until, dismiss, reason }) => {
+    async ({ topic, until, dismiss, done, reason }) => {
       try {
         if (until && dismiss) throw new GaError('give until or dismiss, not both');
-        const { topic: t, importance } = await known(topic);
+        const { topic: t, importance, kind } = await known(topic);
         if (dismiss && importance !== 'low') throw new GaError(`"${t}" is ${importance} importance and cannot be dismissed: use not now, or until a date`);
+        if (done) {
+          if (until || dismiss) throw new GaError('done goes alone: not with until or dismiss');
+          if (!validDay(fullDay(done.date)) || fullDay(done.date) > new Date().toLocaleDateString('en-CA')) throw new GaError('done.date must be a past calendar date: YYYY, YYYY-MM or YYYY-MM-DD');
+          // shortcut: vaccines need an Immunization record, add a typed completion when owners ask
+          if (kind === 'vaccine') throw new GaError('vaccines: import the vaccination record instead');
+          const options = loadRules().topics.find((x) => x.id === t)?.doneBy.map((d) => d.name);
+          const method = options?.find((m) => m.toLowerCase() === done.method?.trim().toLowerCase());
+          if (options && !method) throw new GaError(`method must be one of: ${options.join(', ')}`);
+          const m = method ?? done.method;
+          await write('done', t, [{ url: 'urn:ga-server:ext:done-date', valueString: done.date }, ...(m ? [{ url: 'urn:ga-server:ext:method', valueString: m }] : []),
+            ...(done.where ? [{ url: 'urn:ga-server:ext:where', valueString: done.where }] : [])], `done "${t}" ${done.date}${m ? ` ${m}` : ''}${done.where ? ` at ${done.where}` : ''}${reason ? `: ${reason}` : ''}`);
+          return text({ topic: t, recorded: 'done', date: done.date });
+        }
         const code = until ? 'postpone' : dismiss ? 'dismiss' : 'not-now';
         await write(code, t, until ? [{ url: 'urn:ga-server:ext:until', valueDate: until }] : [], `${code} "${t}"${until ? ` until ${until}` : ''}${reason ? `: ${reason}` : ''}`);
         return text({ topic: t, recorded: code, ...(until && { until }) });
