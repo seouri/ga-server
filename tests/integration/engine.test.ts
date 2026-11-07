@@ -839,3 +839,23 @@ test('arrival survives update, merge, skip and possible-duplicate', async () => 
   expect(both.every((o) => arrivedAt(o))).toBe(true);
   expect(both.map(arrivedAt)).toContain(arrival);
 });
+
+test('arrival survives a last-seen bump and a fill-only merge', async () => {
+  const o = uid('o');
+  const batch = [{ ...chol(o, 170, '2026-02-03'), identifier: [{ system: SMART_SYS, value: `Observation/${o}` }] } as Resource];
+  const run = (at: string) => importResources(client, batch, smartSrc(at, { seenAt: at, fillOnly: () => true }), pid, 'h');
+  const arrival = async () => arrivedAt((await client.searchResources('Observation', { identifier: `${SMART_SYS}|Observation/${o}` }, { cache: 'no-cache' }))[0]);
+  await run('2026-11-04T00:00:00Z');
+  const first = await arrival();
+  expect(first).toBeDefined();
+  expect(await run('2026-11-05T00:00:00Z')).toMatchObject({ updated: 0, seen: 1 });
+  expect(await arrival()).toBe(first);
+
+  const pl = { system: PROBLEM_OID, value: uid('pl') };
+  await importResources(client, [ehiProblem(pl)], ehiSrc('2026-01-01'), pid, 'h');
+  const stamp = async () => arrivedAt((await byId('Condition', pl.system, pl.value))[0]);
+  const ehiArrival = await stamp();
+  expect(ehiArrival).toBeDefined();
+  expect(await importResources(client, [smartProblem(pl, 'resolved')], smartSrc('2026-11-05T00:00:00Z', { fillOnly: () => true }), pid, 'h')).toMatchObject({ merged: 1 });
+  expect(await stamp()).toBe(ehiArrival);
+});
