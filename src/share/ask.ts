@@ -39,6 +39,8 @@ export function instructions(vaccines: boolean): string {
         return vaccines
           ? `${bold(l)} Call \`vaccine_gaps\`; never judge the schedule yourself. Report its schedule edition, statuses, records used, unmatched and possible-duplicate records.`
           : `${bold(l)} This share has no schedule check: list the vaccine doses in the records, with dates, and say vaccinations are listed without a schedule check. Never judge the schedule yourself.`;
+      // whats_new and postpone are the owner's: a share keeps only the answering rule.
+      if (/^9\. /.test(l)) return '9. **Answer briefly:** the direct answer first, then the evidence, then what\'s missing that would change it. For decisions, frame it as input for a conversation with their clinician.';
       return l.replaceAll(' (optional `asOf`)', '').replaceAll('fhir_search', 'search_records').replaceAll('fhir_read', 'read_record');
     })
     .join('\n')
