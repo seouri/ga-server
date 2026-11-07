@@ -38,3 +38,4 @@ export const cvxFor = (name: string): Coding | undefined => {
   const v = cvx.find((x) => x.short.toLowerCase() === name.trim().toLowerCase());
   return v && { system: CVX, code: v.code, display: v.short };
 };
+export const cvxShort = (code: string): string | undefined => cvx.find((x) => x.code === code)?.short;

@@ -1,5 +1,6 @@
 import { basename, dirname } from 'node:path';
-import { conceptMapTranslate, type MedplumClient } from '@medplum/core';
+import { isDeepStrictEqual } from 'node:util';
+import { conceptMapTranslate, getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { CodeableConcept, Coding, ConceptMap, ConceptMapGroup, Observation, Resource } from '@medplum/fhirtypes';
 import { type SourceInfo, TAG } from './identity.ts';
 import { SUMMARY } from './vitals.ts';
@@ -91,13 +92,15 @@ export function lookup(maps: Maps, source: string, key: string): MapEntry | unde
 
 // Creates or updates the source's map in one read-modify-write: an agent entry replaces any earlier entry for its key;
 // a learned (by 'source') entry is only added, never replacing one, judged on the map as just read. One group per target system.
-export async function upsertEntries(client: MedplumClient, source: string, entries: MapEntry[]): Promise<void> {
+// Versioned: If-Match on update, If-None-Exist on create; a write that lost a race re-reads and retries once, so concurrent
+// writers (an import and an agent's map_concept) never drop each other's entries. Returns the written map (undefined: nothing to add).
+export async function upsertEntries(client: MedplumClient, source: string, entries: MapEntry[], retry = true): Promise<ConceptMap | undefined> {
   const url = mapUrl(source);
   const map: ConceptMap = (await client.searchOne('ConceptMap', { url }, { cache: 'no-cache' })) ?? { resourceType: 'ConceptMap', status: 'active', url, meta: { tag: [{ system: TAG, code: MAP_TAG }] } };
   let groups: ConceptMapGroup[] = map.group ?? [];
   const has = (key: string) => groups.some((g) => g.element?.some((e) => e.code === key));
   const todo = entries.filter((e) => e.by !== 'source' || !has(e.key));
-  if (!todo.length) return;
+  if (!todo.length) return undefined;
   for (const entry of todo) {
     const target = entry.target?.code ? entry.target.system : UNMATCHED;
     groups = groups.map((g) => ({ ...g, element: g.element?.filter((e) => e.code !== entry.key) })).filter((g) => g.element?.length || g.target === target);
@@ -114,8 +117,19 @@ export async function upsertEntries(client: MedplumClient, source: string, entri
     }];
   }
   const body: ConceptMap = { ...map, group: groups.filter((x) => x.element?.length) };
-  await (map.id ? client.updateResource(body) : client.createResource(body));
   cache = undefined;
+  let written: ConceptMap | undefined;
+  try {
+    written = map.id
+      ? await client.updateResource(body, { headers: { 'If-Match': `W/"${map.meta?.versionId}"` } })
+      : await client.createResourceIfNoneExist(body, `url=${url}`);
+  } catch (e) {
+    if (!retry || !(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 412) throw e;
+  }
+  // On create, another writer's map coming back means ours was not written.
+  if (written && (map.id || isDeepStrictEqual(written.group, body.group))) return written;
+  if (!retry) throw new Error(`concept map ${source} changed during the write`);
+  return upsertEntries(client, source, entries, false);
 }
 
-export const upsertEntry = (client: MedplumClient, source: string, entry: MapEntry): Promise<void> => upsertEntries(client, source, [entry]);
+export const upsertEntry = (client: MedplumClient, source: string, entry: MapEntry): Promise<ConceptMap | undefined> => upsertEntries(client, source, [entry]);
