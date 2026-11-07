@@ -70,7 +70,6 @@ try {
     } else {
       const pub = process.env.GA_PUBLIC_URL?.replace(/\/+$/, '');
       if (!pub) throw new GaError('the calendar link needs remote access: set GA_PUBLIC_URL in .env (see docs/chat-apps.md)');
-      // A calendar app fetches this link from its own servers: the topic names and due dates leave this computer.
       console.log(`${pub}/cal/${newCalendarToken(gatewayDir())}.ics\nSubscribe to it in your calendar app. Anyone with the link sees your health maintenance topics and due dates; \`ga calendar\` makes a new link (the old one stops), \`ga calendar revoke\` turns it off.`);
     }
   } else if (process.argv[2] === 'gateway' && process.argv[3] === 'serve' && process.argv.length === 4) {

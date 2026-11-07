@@ -6,15 +6,15 @@ import type { Item } from './maintenance.ts';
 const FILE = 'calendar.json';
 const hash = (t: string): string => createHash('sha256').update(t).digest('hex');
 
-type Stored = { tokenHash?: string; created?: string; id?: string };
+type Stored = { tokenHash?: string; id?: string };
 const stored = (dir: string) => readJson<Stored>(dir, FILE, {});
 // id: this install's part of every event UID (RFC 5545 wants them globally unique), kept across new links so events update in place.
 const idOf = (dir: string) => stored(dir).id ?? randomBytes(8).toString('hex');
 
 // A new link replaces the old one, so a leaked link is fixed by making a new one.
-export function newCalendarToken(dir: string, now = new Date()): string {
+export function newCalendarToken(dir: string): string {
   const token = randomBytes(32).toString('base64url');
-  writeJson(dir, FILE, { tokenHash: hash(token), created: now.toISOString(), id: idOf(dir) });
+  writeJson(dir, FILE, { tokenHash: hash(token), id: idOf(dir) });
   return token;
 }
 export const revokeCalendar = (dir: string): void => writeJson(dir, FILE, { id: idOf(dir) });
