@@ -200,3 +200,7 @@ test('no Observation read of a health maintenance check includes Apple Health da
   expect(qs.filter((q) => q['code:text'] !== 'Health maintenance').every((q) => q['_tag:not'] === 'urn:ga-server:tag|src-apple-health')).toBe(true);
   expect(qs.length).toBeGreaterThanOrEqual(4);
 });
+
+test('an Epic due date on the birth date is a placeholder, not a date', () => {
+  expect(epicPlans([hm('CRCS', '1976-05-21', 'Overdue')], '1976-05-21')[0].due).toBeUndefined();
+});

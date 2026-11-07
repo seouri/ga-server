@@ -54,7 +54,7 @@ export function epicPlans(hm: Observation[], birthDate?: string): Plan[] {
     const t = o.code?.text;
     if (!t?.startsWith(P)) return [];
     const next = o.component?.find((c) => c.code?.text === 'Next due date')?.valueDateTime?.slice(0, 10);
-    const due = next && !(birthDate && next < birthDate) ? next : undefined; // a date before birth is a placeholder
+    const due = next && !(birthDate && next <= birthDate) ? next : undefined; // a date on or before birth is a placeholder (Epic uses the birth date)
     const asOf = val(o.extension?.find((e) => e.url === SRC_DATE));
     return [{ topic: cleanName(t.slice(P.length)), asOf, from: 'epic', ...(due && { due }), ...(o.valueString && { status: o.valueString }), ...(o.id && { id: `Observation/${o.id}` }) } as Plan];
   });
