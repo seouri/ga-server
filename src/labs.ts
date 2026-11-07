@@ -12,13 +12,18 @@ export type LabRow = { date?: string; name?: string; value?: string; range?: str
 
 export const qty = (q?: Quantity) => (q?.value === undefined ? undefined : `${q.comparator ?? ''}${q.value}${q.unit ?? q.code ? ` ${q.unit ?? q.code}` : ''}`);
 
+// GA's review tags as row flags.
+export function flagsOf(meta?: { tag?: { code?: string }[] }): string[] | undefined {
+  const tags = new Set(meta?.tag?.map((t) => t.code));
+  const f = [...(tags.has('extracted-by-llm') ? ['read from a document by AI'] : []), ...(tags.has('possible-duplicate') ? ['possible-duplicate'] : [])];
+  return f.length ? f : undefined;
+}
+
 export function labRow(o: Observation): LabRow {
   const c = o.code?.coding?.[0];
   const r = o.referenceRange?.[0];
   const lo = qty(r?.low), hi = qty(r?.high);
   const range = r?.text ?? (lo && hi ? `${r?.low?.value}–${hi}` : lo ? `≥${lo}` : hi ? `≤${hi}` : undefined);
-  const tags = new Set(o.meta?.tag?.map((t) => t.code));
-  const flags = [...(tags.has('extracted-by-llm') ? ['read from a document by AI'] : []), ...(tags.has('possible-duplicate') ? ['possible-duplicate'] : [])];
   const row: LabRow = {
     date: (o.effectiveDateTime ?? o.effectivePeriod?.start ?? o.effectiveInstant ?? o.issued)?.slice(0, 10),
     name: o.code?.text ?? c?.display ?? c?.code,
@@ -26,7 +31,7 @@ export function labRow(o: Observation): LabRow {
     range,
     interpretation: o.interpretation?.[0]?.coding?.[0]?.code ?? o.interpretation?.[0]?.text,
     source: o.meta?.source ? basename(o.meta.source) : undefined,
-    flags: flags.length ? flags : undefined,
+    flags: flagsOf(o.meta),
     id: o.id,
   };
   return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as LabRow;

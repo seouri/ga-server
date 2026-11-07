@@ -2,16 +2,15 @@
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Resource } from '@medplum/fhirtypes';
-import { currencyContext, explain, type Ctx } from './current.ts';
+import { currencyContext, explain, SMART_ID, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
-import { collect, fit } from './labs.ts';
+import { collect, fit, flagsOf } from './labs.ts';
 import { forPatient, SOURCE_ID } from './smart/sync.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
 export type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string };
 
 type Any = Record<string, any>;
-const SMART_ID = 'urn:ga-server:id:smart:';
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
 const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
 const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].indexOf(r.currency);
@@ -30,7 +29,6 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     if (!e && !unstated && include !== 'all') return [];
     const keys = (r.identifier ?? []).filter((i: Any) => i.system?.startsWith(SMART_ID)).map((i: Any) => i.system.slice(SMART_ID.length));
     const tags = new Set(r.meta?.tag?.filter((t: Any) => t.system === TAG).map((t: Any) => t.code));
-    const flags = [...(tags.has('extracted-by-llm') ? ['read from a document by AI'] : []), ...(tags.has('possible-duplicate') ? ['possible-duplicate'] : [])];
     const row: ListRow = {
       name: concept(r.medicationCodeableConcept) ?? concept(meds.get(r.medicationReference?.reference)?.code) ?? r.medicationReference?.display ?? concept(r.code),
       status: status ?? 'not stated',
@@ -40,7 +38,7 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
       source: keys.length
         ? `hospital portal ${keys.join(', ')}`
         : tags.has('src-apple-health') ? 'Apple Health copy of a hospital record (prefer the hospital source)' : r.meta?.source ? basename(r.meta.source) : undefined,
-      flags: flags.length ? flags : undefined,
+      flags: flagsOf(r.meta),
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,
     };
