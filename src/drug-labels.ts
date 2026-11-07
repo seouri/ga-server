@@ -9,7 +9,7 @@ export type LabelSections =
   | { status: 'ok'; rxcui: string; setId: string; effective: string; title?: string; sections: Partial<Record<(typeof SECTIONS)[number], string>> }
   | { status: 'no label' | 'unavailable' | 'no code'; rxcui?: string };
 
-const CACHE_V = 2; // 1 allowed combination-product labels
+const CACHE_V = 3; // older versions allowed combination-product and kit labels
 const TTL = 30 * 86_400_000;
 const MAX = 4000;
 type Label = Record<string, unknown> & { set_id?: string; effective_time?: string; openfda?: { generic_name?: string[]; substance_name?: string[] } };
@@ -31,9 +31,15 @@ async function related(f: typeof fetch, rxcui: string): Promise<string[]> {
   return [...new Set(codes)].slice(0, 20);
 }
 
+// A kit or combination product (its code can sit on the ingredient's too): several substances, or a generic name listing several drugs.
+const multiDrug = (l: Label): boolean => {
+  const g = l.openfda?.generic_name ?? [];
+  return (l.openfda?.substance_name?.length ?? 0) > 1 || g.length > 1 || g.some((n) => /, | and /i.test(n));
+};
+
 function pick(rxcui: string, labels: Label[]): LabelSections {
   // Never a label for another drug: a combination product's label can carry the ingredient's code too.
-  const best = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s])) && (l.openfda?.substance_name?.length ?? 0) <= 1).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
+  const best = labels.filter((l) => SECTIONS.some((s) => Array.isArray(l[s])) && !multiDrug(l)).sort((a, b) => (b.effective_time ?? '').localeCompare(a.effective_time ?? ''))[0];
   if (!best?.set_id || !best.effective_time) return { status: 'no label', rxcui };
   const sections: Partial<Record<(typeof SECTIONS)[number], string>> = {};
   for (const s of SECTIONS) {
