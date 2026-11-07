@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import type { MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
@@ -201,4 +201,21 @@ test('arrival is not content', () => {
   const ex = existing(ms('active'), src('2024-01-01'));
   const withArrival = { ...ex, extension: [...((ex as MedicationStatement).extension ?? []), { url: ARRIVED, valueInstant: '2024-01-02T00:00:00.000Z' }] } as Resource;
   expect(decide(withArrival, stamp(ms('active'), src('2024-01-01'), ID))).toBe('skip');
+});
+
+test('each created record is stamped with its own arrival time', async () => {
+  vi.useFakeTimers({ now: Date.parse('2026-01-01T00:00:00Z') });
+  try {
+    const created: Resource[] = [];
+    const client = {
+      ...fake('search', new Error('unused')),
+      searchOne: async () => undefined,
+      createResource: async (r: Resource) => (created.push(r), vi.advanceTimersByTime(60_000), { ...r, id: `n${created.length}` }),
+    } as unknown as MedplumClient;
+    await importResources(client, [{ ...ms('active'), id: 'a' }, { ...ms('stopped'), id: 'b' }] as Resource[], src('2024-01-01'), 'p', 'h');
+    const at = created.map((r) => (r as MedicationStatement).extension?.find((e) => e.url === ARRIVED)?.valueInstant);
+    expect(at).toEqual(['2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z']);
+  } finally {
+    vi.useRealTimers();
+  }
 });

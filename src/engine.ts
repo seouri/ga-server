@@ -260,7 +260,8 @@ export async function importResources(
     ...(source.kind === 'smart' && { byType: {} }),
     unmapped: [],
   };
-  const arrived: Extension = { url: ARRIVED, valueInstant: new Date().toISOString() };
+  // Stamped at each create, not once per import: a whats_new markSeen during a long import must not hide its later records.
+  const arrived = (): Extension => ({ url: ARRIVED, valueInstant: new Date().toISOString() });
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
   const me = client.getProfile();
@@ -477,7 +478,7 @@ export async function importResources(
         } else if (matches.length) {
           const dupExt = (o: Resource): Extension => ({ url: DUP_OF, valueReference: { reference: `${o.resourceType}/${o.id}` } });
           target = await client.createResource(
-            withTag({ ...coded, extension: [...(coded.extension ?? []), arrived, ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
+            withTag({ ...coded, extension: [...(coded.extension ?? []), arrived(), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
             const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
@@ -485,7 +486,7 @@ export async function importResources(
           }
           report.possibleDuplicates++;
         } else {
-          target = await client.createResource({ ...coded, extension: [...(coded.extension ?? []), arrived] } as Resource);
+          target = await client.createResource({ ...coded, extension: [...(coded.extension ?? []), arrived()] } as Resource);
           report.created++;
         }
       }
