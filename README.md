@@ -56,6 +56,7 @@ Everything runs on your computer. It talks only to your own hospitals (to fetch 
 | [Hospital portals](docs/hospital-portals.md) | Connecting Epic patient portals (MyChart) for daily automatic sync |
 | [Registering GA with Epic](docs/epic-setup.md) | One-time Epic app registration, field by field |
 | [GA from chat apps](docs/chat-apps.md) | Setup for claude.ai, ChatGPT, Gemini, Grok and remote Claude Code |
+| [One test, one name](docs/concepts.md) | How GA links the same test, vaccine or drug across sources under standard codes, and how to review what it mapped |
 | [Sharing](docs/sharing.md) | Private links for doctors and family: summary, PDF and FHIR downloads, questions |
 | [Running GA](docs/operations.md) | Where data lives, **backup and restore**, uninstall, admin app |
 | [Adding a skill](docs/skills.md) | Writing your own `/` command against GA |

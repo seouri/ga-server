@@ -57,17 +57,7 @@ Then delete the repo folder, which includes `.ga/` with your keys and tokens. Al
 
 ## Concept layer
 
-GA maps each source's test, drug and vaccine names to standard codes. Review what has none, from the repo folder:
-
-```sh
-node src/cli.ts concepts              # terms with no standard code
-node src/cli.ts concepts --suggested  # terms with only a suggested code
-node src/cli.ts concepts apply        # backfill: code stored records and re-apply every map
-```
-
-Run `concepts apply` after an upgrade or after editing a map. If your maps predate typed keys (`Condition|…`), run `node src/cli.ts concepts apply --migrate-keys` once first: a plain apply before that strips the codes older entries added (the migration restores them). Your agent maps terms with `map_concept`.
-
-Learned maps live in the FHIR server as ConceptMaps, one per source, so they are in the nightly backup and restore with the database.
+Run `node src/cli.ts concepts apply` after an upgrade (and `--migrate-keys` once first on maps that predate typed keys). The learned maps are in the FHIR server, so backup and restore cover them. Details: [One test, one name](concepts.md).
 
 ## Admin app
 
