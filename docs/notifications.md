@@ -10,7 +10,7 @@ GA can text you by iMessage: new out-of-range results as they arrive, and what i
 - Nothing on a day with nothing to say.
 - Never the same item twice. A due item you did not act on comes back after 14, 60 or 365 days, depending on its importance.
 
-The first line of each text is generic ("GA: 2 new results"), but iOS previews show more lines. To keep details off the lock screen, set Settings > Notifications > Messages > Show Previews > When Unlocked.
+Texts are short lists: a generic first line ("GA: 2 new results"), then at most 5 lines, one per item with its name, status and date (for example `• COVID-19 vaccine: overdue since Aug 2025`), then "+N more" if there are more. No reasons, costs, guidelines or sources: reply with an item's name (or "why") to get those, with dates and sources. iOS previews show more than the first line. To keep details off the lock screen, set Settings > Notifications > Messages > Show Previews > When Unlocked.
 
 ## Replying
 

@@ -1,36 +1,42 @@
 import type { Item } from '../maintenance.ts';
 import type { ReviewItem } from '../whats-new.ts';
 
-const CAP = 1500;
-const FDA = 'From the FDA label; not a full interaction screen. Ask your pharmacist.';
+const MAX = 5;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Whole items only: when the cap bites, the rest become "…and N more: ask GA" before the final hint line.
-// Plain text for iMessage: bullet items, details indented two spaces, blank lines between parts.
-const item = (title: string, ...details: (string | undefined | '')[]): string => [`• ${title}`, ...details.filter(Boolean).map((d) => `  ${d}`)].join('\n');
-function build(head: string, blocks: string[], hint: string, tail: string[] = []): string {
-  const out = (n: number) => [head, ...blocks.slice(0, n), ...(n < blocks.length ? [`…and ${blocks.length - n} more: ask GA`] : []), ...tail, hint].join('\n\n');
-  let n = blocks.length;
-  while (n > 1 && out(n).length > CAP) n--;
-  return out(n);
+// "Mon D" in the current year, "Mon YYYY" otherwise; text that is not YYYY-MM-DD passes through.
+function when(d: string | undefined, now: Date): string {
+  const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(d ?? '');
+  if (!m) return d ?? '';
+  return +m[1] === now.getFullYear() ? `${MON[+m[2] - 1]} ${+m[3]}` : `${MON[+m[2] - 1]} ${m[1]}`;
 }
 
-export function resultMessage(items: ReviewItem[]): string {
-  const blocks = items.map((i) => {
-    const d = i.detail as { value?: unknown; range?: unknown; flag?: unknown; previous?: { date?: string; value?: unknown } };
-    return item(`${i.title}: ${d.value}${d.range ? ` (range ${d.range})` : ''}${d.flag ? `, ${d.flag}` : ''}`, `${i.date}${i.source ? `, ${i.source}` : ''}${d.previous ? `; previous ${d.previous.value} on ${d.previous.date}` : ''}`);
+// Whole lines only: at most MAX item lines, then "+N more"; headings only when their group has a shown line.
+function build(head: string, groups: [string, string[]][], hint: string): string {
+  let left = MAX;
+  const body: string[] = [];
+  for (const [h, lines] of groups) {
+    const shown = lines.slice(0, left);
+    left -= shown.length;
+    if (shown.length) body.push(...(h ? [h] : []), ...shown);
+  }
+  const more = groups.reduce((n, [, l]) => n + l.length, 0) - (MAX - left);
+  return [head, '', ...body, ...(more ? [`+${more} more`] : []), '', hint].join('\n');
+}
+
+export function resultMessage(items: ReviewItem[], now = new Date()): string {
+  const lines = items.map((i) => {
+    const d = i.detail as { value?: unknown; range?: unknown; flag?: unknown };
+    const note = [d.flag, d.range ? `range ${d.range}` : ''].filter(Boolean).join('; ');
+    return `• ${i.title}: ${d.value}${note ? ` (${note})` : ''}${i.date ? `, ${when(i.date, now)}` : ''}`;
   });
-  return build(`GA: ${items.length} new result${items.length === 1 ? '' : 's'}`, blocks, 'Reply with a question about it. Not medical advice.');
+  return build(`GA: ${items.length} new result${items.length === 1 ? '' : 's'}`, [['', lines]], 'Reply a name for details. Not medical advice.');
 }
 
-export function digestMessage(meds: ReviewItem[], due: Item[], labels: { drug: string; label: { status?: string; [k: string]: unknown } }[] = []): string {
+export function digestMessage(meds: ReviewItem[], due: Item[], labels: { drug: string; label: { status?: string; [k: string]: unknown } }[] = [], now = new Date()): string {
   const n = meds.length + due.length;
-  const blocks = [
-    ...meds.map((m, k) => (k ? '' : 'New medications:\n') + item(`${m.title}${m.date ? ` (${m.date})` : ''}`)),
-    ...due.map((i, k) => {
-      const plan = i.doctorsPlan;
-      return (k ? '' : 'Due:\n') + item(`${i.name} — ${i.status}${i.dueDate ? (i.status === 'overdue' ? ` since ${i.dueDate}` : `, due ${i.dueDate}`) : ''}`, i.why && `Why: ${i.why}`, plan && `Your doctor's plan: ${plan.quote ?? plan.status ?? plan.due ?? plan.topic}`);
-    }),
-  ];
-  const fda = meds.some((m) => labels.some((l) => l.drug.toLowerCase() === m.title.toLowerCase() && (!l.label.status || l.label.status === 'ok')));
-  return build(`GA: ${n} item${n === 1 ? '' : 's'} for you`, blocks, 'Reply "done" if you already had one, "not now", or ask a question. Not medical advice.', fda ? [FDA] : []);
+  const hasLabel = (t: string) => labels.some((l) => l.drug.toLowerCase() === t.toLowerCase() && (!l.label.status || l.label.status === 'ok'));
+  const medLines = meds.map((m) => `• ${m.title}: new${hasLabel(m.title) ? ' (FDA label notes)' : ''}`);
+  const dueLines = due.map((i) => `• ${i.name}: ${i.status}${i.dueDate ? `${i.status === 'overdue' ? ' since' : ''} ${when(i.dueDate, now)}` : ''}${i.doctorsPlan ? " (doctor's plan)" : ''}`);
+  return build(`GA: ${n} item${n === 1 ? '' : 's'} for you`, [['New medications:', medLines], ['Due:', dueLines]], 'Reply a name for why and sources. Not medical advice.');
 }

@@ -7,40 +7,32 @@ const lab = (title: string, previous?: object): ReviewItem => ({ kind: 'lab', ti
 const due = (n: number): Item => ({ topic: `t${n}`, name: `Screen ${n}`, kind: 'screening', status: 'overdue', importance: 'high', dueDate: '2026-10-01', why: 'Finds it early.', evidence: [], doctorsPlan: { quote: 'repeat in a year', asOf: '2026-01-01', from: 'agent' } });
 const med: ReviewItem = { kind: 'new medication', title: 'Atorvastatin', detail: {} };
 
+const NOW = new Date('2026-11-07T12:00:00');
+const HINT = 'Reply a name for why and sources. Not medical advice.';
+
 describe('notify compose', () => {
-  it('resultMessage', () => {
-    const m = resultMessage([lab('LDL', { date: '2026-05-01', value: '150 mg/dL' }), lab('A1c')]);
-    const lines = m.split('\n');
-    expect(lines[0]).toBe('GA: 2 new results');
-    expect(lines[1]).toBe('');
-    for (const s of ['LDL', '190 mg/dL', '<100', 'high', '2026-11-04', 'Clinic', '150 mg/dL', '2026-05-01']) expect(m).toContain(s);
-    expect(lines.at(-2)).toBe('');
-    expect(lines.at(-1)).toBe('Reply with a question about it. Not medical advice.');
-    expect(resultMessage([lab('LDL')]).split('\n')[0]).toBe('GA: 1 new result');
-  });
-  it('digestMessage', () => {
-    const m = digestMessage([med], [due(1), due(2)], [{ drug: 'Atorvastatin', label: { status: 'ok' } }]);
-    expect(m.split('\n')[0]).toBe('GA: 3 items for you');
-    for (const s of ['Screen 1', 'overdue', '2026-10-01', 'Finds it early.', 'repeat in a year', 'Atorvastatin', 'From the FDA label; not a full interaction screen. Ask your pharmacist.']) expect(m).toContain(s);
-    expect(m.endsWith('Reply "done" if you already had one, "not now", or ask a question. Not medical advice.')).toBe(true);
-    expect(digestMessage([med], [])).not.toContain('FDA');
-  });
-  it('digest layout: headings, bullets, indented details, blank lines between items', () => {
-    const m = digestMessage([med], [due(1), due(2)], [{ drug: 'Atorvastatin', label: { status: 'ok' } }]);
-    expect(m).toBe([
-      'GA: 3 items for you', '',
-      'New medications:', '• Atorvastatin', '',
-      'Due:', '• Screen 1 — overdue since 2026-10-01', "  Why: Finds it early.", "  Your doctor's plan: repeat in a year", '',
-      '• Screen 2 — overdue since 2026-10-01', "  Why: Finds it early.", "  Your doctor's plan: repeat in a year", '',
-      'From the FDA label; not a full interaction screen. Ask your pharmacist.', '',
-      'Reply "done" if you already had one, "not now", or ask a question. Not medical advice.',
+  it('resultMessage: one line per result', () => {
+    expect(resultMessage([lab('LDL', { date: '2026-05-01', value: '150 mg/dL' }), lab('A1c')], NOW)).toBe([
+      'GA: 2 new results', '',
+      '• LDL: 190 mg/dL (high; range <100), Nov 4',
+      '• A1c: 190 mg/dL (high; range <100), Nov 4', '',
+      'Reply a name for details. Not medical advice.',
     ].join('\n'));
-    expect(resultMessage([lab('LDL'), lab('A1c')])).toContain('\n\n• A1c: ');
+    expect(resultMessage([lab('LDL')], NOW).split('\n')[0]).toBe('GA: 1 new result');
   });
-  it('caps at 1500 chars keeping whole items', () => {
-    const m = digestMessage([], Array.from({ length: 30 }, (_, i) => due(i)));
-    expect(m.length).toBeLessThanOrEqual(1500);
-    expect(m).toMatch(/…and \d+ more: ask GA\n\nReply "done"/);
-    expect(m).toContain('Screen 0');
+  it('digestMessage: headings and one line per item', () => {
+    const d = (name: string, status: string, dueDate: string, plan = false): Item => ({ ...due(1), name, status, dueDate, doctorsPlan: plan ? due(1).doctorsPlan : undefined } as Item);
+    const m = digestMessage([med], [d('COVID-19 vaccine', 'overdue', '2025-08-01'), d('Lipid recheck', 'due soon', '2026-12-15', true), d('Shingles vaccine, dose 2', 'due', '2026-12-29')], [{ drug: 'Atorvastatin', label: { status: 'ok' } }], NOW);
+    expect(m).toBe([
+      'GA: 4 items for you', '',
+      'New medications:', '• Atorvastatin: new (FDA label notes)',
+      'Due:', '• COVID-19 vaccine: overdue since Aug 2025', "• Lipid recheck: due soon Dec 15 (doctor's plan)", '• Shingles vaccine, dose 2: due Dec 29', '',
+      HINT,
+    ].join('\n'));
+    expect(digestMessage([med], [], [], NOW)).not.toContain('FDA');
+  });
+  it('+N more after 5 items', () => {
+    const m = digestMessage([], Array.from({ length: 8 }, (_, i) => due(i)), [], NOW);
+    expect(m).toBe(['GA: 8 items for you', '', 'Due:', ...[0, 1, 2, 3, 4].map((i) => `• Screen ${i}: overdue since Oct 1 (doctor's plan)`), '+3 more', '', HINT].join('\n'));
   });
 });
