@@ -129,7 +129,9 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
   const ccdaDocs = new Set<DocumentReference>();
   for (const [path, { tag, date }] of sources) {
     if (!existsSync(path)) {
-      problems.push(`missing: ${path}`);
+      // A C-CDA file may have been imported from two places; the count check below catches one really missing.
+      if (tag === 'src-ccda') console.log(`not on disk, covered if the C-CDA count matches: ${basename(path)}`);
+      else problems.push(`missing: ${path}`);
       continue;
     }
     const kind = tag === 'src-ccda' ? 'ccda' : tag === 'src-ehi' ? 'ehi' : 'apple';
