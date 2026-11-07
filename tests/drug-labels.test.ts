@@ -51,8 +51,30 @@ test('unavailable on network error or 429, no label on empty', async () => {
 test('sends only the code', async () => {
   const t = mk((u) => u.includes('rxnav') ? json({ relatedGroup: { conceptGroup: [{ conceptProperties: [{ rxcui: '9' }] }] } }) : json({ error: {} }, 404));
   await drugLabel('617312', t);
-  for (const u of t.urls) expect(u).toMatch(/rxcui[:/]"?\d+/);
-  expect(t.urls.join()).not.toMatch(/617312.*(name|date|value)/i);
+  expect(t.urls).toHaveLength(3);
+  const fixed = ['https://api.fda.gov/drug/label.json?search=openfda.rxcui:', '+AND+_exists_:drug_interactions&sort=effective_time:desc&limit=5', 'https://rxnav.nlm.nih.gov/REST/rxcui/', '/related.json?tty=SCD+SBD'];
+  for (const u of t.urls) {
+    const rest = fixed.reduce((x, f) => x.replace(f, ''), u);
+    expect(rest.match(/\d+/g)?.filter((d) => !['617312', '9'].includes(d)), u).toEqual([]);
+  }
+});
+
+test('"no label" is cached, "unavailable" is not, a corrupt cache file is refetched', async () => {
+  const empty = mk((u) => u.includes('rxnav') ? json({ relatedGroup: {} }) : json({ error: {} }, 404));
+  const opts = { ...empty, now: new Date('2026-01-01') };
+  expect((await drugLabel('1', opts)).status).toBe('no label');
+  const n = empty.urls.length;
+  expect((await drugLabel('1', opts)).status).toBe('no label');
+  expect(empty.urls).toHaveLength(n);
+  let down = true;
+  const flaky = mk(() => (down ? json({}, 429) : json({ results: [label('s', '20240101', ['i'])] })));
+  expect((await drugLabel('1', flaky)).status).toBe('unavailable');
+  down = false;
+  expect((await drugLabel('1', flaky)).status).toBe('ok');
+  const bad = mk(() => json({ results: [label('s', '20240101', ['i'])] }));
+  writeFileSync(join(bad.dir, '1.json'), '{not json');
+  expect((await drugLabel('1', bad)).status).toBe('ok');
+  expect(bad.urls).toHaveLength(1);
 });
 
 test('combination products are skipped: single-substance label preferred, RxNav combos dropped', async () => {

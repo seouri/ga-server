@@ -187,6 +187,26 @@ test('whatsNew: markSeen is refused when the summary was cut or a section failed
   expect(readLastSeen(bad.dir)).toBeUndefined();
 });
 
+test('whatsNew: lists, labs or arrivals failing is isolated, trimmed and never marks seen', async () => {
+  const boom = (what: string) => { throw new Error(`${what} ${'x'.repeat(100_000)}`); };
+  const cases: [string, object, (r: Awaited<ReturnType<typeof whatsNew>>) => unknown][] = [
+    ['lists', { search: async (type: string, q: unknown) => (type === 'MedicationStatement' ? boom('lists') : big().client.search(type as 'Observation', q as URLSearchParams)) }, (r) => [r.context.currentMedications, r.sectionErrors?.['new medications']]],
+    ['labs', { search: async (type: string, q: unknown) => (String(q).includes('_filter') ? boom('labs') : big().client.search(type as 'Observation', q as URLSearchParams)) }, (r) => [r.context.recentOutOfRange, r.sectionErrors?.labs]],
+    ['arrivals', { searchResourcePages: async function* (type: string) { if (type === 'Observation') boom('arrivals'); yield []; } }, (r) => [r.tally, r.sectionErrors?.labs]],
+  ];
+  for (const [name, over, pick] of cases) {
+    const { client, fetch, dir } = big();
+    const r = await whatsNew({ ...client, ...over } as unknown as MedplumClient, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir, markSeen: true });
+    const [inPlace, inErrors] = pick(r) as [{ error?: string }, string | undefined];
+    expect(inPlace.error ?? inErrors, name).toMatch(new RegExp(`^${name}`));
+    expect((inPlace.error ?? inErrors)!.length).toBeLessThanOrEqual(200);
+    expect(r.context.activeProblems).toBeDefined();
+    expect(r.seen, name).toBe(false);
+    expect(readLastSeen(dir), name).toBeUndefined();
+    expect(JSON.stringify(r).length).toBeLessThan(150_000);
+  }
+});
+
 test('whatsNew: large current lists and many errors still fit the cap', async () => {
   const { client, fetch, dir } = big(undefined, 600);
   const r = await whatsNew(client, 'p', Promise.resolve([]), { asOf: '2026-11-07', fetch, dir });

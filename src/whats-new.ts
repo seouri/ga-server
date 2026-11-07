@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Endpoint, Extension, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Condition, Endpoint, Extension, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
@@ -160,20 +160,20 @@ async function versionBefore(client: MedplumClient, type: 'Condition', id: strin
   }
 }
 
-// A status that changed since `since`, against the last stored version before it. all: the loaded lists (for referenced Medication names).
-export async function statusItems(client: MedplumClient, patientId: string, since: string, all: Resource[] = []): Promise<ReviewItem[]> {
-  const out: ReviewItem[] = [];
-  const meds = medMap(all);
+// A status that changed since `since`, against the last stored version before it. all: the loaded lists (for referenced Medication names); awaited last so the history reads overlap with loading them.
+export async function statusItems(client: MedplumClient, patientId: string, since: string, all: Resource[] | Promise<Resource[]> = []): Promise<ReviewItem[]> {
+  const changed: { type: 'Condition'; r: Resource; kind: ReviewItem['kind']; from: string; to: string }[] = [];
   for (const [type, param, kind] of [['MedicationStatement', 'subject', 'medication status'], ['MedicationRequest', 'subject', 'medication status'], ['Condition', 'subject', 'problem status']] as const) {
     for await (const page of client.searchResourcePages(type as 'Condition', { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
       for (const r of page) {
         const prev = await versionBefore(client, type as 'Condition', r.id as string, since);
         const from = prev && statusOf(prev), to = statusOf(r);
-        if (from && to && from !== to) out.push({ kind, title: concept(type === 'Condition' ? r.code : medCode(r, meds).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id });
+        if (from && to && from !== to) changed.push({ type: type as 'Condition', r, kind, from, to });
       }
     }
   }
-  return out;
+  const meds = medMap(await all);
+  return changed.map(({ type, r, kind, from, to }) => ({ kind, title: concept(r.resourceType === 'Condition' ? (r as Condition).code : medCode(r, meds).cc) ?? type, date: r.meta?.lastUpdated?.slice(0, 10), detail: { from, to }, source: sourceOf(r), id: r.id }));
 }
 
 export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>, hm: Observation[], asOf: string, birthDate?: string): ReviewItem[] {
@@ -195,8 +195,8 @@ export function followUpItems(vaccines: Awaited<ReturnType<typeof vaccineGaps>>,
 const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'vaccine follow-up', 'health maintenance'];
 const NOTE = 'From the FDA label; not a full interaction screen. Ask your pharmacist. Report only what the label sections say, quoting the section and the label date.';
 
-// A failed section becomes {error} in its place; the rest still returns.
-export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+// A failed section becomes {error} in its place, trimmed like sectionErrors; the rest still returns.
+export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.catch((e: unknown) => ({ error: (e instanceof Error ? e.message : String(e)).slice(0, ERROR) }));
 const failed = (v: unknown): v is { error: string } => typeof v === 'object' && v !== null && !Array.isArray(v) && 'error' in v;
 
 // Budgets (characters) that together stay under the remote 150k tool-result cap, so `note` and the label quotes are never cut.
@@ -232,7 +232,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
     part(listsP),
     part(q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]])),
     part(q([['code:text', 'Health maintenance']])),
-    part(listsP.catch(() => undefined).then((l) => statusItems(client, patientId, since, l?.all))), // names of referenced drugs come from the lists
+    part(statusItems(client, patientId, since, listsP.then((l) => l.all, () => []))), // names of referenced drugs come from the lists
     part(client.readResource('Patient', patientId, { cache: 'no-cache' }) as Promise<Patient>),
     part(vaccineGaps(client, patientId, asOf)),
   ]);
