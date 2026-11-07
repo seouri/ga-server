@@ -9,7 +9,7 @@ import { storeDocument } from './document.ts';
 
 // R1: the archive's identity is the folder's manifest (sorted relative paths, sizes, sha256s), not the tarball, whose
 // bytes change with every tar run (timestamps), so a re-import finds it and skips tar and upload.
-async function manifestHash(dir: string): Promise<string> {
+export async function manifestHash(dir: string): Promise<string> {
   const lines: string[] = [];
   for (const e of readdirSync(dir, { recursive: true, withFileTypes: true }).filter((x) => x.isFile())) {
     const p = join(e.parentPath, e.name);
