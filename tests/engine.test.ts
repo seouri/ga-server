@@ -199,6 +199,6 @@ test('EHI fill: participant display over reference, unknown status, same-day per
 
 test('arrival is not content', () => {
   const ex = existing(ms('active'), src('2024-01-01'));
-  const withArrival = { ...ex, extension: [...(ex.extension ?? []), { url: ARRIVED, valueInstant: '2024-01-02T00:00:00.000Z' }] } as Resource;
+  const withArrival = { ...ex, extension: [...((ex as MedicationStatement).extension ?? []), { url: ARRIVED, valueInstant: '2024-01-02T00:00:00.000Z' }] } as Resource;
   expect(decide(withArrival, stamp(ms('active'), src('2024-01-01'), ID))).toBe('skip');
 });
