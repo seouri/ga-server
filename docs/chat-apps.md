@@ -63,7 +63,7 @@ Each app's redirect addresses are in `config/chat-apps.json`.
 - **Claude Code** (any machine): `claude mcp add --transport http ga https://<machine>.<tailnet>.ts.net/mcp`. Not yet verified.
 - **Grok (grok.com)**: free account. Verified 2026-11-06. Add the connector under Connectors, Custom; passkey sign-in and consent worked. Grok uses GA only when you name it, e.g. "Look in my GA: ...". Reading records, hospital status, share preview, confirm and revoke, and upload links all worked. To import a PDF, attach it in the Grok chat too: Grok reads it, GA keeps the uploaded original. A chat app may open a share link right after creating it; that shows up as an access in the share log.
 - **claude.ai**: a free personal account allows one custom connector. On an Enterprise plan only an organization Owner can add one. Not yet verified.
-- **ChatGPT**: whether attaching files needs a paid plan is not yet known. Not yet verified.
+- **ChatGPT** (chatgpt.com): verified 2026-11-07. Turn on developer mode (Settings, Apps & Connectors, Advanced), then create a connector with the `/mcp` URL and OAuth, client ID and secret empty. In a chat, select GA with the + button in the text box. Attaching files straight to GA stays off; use upload links.
 - **Gemini app** (gemini.google.com): verified 2026-11-07. Settings, Connected Apps, Custom apps, Add a custom app; leave Client ID and secret empty. Needs a personal Google account with Gemini Apps Activity on. Gemini uses GA only when you name it: start with "@" and the app name, or "use my GA server".
 - **Grok Bot**: not yet verified.
 
