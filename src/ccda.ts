@@ -267,6 +267,7 @@ const ENCOUNTER_DIAGNOSIS = [OID.OID_ENCOUNTER_DIAGNOSIS, OID.OID_ENCOUNTER_DIAG
 // Sections whose concern acts the library reads as one record per SUBJ observation (processConditionAct, processAllergyIntoleranceAct).
 const ALLERGIES = [OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
   OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2];
+const GENERIC_ALLERGY_TYPES = new Set(['418038007', '420134006']);
 const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION, ...ALLERGIES];
 // A goal observation (by its template, in any section, and every observation in the plan of care and goals sections) is read by
@@ -311,12 +312,14 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
     // Concern acts: one record per SUBJ observation (none: the act produced no record).
     const concerns = hasTemplate(s, ...CONCERN) ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length) : [];
-    // An allergy observation's value is read only as the category and type it states (medplum#11308): a code stating neither is named.
+    // An allergy observation's value is read only as the category and type it states (medplum#11308): a code stating neither is named,
+    // except the type value set's two generic codes (propensity to adverse reaction(s)), which the PR's table maps to neither on purpose.
     if (hasTemplate(s, ...ALLERGIES)) {
       const subj = entries.flatMap((e) => e.act ?? []).flatMap((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ')).flatMap((er) => er.observation ?? []);
       add(name, OID.OID_ALLERGY_OBSERVATION, subj.filter((o) => {
         const m = mapCcdaAllergyCategoryAndType(o.value);
-        return (o.value as X | undefined)?.['@_code'] && !m.category && !m.type;
+        const code = (o.value as X | undefined)?.['@_code'] as string | undefined;
+        return code && !GENERIC_ALLERGY_TYPES.has(code) && !m.category && !m.type;
       }).length, 'allergy type not converted');
     }
     const expected = statements.length + supplies(s) + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);

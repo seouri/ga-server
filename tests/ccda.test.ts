@@ -631,6 +631,10 @@ test('allergy category follows the source: a drug allergy is medication/allergy,
   expect(allergy(other).category).toBeUndefined();
   expect(allergy(other).type).toBeUndefined();
   expect(convertCcdaLocal(other).notImported).toEqual([{ section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.7', entries: 1, reason: 'allergy type not converted' }]);
+  // A generic code (propensity to adverse reaction) states neither, and loses nothing: not named.
+  const generic = EPIC.replace('code="416098002" codeSystem="2.16.840.1.113883.6.96"', 'code="420134006" codeSystem="2.16.840.1.113883.6.96"');
+  expect([allergy(generic).category, allergy(generic).type]).toEqual([undefined, undefined]);
+  expect(convertCcdaLocal(generic).notImported).toEqual([]);
 });
 
 test('encounter has its location: the visit points at a stored Location with the clinic\'s id, name, type and address', async () => {
