@@ -51,6 +51,8 @@ import {
   OID_ALLERGIES_SECTION_ENTRIES_REQUIRED,
   OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
   OID_CARE_TEAMS_SECTION,
+  OID_ENCOUNTER_DIAGNOSIS,
+  OID_ENCOUNTER_DIAGNOSIS_V2,
   OID_GOAL_OBSERVATION,
   OID_GUARANTOR_PERFORMER,
   OID_GOALS_SECTION,
@@ -141,6 +143,18 @@ import type {
   CcdaText,
 } from './types.ts';
 import { convertToCompactXml } from './xml.ts';
+
+const PROBLEM_LIST_ITEM: Coding = {
+  system: CONDITION_CATEGORY_CODE_SYSTEM,
+  code: 'problem-list-item',
+  display: 'Problem List Item',
+};
+
+const ENCOUNTER_DIAGNOSIS: Coding = {
+  system: CONDITION_CATEGORY_CODE_SYSTEM,
+  code: 'encounter-diagnosis',
+  display: 'Encounter Diagnosis',
+};
 
 export interface CcdaToFhirOptions {
   ignoreUnsupportedSections?: boolean;
@@ -565,13 +579,18 @@ class CcdaToFhirConverter {
     return allergy;
   }
 
-  private processConditionAct(act: CcdaAct): Resource[] {
+  private processConditionAct(act: CcdaAct, category = PROBLEM_LIST_ITEM): Condition[] {
     return this.getSubjectObservations(act).map((observation, index) =>
-      this.processConditionObservation(act, observation, index)
+      this.processConditionObservation(act, observation, index, category)
     );
   }
 
-  private processConditionObservation(act: CcdaAct, observation: CcdaObservation, index: number): Condition {
+  private processConditionObservation(
+    act: CcdaAct,
+    observation: CcdaObservation,
+    index: number,
+    category: Coding
+  ): Condition {
     const result: Condition = {
       resourceType: 'Condition',
       id: this.mapId(index === 0 ? act.id : observation.id),
@@ -595,17 +614,7 @@ class CcdaToFhirConverter {
           },
         ],
       },
-      category: [
-        {
-          coding: [
-            {
-              system: CONDITION_CATEGORY_CODE_SYSTEM,
-              code: 'problem-list-item',
-              display: 'Problem List Item',
-            },
-          ],
-        },
-      ],
+      category: [{ coding: [category] }],
       code: this.mapCode(observation.value as CcdaCode),
       subject: createReference(this.patient as Patient),
       onsetDateTime: mapCcdaToFhirDateTime(observation.effectiveTime?.[0]?.low?.['@_value']),
@@ -1648,6 +1657,18 @@ class CcdaToFhirConverter {
 
       if (diagnoses.length > 0) {
         result.diagnosis = diagnoses;
+      }
+    }
+
+    // Encounter Diagnosis acts (Epic links them with SUBJ, the IG with REFR): each problem observation is a visit diagnosis
+    for (const rel of encounter.entryRelationship ?? EMPTY) {
+      for (const act of rel.act ?? EMPTY) {
+        if (getTemplateIds(act).some((id) => id === OID_ENCOUNTER_DIAGNOSIS || id === OID_ENCOUNTER_DIAGNOSIS_V2)) {
+          for (const condition of this.processConditionAct(act, ENCOUNTER_DIAGNOSIS)) {
+            condition.encounter = createReference(result);
+            this.resources.push(condition);
+          }
+        }
       }
     }
 

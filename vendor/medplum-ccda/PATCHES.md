@@ -14,10 +14,11 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 | 7 | `ccda-to-fhir.ts`, `types.ts`, `xml.ts` | Payers section (and V2): each Policy Activity of a Coverage Activity becomes a `Coverage`: identifier (policy id, then covered party member id), status `active` (C-CDA has none), type (policy code), beneficiary, subscriberId (policy holder id), relationship and period (covered party), payor (payer performer org id and name; data-absent `unknown` when none), order (sequenceNumber). `processAct` may return several resources. `act.participant` parsed as an array; `CcdaParticipant.time`. Test `test/payers-section.test.ts` | payers were skipped ("not yet implemented"); the Microsoft path made Coverage. Guarantor and the policy holder's own name/address have no Coverage field: GA names them in notImported | new issue (none open); draft `docs/superpowers/upstream/ccda/7-payers-coverage.md` |
 | 8 | `ccda-to-fhir.ts` | a Plan of Treatment act's CarePlan `description` is the act's own text or the narrative it references (via row 3), with the narrative-reference extension. Test `test/care-plan-text.test.ts` | `nodeToString(act.text)` was empty for a `<reference>`, so the plan text lived only on the (never shared) Composition | new issue (none open); draft `docs/superpowers/upstream/ccda/8-care-plan-text.md`; needs medplum#11242 |
 | 9 | `ccda-to-fhir.ts` | a problem, health concern or allergy concern act becomes one `Condition` / `AllergyIntolerance` per SUBJ observation (`getSubjectObservations`), not only `entryRelationship.find(SUBJ).observation[0]`. Each record's identifiers are its own observation ids first, then (first record only) the act ids (`mapConcernIdentifiers`); `AllergyIntolerance` gains `identifier` (it had none). Test `test/concern-observations.test.ts` | a concern may track several problems or allergies; all but the first were silently lost. Observation id first: it is the per-record id (the act id is shared), as the Microsoft path keyed them | new issue (none open); draft `docs/superpowers/upstream/ccda/9-concern-observations.md` |
+| 10 | `ccda-to-fhir.ts` | an Encounter Diagnosis act (`22.4.80`, V2 `22.4.80.2`) inside an encounter, under any entryRelationship typeCode (Epic: SUBJ; IG: REFR), becomes one `Condition` per SUBJ problem observation (row 9's builder, `processConditionAct(act, ENCOUNTER_DIAGNOSIS)`): category `encounter-diagnosis`, `encounter` → its Encounter. Test `test/encounter-diagnoses.test.ts` | visit diagnoses were silently dropped (only RSON observations were read): the spike lost 106 of 138 Conditions. Link Condition → Encounter only (child to parent), so the Encounter is unchanged and no reference cycle forms | new issue (none open); draft `docs/superpowers/upstream/ccda/10-encounter-diagnoses.md` |
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 
-## Section → resource (with rows 1-9)
+## Section → resource (with rows 1-10)
 
 Every section's narrative is also on the Composition (`section.text`). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
 
@@ -28,7 +29,7 @@ Every section's narrative is also on the Composition (`section.text`). Anything 
 | Medications (22.2.1, .1.1, V2) | MedicationRequest | entries-optional root routed (row 1) |
 | Immunizations (22.2.2, .2.1) | Immunization | |
 | Results, Vital Signs, Social History, Functional Status (22.2.14), Reason for Visit (22.2.12), any other observation section | Observation (organizer: panel Observation with `hasMember`) | the library's "vitals" path |
-| Encounters (22.2.22, .22.1) | Encounter (+ Condition per RSON observation) | Epic visit diagnoses (22.4.80): Task 5 |
+| Encounters (22.2.22, .22.1) | Encounter; Condition per RSON observation; Condition (`encounter-diagnosis`, `encounter` → its Encounter) per problem observation of an Encounter Diagnosis act (22.4.80) | row 10 |
 | Procedures (22.2.7.1) | Procedure | |
 | Plan of Treatment (22.2.10) | CarePlan (acts, with their narrative text as `description`), Goal (observations), MedicationRequest (substanceAdministrations); section narrative on the Composition | row 8 |
 | Goals (22.2.60) | Goal | |

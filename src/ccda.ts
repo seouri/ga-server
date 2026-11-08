@@ -240,7 +240,7 @@ const STATEMENTS = ['act', 'encounter', 'observation', 'observationMedia', 'orga
 const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT']);
 // An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
 const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
-const ENCOUNTER_DIAGNOSIS = '2.16.840.1.113883.10.20.22.4.80';
+const ENCOUNTER_DIAGNOSIS = [OID.OID_ENCOUNTER_DIAGNOSIS, OID.OID_ENCOUNTER_DIAGNOSIS_V2];
 // Sections whose concern acts the library reads as one record per SUBJ observation (processConditionAct, processAllergyIntoleranceAct).
 const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED,
@@ -295,10 +295,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       }
     };
     nested(s);
-    // Visit diagnoses: the library reads only RSON observations on an encounter, not Epic's diagnosis acts (Task 5).
-    const dx = entries.flatMap((e) => e.encounter ?? []).flatMap((enc) => enc.entryRelationship ?? []).flatMap((er) => er.act ?? []).filter((a) => hasTemplate(a, ENCOUNTER_DIAGNOSIS)).length;
-    const linked = made.reduce((n, r) => n + (r?.resourceType === 'Encounter' ? ((r as Encounter).diagnosis?.length ?? 0) : 0), 0);
-    add(name, ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
+    // Visit diagnoses: each SUBJ observation of an encounter diagnosis act is a Condition pointing at its Encounter (any other observation is named).
+    const dx = entries.flatMap((e) => e.encounter ?? []).flatMap((enc) => enc.entryRelationship ?? []).flatMap((er) => er.act ?? []).filter((a) => hasTemplate(a, ...ENCOUNTER_DIAGNOSIS))
+      .flatMap((a) => (a.entryRelationship ?? []).flatMap((er) => er.observation ?? [])).length;
+    const encounters = new Set(made.filter((r) => r?.resourceType === 'Encounter').map((r) => `Encounter/${r?.id}`));
+    const linked = resources.filter((r) => r.resourceType === 'Condition' && encounters.has((r as Condition).encounter?.reference ?? '')).length;
+    add(name, OID.OID_ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
     // Organizer components: the library reads only observations (care teams: their member acts, one participant per performer).
     const careTeam = hasTemplate(s, OID.OID_CARE_TEAMS_SECTION);
     for (const org of entries.flatMap((e) => e.organizer ?? [])) {

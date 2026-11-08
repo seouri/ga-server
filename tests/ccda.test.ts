@@ -205,7 +205,6 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   accounted(EPIC, out);
   // Shrinks as the library fixes land: sections (Task 4), visit diagnoses (Task 5), values (Task 7).
   expect(out.notImported).toEqual([
-    { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
   ]);
   const types = out.resources.map((r) => r.resourceType);
@@ -214,6 +213,24 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item'); // repair, by the problem observation id
   // The document id keys the Composition, so a re-issued document updates it instead of adding a second one.
   expect((out.resources.find((r) => r.resourceType === 'Composition') as Composition).identifier).toEqual({ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.8.688883.900001', value: 'EPICSTYLE-DOC-1' });
+});
+
+test('encounter diagnoses become Conditions linked to their encounter', () => {
+  // A second diagnosis act on the fixture's one encounter.
+  const act = EPIC.slice(EPIC.indexOf('<entryRelationship typeCode="SUBJ">\n                <act'), EPIC.indexOf('</encounter>'));
+  const two = EPIC.replace('</encounter>', `${act.replace('EX-VISITDX-1', 'EX-VISITDX-2').replace('code="36971009"', 'code="195662009"')}</encounter>`);
+  const out = convertCcdaLocal(two);
+  const [enc] = out.resources.filter((r) => r.resourceType === 'Encounter');
+  const dx = (out.resources.filter((r) => r.resourceType === 'Condition') as Condition[]).filter((c) => c.category?.[0].coding?.[0].code === 'encounter-diagnosis');
+  expect(dx.map((c) => c.identifier?.[0].value)).toEqual(['EX-VISITDX-1', 'EX-VISITDX-2']);
+  expect(dx.map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`, `Encounter/${enc.id}`]);
+  expect(dx.map((c) => c.clinicalStatus?.coding?.[0].code)).toEqual(['resolved', 'resolved']); // repair: the diagnosis act is completed
+  expect(out.notImported.filter((n) => n.section === 'Encounters')).toEqual([]);
+  // A diagnosis observation the library does not read (not SUBJ) is named.
+  const comp = EPIC.replace('                  <entryRelationship typeCode="SUBJ">\n                    <observation', '                  <entryRelationship typeCode="COMP">\n                    <observation');
+  expect(convertCcdaLocal(comp).notImported.filter((n) => n.section === 'Encounters')).toEqual([
+    { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
+  ]);
 });
 
 test('a binary ED value (no FHIR value type) is named; a text one is converted', () => {
@@ -275,8 +292,8 @@ test('every section of the Epic-style fixture is imported', () => {
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
   });
-  // Only the entries later tasks own remain: the visit diagnosis (Task 5) and the REAL value (Task 7).
-  expect(out.notImported.map((n) => n.section)).toEqual(['Encounters', 'Results']);
+  // Only the entries later tasks own remain: the REAL value (Task 7).
+  expect(out.notImported.map((n) => n.section)).toEqual(['Results']);
 });
 
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
@@ -319,7 +336,9 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const first = await importPath(client, cfg, file, pid);
     expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
     expect(first.created).toBeGreaterThan(0);
-    expect(first.notImported?.map((n) => n.section)).toEqual(['Encounters', 'Results']); // visit diagnosis (Task 5), REAL value (Task 7)
+    expect(first.notImported?.map((n) => n.section)).toEqual(['Results']); // REAL value (Task 7)
+    const dx = (await client.searchResources('Condition', { subject: `Patient/${pid}` })).find((c) => c.category?.[0]?.coding?.[0]?.code === 'encounter-diagnosis');
+    expect(dx?.encounter?.reference).toMatch(/^Encounter\//);
     const [coverage] = await client.searchResources('Coverage', {});
     expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
