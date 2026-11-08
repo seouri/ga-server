@@ -1576,9 +1576,6 @@ class CcdaToFhirConverter {
     const existing = this.resources.find(
       (r): r is Encounter => r.resourceType === 'Encounter' && !!r.identifier?.some((i) => keys.has(key(i)))
     );
-    if (existing) {
-      return createReference(existing);
-    }
     const facility = encompassing.location?.healthCareFacility;
     const location: Location | undefined = facility
       ? {
@@ -1595,8 +1592,14 @@ class CcdaToFhirConverter {
         ? [{ typeCode: 'RESP', entity: encompassing.responsibleParty.assignedEntity }]
         : []),
       ...(encompassing.encounterParticipant ?? EMPTY).map((p) => ({ typeCode: p['@_typeCode'], entity: p.assignedEntity })),
-    ].filter((p) => p.entity);
-    const encounter: Encounter = {
+    ]
+      .filter((p) => p.entity)
+      .map((p) => ({
+        ...(p.typeCode && { type: [{ coding: [{ system: PARTICIPATION_CODE_SYSTEM, code: p.typeCode }] }] }),
+        individual: this.mapAssignedEntityToReference(p.entity),
+      }));
+    const period = this.mapEffectiveTimeToPeriod(encompassing.effectiveTime?.[0]);
+    const encounter: Encounter = existing ?? {
       resourceType: 'Encounter',
       id: this.mapId(encompassing.id),
       identifier,
@@ -1604,19 +1607,27 @@ class CcdaToFhirConverter {
       class: this.mapEncounterClass(encompassing.code),
       type: encompassing.code ? [this.mapCode(encompassing.code) as CodeableConcept] : undefined,
       subject: this.patient ? createReference(this.patient) : undefined,
-      period: this.mapEffectiveTimeToPeriod(encompassing.effectiveTime?.[0]),
-      participant: participants.length
-        ? participants.map((p) => ({
-            ...(p.typeCode && { type: [{ coding: [{ system: PARTICIPATION_CODE_SYSTEM, code: p.typeCode }] }] }),
-            individual: this.mapAssignedEntityToReference(p.entity),
-          }))
-        : undefined,
-      location: location ? [{ location: createReference(location) }] : undefined,
     };
-    if (location) {
-      this.resources.push(location);
+    // An entry's Encounter of the same id gains what the header adds: its period when it has none, every header participant,
+    // and the facility unless one of its locations already has that facility's id.
+    encounter.period ??= period;
+    if (participants.length) {
+      encounter.participant = [...(encounter.participant ?? EMPTY), ...participants];
     }
-    this.resources.push(encounter);
+    if (location) {
+      const facilityKeys = new Set((location.identifier ?? EMPTY).filter((i) => i.value).map(key));
+      const known = (encounter.location ?? EMPTY).some((l) => {
+        const target = this.resources.find((r) => `${r.resourceType}/${r.id}` === l.location.reference) as Location | undefined;
+        return !!target?.identifier?.some((i) => facilityKeys.has(key(i)));
+      });
+      if (!known) {
+        this.resources.push(location);
+        encounter.location = [...(encounter.location ?? EMPTY), { location: createReference(location) }];
+      }
+    }
+    if (!existing) {
+      this.resources.push(encounter);
+    }
     return createReference(encounter);
   }
 

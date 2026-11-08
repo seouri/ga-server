@@ -44,3 +44,31 @@ test('a document with no encompassing encounter has no Composition encounter', (
   const xml = `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody/></component></ClinicalDocument>`;
   expect(resourcesOf<Composition>(convertCcdaToFhir(convertXmlToCcda(xml)), 'Composition')[0].encounter).toBeUndefined();
 });
+
+test('an entry Encounter of the same id gains the header\'s period, participants and facility when it lacks them', () => {
+  const bundle = convertCcdaToFhir(convertXmlToCcda(doc(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+    <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+      <id root="2.16.840.1.113883.19.5.3" extension="V1"/><code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="NPI-2"/></assignedEntity></performer></encounter></entry>
+  </section></component>`)));
+  const [encounter] = resourcesOf<Encounter>(bundle, 'Encounter');
+  const [location] = resourcesOf<Location>(bundle, 'Location');
+  expect(encounter.period).toEqual({ start: '2020-01-02', end: '2020-01-02' });
+  expect(encounter.participant).toHaveLength(2); // the entry's performer and the header's attender
+  expect(encounter.location?.map((l) => l.location.reference)).toEqual([`Location/${location.id}`]);
+  expect(location).toMatchObject({ name: 'Test Clinic', address: { city: 'Town' } });
+});
+
+test('a facility the entry already locates the visit at is not added twice', () => {
+  const bundle = convertCcdaToFhir(convertXmlToCcda(doc(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+    <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+      <id root="2.16.840.1.113883.19.5.3" extension="V1"/><code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <participant typeCode="LOC"><participantRole classCode="SDLOC"><templateId root="2.16.840.1.113883.10.20.22.4.32"/>
+        <id root="2.16.840.1.113883.19.5.4" extension="F1"/><playingEntity><name>Test Clinic</name></playingEntity></participantRole></participant></encounter></entry>
+  </section></component>`)));
+  const [encounter] = resourcesOf<Encounter>(bundle, 'Encounter');
+  expect(encounter.location).toHaveLength(1);
+  expect(resourcesOf<Location>(bundle, 'Location')).toHaveLength(1);
+});
