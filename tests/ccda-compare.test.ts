@@ -70,7 +70,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
   // Shrinks as Tasks 4-8 land.
   expect(r.losses).toEqual([
     { type: 'Patient', path: 'name.use', count: 1 },
-    { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
     { type: 'Encounter', path: 'location.location.reference', count: 1 },
     { type: 'Location', path: '(record)', count: 1 },
   ]);
@@ -283,4 +282,14 @@ test('an unset choice key never hides a set one; the Microsoft path\'s raw CDA b
   expect(pairLosses([fh({ bornString: '19400315' })], [fh({ bornDate: '1941-03-15' })])).toEqual([{ type: 'FamilyMemberHistory', path: 'born[x].start', count: 1 }]);
   // Only digits that are a CDA date: other text stays text.
   expect(pairLosses([fh({ bornString: 'about 1940' })], [fh({ bornDate: '1940' })])).toEqual([{ type: 'FamilyMemberHistory', path: 'born[x]', count: 1 }]);
+});
+
+test('an encounter class of another system (a CPT visit code) is covered by the new type carrying it; an ActCode class or an uncarried code stays compared', () => {
+  const cpt = { system: 'http://www.ama-assn.org/go/cpt', code: '99213' };
+  const act = { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' };
+  const enc = (x: object) => ({ resourceType: 'Encounter', identifier: id('e'), ...x });
+  const absent = { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] };
+  expect(pairLosses([enc({ class: cpt })], [enc({ class: absent, type: [{ coding: [cpt] }] })])).toEqual([]);
+  expect(pairLosses([enc({ class: cpt })], [enc({ class: absent, type: [{ coding: [{ ...cpt, code: '99214' }] }] })])).toEqual([{ type: 'Encounter', path: 'class', count: 1 }]);
+  expect(pairLosses([enc({ class: act })], [enc({ class: absent, type: [{ coding: [act] }] })])).toEqual([{ type: 'Encounter', path: 'class', count: 1 }]);
 });

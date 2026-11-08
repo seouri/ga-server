@@ -206,6 +206,17 @@ function policyType(o: Resource, n: Resource): Resource {
   return moved ? ({ ...rest, type: relationship } as unknown as Resource) : o;
 }
 
+// One path equivalence: the Microsoft path files an encounter code of another system (Epic's CPT visit code) as `class`; the new
+// path keeps it as `type` (class is a v3 ActCode, data-absent when the source has none). The old `class` is dropped only when it is
+// not an ActCode and the new `type` carries its coding (system|code); otherwise it stays a compared leaf.
+const ACT_CODE = system('http://terminology.hl7.org/CodeSystem/v3-ActCode');
+function encounterClass(o: Resource, n: Resource): Resource {
+  const { class: cls, ...rest } = o as unknown as R & { class?: R };
+  if (o.resourceType !== 'Encounter' || !cls || !isCoding(cls) || system(cls.system as string) === ACT_CODE) return o;
+  const types = ((n as unknown as { type?: { coding?: R[] }[] }).type ?? []).flatMap((t) => t.coding ?? []).filter(isCoding).map(codingKey);
+  return types.includes(codingKey(cls)) ? (rest as unknown as Resource) : o;
+}
+
 // One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
 // (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
 // The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
@@ -251,7 +262,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(asDispense(policyType(r, m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(r, m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());

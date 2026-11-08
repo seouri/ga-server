@@ -54,6 +54,7 @@ import type {
 } from '@medplum/fhirtypes';
 import { mapCcdaToFhirDate, mapCcdaToFhirDateTime } from './datetime.ts';
 import {
+  OID_ACT_CODE_CODE_SYSTEM,
   OID_AGE_OBSERVATION,
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL,
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2,
@@ -1940,6 +1941,22 @@ class CcdaToFhirConverter {
     return result;
   }
 
+  /**
+   * Encounter.class is a v3 ActCode (ActEncounterCode): the encounter code or one of its translations in that system. Another
+   * code (a CPT visit code) is only the encounter type; with no ActCode the class is data-absent.
+   * @param code - The encounter code.
+   * @returns The class.
+   */
+  private mapEncounterClass(code: CcdaCode | undefined): Coding {
+    const act = [code, ...(code?.translation ?? EMPTY)].find(
+      (c) => c?.['@_codeSystem'] === OID_ACT_CODE_CODE_SYSTEM && c['@_code']
+    );
+    if (!act) {
+      return { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] };
+    }
+    return { system: ACT_CODE_SYSTEM, code: act['@_code'], display: act['@_displayName'] };
+  }
+
   private processEncounter(section: CcdaSection, encounter: CcdaEncounter): Encounter {
     // Create the main encounter resource
     const result: Encounter = {
@@ -1947,11 +1964,7 @@ class CcdaToFhirConverter {
       id: this.mapId(encounter.id),
       identifier: this.mapIdentifiers(encounter.id),
       status: ENCOUNTER_STATUS_MAPPER.mapCcdaToFhirWithDefault(encounter.statusCode?.['@_code'], 'unknown'),
-      class: {
-        system: ACT_CODE_SYSTEM,
-        code: encounter.code?.['@_code'] ?? 'AMB',
-        display: encounter.code?.['@_displayName'] ?? 'Ambulatory',
-      },
+      class: this.mapEncounterClass(encounter.code),
       type: encounter.code ? [this.mapCode(encounter.code) as CodeableConcept] : undefined,
       subject: createReference(this.patient as Patient),
       period: this.mapEffectiveTimeToPeriod(encounter.effectiveTime?.[0]),
