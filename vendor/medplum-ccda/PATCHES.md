@@ -15,6 +15,29 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 
+## Section → resource (with rows 1-7)
+
+Every section's narrative is also on the Composition (`section.text`). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
+
+| Section (templateId root) | Entries become | Notes |
+|---|---|---|
+| Problems (22.2.5, .5.1, V2), Health Concerns (22.2.58) | Condition | concern act; first SUBJ observation (others named) |
+| Allergies (22.2.6, .6.1, V2) | AllergyIntolerance | |
+| Medications (22.2.1, .1.1, V2) | MedicationRequest | entries-optional root routed (row 1) |
+| Immunizations (22.2.2, .2.1) | Immunization | |
+| Results, Vital Signs, Social History, Functional Status (22.2.14), Reason for Visit (22.2.12), any other observation section | Observation (organizer: panel Observation with `hasMember`) | the library's "vitals" path |
+| Encounters (22.2.22, .22.1) | Encounter (+ Condition per RSON observation) | Epic visit diagnoses (22.4.80): Task 5 |
+| Procedures (22.2.7.1) | Procedure | |
+| Plan of Treatment (22.2.10) | CarePlan (acts), Goal (observations), MedicationRequest (substanceAdministrations); narrative on the Composition | |
+| Goals (22.2.60) | Goal | |
+| Care Teams (22.2.500) | CareTeam, one participant per member performer (row 4) | |
+| Instructions (22.2.45, V2) | DocumentReference (text/plain) | row 5 |
+| History of Present Illness (IHE 1.3.6.1.4.1.19376.1.5.3.1.3.4) | DocumentReference (text/plain) | row 5 |
+| Notes (22.2.65), e.g. Progress Notes; a Note Activity (22.4.202) in any section | DocumentReference (text/plain) | row 5 |
+| Reason for Referral (IHE 1.3.6.1.4.1.19376.1.5.3.1.3.1, V2) | ServiceRequest | row 6 |
+| Payers (22.2.18, V2) | Coverage, one per Policy Activity; never shared | row 7 |
+| Narrative-only sections (no entries), and entries no row handles | Composition `section.text` | entries named in `notImported` |
+
 ## Omitted
 
 - `src/fhir-to-ccda/` (GA only converts C-CDA to FHIR).

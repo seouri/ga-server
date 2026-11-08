@@ -260,6 +260,21 @@ test('goals and plan of care: an observation value the goal path cannot read, an
   ]);
 });
 
+test('every section of the Epic-style fixture is imported', () => {
+  const out = convertCcdaLocal(EPIC);
+  const comp = out.resources.find((r) => r.resourceType === 'Composition') as Composition;
+  const byRef = new Map(out.resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
+  const made = Object.fromEntries((comp.section ?? []).map((s) => [s.title, [...new Set((s.entry ?? []).map((e) => byRef.get(e.reference ?? '')?.resourceType))]]));
+  expect(made).toEqual({
+    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
+    Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
+    'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
+    'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
+  });
+  // Only the entries later tasks own remain: the visit diagnosis (Task 5) and the REAL value (Task 7).
+  expect(out.notImported.map((n) => n.section)).toEqual(['Encounters', 'Results']);
+});
+
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
 const writeDoc = (xml: string) => {
   const f = join(mkdtempSync(join(tmpdir(), 'ga-ccda-')), 'doc.xml');
