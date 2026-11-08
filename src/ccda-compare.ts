@@ -232,11 +232,19 @@ function deviceModel(o: Resource, n: Resource): Resource {
 }
 
 // One path equivalence: a CDA legal name (use="L") is `usual` on the Microsoft path and `official` in the library (FHIR's own v3
-// map pairs neither with L). The old `usual` reads as `official` only for a Patient name whose family is that of a source L name.
-function legalName(o: Resource, legal: Set<string | undefined>): Resource {
-  if (o.resourceType !== 'Patient' || !legal.size) return o;
-  const names = (o as unknown as { name?: { use?: string; family?: string }[] }).name;
-  return { ...o, name: names?.map((nm) => (nm.use === 'usual' && legal.has(nm.family) ? { ...nm, use: 'official' } : nm)) } as unknown as Resource;
+// map pairs neither with L). An old `usual` Patient name reads as `official` only when a source L name has its family and given
+// names, and only as many times as there are such L names (a C name of the same family stays usual).
+const nameKey = (family?: string, given: (string | undefined)[] = []) => `${family ?? ''}|${given.join(' ')}`;
+function legalName(o: Resource, legal: string[]): Resource {
+  if (o.resourceType !== 'Patient' || !legal.length) return o;
+  const left = [...legal];
+  const names = (o as unknown as { name?: { use?: string; family?: string; given?: string[] }[] }).name;
+  return { ...o, name: names?.map((nm) => {
+    const i = nm.use === 'usual' ? left.indexOf(nameKey(nm.family, nm.given)) : -1;
+    if (i < 0) return nm;
+    left.splice(i, 1);
+    return { ...nm, use: 'official' };
+  }) } as unknown as Resource;
 }
 
 // One correction, not a loss: the Microsoft path writes a vaccine not given (negationInd="true") as `completed`; the new path as
@@ -275,7 +283,8 @@ const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry pr
 
 export function compareCcda(xml: string, old: Resource[], neu: Resource[], notImported: NotImported[]): { losses: Loss[]; gains: Record<string, number>; unaccounted: NotImported[] } {
   const ccda = sanitizeNullFlavors(convertXmlToCcda(xml));
-  const legal = new Set((ccda.recordTarget?.[0]?.patientRole?.patient?.name ?? []).filter((nm) => nm['@_use'] === 'L').map((nm) => nodeToPlainText(nm.family)));
+  const legal = (ccda.recordTarget?.[0]?.patientRole?.patient?.name ?? []).filter((nm) => nm['@_use'] === 'L')
+    .map((nm) => nameKey(nodeToPlainText(nm.family), (nm.given ?? []).map(nodeToPlainText)));
   const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
   const negated = new Set((ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []).flatMap((sec) => sec.entry ?? [])
     .flatMap((e) => e.substanceAdministration ?? []).filter((sa) => sa['@_negationInd'] === 'true').flatMap((sa) => cdaKeys(sa as unknown as R)));

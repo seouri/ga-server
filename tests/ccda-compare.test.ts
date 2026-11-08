@@ -302,11 +302,18 @@ test('an authoring device: the old manufacturer and bare type display are covere
 });
 
 test('a legal name: the old usual and the new official are one name use when the source name is use="L"; otherwise a loss', () => {
-  const pt = (use: string, family = 'Epicstyle') => ({ resourceType: 'Patient', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.5.737384.14', value: 'EXAMPLE-MRN-42' }], name: [{ use, family }] });
+  const pt = (use: string, family = 'Epicstyle', more: object[] = []) => ({ resourceType: 'Patient', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.5.737384.14', value: 'EXAMPLE-MRN-42' }], name: [{ use, family, given: ['Sample'] }, ...more] });
   const losses = (xml: string, o: object, n: object) => compareCcda(xml, [o as Resource], [n as Resource], []).losses;
   expect(losses(EPIC, pt('usual'), pt('official'))).toEqual([]);
   expect(losses(EPIC.replace('<name use="L">', '<name use="C">'), pt('usual'), pt('official'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
   expect(losses(EPIC, pt('usual', 'Other'), pt('official', 'Other'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
+  // L "Smith John" and C "Smith Johnny": only the L name is official; the C name is usual on both paths (no false loss).
+  const two = EPIC.replace('<name use="L"><given>Sample</given><family>Epicstyle</family></name>', '<name use="L"><given>John</given><family>Smith</family></name><name use="C"><given>Johnny</given><family>Smith</family></name>');
+  const smith = (l: string) => ({ ...pt(l), name: [{ use: l, family: 'Smith', given: ['John'] }, { use: 'usual', family: 'Smith', given: ['Johnny'] }] });
+  expect(losses(two, smith('usual'), smith('official'))).toEqual([]);
+  // The C name read as official by the new path would be a loss.
+  expect(losses(two, smith('usual'), { ...smith('official'), name: [{ use: 'official', family: 'Smith', given: ['John'] }, { use: 'official', family: 'Smith', given: ['Johnny'] }] }))
+    .toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
 });
 
 test('a vaccine not given: the Microsoft path\'s completed and the new not-done are a correction for a negated source entry; otherwise a loss', () => {
