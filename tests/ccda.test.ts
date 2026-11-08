@@ -621,3 +621,17 @@ test('encounter has its location: the visit points at a stored Location with the
     expect(loc).toMatchObject({ name: 'Example Clinic', type: [{ coding: [{ code: '1160-1' }] }], address: { city: 'Testville' } });
   });
 });
+
+test('a practitioner named twice with different details is one stored Practitioner, not a content-hash split', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    // The header author again on the allergy, now with a phone number.
+    const authored = EPIC.replace(/(extension="EX-ALLERGY-1"\/>[\s\S]*?<\/effectiveTime>)/, `$1<author><time value="20150401"/><assignedAuthor>
+      <id root="1.2.840.114350.1.13.999.2.7.2.697780" extension="EX-PROV-1"/><telecom use="WP" value="tel:+1-555-555-0101"/>
+      <assignedPerson><name><given>Example</given><family>Clinician</family></name></assignedPerson></assignedAuthor></author>`);
+    expect(await importPath(client, cfgFor(pid), writeDoc(authored), pid)).toMatchObject({ invalid: 0 });
+    const prov = await client.searchResources('Practitioner', { identifier: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.697780|EX-PROV-1' });
+    expect(prov).toHaveLength(1);
+    expect(prov[0].telecom?.[0].value).toBe('+1-555-555-0101');
+  });
+});

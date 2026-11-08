@@ -252,6 +252,7 @@ class CcdaToFhirConverter {
   convert(): Bundle {
     this.processHeader();
     const composition = this.createComposition();
+    this.mergeSharedResources(composition);
 
     return {
       resourceType: 'Bundle',
@@ -262,6 +263,56 @@ class CcdaToFhirConverter {
         ...this.resources.map((resource) => ({ resource })),
       ],
     };
+  }
+
+  /**
+   * The converter makes a Practitioner, Organization or Location per occurrence: one per identifier is kept (the first, with every
+   * field a later copy adds), then one PractitionerRole per practitioner and organization; every reference points at the kept one.
+   * @param composition - The document's Composition (its author and custodian references are repointed too).
+   */
+  private mergeSharedResources(composition: Composition): void {
+    const moved = new Map<string, string>();
+    const kept = new Map<string, Resource>();
+    const merge = (resource: Resource, keys: string[]): boolean => {
+      const first = keys.map((key) => kept.get(key)).find(Boolean);
+      if (!first) {
+        keys.forEach((key) => kept.set(key, resource));
+        return true;
+      }
+      const target = first as unknown as Record<string, unknown>;
+      for (const [k, v] of Object.entries(resource)) {
+        if (target[k] === undefined && v !== undefined) {
+          target[k] = v;
+        }
+      }
+      keys.forEach((key) => kept.set(key, first));
+      moved.set(`${resource.resourceType}/${resource.id}`, `${first.resourceType}/${first.id}`);
+      return false;
+    };
+    const repoint = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        node.forEach(repoint);
+      } else if (node && typeof node === 'object') {
+        const obj = node as Record<string, unknown>;
+        if (typeof obj.reference === 'string' && moved.has(obj.reference)) {
+          obj.reference = moved.get(obj.reference);
+        }
+        Object.values(obj).forEach(repoint);
+      }
+    };
+    const shared = new Set(['Practitioner', 'Organization', 'Location']);
+    const identifierKeys = (r: Resource): string[] =>
+      ((r as Practitioner).identifier ?? EMPTY)
+        .filter((i) => i.value)
+        .map((i) => `${r.resourceType}|${i.system ?? ''}|${i.value}`);
+    let resources = this.resources.filter((r) => !shared.has(r.resourceType) || !identifierKeys(r).length || merge(r, identifierKeys(r)));
+    repoint(resources);
+    const roleKey = (r: PractitionerRole): string =>
+      `PractitionerRole|${r.practitioner?.reference ?? ''}|${r.organization?.reference ?? ''}`;
+    resources = resources.filter((r) => r.resourceType !== 'PractitionerRole' || merge(r, [roleKey(r as PractitionerRole)]));
+    repoint(resources);
+    repoint([composition, this.patient]);
+    this.resources.splice(0, this.resources.length, ...resources);
   }
 
   private processHeader(): void {
@@ -1363,20 +1414,23 @@ class CcdaToFhirConverter {
 
     this.resources.push(practitioner);
 
-    const organization: Organization = {
-      resourceType: 'Organization',
-      id: this.mapId(assignedEntity?.id),
-      identifier: this.mapIdentifiers(representedOrganization?.id),
-      name: representedOrganization?.name?.[0],
-      address: this.mapAddresses(representedOrganization?.addr),
-    };
-    this.resources.push(organization);
+    let organization: Organization | undefined;
+    if (representedOrganization) {
+      organization = {
+        resourceType: 'Organization',
+        id: this.mapId(assignedEntity?.id),
+        identifier: this.mapIdentifiers(representedOrganization.id),
+        name: representedOrganization.name?.[0],
+        address: this.mapAddresses(representedOrganization.addr),
+      };
+      this.resources.push(organization);
+    }
 
     const practitionerRole: PractitionerRole = {
       resourceType: 'PractitionerRole',
       id: this.mapId(assignedEntity?.id),
       practitioner: createReference(practitioner),
-      organization: createReference(organization),
+      organization: organization ? createReference(organization) : undefined,
     };
     this.resources.push(practitionerRole);
 
