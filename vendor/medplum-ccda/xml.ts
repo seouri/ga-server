@@ -7,6 +7,7 @@ import type { Ccda } from './types.ts';
 const ARRAY_PATHS = [
   'ClinicalDocument.participant',
   'ClinicalDocument.recordTarget',
+  'ClinicalDocument.authenticator',
 
   // Always arrays
   '.id',

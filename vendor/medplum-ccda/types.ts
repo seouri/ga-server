@@ -13,6 +13,8 @@ export interface Ccda {
   informationRecipient?: CcdaInformationRecipient;
   participant?: CcdaParticipant[];
   documentationOf?: CcdaDocumentationOf;
+  legalAuthenticator?: CcdaAuthenticator;
+  authenticator?: CcdaAuthenticator[];
   title?: string;
   code?: CcdaCode;
   confidentialityCode?: CcdaCode;
@@ -456,6 +458,11 @@ export interface CcdaSubjectPerson {
   birthTime?: CcdaTimeStamp;
   'sdtc:deceasedInd'?: { '@_value'?: string };
   'sdtc:deceasedTime'?: CcdaTimeStamp;
+}
+
+export interface CcdaAuthenticator {
+  time?: { '@_value'?: string };
+  assignedEntity?: CcdaAssignedEntity;
 }
 
 export interface CcdaCustodian {

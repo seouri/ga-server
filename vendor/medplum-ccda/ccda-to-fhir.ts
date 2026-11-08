@@ -12,6 +12,7 @@ import type {
   CodeableConcept,
   Coding,
   Composition,
+  CompositionAttester,
   CompositionEvent,
   CompositionSection,
   Condition,
@@ -572,6 +573,7 @@ class CcdaToFhirConverter {
       author: this.ccda.author?.length
         ? this.ccda.author.map((author) => this.mapDocumentAuthorToReference(author))
         : [{ display: 'Medplum' }],
+      attester: this.mapAuthenticatorsToAttesters(),
       custodian: this.mapCustodianToReference(this.ccda.custodian),
       event: this.mapDocumentationOfToEvent(this.ccda.documentationOf),
       date: mapCcdaToFhirDateTime(this.ccda.effectiveTime?.[0]?.['@_value']) ?? new Date().toISOString(),
@@ -1535,6 +1537,23 @@ class CcdaToFhirConverter {
     this.resources.push(practitionerRole);
 
     return createReference(practitionerRole);
+  }
+
+  /**
+   * The document's legalAuthenticator is a `legal` attester, each authenticator a `professional` one: when, and who (as for any
+   * assigned entity: a PractitionerRole of the Practitioner and their Organization).
+   * @returns The Composition attesters, or undefined when the document names none.
+   */
+  private mapAuthenticatorsToAttesters(): CompositionAttester[] | undefined {
+    const attesters = [
+      ...(this.ccda.legalAuthenticator ? [{ mode: 'legal' as const, authenticator: this.ccda.legalAuthenticator }] : []),
+      ...(this.ccda.authenticator ?? EMPTY).map((authenticator) => ({ mode: 'professional' as const, authenticator })),
+    ].map(({ mode, authenticator }) => ({
+      mode,
+      time: mapCcdaToFhirDateTime(authenticator.time?.['@_value']),
+      party: this.mapAssignedEntityToReference(authenticator.assignedEntity),
+    }));
+    return attesters.length > 0 ? attesters : undefined;
   }
 
   private mapCustodianToReference(custodian: CcdaCustodian | undefined): Reference<Organization> | undefined {
