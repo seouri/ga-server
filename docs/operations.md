@@ -11,6 +11,7 @@ Back to the [README](../README.md).
 | Config, admin password, client secret | `.ga/config.json` (gitignored, mode 0600) |
 | Portal signing key, client ID, sources, encrypted tokens | `.ga/smart/` |
 | Shares and their encrypted link tokens | `.ga/share/` |
+| Performance log: tool name, app, timing, size, request count per call (no arguments or records; 30 days; `ga perf`) | `.ga/perf.jsonl` |
 
 All ports bind to `127.0.0.1`. Nothing is reachable from the network unless you turn on Tailscale Funnel, which exposes one service, `ga-gateway` (port 8110): share links, the hospital login return `/callback` and, only if `GA_PUBLIC_URL` is set in `.env`, chat-app access (`/mcp`, login and upload pages; see [GA from chat apps](chat-apps.md)). The FHIR server and admin app are never exposed. Chat-app logins live in `.ga/` and come back with a restore.
 

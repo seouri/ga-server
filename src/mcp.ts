@@ -5,6 +5,7 @@ import type { Bundle, Extension, Identifier, Immunization, Narrative, Resource }
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { timed } from './perf.ts';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
 import { importResources, type ImportReport } from './engine.ts';
@@ -210,11 +211,12 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
   };
   const dates = { since: z.string().optional(), until: z.string().optional() };
   const server = new McpServer({ name: 'ga-server', version: '0.1.0' }, { instructions: remote ? chatInstructions() : STDIO_INSTRUCTIONS });
-  if (remote) {
-    // One wrap for every tool: log first, then cap the text.
-    const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
-    (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
-      register(name, config, async (...a: unknown[]) => {
+  // One wrap for every tool: time it (perf log), and remotely also log first and cap the text.
+  const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
+  (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
+    register(name, config, (...a: unknown[]) =>
+      timed(name, remote?.clientName ?? server.server.getClientVersion()?.name ?? 'Claude Code', async () => {
+        if (!remote) return cb(...a);
         // A read-only tool's only possible write is the cached newest-import date on the Patient: accepted as unlogged if the parallel log fails.
         // Read-only tools log in parallel (a failed log still fails the call); anything else logs first, so a write never happens unlogged.
         let r: any;
@@ -223,8 +225,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         for (const c of r.content ?? [])
           if (c.type === 'text' && c.text.length > CAP) c.text = `${c.text.slice(0, CAP)}[truncated: narrow the search, e.g. _count, _elements or a date range]`;
         return r;
-      });
-  }
+      }));
   server.registerTool(
     'fhir_search',
     {

@@ -8,6 +8,7 @@ import { GaError, type GaConfig } from '../config.ts';
 import { logRemote, remoteTools } from '../gateway/remote-log.ts';
 import { chatLoop, type Llm } from '../llm-chat.ts';
 import { normalizeHandle } from './imessage.ts';
+import { record } from '../perf.ts';
 import { enqueue } from './outbox.ts';
 import { readSettings, readState, writeState } from './settings.ts';
 
@@ -46,7 +47,7 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
     add('assistant', t);
   };
 
-  async function answer(text: string, history: Turn[]): Promise<string> {
+  async function answer(text: string, history: Turn[], onTime: (kind: 'llm' | 'tool', ms: number) => void): Promise<string> {
     if (!d.llm || !d.model) return NO_MODEL;
     const server = remoteTools(d.client, d.cfg, d.patientId)({ publicUrl: d.publicUrl ?? '', clientName: 'iMessage' });
     const mcp = new Client({ name: 'ga-text', version: '0' });
@@ -62,7 +63,7 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
         ...history.map(({ role, content }) => ({ role, content })),
         { role: 'user', content: text },
       ];
-      return await chatLoop({ llm: d.llm, model: d.model }, messages, tools, async (name, input) => {
+      return await chatLoop({ llm: d.llm, model: d.model, onTime }, messages, tools, async (name, input) => {
         if (!allowed.includes(name)) return 'error: tool not available by text'; // enforced at call time, not only by hiding tools
         if (name === 'whats_new') delete input.markSeen; // texts are capped: nothing may be marked seen
         const r = (await mcp.callTool({ name, arguments: input })) as { content?: { type: string; text?: string }[] };
@@ -83,13 +84,17 @@ export function createReplier(d: Deps): { onIncoming(m: { from: string; text: st
       let out: string;
       const history = thread.filter((t) => t.at > now() - THREAD_MS);
       add('user', m.text); // before the model runs, so a digest acked mid-answer lands after it
+      const t0 = performance.now(), ms = { llm: 0, tool: 0 };
+      let ok = true;
       try {
-        out = await answer(m.text, history);
+        out = await answer(m.text, history, (k, x) => void (ms[k] += x));
       } catch (e) {
         out = FAILED;
+        ok = false;
         // Content-free: GaError text is status and code only; anything else, the error name.
         writeState(d.dir, { ...readState(d.dir), lastError: `reply failed: ${e instanceof GaError ? e.message : e instanceof Error ? e.name : 'unknown'}` });
       }
+      record({ tool: 'text reply', app: 'iMessage', ms: Math.round(performance.now() - t0), llmMs: Math.round(ms.llm), toolMs: Math.round(ms.tool), ok });
       reply(out);
     },
   };

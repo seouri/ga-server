@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MedplumClient } from '@medplum/core';
+import { countingFetch } from './perf.ts';
 
 export class GaError extends Error {}
 
@@ -37,7 +38,7 @@ export const notRunning = (e: unknown) =>
   JSON.stringify([e, (e as Error)?.cause]).includes('ECONNREFUSED') || (e as Error)?.message === 'fetch failed';
 
 export async function getClient(cfg: GaConfig): Promise<MedplumClient> {
-  const client = new MedplumClient({ baseUrl: cfg.baseUrl });
+  const client = new MedplumClient({ baseUrl: cfg.baseUrl, fetch: countingFetch });
   try {
     await client.startClientLogin(cfg.clientId, cfg.clientSecret);
   } catch (e) {
