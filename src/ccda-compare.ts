@@ -26,6 +26,8 @@ const CODING = new Set(['system', 'version', 'code', 'display', 'userSelected'])
 const PRESENCE = new Set(['reference', 'display', 'div']); // labels and links: present or not (the linked record is matched on its own)
 const CHOICE = /^(value|effective|onset|abatement|occurrence|performed|medication|deceased|multipleBirth|asNeeded)(Quantity|CodeableConcept|Coding|String|Boolean|Integer|Range|Ratio|DateTime|Period|Time|Instant|Date|Age|Reference)$/;
 
+// shortcut: paths drop array indices, so a value moved between elements of one array (e.g. two components swapping values) is
+// not seen; compare per element if Task 9 shows such a case.
 // Leaves as [element path, normalised value]. Paths drop array indices; a Coding is one leaf (system|code), an Identifier one leaf
 // (its key), an extension is named by its url, a choice element is `name[x]` (a Period's start at `name[x]`, its end at `name[x].end`).
 function leaves(node: unknown, path = '', key = '', out: [string, string][] = []): [string, string][] {
@@ -41,7 +43,7 @@ function leaves(node: unknown, path = '', key = '', out: [string, string][] = []
   const o = node as R;
   const at = (k: string) => (path ? `${path}.${k}` : k);
   if (typeof o.code === 'string' && Object.keys(o).every((k) => CODING.has(k))) {
-    out.push([path, `${system(o.system as string)}|${o.code}`.toLowerCase()]);
+    out.push([path, `${system(o.system as string).toLowerCase()}|${o.code}`]);
     if (o.display) out.push([at('display'), '*']);
     return out;
   }
@@ -188,8 +190,10 @@ export async function ccdaCompare(
       try {
         local = convertCcdaLocal(xml);
       } catch {
-        report.failed++; // counted, never the message: it may quote the document
-        continue;
+        // Counted, never the message (it may quote the document). Compared as an empty conversion, so every Microsoft record
+        // is a loss and every entry unaccounted: a document the new path cannot convert never passes the gate.
+        report.failed++;
+        local = { resources: [], notImported: [] };
       }
       report.documents++;
       const r = compareCcda(xml, old, local.resources, local.notImported);

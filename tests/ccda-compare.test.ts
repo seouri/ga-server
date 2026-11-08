@@ -122,3 +122,14 @@ test('compare never writes', async () => {
   expect(report).toMatchObject({ documents: 1, failed: 0, gains: { Observation: 2 }, unaccounted: [] });
   expect(report.losses).toContainEqual({ type: 'Observation', path: 'interpretation.coding', count: 1 });
 });
+
+test('a document the new path cannot convert is counted and fails the gate', async () => {
+  // An observation without a templateId still crashes the library (deferred library fix).
+  const crash = SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.4.78" extension="2014-06-09"/>', '');
+  expect(() => convertCcdaLocal(crash)).toThrow();
+  const client = { async *searchResourcePages() { yield [{ resourceType: 'DocumentReference', content: [{ attachment: { url: 'Binary/b1' } }] }]; }, download: async () => new Blob([crash]) } as unknown as MedplumClient;
+  const report = await ccdaCompare(client, 'p1', 'http://converter/', async () => MS_SYNTHETIC());
+  expect(report).toMatchObject({ documents: 1, failed: 1 });
+  expect(report.losses).toContainEqual({ type: 'Observation', path: '(record)', count: 2 });
+  expect(report.unaccounted.length).toBeGreaterThan(0);
+});
