@@ -1552,6 +1552,8 @@ class CcdaToFhirConverter {
       id: this.mapId(assignedEntity?.id),
       practitioner: createReference(practitioner),
       organization: organization ? createReference(organization) : undefined,
+      // The assigned entity's code (a provider taxonomy, e.g. NUCC) is what this person practises in this role
+      specialty: assignedEntity.code ? [this.mapCode(assignedEntity.code) as CodeableConcept] : undefined,
     };
     this.resources.push(practitionerRole);
 

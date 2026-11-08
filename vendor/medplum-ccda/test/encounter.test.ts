@@ -1,4 +1,4 @@
-import type { Encounter, Location } from '@medplum/fhirtypes';
+import type { Encounter, Location, PractitionerRole } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { convertSections, resourcesOf } from './convert-sections.ts';
 
@@ -49,4 +49,16 @@ test('an encounter\'s service delivery location is a Location it points at', () 
     telecom: [{ system: 'phone', use: 'work' }],
   });
   expect(encounter('').location).toBeUndefined();
+});
+
+test('an assigned entity\'s code (a provider taxonomy) is the specialty of its PractitionerRole', () => {
+  const bundle = convertSections(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+    <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="2.16.840.1.113883.19.5" extension="ENC-2"/>
+      <performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="NPI-2"/>
+        <code code="207R00000X" codeSystem="2.16.840.1.113883.6.101" displayName="Internal Medicine"/></assignedEntity></performer>
+    </encounter></entry></section></component>`);
+  const [role] = resourcesOf<PractitionerRole>(bundle, 'PractitionerRole');
+  expect(role.specialty).toEqual([{ coding: [{ system: 'http://nucc.org/provider-taxonomy', code: '207R00000X', display: 'Internal Medicine' }], text: 'Internal Medicine' }]);
+  expect(resourcesOf<Encounter>(bundle, 'Encounter')[0].participant?.[0].individual?.reference).toBe(`PractitionerRole/${role.id}`);
 });
