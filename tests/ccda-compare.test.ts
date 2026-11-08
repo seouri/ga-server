@@ -315,3 +315,9 @@ test('a vaccine not given: the Microsoft path\'s completed and the new not-done 
   expect(losses(EPIC.replace('negationInd="false">', 'negationInd="true">'))).toEqual([]);
   expect(losses(EPIC)).toEqual([{ type: 'Immunization', path: 'status', count: 1 }]);
 });
+
+test('a vaccine coded in http://nucc.org/cvx (unknown to GA\'s readers) is a loss against the CVX OID; http://hl7.org/fhir/sid/cvx is not', () => {
+  const imm = (system: string) => ({ resourceType: 'Immunization', identifier: id('i'), vaccineCode: { coding: [{ system, code: '140' }] } });
+  expect(pairLosses([imm('urn:oid:2.16.840.1.113883.12.292')], [imm('http://nucc.org/cvx')])).toEqual([{ type: 'Immunization', path: 'vaccineCode.coding', count: 1 }]);
+  expect(pairLosses([imm('urn:oid:2.16.840.1.113883.12.292')], [imm('http://hl7.org/fhir/sid/cvx')])).toEqual([]);
+});

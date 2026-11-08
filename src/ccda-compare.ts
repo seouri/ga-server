@@ -1,6 +1,6 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Composition, Identifier, Medication, Resource } from '@medplum/fhirtypes';
-import { convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
+import { CVX_URL, convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
 import type { NotImported } from './engine.ts';
@@ -15,8 +15,9 @@ type R = Record<string, unknown>;
 const FAMILY: Record<string, string> = { MedicationRequest: 'MedicationStatement', Observation: 'DiagnosticReport' };
 const family = (t: string) => FAMILY[t] ?? t;
 
-// One spelling per system: the library's own OID table both ways (http://loinc.org = urn:oid:2.16.840.1.113883.6.1).
-const system = (s?: string) => (!s ? '' : (mapFhirSystemToCcda(s) ?? s));
+// One spelling per system: the library's own OID table both ways (http://loinc.org = urn:oid:2.16.840.1.113883.6.1). Except
+// http://nucc.org/cvx (the library's alternate CVX URI), which GA's readers do not know (vaccines.ts): kept apart, so a coding in it is a loss.
+const system = (s?: string) => (!s ? '' : s === CVX_URL ? s : (mapFhirSystemToCcda(s) ?? s));
 const idKey = (i: Identifier) => fhirKey(i.system === 'urn:ietf:rfc:3986' ? i : { ...i, system: system(i.system) });
 const keys = (r: Resource): string[] =>
   [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat().map(idKey).filter((k): k is string => !!k);
