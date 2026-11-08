@@ -195,3 +195,37 @@ test('a document the new path cannot convert is counted and fails the gate', asy
   expect(report).toMatchObject({ documents: 1, failed: 1, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] });
   expect(report.losses).toContainEqual({ type: 'Observation', path: '(record)', count: 3 });
 });
+
+test('a display is compared as text when it is the only content, by presence beside a code or reference', () => {
+  const al = (d: string) => ({ resourceType: 'AllergyIntolerance', identifier: id('a'), reaction: [{ manifestation: [{ coding: [{ display: d }] }] }] });
+  expect(pairLosses([al('Hives')], [al('Anaphylaxis')])).toEqual([{ type: 'AllergyIntolerance', path: 'reaction.manifestation.coding.display', count: 1 }]);
+  const cond = (d: string) => ({ resourceType: 'Condition', identifier: id('c'), code: { coding: [{ system: 'http://snomed.info/sct', display: d }] } });
+  expect(pairLosses([cond('Asthma')], [cond('COPD')])).toEqual([{ type: 'Condition', path: 'code.coding.display', count: 1 }]);
+  const imm = (d: string) => ({ resourceType: 'Immunization', identifier: id('i'), performer: [{ actor: { display: d } }] });
+  expect(pairLosses([imm('Dr Alice')], [imm('Dr Bob')])).toEqual([{ type: 'Immunization', path: 'performer.actor.display', count: 1 }]);
+  const ob = (d: string) => ({ resourceType: 'Observation', identifier: id('o'), code: { coding: [{ system: 'http://loinc.org', code: '13457-7', display: d }] } });
+  expect(pairLosses([ob('LDL')], [ob('LDL cholesterol')])).toEqual([]); // same code: the label may differ
+});
+
+test('placeholder, root-id, status and date rules stay narrow', () => {
+  // An unmatched cancelled test is information.
+  const cancelled = { resourceType: 'Observation', identifier: id('x'), status: 'cancelled', code: { text: 'K' } };
+  expect(pairLosses([cancelled], [])).toEqual([{ type: 'Observation', path: '(record)', count: 1 }]);
+  // The root-id rule is for the document Compositions only.
+  expect(pairLosses([{ resourceType: 'Observation', identifier: [...id('o'), { value: '2.25.7' }] }], [{ resourceType: 'Observation', identifier: [...id('o'), { system: 'urn:oid:2.25.7', value: 'z' }] }]))
+    .toEqual([{ type: 'Observation', path: 'identifier', count: 1 }]);
+  // 'unknown' -> entered-in-error changes the meaning.
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('u'), status: 'unknown' }], [{ resourceType: 'Observation', identifier: id('u'), status: 'entered-in-error' }]))
+    .toEqual([{ type: 'Observation', path: 'status', count: 1 }]);
+  // Date precision only for date elements: a string that looks like a year is not covered by one that looks like a month.
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('s'), valueString: '1000' }], [{ resourceType: 'Observation', identifier: id('s'), valueString: '1000-12' }]))
+    .toEqual([{ type: 'Observation', path: 'value[x]', count: 1 }]);
+  expect(pairLosses([{ resourceType: 'Patient', identifier: id('p'), birthDate: '1970' }], [{ resourceType: 'Patient', identifier: id('p'), birthDate: '1970-01-01' }])).toEqual([]);
+});
+
+test('a converter answer that is not a Bundle fails the document', async () => {
+  for (const body of [{}, { result: { resourceType: 'OperationOutcome' } }]) {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(body), { status: 200 }));
+    await expect(convertCcdaMs(SYNTHETIC, 'http://converter/')).rejects.toThrow(/^converter failed: HTTP 200, unexpected response$/);
+  }
+});

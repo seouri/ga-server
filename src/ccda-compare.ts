@@ -26,7 +26,12 @@ const CODING = new Set(['system', 'version', 'code', 'display', 'userSelected', 
 const isCoding = (o: R) => typeof o.code === 'string' && Object.keys(o).every((k) => CODING.has(k));
 const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
 const codingKey = (o: R) => `${system(o.system as string).toLowerCase()}|${o.code}`;
-const PRESENCE = new Set(['display', 'div']); // labels: present or not
+// Labels, present or not: a narrative div, and a display beside the code or reference that carries the identity. A display that
+// is the element's only content (a Coding without code, a Reference without reference) is compared as text.
+const PRESENCE = new Set(['display', 'div']);
+const LABEL = '#display'; // key under which such a display is compared
+// Elements holding a date, dateTime or instant (choice ones read as `start`): only these get the date-precision rule.
+const DATED = /^(start|end|date|issued|authoredOn|recorded|asserted|lastOccurrence|\w+Date|\w+DateTime|\w+Instant)$/;
 // Choice elements [x] (FHIR R4 prefixes and data types): one name whatever the type; a date or time reads as a Period's start.
 const CHOICE = new RegExp(`^(value|effective|onset|abatement|occurrence|performed|medication|deceased|multipleBirth|asNeeded|serviced|timing|born|age|dose|rate|reported|product|item|answer|allowed|used|defaultValue|location|subject|scheduled|collected|fasting|substance|onBehalfOf)(${
   'Base64Binary|Boolean|Canonical|Code|Date|DateTime|Decimal|Id|Instant|Integer|Markdown|Oid|PositiveInt|String|Time|UnsignedInt|Uri|Url|Uuid|Address|Age|Annotation|Attachment|CodeableConcept|Coding|ContactPoint|Count|Distance|Duration|HumanName|Identifier|Money|Period|Quantity|Range|Ratio|Reference|SampledData|Signature|Timing|Dosage'})$`);
@@ -48,14 +53,15 @@ function prep(n: unknown): unknown {
 const DATE = /^\d{4}(-\d{2}(-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?)?)?$/;
 // Same meaning: numbers and booleans only as equal JSON values; strings equal after collapsing whitespace, or a date the new path
 // gives as precisely or more (same year/month/day prefix, or the same instant in another zone).
-function same(a: unknown, b: unknown): boolean {
+function same(a: unknown, b: unknown, dated = false): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return a === b;
   const [x, y] = [a.replace(/\s+/g, ' ').trim(), b.replace(/\s+/g, ' ').trim()];
-  return x === y || (DATE.test(x) && DATE.test(y) && (y.startsWith(x) || (x.length > 10 && y.length > 10 && Date.parse(x) === Date.parse(y))));
+  return x === y || (dated && DATE.test(x) && DATE.test(y) && (y.startsWith(x) || (x.length > 10 && y.length > 10 && Date.parse(x) === Date.parse(y))));
 }
 
-// A reference's expected new target: the new counterpart of the old target; null when that has none; undefined when unknown (presence only).
-type Ref = (oldRef: string) => string | null | undefined;
+// A reference's expected new target: the new counterpart of the old target; null when that has none; undefined when unknown
+// (presence only). root: comparing the document Compositions (the root-id rule below).
+type Ref = ((oldRef: string) => string | null | undefined) & { root?: boolean };
 
 // Element paths (array indices dropped) the old value holds that the new one lacks or holds with another meaning; one per lost leaf.
 // A Coding is one unit (system|code) and an Identifier one (its key); a reference must point at the new counterpart of its target.
@@ -64,9 +70,9 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
   if (Array.isArray(o)) return pair(o, n === undefined ? [] : [n].flat(), path, key, ref, out);
   const at = (k: string) => (path ? `${path}.${k}` : k);
   if (typeof o !== 'object') {
-    // GA's repair writes status 'unknown' when the source has none: any new status holds as much.
-    const any = PRESENCE.has(key) || (key === 'status' && o === 'unknown');
-    if (any ? n === undefined || n === '' : !same(o, n)) out.push(path);
+    // GA's repair writes status 'unknown' when the source has none: any new status holds as much, except entered-in-error.
+    const any = PRESENCE.has(key) || (key === 'status' && o === 'unknown' && n !== 'entered-in-error');
+    if (any ? n === undefined || n === '' : !same(o, n, DATED.test(key))) out.push(path);
     return out;
   }
   const a = o as R;
@@ -78,7 +84,7 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
   }
   if (key === 'identifier') {
     // The Microsoft path gives the document id as {value: <root OID>} with no system: the same id as the new path's system.
-    const root = !a.system && b?.system && same(norm(String(a.value)), norm(system(b.system as string)));
+    const root = ref.root && path === 'identifier' && !a.system && b?.system && same(norm(String(a.value)), norm(system(b.system as string)));
     if (!b || (idKey(a as Identifier) !== idKey(b as Identifier) && !root)) out.push(path);
     return out;
   }
@@ -86,7 +92,7 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
     if (k === 'reference' && typeof v === 'string') {
       const want = ref(v);
       if (typeof b?.reference !== 'string' || want === null || (want !== undefined && b.reference !== want)) out.push(at(k));
-    } else diff(v, b?.[k], at(k), k, ref, out);
+    } else diff(v, b?.[k], at(k), k === 'display' && typeof a.code !== 'string' && typeof a.reference !== 'string' ? LABEL : k, ref, out);
   }
   return out;
 }
@@ -177,7 +183,7 @@ const PLACEHOLDER = 'no value and no code beyond text';
 const PLACEHOLDER_KEYS = new Set(['resourceType', 'status', 'category', 'code', 'subject', 'identifier', 'effective[x]']);
 const placeholder = (r: Resource) => {
   const p = prep(r) as R;
-  return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && Object.keys((p.code as R | undefined) ?? {}).every((k) => k === 'text');
+  return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string) && Object.keys((p.code as R | undefined) ?? {}).every((k) => k === 'text');
 };
 
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
@@ -202,7 +208,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(r), prep(m), '', '', ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(r), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());

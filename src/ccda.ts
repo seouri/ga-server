@@ -33,7 +33,7 @@ export async function convertCcdaMs(xml: string, converterUrl: string): Promise<
   if (!res.ok) throw new GaError(`converter failed: HTTP ${res.status}`);
   // Status only, also when the body is not the expected JSON: a parse error would quote it.
   const result = await res.json().then((b: { result?: Bundle }) => b?.result, () => undefined);
-  if (!result) throw new GaError(`converter failed: HTTP ${res.status}, unexpected response`);
+  if (result?.resourceType !== 'Bundle') throw new GaError(`converter failed: HTTP ${res.status}, unexpected response`);
   return repair((result.entry ?? []).map((e) => e.resource as Resource), xml);
 }
 
