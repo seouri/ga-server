@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClientStorage, MedplumClient, MemoryStorage } from '@medplum/core';
@@ -118,4 +118,12 @@ export async function getClient(cfg: GaConfig): Promise<MedplumClient> {
   const client = new MedplumClient({ baseUrl: cfg.baseUrl, fetch: medplumOnly(ownFetch(countingFetch)), storage: storage() });
   await client.startClientLogin(cfg.clientId, cfg.clientSecret);
   return client;
+}
+
+// `ga ccda replace`: "ccdaConverter": "medplum" into the config as written (no env overrides), every other key kept, 0600, atomically.
+export function setCcdaConverter(file = defaultConfigPath()): void {
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as GaConfig;
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify({ ...raw, ccdaConverter: 'medplum' }, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmp, file);
 }

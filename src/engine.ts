@@ -310,6 +310,38 @@ async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promis
   } as Resource);
 }
 
+// One batch as importResources keys it: Patients collapsed, records in reference order, each record's stable identifier value
+// (keyOf), the values held by two different records (colliding: each gets its content hash), and idOf, the value it is stored
+// under (C-CDA; src/ccda-replace.ts finds a document's records by it).
+export function batchKeys(resources: Resource[], source: SourceInfo, fileHash: string, patientId: string) {
+  const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
+  const ordered = topoSort(collapsed);
+  // Same stable identifier twice in one batch with different content would make the second a silent skip:
+  // give every member of such a group source id + content hash (deterministic, order-independent).
+  // A reference in the batch reads as its target's key (C-CDA links: identity.ts), computed from the batch as the source sent it.
+  const bySource = new Map(ordered.flatMap((r) => sourceKeys(r).map((k) => [k, r] as const)));
+  const keys = new Map<Resource, string>();
+  const resolve = (ref: string): string | undefined => {
+    const t = bySource.get(ref);
+    return t && keyOf(t);
+  };
+  const keyOf = (r: Resource): string => {
+    if (!keys.has(r)) keys.set(r, stableIdentifier(r, source, fileHash, patientId, resolve).value as string);
+    return keys.get(r) as string;
+  };
+  const groups = new Map<string, Set<string>>();
+  for (const r of ordered) {
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, new Set());
+    groups.get(k)?.add(contentHash(r, patientId));
+  }
+  // A visit on the in-process path is one record per id: its copies in one batch merge (mergeCopies), never split by content.
+  const oneVisit = (r: Resource) => source.kind === 'ccda' && !!source.local && r.resourceType === 'Encounter';
+  const colliding = new Set([...groups].filter(([k, h]) => h.size > 1 && !ordered.some((r) => oneVisit(r) && keyOf(r) === k)).map(([k]) => k));
+  const idOf = (r: Resource): string => (colliding.has(keyOf(r)) ? `${keyOf(r)}|${contentHash(r, patientId)}` : keyOf(r));
+  return { ordered, patientIdentifiers, keyOf, colliding, idOf };
+}
+
 export async function importResources(
   client: MedplumClient,
   resources: Resource[],
@@ -325,8 +357,7 @@ export async function importResources(
   };
   // Stamped at each create, not once per import: a whats_new markSeen during a long import must not hide its later records.
   const arrived = (): Extension => ({ url: ARRIVED, valueInstant: new Date().toISOString() });
-  const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
-  const ordered = topoSort(collapsed); // throws before any write
+  const { ordered, patientIdentifiers, keyOf, colliding } = batchKeys(resources, source, fileHash, patientId); // throws before any write
   // The agent wrote this record (or it is protected): smart fill-only writes leave it alone (last-seen still advances).
   const agentOrShielded = (r: Resource): boolean => shielded(r) || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
@@ -361,28 +392,6 @@ export async function importResources(
   const filled = (['birthDate', 'gender', 'name'] as const).some((f) => next[f] !== patient[f]);
   if (missing.length || filled) await client.updateResource<Patient>({ ...next, identifier: [...(patient.identifier ?? []), ...missing] });
 
-  // Same stable identifier twice in one batch with different content would make the second a silent skip:
-  // give every member of such a group source id + content hash (deterministic, order-independent).
-  // A reference in the batch reads as its target's key (C-CDA links: identity.ts), computed from the batch as the source sent it.
-  const bySource = new Map(ordered.flatMap((r) => sourceKeys(r).map((k) => [k, r] as const)));
-  const keys = new Map<Resource, string>();
-  const resolve = (ref: string): string | undefined => {
-    const t = bySource.get(ref);
-    return t && keyOf(t);
-  };
-  const keyOf = (r: Resource): string => {
-    if (!keys.has(r)) keys.set(r, stableIdentifier(r, source, fileHash, patientId, resolve).value as string);
-    return keys.get(r) as string;
-  };
-  const groups = new Map<string, Set<string>>();
-  for (const r of ordered) {
-    const k = keyOf(r);
-    if (!groups.has(k)) groups.set(k, new Set());
-    groups.get(k)?.add(contentHash(r, patientId));
-  }
-  // A visit on the in-process path is one record per id: its copies in one batch merge (mergeCopies), never split by content.
-  const oneVisit = (r: Resource) => source.kind === 'ccda' && !!source.local && r.resourceType === 'Encounter';
-  const colliding = new Set([...groups].filter(([k, h]) => h.size > 1 && !ordered.some((r) => oneVisit(r) && keyOf(r) === k)).map(([k]) => k));
   for (const r of ordered) if (colliding.has(keyOf(r))) console.error(`source id collision: ${r.resourceType}`);
 
   // Link lookup by Epic id. A candidate that already has an identifier in the incoming stable system is a different

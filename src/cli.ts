@@ -84,6 +84,11 @@ try {
     const sum = (n: { count?: number; entries?: number }[]) => n.reduce((a, x) => a + (x.count ?? x.entries ?? 0), 0);
     const explained = r.losses.filter((l) => l.explained);
     console.log(`documents ${r.documents}${r.failed ? ` (${r.failed} failed to convert)` : ''}, skipped ${r.skipped}; losses ${sum(r.losses) - sum(explained)} at ${r.losses.length - explained.length} type/paths, explained ${sum(explained)}; gains ${Object.values(r.gains).reduce((a, b) => a + b, 0)}; unaccounted ${sum(r.unaccounted)}; not imported (named) ${sum(r.notImported)}`);
+  } else if (process.argv[2] === 'ccda' && process.argv[3] === 'replace' && (process.argv.length === 4 || (process.argv[4] === '--yes' && process.argv.length === 5))) {
+    // Owner-started, once: the Microsoft-era C-CDA records replaced by the new converter's. Without --yes a dry run (counts only).
+    const { replaceCcda } = await import('./ccda-replace.ts');
+    const cfg = loadConfig();
+    console.log(JSON.stringify(await replaceCcda(await getClient(cfg), cfg, { yes: process.argv[4] === '--yes', log: (s) => console.error(s) })));
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open
@@ -125,7 +130,7 @@ try {
     const [arg, , since] = process.argv.slice(3);
     console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga ccda compare [--out <file>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga ccda compare [--out <file>] | ga ccda replace [--yes] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {
