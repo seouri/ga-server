@@ -149,6 +149,12 @@ test('the generic fixture converts with nothing unaccounted', () => {
   accounted(SYNTHETIC, out);
 });
 
+test('a section inside a section is named, with its entries', () => {
+  const sub = '<component><section><templateId root="2.16.840.1.113883.10.20.22.2.99"/><title>Sub</title><text>x</text><entry><act classCode="ACT" moodCode="EVN"/></entry></section></component>';
+  const out = convertCcdaLocal(SYNTHETIC.replace('<text>Never smoker</text>', `<text>Never smoker</text>${sub}`));
+  expect(out.notImported).toEqual([{ section: 'Social History', templateId: '2.16.840.1.113883.10.20.22.2.99', entries: 1, reason: 'nested section not read' }]);
+});
+
 test('the Epic-style fixture converts (template order) and lists what it cannot import yet', () => {
   const out = convertCcdaLocal(EPIC);
   accounted(EPIC, out);
@@ -191,10 +197,18 @@ test('a later document repeating an entry updates it', async () => {
     const conds = (await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.code?.coding?.some((x) => x.code === '55822004'));
     expect(conds).toHaveLength(1);
     expect(conds[0].clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+    // A newer summary (its own document id) repeating the same entries: only its Composition is new.
+    const newer = later.replace('extension="synthetic-doc-1"', 'extension="synthetic-doc-2"').replaceAll('20240701120000-0500', '20240901120000-0500');
+    const n = await importPath(client, cfg, writeDoc(newer), pid);
+    expect(n).toMatchObject({ created: 1, invalid: 0, possibleDuplicates: 0 });
+    expect(n.updated).toBeGreaterThanOrEqual(1);
+    // Known gap: the library gives the Composition no subject (fix with the CareTeam's, below).
+    expect(await client.searchResources('Composition', { _tag: 'urn:ga-server:tag|src-ccda' })).toHaveLength(2);
+    expect((await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.code?.coding?.some((x) => x.code === '55822004'))).toHaveLength(1);
   });
 });
 
-test('the Epic-style fixture imports with every record on the patient, and a re-import changes nothing', async () => {
+test('the Epic-style fixture imports with no record refused, and a re-import changes nothing', async () => {
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
     const cfg = cfgFor(pid);
@@ -204,6 +218,9 @@ test('the Epic-style fixture imports with every record on the patient, and a re-
     expect(first.created).toBeGreaterThan(0);
     expect(first.notImported?.map((n) => n.section)).toContain('Insurance');
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
+    // Known gap: the library gives a CareTeam no subject, so it sits outside the patient compartment (not yet assigned to a fix task).
+    const [team] = await client.searchResources('CareTeam', {});
+    expect(team.subject).toBeUndefined();
   });
 });
 
@@ -220,5 +237,9 @@ test('ccdaConverter picks medplum when the flag is set or the record has no C-CD
     expect(await ccdaConverter(cfgFor(pid), client)).toBe('microsoft');
     expect(await ccdaConverter(cfgFor(pid, { ccdaConverter: 'medplum' }), client)).toBe('medplum');
     expect(await ccdaConverter(cfgFor('other'), client)).toBe('medplum'); // per patient record
+    // A Microsoft-era Composition stored without a patient also counts.
+    await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', author: [{ display: 'x' }], title: 'x',
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
+    expect(await ccdaConverter(cfgFor('other'), client)).toBe('microsoft');
   });
 });

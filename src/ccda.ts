@@ -224,8 +224,12 @@ const LOCAL_TAG = 'ccda-medplum';
 // (a mix would duplicate them). Each C-CDA import writes one Composition, so one search per import decides.
 export async function ccdaConverter(cfg: Pick<GaConfig, 'patientId' | 'ccdaConverter'>, client: MedplumClient, patientId = cfg.patientId): Promise<'medplum' | 'microsoft'> {
   if (cfg.ccdaConverter) return cfg.ccdaConverter;
-  const old = await client.search('Composition', { subject: `Patient/${patientId}`, _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}`, _count: '1' }, { cache: 'no-cache' });
-  return old.entry?.length ? 'microsoft' : 'medplum';
+  // Also a Composition stored without a patient (engine.ts allows C-CDA records so): a miss here would duplicate the record.
+  for (const who of [{ subject: `Patient/${patientId}` }, { 'subject:missing': 'true' }]) {
+    const old = await client.search('Composition', { ...who, _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}`, _count: '1' }, { cache: 'no-cache' });
+    if (old.entry?.length) return 'microsoft';
+  }
+  return 'medplum';
 }
 
 // Clinical statements an entry may hold (CDA R2): each is one record or is named in notImported.
@@ -263,6 +267,16 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const entries = s.entry ?? [];
     const statements = entries.flatMap((e) => STATEMENTS.flatMap((k) => (e as Record<string, unknown[] | undefined>)[k] ?? []));
     add(name, root0(s.templateId), statements.length - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
+    // Sections inside a section: the library reads neither their entries nor their narrative.
+    const nested = (n: CcdaSection): void => {
+      for (const c of arr((n as { component?: X | X[] }).component)) {
+        for (const sub of arr(c.section as CcdaSection | CcdaSection[] | undefined)) {
+          addNotImported(notImported, [{ section: name, ...(root0(sub.templateId) && { templateId: root0(sub.templateId) }), entries: sub.entry?.length ?? 0, reason: 'nested section not read' }]);
+          nested(sub);
+        }
+      }
+    };
+    nested(s);
     // Visit diagnoses: the library reads only RSON observations on an encounter, not Epic's diagnosis acts (Task 5).
     const dx = entries.flatMap((e) => e.encounter ?? []).flatMap((enc) => enc.entryRelationship ?? []).flatMap((er) => er.act ?? []).filter((a) => hasTemplate(a, ENCOUNTER_DIAGNOSIS)).length;
     const linked = made.reduce((n, r) => n + (r?.resourceType === 'Encounter' ? ((r as Encounter).diagnosis?.length ?? 0) : 0), 0);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { convertCcdaMs, importPath } from '../../src/ccda.ts';
+import { ccdaConverter, convertCcdaMs, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
@@ -69,6 +69,8 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(status).toEqual({ '55822004': 'active', '195967001': 'resolved' });
   // The converter's Patient collapsed onto the GA patient: no second Patient for the fake MRN.
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
+  // Microsoft-era records keep the next import on the Microsoft converter (Medplum honours _tag with _tag:not).
+  expect(await ccdaConverter({ patientId: pid }, client)).toBe('microsoft');
 });
 
 test('importing the same ccda twice changes nothing', async () => {
