@@ -1,9 +1,11 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import type { Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
-import { ccdaDate, ccdaFiles, custodian, repair } from '../src/ccda.ts';
+import type { Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
+import type { GaConfig } from '../src/config.ts';
+import { onStore } from './temp-store.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -121,7 +123,102 @@ test('custodian: own element only, namespace prefix and entities handled, never 
   expect(custodian(doc('<custodian><representedCustodianOrganization><name>A &#99999999;</name></representedCustodianOrganization></custodian>'))).toBeUndefined();
 });
 
-test('convertCcda with the converter not running names the command that starts it', async () => {
-  const { convertCcda } = await import('../src/ccda.ts');
-  await expect(convertCcda('<ClinicalDocument/>', 'http://127.0.0.1:9/')).rejects.toThrow('docker compose --profile ccda up -d fhir-converter');
+test('convertCcdaMs with the converter not running names the command that starts it', async () => {
+  const { convertCcdaMs } = await import('../src/ccda.ts');
+  await expect(convertCcdaMs('<ClinicalDocument/>', 'http://127.0.0.1:9/')).rejects.toThrow('docker compose --profile ccda up -d fhir-converter');
+});
+
+const FIXTURES = join(import.meta.dirname, 'fixtures');
+const SYNTHETIC = readFileSync(join(FIXTURES, 'ccda-synthetic.xml'), 'utf8');
+const EPIC = readFileSync(join(FIXTURES, 'ccda-epic-style.xml'), 'utf8');
+const ENTRY_LEVEL = ['section not supported by the converter', 'entry produced no record'];
+const sectionTitles = (xml: string) => [...xml.matchAll(/<section>[\s\S]*?<title>([^<]*)<\/title>/g)].map((m) => m[1]);
+// Every section is on the Composition (its narrative); every section with entries has records or is named in notImported.
+const accounted = (xml: string, out: ReturnType<typeof convertCcdaLocal>) => {
+  const comp = out.resources.find((r) => r.resourceType === 'Composition') as Composition;
+  expect(comp.section?.map((s) => s.title)).toEqual(sectionTitles(xml));
+  for (const s of comp.section ?? []) {
+    const entries = (xml.split(`<title>${s.title}</title>`)[1].split('</section>')[0].match(/<entry>/g) ?? []).length;
+    expect((s.entry?.length ?? 0) + out.notImported.filter((n) => n.section === s.title && ENTRY_LEVEL.includes(n.reason)).reduce((a, n) => a + n.entries, 0)).toBe(entries);
+  }
+};
+
+test('the generic fixture converts with nothing unaccounted', () => {
+  const out = convertCcdaLocal(SYNTHETIC);
+  expect(out.notImported).toEqual([]);
+  accounted(SYNTHETIC, out);
+});
+
+test('the Epic-style fixture converts (template order) and lists what it cannot import yet', () => {
+  const out = convertCcdaLocal(EPIC);
+  accounted(EPIC, out);
+  // Shrinks as the library fixes land: sections (Task 4), visit diagnoses (Task 5), values (Task 7).
+  expect(out.notImported).toEqual([
+    { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
+    { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
+    { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'ED value not converted' },
+    { section: 'Patient Instructions', templateId: '2.16.840.1.113883.10.20.22.2.45', entries: 1, reason: 'section not supported by the converter' },
+    { section: 'History of Present Illness', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.4', entries: 1, reason: 'section not supported by the converter' },
+    { section: 'Reason for Referral', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.1', entries: 1, reason: 'section not supported by the converter' },
+    { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' },
+  ]);
+  const types = out.resources.map((r) => r.resourceType);
+  expect(types).toContain('MedicationRequest'); // Epic lists Medications' entries-optional root first: no throw
+  const [cond] = out.resources.filter((r) => r.resourceType === 'Condition') as Condition[];
+  expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item'); // repair, by the problem observation id
+  // The document id keys the Composition, so a re-issued document updates it instead of adding a second one.
+  expect((out.resources.find((r) => r.resourceType === 'Composition') as Composition).identifier).toEqual({ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.8.688883.900001', value: 'EPICSTYLE-DOC-1' });
+});
+
+const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
+const writeDoc = (xml: string) => {
+  const f = join(mkdtempSync(join(tmpdir(), 'ga-ccda-')), 'doc.xml');
+  writeFileSync(f, xml);
+  return f;
+};
+
+test('a later document repeating an entry updates it', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const cfg = cfgFor(pid, { ccdaConverter: 'medplum' });
+    await importPath(client, cfg, writeDoc(SYNTHETIC), pid);
+    // The same document re-issued later: the hyperlipidemia problem (same entry ids) now resolved.
+    const later = SYNTHETIC.replaceAll('20240315120000-0500', '20240701120000-0500')
+      .replaceAll('<effectiveTime><low value="20220601"/></effectiveTime>', '<effectiveTime><low value="20220601"/><high value="20240601"/></effectiveTime>');
+    const r = await importPath(client, cfg, writeDoc(later), pid);
+    expect(r).toMatchObject({ created: 0, invalid: 0 });
+    expect(r.updated).toBeGreaterThanOrEqual(1);
+    const conds = (await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.code?.coding?.some((x) => x.code === '55822004'));
+    expect(conds).toHaveLength(1);
+    expect(conds[0].clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+  });
+});
+
+test('the Epic-style fixture imports with every record on the patient, and a re-import changes nothing', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const cfg = cfgFor(pid);
+    const file = writeDoc(EPIC);
+    const first = await importPath(client, cfg, file, pid);
+    expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
+    expect(first.created).toBeGreaterThan(0);
+    expect(first.notImported?.map((n) => n.section)).toContain('Insurance');
+    expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
+  });
+});
+
+test('ccdaConverter picks medplum when the flag is set or the record has no C-CDA records, else microsoft', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    expect(await ccdaConverter(cfgFor(pid), client)).toBe('medplum');
+    // Records the new path wrote are not Microsoft-era: two imports in a row both convert in process.
+    await importPath(client, cfgFor(pid), writeDoc(SYNTHETIC), pid);
+    expect(await ccdaConverter(cfgFor(pid), client)).toBe('medplum');
+    // A Microsoft-era C-CDA record: microsoft, unless the flag says medplum.
+    await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', author: [{ display: 'x' }], title: 'x',
+      subject: { reference: `Patient/${pid}` }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
+    expect(await ccdaConverter(cfgFor(pid), client)).toBe('microsoft');
+    expect(await ccdaConverter(cfgFor(pid, { ccdaConverter: 'medplum' }), client)).toBe('medplum');
+    expect(await ccdaConverter(cfgFor('other'), client)).toBe('medplum'); // per patient record
+  });
 });

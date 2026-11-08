@@ -139,6 +139,13 @@ test('selectScoped follows support references only from in-scope records', () =>
   expect(all.refs).toEqual(['Binary/00000000-0000-0000-0000-000000000001']);
 });
 
+test('C-CDA record kinds: Goal and CareTeam are compartment records, a PractitionerRole is followed as support, RelatedPerson never', () => {
+  expect(COMPARTMENT_TYPES).toEqual(expect.arrayContaining(['Goal', 'CareTeam', 'CarePlan']));
+  expect(COMPARTMENT_TYPES).not.toContain('RelatedPerson');
+  const team = r({ resourceType: 'CareTeam', ...inP, subject: { reference: 'Patient/p' }, participant: [{ member: { reference: 'PractitionerRole/pr3' } }] });
+  expect(selectScoped([team], share()).refs).toEqual(['PractitionerRole/pr3']);
+});
+
 test("selectScoped drops records not in the share patient's compartment", () => {
   const other = obs('laboratory', { meta: { compartment: [{ reference: 'Patient/q' }] }, performer: [{ reference: 'Practitioner/px' }] });
   const none = obs('laboratory');

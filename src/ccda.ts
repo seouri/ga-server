@@ -1,17 +1,21 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
+import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir } from '../vendor/medplum-ccda/index.ts';
+import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
+import type { CcdaObservation, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
 import { type GaConfig, GaError, isGaNotRunning } from './config.ts';
 import { RXNORM } from './concepts.ts';
-import { addReport, importResources, type ImportReport } from './engine.ts';
+import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
+import { TAG } from './identity.ts';
 import { withImportLock } from './lock.ts';
 import { storeDocument } from './document.ts';
 
 export const CONVERTER_DOWN = 'the C-CDA converter is not running: start it with docker compose --profile ccda up -d fhir-converter';
 
-export async function convertCcda(xml: string, converterUrl: string): Promise<Resource[]> {
+export async function convertCcdaMs(xml: string, converterUrl: string): Promise<Resource[]> {
   let res: Response;
   try {
     res = await fetch(`${converterUrl}convertToFhir?api-version=2024-05-01-preview`, {
@@ -213,14 +217,107 @@ export function ccdaFiles(path: string): string[] {
   });
 }
 
+// Marks the Composition of each in-process conversion, so its records never count as Microsoft-era ones (ccdaConverter).
+const LOCAL_TAG = 'ccda-medplum';
+
+// In process unless the record holds C-CDA records the Microsoft converter wrote: those keep their path until `ga ccda replace`
+// (a mix would duplicate them). Each C-CDA import writes one Composition, so one search per import decides.
+export async function ccdaConverter(cfg: Pick<GaConfig, 'patientId' | 'ccdaConverter'>, client: MedplumClient, patientId = cfg.patientId): Promise<'medplum' | 'microsoft'> {
+  if (cfg.ccdaConverter) return cfg.ccdaConverter;
+  const old = await client.search('Composition', { subject: `Patient/${patientId}`, _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}`, _count: '1' }, { cache: 'no-cache' });
+  return old.entry?.length ? 'microsoft' : 'medplum';
+}
+
+// Clinical statements an entry may hold (CDA R2): each is one record or is named in notImported.
+const STATEMENTS = ['act', 'encounter', 'observation', 'observationMedia', 'organizer', 'procedure', 'regionOfInterest', 'substanceAdministration', 'supply'];
+// Observation value types the library converts (processVitalsObservation); any other is dropped with a console.warn.
+const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT']);
+const ENCOUNTER_DIAGNOSIS = '2.16.840.1.113883.10.20.22.4.80';
+const NOT_VITALS = new Set(['2.16.840.1.113883.10.20.22.2.10', '2.16.840.1.113883.10.20.22.2.60', '2.16.840.1.113883.10.20.22.2.500']); // plan of care, goals, care teams
+const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
+const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, root: string) => !!n.templateId?.some((t) => t['@_root'] === root);
+
+// Converts in process with the vendored @medplum/ccda. Accounting: every section is on the Composition (its narrative); every
+// entry with no record, visit diagnosis the converter drops, and observation value it cannot read is in notImported, with a reason.
+export function convertCcdaLocal(xml: string): { resources: Resource[]; notImported: NotImported[] } {
+  const ccda = sanitizeNullFlavors(convertXmlToCcda(xml)); // what the library reads: the same sections, in its order
+  const sections = (ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
+  // Epic lists a section's entries-optional root (e.g. Medications ...2.1) before its entries-required one (...2.1.1) and the library
+  // dispatches on the first: put the required one first. shortcut: removed when the library matches any templateId (Task 4).
+  for (const s of sections) {
+    const t = s.templateId ?? [];
+    const i = t.findIndex((x) => t.some((y) => x['@_root'] === `${y['@_root']}.1`));
+    if (i > 0) t.unshift(...t.splice(i, 1));
+  }
+  // Unsupported sections are not silently skipped: they are accounted below.
+  const resources = (convertCcdaToFhir(ccda, { ignoreUnsupportedSections: true }).entry ?? []).map((e) => e.resource as Resource);
+  const byRef = new Map(resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
+  const comp = resources.find((r): r is Composition => r.resourceType === 'Composition');
+  const notImported: NotImported[] = [];
+  const add = (section: string, templateId: string | undefined, entries: number, reason: string) => {
+    if (entries > 0) addNotImported(notImported, [{ section, ...(templateId && { templateId }), entries, reason }]);
+  };
+  sections.forEach((s: CcdaSection, i) => {
+    const name = textOf(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
+    const made = (comp?.section?.[i]?.entry ?? []).map((e) => byRef.get(e.reference ?? ''));
+    const entries = s.entry ?? [];
+    const statements = entries.flatMap((e) => STATEMENTS.flatMap((k) => (e as Record<string, unknown[] | undefined>)[k] ?? []));
+    add(name, root0(s.templateId), statements.length - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
+    // Visit diagnoses: the library reads only RSON observations on an encounter, not Epic's diagnosis acts (Task 5).
+    const dx = entries.flatMap((e) => e.encounter ?? []).flatMap((enc) => enc.entryRelationship ?? []).flatMap((er) => er.act ?? []).filter((a) => hasTemplate(a, ENCOUNTER_DIAGNOSIS)).length;
+    const linked = made.reduce((n, r) => n + (r?.resourceType === 'Encounter' ? ((r as Encounter).diagnosis?.length ?? 0) : 0), 0);
+    add(name, ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
+    // Observations the library reads as results (its "vitals" path), with their children: a missing code drops the record, an unread value type the value.
+    if (NOT_VITALS.has(root0(s.templateId) ?? '')) return;
+    const walk = (o: CcdaObservation, nested: boolean) => {
+      if (!o.code) {
+        if (nested) add(name, root0(o.templateId), 1, 'observation without a code');
+        return;
+      }
+      const type = o.value?.['@_xsi:type'];
+      if (type && !VALUE_TYPES.has(type)) add(name, root0(o.templateId), 1, `${type} value not converted`);
+      for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
+    };
+    for (const e of entries) {
+      for (const o of e.observation ?? []) walk(o, false);
+      for (const org of e.organizer ?? []) for (const c of org.component ?? []) for (const o of c.observation ?? []) walk(o, true);
+    }
+  });
+  // Identity: the document id keys the Composition (the library gives it none), never converter-made content.
+  const docId = ccda.id?.[0];
+  if (comp && docId?.['@_root']) {
+    const root = docId['@_root'];
+    comp.identifier = docId['@_extension']
+      ? { system: mapCcdaSystemToFhir(root), value: docId['@_extension'] }
+      : { system: 'urn:ietf:rfc:3986', value: `urn:${/-/.test(root) ? 'uuid' : 'oid'}:${root}` };
+  }
+  if (comp) comp.meta = { ...comp.meta, tag: [...(comp.meta?.tag ?? []), { system: TAG, code: LOCAL_TAG }] };
+  return { resources: repair(resources, xml), notImported };
+}
+
+// Sums rows of one section, template and reason (several documents of one import).
+export function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[] {
+  for (const r of rows) {
+    const same = total.find((t) => t.section === r.section && t.templateId === r.templateId && t.reason === r.reason);
+    if (same) same.entries += r.entries;
+    else total.push({ ...r });
+  }
+  return total;
+}
+
 export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId): Promise<ImportReport> {
   const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
-  for (const file of ccdaFiles(path)) {
+  const files = ccdaFiles(path);
+  // Decided once: this import's own records must not switch the path between its files.
+  const local = files.length > 0 && (await ccdaConverter(cfg, client, patientId)) === 'medplum';
+  if (local) total.notImported = [];
+  for (const file of files) {
     const xml = readFileSync(file, 'utf8');
-    const resources = await convertCcda(xml, cfg.converterUrl);
+    const { resources, notImported } = local ? convertCcdaLocal(xml) : { resources: await convertCcdaMs(xml, cfg.converterUrl), notImported: undefined };
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
     const r = await withImportLock(() => importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash));
     addReport(total, r);
+    if (notImported && total.notImported) addNotImported(total.notImported, notImported);
   }
   return total;
 }

@@ -52,7 +52,7 @@ const DATE_PATHS = [
   'period.start', 'date', 'authoredOn', 'sent', 'authored', 'recordedDate', 'onsetDateTime', 'dateAsserted',
 ];
 // Only these are followed from in-scope records, one hop; they are never searchable on their own.
-const SUPPORT_REF = /^(Medication|Practitioner|Organization|Location|Binary)\/([A-Za-z0-9\-.]{1,64})(?:\/|$)/;
+const SUPPORT_REF = /^(Medication|Practitioner|PractitionerRole|Organization|Location|Binary)\/([A-Za-z0-9\-.]{1,64})(?:\/|$)/;
 // Attachment urls: Medplum may answer with a presigned /storage/<binary id>/... URL instead of Binary/<id>.
 export const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
 

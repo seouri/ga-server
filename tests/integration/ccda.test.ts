@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { convertCcda, importPath } from '../../src/ccda.ts';
+import { convertCcdaMs, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { stableIdentifier } from '../../src/identity.ts';
 import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
@@ -16,7 +16,7 @@ let client: MedplumClient;
 let pid: string;
 
 beforeAll(async () => {
-  cfg = loadConfig();
+  cfg = { ...loadConfig(), ccdaConverter: 'microsoft' }; // what these tests and their cleanup expect
   client = await getClient(cfg);
   pid = await createTestPatient(client);
 });
@@ -25,7 +25,7 @@ beforeAll(async () => {
 // including Practitioner/Organization/Medication and the Binary, which $everything doesn't reach.
 afterAll(async () => {
   await cleanupTestMaps(client);
-  for (const r of await convertCcda(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
+  for (const r of await convertCcdaMs(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
     const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
       // Ownership check: identifier search is global; only delete what this fixture wrote.

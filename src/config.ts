@@ -14,6 +14,9 @@ export type GaConfig = {
   patientId: string;
   projectId?: string; // GA's own Medplum project; absent on installs from before it (ga migrate)
   converterUrl: string;
+  // C-CDA converter: 'medplum' in process (set by ga ccda replace); absent: in process unless the record holds Microsoft-era C-CDA records.
+  // 'microsoft' forces the converter container (tests and the comparison).
+  ccdaConverter?: 'medplum' | 'microsoft';
   store?: 'medplum' | 'sqlite'; // which store GA uses (default medplum); the GA_STORE environment variable overrides it
   storeUrl?: string; // GA's SQLite store; default http://127.0.0.1:8120/
   adminPassword?: string; // rotated by ga setup; also the Medplum app (http://localhost:3000) login for admin@example.com

@@ -9,7 +9,7 @@ import { searchAll } from './labs.ts';
 import { importAppleHealth } from './apple/import.ts';
 import { manifestHash } from './archive.ts';
 import { MAP_TAG } from './conceptmap.ts';
-import { importPath } from './ccda.ts';
+import { ccdaConverter, importPath } from './ccda.ts';
 import { defaultConfigPath, GaError, type GaConfig, getClient, loadConfig } from './config.ts';
 import { importEhi } from './ehi/import.ts';
 import { exportInfo } from './ehi/read.ts';
@@ -140,6 +140,8 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
   if ([...sources.values()].some((s) => s.tag === 'src-smart')) throw new GaError('hospital portal (SMART) records are not migrated: disconnect the portals (ga disconnect) first, or migrate by hand');
   const problems: string[] = [];
   const jobs: Job[] = [];
+  // The copy keeps the old record's C-CDA converter: the new project starts empty, which alone would pick the in-process one.
+  const converter = await ccdaConverter({ patientId: oldPid }, old);
   const ccdaDocs = new Set<DocumentReference>();
   for (const [path, { tag, date }] of sources) {
     if (!existsSync(path)) {
@@ -165,7 +167,7 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
       label: `${kind} ${basename(path)}`,
       run: async () => {
         const [c, cfg] = await newClient();
-        return kind === 'ccda' ? importPath(c, cfg, path) : kind === 'ehi' ? importEhi(c, cfg, path) : importAppleHealth(c, cfg, path);
+        return kind === 'ccda' ? importPath(c, { ...cfg, ccdaConverter: converter }, path) : kind === 'ehi' ? importEhi(c, cfg, path) : importAppleHealth(c, cfg, path);
       },
     });
   }

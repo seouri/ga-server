@@ -8,6 +8,8 @@ import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport, storeNewestImport } from './share/scope.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
+// A C-CDA section, or part of one, the in-process converter turned into no record (src/ccda.ts convertCcdaLocal). Names and counts only.
+export type NotImported = { section: string; templateId?: string; entries: number; reason: string };
 export type ImportReport = {
   created: number;
   updated: number;
@@ -19,6 +21,7 @@ export type ImportReport = {
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
   unmapped: Unmapped[]; // in-scope terms of this batch with no standard code, for review (src/concept-apply.ts)
+  notImported?: NotImported[]; // C-CDA converted in process only: what became no record
 };
 const COUNTS = ['created', 'updated', 'skipped', 'merged', 'conflicts', 'possibleDuplicates', 'invalid'] as const;
 // Adds one importResources report into a running total (several files or batches of one import).
