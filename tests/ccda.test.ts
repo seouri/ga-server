@@ -316,7 +316,7 @@ test('every section of the Epic-style fixture is imported', () => {
   const byRef = new Map(out.resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
   const made = Object.fromEntries((comp.section ?? []).map((s) => [s.title, [...new Set((s.entry ?? []).map((e) => byRef.get(e.reference ?? '')?.resourceType))]]));
   expect(made).toEqual({
-    'Problem List': ['Condition'], Encounters: ['Encounter'], 'Family History': ['FamilyMemberHistory'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
+    'Problem List': ['Condition'], Encounters: ['Encounter'], 'Family History': ['FamilyMemberHistory'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['DiagnosticReport'], 'Vital Signs': ['Observation'],
     Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
@@ -385,6 +385,11 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const [enc] = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
     expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
     expect(await client.searchResources('FamilyMemberHistory', { patient: `Patient/${pid}` })).toHaveLength(1);
+    // The result panel is a report whose results are the stored lab Observations.
+    const [report] = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` });
+    const labs = await client.searchResources('Observation', { subject: `Patient/${pid}`, category: 'laboratory' });
+    expect(report.result?.map((r) => r.reference).sort()).toEqual(labs.map((o) => `Observation/${o.id}`).sort());
+    expect(labs).toHaveLength(3);
     const [coverage] = await client.searchResources('Coverage', {});
     expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });

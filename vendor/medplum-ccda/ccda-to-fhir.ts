@@ -17,6 +17,7 @@ import type {
   Condition,
   ContactPoint,
   Coverage,
+  DiagnosticReport,
   DocumentReference,
   Dosage,
   DosageDoseAndRate,
@@ -88,6 +89,8 @@ import {
   OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID_PROCEDURES_SECTION_ENTRIES_REQUIRED,
   OID_REASON_FOR_REFERRAL,
+  OID_RESULT_ORGANIZER,
+  OID_RESULT_ORGANIZER_V2,
   OID_REASON_FOR_REFERRAL_V2,
 } from './oids.ts';
 import { sanitizeNullFlavors } from './sanitize.ts';
@@ -105,6 +108,7 @@ import {
   CONDITION_VER_STATUS_CODE_SYSTEM,
   CONDITION_VERIFICATION_CODE_SYSTEM,
   DIAGNOSIS_ROLE_CODE_SYSTEM,
+  DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM,
   ENCOUNTER_STATUS_MAPPER,
   HUMAN_NAME_USE_MAPPER,
   IMMUNIZATION_STATUS_MAPPER,
@@ -1433,10 +1437,42 @@ class CcdaToFhirConverter {
       return this.processCareTeamOrganizer(organizer);
     }
     // Route by the organizer's own templates: it can have several, such as a vendor template and a C-CDA one
-    if (getTemplateIds(organizer).includes(OID_FAMILY_HISTORY_ORGANIZER)) {
+    const templateIds = getTemplateIds(organizer);
+    if (templateIds.includes(OID_FAMILY_HISTORY_ORGANIZER)) {
       return this.processFamilyHistoryOrganizer(organizer);
     }
+    if (templateIds.includes(OID_RESULT_ORGANIZER) || templateIds.includes(OID_RESULT_ORGANIZER_V2)) {
+      return this.processResultOrganizer(organizer);
+    }
     return this.processVitalsOrganizer(organizer);
+  }
+
+  private processResultOrganizer(organizer: CcdaOrganizer): DiagnosticReport {
+    // A result panel is a report whose results are its observations (C-CDA on FHIR: Result Organizer → DiagnosticReport)
+    const statuses: Record<string, DiagnosticReport['status']> = {
+      completed: 'final',
+      active: 'partial',
+      aborted: 'cancelled',
+      cancelled: 'cancelled',
+    };
+    const results: Reference<Observation>[] = [];
+    for (const component of organizer.component ?? EMPTY) {
+      results.push(...this.processVitalsComponent(component));
+    }
+    return {
+      resourceType: 'DiagnosticReport',
+      id: this.mapId(organizer.id),
+      identifier: this.mapIdentifiers(organizer.id),
+      status: statuses[organizer.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+      category: [{ coding: [{ system: DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM, code: 'LAB', display: 'Laboratory' }] }],
+      // The code is required in FHIR, so a panel the document does not name is unknown
+      code: this.mapCode(organizer.code) ?? {
+        extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }],
+      },
+      subject: createReference(this.patient as Patient),
+      ...this.mapObservationEffectiveTime(organizer.effectiveTime?.[0]),
+      result: results.length > 0 ? results : undefined,
+    };
   }
 
   private processCareTeamOrganizer(organizer: CcdaOrganizer): CareTeam {

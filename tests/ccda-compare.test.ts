@@ -24,13 +24,11 @@ const subject = { reference: 'Patient/ms-p' };
 
 test('a field present in the old record and missing in the new is a loss with its element path', () => {
   const r = run(SYNTHETIC, MS_SYNTHETIC());
-  // Against the real converter: the organizer as report (Task 7), the Composition's subject and section mode. LOINC/SNOMED/RxNorm,
-  // values, dates, the medication (a statement on both paths) and the document id agree.
+  // Against the real converter: the Composition's subject and section mode (Task 8). LOINC/SNOMED/RxNorm, values, dates, the
+  // medication (a statement on both paths), the result panel (a report on both paths, Task 7) and the document id agree.
   expect(r.losses).toEqual([
     { type: 'Composition', path: 'section.mode', count: 1 },
     { type: 'Composition', path: 'subject.reference', count: 1 },
-    { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
-    { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
   ]);
   // A field only the old record holds.
   const old = MS_SYNTHETIC().map((x) => (JSON.stringify(x).includes('syn-ldl-1') ? { ...x, interpretation: [{ coding: [{ system: 'urn:oid:2.16.840.1.113883.5.83', code: 'H' }] }] } : x));
@@ -77,9 +75,7 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Composition', path: 'section.mode', count: 1 },
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'Patient', path: 'name.use', count: 1 },
-    { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
     { type: 'DiagnosticReport', path: 'effective[x].end', count: 1 },
-    { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
     { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
     { type: 'Encounter', path: 'location.location.reference', count: 1 },
     { type: 'Location', path: '(record)', count: 1 },
@@ -172,7 +168,7 @@ test('compare never writes', async () => {
   const client = reader([doc('Binary/b1'), doc('Binary/b2'), doc()], { 'Binary/b1': SYNTHETIC, 'Binary/b2': '<?xml version="1.0"?><SubmitObjectsRequest/>' });
   const report = await ccdaCompare(client, 'p1', 'http://converter/', async (xml) => (xml === SYNTHETIC ? MS_SYNTHETIC() : []));
   expect(report).toMatchObject({ documents: 1, skipped: 2, failed: 0, gains: { Observation: 1 }, unaccounted: [] });
-  expect(report.losses).toContainEqual({ type: 'DiagnosticReport', path: 'result.reference', count: 1 });
+  expect(report.losses).toContainEqual({ type: 'Composition', path: 'subject.reference', count: 1 });
 });
 
 test('a document the new path cannot convert is counted and fails the gate', async () => {

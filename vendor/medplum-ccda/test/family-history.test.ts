@@ -204,19 +204,23 @@ describe('organizer templates', () => {
     </entry>`;
   }
 
+  // GA: a Result Organizer is a DiagnosticReport (PATCHES row 20); its observations are the same.
   test.each([
-    ['Vital Signs Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.26" extension="2015-08-01"/>'],
-    ['Result Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.1" extension="2015-08-01"/>'],
-    ['Functional Status Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.66" extension="2014-06-09"/>'],
+    ['Vital Signs Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.26" extension="2015-08-01"/>', 'Observation'],
+    ['Result Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.1" extension="2015-08-01"/>', 'DiagnosticReport'],
+    ['Functional Status Organizer', '<templateId root="2.16.840.1.113883.10.20.22.4.66" extension="2014-06-09"/>', 'Observation'],
     [
       'Result Organizer after another template',
       '<templateId root="2.16.840.1.113883.19.5.99"/><templateId root="2.16.840.1.113883.10.20.22.4.1"/>',
+      'DiagnosticReport',
     ],
-  ])('converts a %s to Observations', (_name, templateIdsXml) => {
+  ])('converts a %s to Observations', (_name, templateIdsXml, panelType) => {
     const bundle = convertSection(RESULTS_SECTION, organizer(templateIdsXml));
 
     const observations = resourcesOfType<Observation>(bundle, 'Observation');
-    expect(observations.map((o) => o.code?.coding?.[0]?.code)).toEqual(['8867-4', '46680005']);
+    const panel = resourcesOfType<Resource>(bundle, panelType as Resource['resourceType']).find((r) => JSON.stringify(r).includes('46680005'));
+    expect(observations.map((o) => o.code?.coding?.[0]?.code).filter((c) => c !== '46680005')).toEqual(['8867-4']);
+    expect(panel).toBeDefined();
   });
 
   // GA: an organizer of another template stays a panel Observation (the PR skips or throws on it; that would drop its

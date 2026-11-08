@@ -51,9 +51,10 @@ function convertResults(organizerEffectiveTime: string, observationEffectiveTime
   return convertCcdaToFhir(convertXmlToCcda(xml));
 }
 
-function findObservation(bundle: Bundle, code: string): Observation {
+// GA: the Result Organizer is a DiagnosticReport (PATCHES row 20), dated by the same helper.
+function findObservation(bundle: Bundle, code: string, resourceType: 'Observation' | 'DiagnosticReport' = 'Observation'): Observation {
   const observation = bundle.entry?.find(
-    (e) => e.resource?.resourceType === 'Observation' && e.resource.code?.coding?.[0]?.code === code
+    (e) => e.resource?.resourceType === resourceType && e.resource.code?.coding?.[0]?.code === code
   )?.resource as Observation;
   expect(observation).toBeDefined();
   return observation;
@@ -103,6 +104,6 @@ describe('observation effectiveTime', () => {
 
   test.each(cases)('maps %s on a result organizer', (_name, effectiveTimeXml, expected) => {
     const bundle = convertResults(effectiveTimeXml, '');
-    expect(effectiveOf(findObservation(bundle, PANEL_CODE))).toEqual(expected);
+    expect(effectiveOf(findObservation(bundle, PANEL_CODE, 'DiagnosticReport'))).toEqual(expected);
   });
 });
