@@ -138,8 +138,7 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
 // Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
 // the date importResources stored on the Patient, else (installs that predate it) a scan of the Epic-tagged records, only the fields currencyContext reads.
 export async function newestEpicImport(client: MedplumClient, patientId: string): Promise<number> {
-  const patient = await client.readResource('Patient', patientId, { cache: 'no-cache' });
-  const stored = Date.parse(patient.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+  const stored = Date.parse((await client.readResource('Patient', patientId, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
   if (!Number.isNaN(stored)) return stored;
   let newest = -Infinity;
   const _tag = [...EPIC_TAGS].map((c) => `${TAG}|${c}`).join(',');
@@ -157,7 +156,7 @@ export async function storeNewestImport(client: MedplumClient, patientId: string
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' });
   const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
   const next = Math.max(value, Number.isNaN(had) ? -Infinity : had);
-  if (next === had || !Number.isFinite(next)) return;
+  if (next === had || next === -Infinity) return;
   try {
     await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(next).toISOString() }] },
       { headers: { 'If-Match': `W/"${p.meta?.versionId}"` } });

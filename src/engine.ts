@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, hasTag, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport, storeNewestImport } from './share/scope.ts';
 
@@ -527,11 +527,8 @@ export async function importResources(
   }
   if (source.kind === 'ccda' || source.kind === 'ehi') {
     const newest = Math.max(...ordered.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
-    const p = await client.readResource('Patient', patientId, { cache: 'no-cache' });
-    const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
-    // No stored date yet: seeded from the scan of Epic records, else an older import would hide a newer one already stored.
-    const value = Math.max(newest, Number.isNaN(had) ? await newestEpicImport(client, patientId) : had);
-    if (value !== had && Number.isFinite(value)) await storeNewestImport(client, patientId, value);
+    // newestEpicImport seeds the stored date from a scan when there is none, so an older import never hides a newer one.
+    await storeNewestImport(client, patientId, Math.max(newest, await newestEpicImport(client, patientId)));
   }
   return report;
 }
