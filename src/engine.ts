@@ -84,7 +84,7 @@ function body(r: R): unknown {
 // C-CDA bodies are complete documents and replace as before.
 const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
 // Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
-const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
+export const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
 const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
 type O = Record<string, unknown>;
 const isObj = (x: unknown): x is O => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -566,7 +566,9 @@ export async function importResources(
       const own = !!existing && (existing === byStable || idList(existing).some((i) => i.system === 'urn:ga-server:id:ccda'));
       const copies = !!existing && source.kind === 'ccda' && !!source.local && (type === 'Encounter' || (own && idless)) && !agentOrShielded(existing as R);
       if (copies) {
-        const theirs = idList(existing as R).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== 'urn:ga-server:id:ccda');
+        // Another source's visit keeps its values only while that source wrote it last: a Microsoft-era C-CDA body on an EHI visit
+        // (src-ccda tag, ga ccda replace) takes the new path's values.
+        const theirs = idList(existing as R).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== 'urn:ga-server:id:ccda') && !hasTag(existing as R, 'src-ccda');
         const merged = mergeCopies(existing as R, coded, theirs);
         const body = (x: R) => JSON.stringify({ ...x, id: undefined, meta: undefined, extension: undefined, identifier: undefined }, sorted);
         const have = new Set(idList(existing as R).map(idKey));
