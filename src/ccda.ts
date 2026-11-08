@@ -259,7 +259,7 @@ export async function ccdaConverter(cfg: Pick<GaConfig, 'patientId' | 'ccdaConve
 // Clinical statements an entry may hold (CDA R2): each is one record or is named in notImported.
 const STATEMENTS = ['act', 'encounter', 'observation', 'observationMedia', 'organizer', 'procedure', 'regionOfInterest', 'substanceAdministration', 'supply'];
 // Observation value types the library converts (processVitalsObservation); any other is dropped with a console.warn.
-const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT', 'REAL']);
+const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT', 'REAL', 'TS', 'BL']);
 // An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
 const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
 const ENCOUNTER_DIAGNOSIS = [OID.OID_ENCOUNTER_DIAGNOSIS, OID.OID_ENCOUNTER_DIAGNOSIS_V2];

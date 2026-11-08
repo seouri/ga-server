@@ -39,7 +39,8 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   return {
     date: (o.effectiveDateTime ?? o.effectivePeriod?.start ?? o.effectiveInstant ?? o.issued)?.slice(0, 10),
     name: o.code?.text ?? c?.display ?? c?.code,
-    value: qty(o.valueQuantity) ?? o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.[0]?.display,
+    value: qty(o.valueQuantity) ?? o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.[0]?.display ?? o.valueDateTime
+      ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)),
     range,
     interpretation: o.interpretation?.[0]?.coding?.[0]?.code ?? o.interpretation?.[0]?.text,
     source: o.meta?.source ? basename(o.meta.source) : undefined,

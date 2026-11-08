@@ -250,6 +250,16 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   ]);
 });
 
+test('TS and BL values are converted (valueDateTime, valueBoolean), not named; lab rows show them', () => {
+  for (const [v, field, row] of [['<value xsi:type="TS" value="20240101"/>', 'valueDateTime', '2024-01-01'], ['<value xsi:type="BL" value="true"/>', 'valueBoolean', 'true']] as const) {
+    const out = convertCcdaLocal(EPIC.replace('<value xsi:type="REAL" value="1.1"/>', v));
+    expect(out.notImported).toEqual([]);
+    const inr = out.resources.find((r): r is Observation => r.resourceType === 'Observation' && JSON.stringify(r.identifier).includes('EX-RES-2'));
+    expect(inr?.[field]).toBeDefined();
+    expect(labRow(inr as Observation).value).toBe(row);
+  }
+});
+
 test('a binary ED value (no FHIR value type) is named; a text one is converted', () => {
   const pdf = convertCcdaLocal(EPIC.replace('<value xsi:type="ED"><reference value="#res3"/></value>', '<value xsi:type="ED" mediaType="application/pdf" representation="B64">JVBERi0=</value>'));
   expect(pdf.notImported).toContainEqual({ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'ED value not converted' });

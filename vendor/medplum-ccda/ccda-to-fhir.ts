@@ -1789,6 +1789,16 @@ class CcdaToFhirConverter {
           result.valueString = this.mapEncapsulatedDataToString(observation.value);
           break;
 
+        case 'TS': // Timestamp, such as a last menstrual period date
+          result.valueDateTime = mapCcdaToFhirDateTime(observation.value['@_value']);
+          break;
+
+        case 'BL': // Boolean
+          if (observation.value['@_value'] === 'true' || observation.value['@_value'] === 'false') {
+            result.valueBoolean = observation.value['@_value'] === 'true';
+          }
+          break;
+
         case 'INT': // Integer
           result.valueInteger = observation.value['@_value']
             ? Number.parseInt(observation.value['@_value'], 10)

@@ -307,7 +307,12 @@ export interface CcdaInteger {
   '@_value': string;
 }
 
-export type CcdaValue = CcdaCode | CcdaText | CcdaQuantity | CcdaReference | CcdaInteger;
+export interface CcdaTimestampOrBoolean {
+  '@_xsi:type': 'TS' | 'BL';
+  '@_value'?: string;
+}
+
+export type CcdaValue = CcdaCode | CcdaText | CcdaQuantity | CcdaReference | CcdaInteger | CcdaTimestampOrBoolean;
 
 export interface CcdaPeriod {
   '@_xsi:type'?: 'PIVL_TS';
