@@ -657,3 +657,14 @@ test('a practitioner named twice with different details is one stored Practition
     expect(prov[0].telecom?.[0].value).toBe('+1-555-555-0101');
   });
 });
+
+test('a vaccine not given (negationInd) is stored not-done and vaccine_gaps does not count it', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    await importPath(client, cfgFor(pid), writeDoc(EPIC.replace('negationInd="false">', 'negationInd="true">')), pid);
+    const [imm] = await client.searchResources('Immunization', { patient: `Patient/${pid}` });
+    expect(imm.status).toBe('not-done');
+    const flu = (await vaccineGaps(client, pid, '2024-01-01')).results.find((r) => r.vaccine === 'influenza');
+    expect(flu).toMatchObject({ status: 'due', records: [] });
+  });
+});

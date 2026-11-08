@@ -308,3 +308,10 @@ test('a legal name: the old usual and the new official are one name use when the
   expect(losses(EPIC.replace('<name use="L">', '<name use="C">'), pt('usual'), pt('official'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
   expect(losses(EPIC, pt('usual', 'Other'), pt('official', 'Other'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
 });
+
+test('a vaccine not given: the Microsoft path\'s completed and the new not-done are a correction for a negated source entry; otherwise a loss', () => {
+  const imm = (status: string) => ({ resourceType: 'Immunization', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.768179', value: 'EX-IMM-1' }], status });
+  const losses = (xml: string) => compareCcda(xml, [imm('completed') as Resource], [imm('not-done') as Resource], []).losses;
+  expect(losses(EPIC.replace('negationInd="false">', 'negationInd="true">'))).toEqual([]);
+  expect(losses(EPIC)).toEqual([{ type: 'Immunization', path: 'status', count: 1 }]);
+});

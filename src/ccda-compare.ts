@@ -2,7 +2,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Composition, Identifier, Medication, Resource } from '@medplum/fhirtypes';
 import { convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
-import { addNotImported, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
+import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
 import type { NotImported } from './engine.ts';
 
 // `ga ccda compare`: each stored C-CDA document converted both ways, compared entry by entry. Read-only. The report holds
@@ -238,6 +238,14 @@ function legalName(o: Resource, legal: Set<string | undefined>): Resource {
   return { ...o, name: names?.map((nm) => (nm.use === 'usual' && legal.has(nm.family) ? { ...nm, use: 'official' } : nm)) } as unknown as Resource;
 }
 
+// One correction, not a loss: the Microsoft path writes a vaccine not given (negationInd="true") as `completed`; the new path as
+// `not-done`. The old status is dropped only for an Immunization whose source entry is negated and when the new one is not-done.
+function refusedVaccine(o: Resource, n: Resource, negated: Set<string>): Resource {
+  if (o.resourceType !== 'Immunization' || (n as { status?: string }).status !== 'not-done' || !keys(o).some((k) => negated.has(k))) return o;
+  const { status: _, ...rest } = o as unknown as R;
+  return rest as unknown as Resource;
+}
+
 // One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
 // (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
 // The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
@@ -268,6 +276,8 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   const ccda = sanitizeNullFlavors(convertXmlToCcda(xml));
   const legal = new Set((ccda.recordTarget?.[0]?.patientRole?.patient?.name ?? []).filter((nm) => nm['@_use'] === 'L').map((nm) => nodeToPlainText(nm.family)));
   const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
+  const negated = new Set((ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []).flatMap((sec) => sec.entry ?? [])
+    .flatMap((e) => e.substanceAdministration ?? []).filter((sa) => sa['@_negationInd'] === 'true').flatMap((sa) => cdaKeys(sa as unknown as R)));
   const match = matchEntries(o, n);
   const losses = new Map<string, Loss>();
   const add = (type: string, path: string, explained?: string) => {
@@ -285,7 +295,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(r, m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());

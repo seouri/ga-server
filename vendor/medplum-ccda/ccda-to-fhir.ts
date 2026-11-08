@@ -72,6 +72,7 @@ import {
   OID_GOALS_SECTION,
   OID_HEALTH_CONCERNS_SECTION,
   OID_HISTORY_OF_PRESENT_ILLNESS_SECTION,
+  OID_IMMUNIZATION_REFUSAL_REASON,
   OID_IMMUNIZATIONS_SECTION_ENTRIES_OPTIONAL,
   OID_IMMUNIZATIONS_SECTION_ENTRIES_REQUIRED,
   OID_INSTRUCTION_SECTION_V2,
@@ -1125,6 +1126,15 @@ class CcdaToFhirConverter {
       lotNumber: consumable.manufacturedProduct?.[0]?.manufacturedMaterial?.[0]?.lotNumberText?.[0],
       route: this.mapCode(substanceAdmin.routeCode),
     };
+
+    // Not given (negationInd): not-done, with the Immunization Refusal Reason as statusReason
+    if (substanceAdmin['@_negationInd'] === 'true') {
+      result.status = 'not-done';
+      const refusal = (substanceAdmin.entryRelationship ?? EMPTY)
+        .flatMap((rel) => rel.observation ?? EMPTY)
+        .find((o) => o.templateId?.some((t) => t['@_root'] === OID_IMMUNIZATION_REFUSAL_REASON));
+      result.statusReason = this.mapCode(refusal?.code);
+    }
 
     if (substanceAdmin.performer) {
       result.performer = this.mapCcdaPerformerArrayToImmunizationPerformerArray(substanceAdmin.performer);
