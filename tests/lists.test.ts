@@ -50,9 +50,13 @@ test('one row per item across sources; best currency wins, inactive never hides 
   expect(p[0]).toMatchObject({ source: 'one; two', ids: ['1', '2'] });
 });
 
-test('medications: a planned or proposed MedicationRequest is not a current medication; an order or an intent-less one is', () => {
-  const req = (id: string, intent?: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', ...(intent && { intent }), medicationCodeableConcept: { text: `Drug ${id}` } });
-  const rows = [req('plan', 'plan'), req('prop', 'proposal'), req('order', 'order'), req('none')] as Resource[];
-  expect(listRows(rows, ctx, 'medications').map((r) => r.id)).toEqual(['order', 'none']);
-  expect(listRows(rows, ctx, 'medications', 'all').filter((r) => r.currency === 'inactive').map((r) => r.id)).toEqual(['plan', 'prop']);
+test('medications: a C-CDA planned or proposed MedicationRequest is not current (listed as planned with include all); a portal\'s is as before', () => {
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const req = (id: string, src: string, intent?: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', ...(intent && { intent }), medicationCodeableConcept: { text: `Drug ${id}` }, ...tag(src) });
+  const rows = [req('plan', 'src-ccda', 'plan'), req('prop', 'src-ccda', 'proposal'), req('order', 'src-ccda', 'order'), req('none', 'src-ccda'), req('portal', 'src-smart', 'plan')] as Resource[];
+  expect(listRows(rows, ctx, 'medications').map((r) => r.id).sort()).toEqual(['none', 'order', 'portal']);
+  const all = listRows(rows, ctx, 'medications', 'all');
+  expect(all.filter((r) => r.currency === 'planned').map((r) => r.id).sort()).toEqual(['plan', 'prop']);
+  expect(all.filter((r) => r.currency === 'planned').map((r) => r.reason)).toEqual([expect.stringMatching(/planned/), expect.stringMatching(/planned/)]);
+  expect(all.map((r) => r.currency).indexOf('planned')).toBeGreaterThan(all.map((r) => r.currency).lastIndexOf('current'));
 });

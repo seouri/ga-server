@@ -41,7 +41,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - Family history: `FamilyMemberHistory`. Social history, vitals: `Observation`. Questionnaires: `QuestionnaireResponse`.
 - Health maintenance: Epic's status at export time is an `Observation` coded `Health maintenance: <topic>` (`valueString` status, components Next due / Last completed date), not a live status; completions are `Procedure`.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:ehi-archive`).
-- Current medications = `active` MedicationStatement plus `active` MedicationRequest (a request with `intent` `plan` or `proposal`, a planned or proposed medication, is left out), each confirmed by the medication currency rule (see "Hospital portals (SMART)"); `current_medications` (and `current_problems`, `allergies`) return them with the rule applied.
+- Current medications = `active` MedicationStatement plus `active` MedicationRequest (a C-CDA plan-of-treatment request with `intent` `plan` or `proposal`, a planned or proposed medication, is left out), each confirmed by the medication currency rule (see "Hospital portals (SMART)"); `current_medications` (and `current_problems`, `allergies`) return them with the rule applied.
 - Vaccinations: call `vaccine_gaps` (optional `asOf` YYYY-MM-DD) and relay its result: schedule edition, per-vaccine status, records used, unmatched and possible-duplicate records. Never judge the schedule yourself. Epic health maintenance is the doctor's plan inside `health_maintenance` (below), labelled as of the export date.
 
 ## Hospital portals (SMART)

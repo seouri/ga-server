@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
 import { defaultConfigPath } from './config.ts';
+import { isPlanned } from './current.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { fit, groupLabs, highLow, labRow, loadObservations, searchAll } from './labs.ts';
@@ -127,7 +128,7 @@ export function medicationItems(arrived: Resource[], all: Resource[], since: str
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
     const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
-    if (!keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
+    if (isPlanned(r) || !keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
     keys.forEach((k) => seen.add(k));
     const rx = keys.find((k) => k.startsWith('rx:'));
     return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date, detail: { rxnorm: rx?.slice(3), status }, source: sourceOf(r), id: r.id }];

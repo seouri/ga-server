@@ -39,12 +39,15 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[], ne
   return { lastSuccess, newestImport, portal };
 }
 
-// Planned or proposed medications (a C-CDA Plan of Treatment's moodCode INT/PRP): not something the patient takes yet.
+// A planned or proposed medication from a C-CDA Plan of Treatment (moodCode INT/PRP → intent plan/proposal): not something the
+// patient takes yet. C-CDA only: a portal passes its own intent through, whose meaning is not verified.
 const NOT_TAKEN = new Set(['plan', 'proposal']);
+export const isPlanned = (r: Resource): boolean =>
+  r.resourceType === 'MedicationRequest' && NOT_TAKEN.has(r.intent) && !!r.meta?.tag?.some((t) => t.system === TAG && t.code === 'src-ccda');
 // Active medication, problem or allergy: the records the currency rule covers.
 export function isActive(r: Resource): boolean {
   const a = r as R;
-  if (r.resourceType === 'MedicationRequest' && NOT_TAKEN.has(r.intent)) return false;
+  if (isPlanned(r)) return false;
   return DATED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 

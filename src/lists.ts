@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Endpoint, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
-import { currencyContext, explain, smartKeys, type Ctx } from './current.ts';
+import { currencyContext, explain, isPlanned, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
 import { collect, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
@@ -15,7 +15,7 @@ type ListRow = { name?: string; status?: string; currency?: string; reason?: str
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
 export const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
-const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].indexOf(r.currency);
+const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'planned', 'inactive'].indexOf(r.currency);
 
 export const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
@@ -53,8 +53,8 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     const row: ListRow = {
       name: concept(r.medicationCodeableConcept) ?? concept(meds.get(r.medicationReference?.reference)?.code) ?? r.medicationReference?.display ?? concept(r.code),
       status: status ?? 'not stated',
-      currency: e?.currency ?? (unstated ? undefined : 'inactive'),
-      reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : undefined),
+      currency: e?.currency ?? (unstated ? undefined : isPlanned(res) ? 'planned' : 'inactive'),
+      reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : isPlanned(res) ? 'planned or proposed in a plan of treatment; not taken yet' : undefined),
       since: (r.effectiveDateTime ?? r.effectivePeriod?.start ?? r.authoredOn ?? r.onsetDateTime ?? r.onsetPeriod?.start ?? r.recordedDate ?? r.dateAsserted)?.slice(0, 10),
       source: keys.length
         ? `hospital portal ${keys.join(', ')}`

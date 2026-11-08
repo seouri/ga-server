@@ -316,3 +316,11 @@ test('new notes and messages are listed with their opening text; source files ar
   ]);
   expect(items[0].detail.text).toContain('repeat your lab panel in 6 weeks');
 });
+
+test('medicationItems: a C-CDA planned medication is not a new medication; a portal one is', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const req = (id: string, code: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', intent: 'plan', medicationCodeableConcept: { text: `Drug ${id}` },
+    meta: { tag: [{ system: 'urn:ga-server:tag', code }] }, ...arrivedExt('2026-11-02T00:00:00Z') }) as Resource;
+  const [ccda, smart] = [req('c', 'src-ccda'), req('s', 'src-smart')];
+  expect(medicationItems([ccda, smart], [ccda, smart], since, '2026-11-07').map((i) => i.id)).toEqual(['s']);
+});
