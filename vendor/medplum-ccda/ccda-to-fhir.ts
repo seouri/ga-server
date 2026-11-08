@@ -270,7 +270,7 @@ class CcdaToFhirConverter {
 
   /**
    * The converter makes a Practitioner, Organization or Location per occurrence: one per identifier is kept (the first, with every
-   * field a later copy adds), then one PractitionerRole per practitioner and organization; every reference points at the kept one.
+   * field a later copy adds and every distinct element of an array field), then one PractitionerRole per practitioner and organization; every reference points at the kept one.
    * @param composition - The document's Composition (its author and custodian references are repointed too).
    */
   private mergeSharedResources(composition: Composition): void {
@@ -284,9 +284,17 @@ class CcdaToFhirConverter {
       }
       const target = first as unknown as Record<string, unknown>;
       for (const [k, v] of Object.entries(resource)) {
-        if (target[k] === undefined && v !== undefined) {
-          target[k] = v;
+        if (k === 'id' || v === undefined) {
+          continue;
         }
+        if (target[k] === undefined) {
+          target[k] = v;
+        } else if (Array.isArray(target[k]) && Array.isArray(v)) {
+          // Array fields (identifier, name, address, telecom, type): every distinct element of every copy
+          const seen = new Set((target[k] as unknown[]).map((e) => JSON.stringify(e)));
+          target[k] = [...(target[k] as unknown[]), ...v.filter((e) => !seen.has(JSON.stringify(e)))];
+        }
+        // A single-valued field both copies hold differently (an Organization's or Location's name, a Location's address): the first wins
       }
       keys.forEach((key) => kept.set(key, first));
       moved.set(`${resource.resourceType}/${resource.id}`, `${first.resourceType}/${first.id}`);

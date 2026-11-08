@@ -41,3 +41,23 @@ test('one Practitioner, Organization and Location per identifier: the first keep
   expect(roles[0].organization).toBeUndefined();
   expect(encounters.map((e) => e.participant?.[0].individual?.reference)).toEqual([`PractitionerRole/${roles[0].id}`, `PractitionerRole/${roles[0].id}`]);
 });
+
+test('copies sharing an identifier: array fields are unioned (equal elements once); a single-valued field keeps the first copy\'s', () => {
+  const tel = (v: string) => `<telecom use="WP" value="tel:${v}"/>`;
+  const org = (name: string) => `<representedOrganization><id root="2.16.840.1.113883.19.5" extension="ORG-9"/><name>${name}</name></representedOrganization>`;
+  const bundle = convertSections(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.6.1"/>
+      <code code="48765-2" codeSystem="2.16.840.1.113883.6.1"/><title>Allergies</title><text>x</text>
+      ${allergy('A1', author(tel('+1-555-555-0101')))}${allergy('A2', author(tel('+1-555-555-0102') + tel('+1-555-555-0101')))}
+    </section></component>
+    <component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+      <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+      <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="2.16.840.1.113883.19.5" extension="E1"/>
+        <performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="3333333333"/>${org('First Name')}</assignedEntity></performer></encounter></entry>
+      <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="2.16.840.1.113883.19.5" extension="E2"/>
+        <performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="3333333333"/>${org('Second Name')}</assignedEntity></performer></encounter></entry>
+    </section></component>`);
+  const [p] = resourcesOf<Practitioner>(bundle, 'Practitioner').filter((x) => x.identifier?.[0].value === '1111111111');
+  expect(p.telecom?.map((t) => t.value)).toEqual(['+1-555-555-0101', '+1-555-555-0102']);
+  const orgs = resourcesOf<Organization>(bundle, 'Organization');
+  expect(orgs.map((o) => o.name)).toEqual(['First Name']);
+});
