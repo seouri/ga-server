@@ -2,11 +2,11 @@
 
 Back to the [README](../README.md).
 
-This page says how GA computes its risk scores, screening and vaccine status and medication label checks, and where each method comes from. It is for a clinician or a technically minded user who wants to check the work. It describes the code as it is; the source files are named in each section.
+This page describes how GA computes its risk scores, its screening and vaccine status, and its medication label checks, and where each method comes from. It is written for a clinician or a technically minded user who wants to check the work. It describes the code as it is; each section names its source files.
 
 GA is a personal health record, not a medical device. Nothing here is medical advice.
 
-The AI agent never computes a score itself. GA's instructions to agents (AGENTS.md and the MCP server instructions) say to gather the inputs from the record, call the tool (`cardiovascular_risk_10yr`, `liver_fibrosis_risk`, `health_maintenance`, `vaccine_gaps`, `whats_new`) and relay what it returns. Screening and vaccine items carry their guideline citation, and `liver_fibrosis_risk` returns its references. `cardiovascular_risk_10yr` returns the PREVENT model used, notes and a `citations` list (PREVENT, PCE, preventr; same text as references 1, 3 and 4 below).
+The AI agent never computes a score itself. GA's instructions (AGENTS.md and the MCP server instructions) tell the agent to gather the inputs from the record, call the tool, and relay what it returns. The tools are `cardiovascular_risk_10yr`, `liver_fibrosis_risk`, `health_maintenance`, `vaccine_gaps` and `whats_new`. Screening and vaccine items carry their guideline citation, and `liver_fibrosis_risk` returns its references. `cardiovascular_risk_10yr` returns the PREVENT model used, notes, and a `citations` list (PREVENT, PCE, preventr), worded as references 1, 3 and 4 below.
 
 ## Cardiovascular risk: PREVENT and Pooled Cohort Equations
 
@@ -50,7 +50,7 @@ Social deprivation index is not supported; the full model runs with SDI coded as
   | eGFR | 15-140 | not used |
   | BMI (when given) | 18.5-39.9 | not used |
 
-- PCE and the SBP range: some published PCE calculators accept SBP up to 200 mmHg, but preventr's `pce_model` checks the same shared 90-180 range as PREVENT (only age differs: 40-79 for PCE). GA matches preventr; a wider PCE range was not confirmed from the 2013 guideline text, so it was not adopted.
+- **PCE and the SBP range.** preventr's `pce_model` applies the same SBP range as PREVENT (90-180 mmHg); only the age range differs (40-79 for PCE). GA follows preventr. A wider PCE range was not adopted because the 2013 guideline text did not confirm one.
 - A BMI outside 18.5-39.9 nulls every PREVENT result, including ASCVD and total CVD, which do not use BMI. This follows preventr.
 - An HbA1c outside 4.5-15 % or a UACR outside 0.1-25,000 mg/g is dropped with a note, and the model is chosen from what is left (preventr does the same).
 - **Heart failure** needs BMI. Without it, both heart failure results are `null` with a note; ASCVD and total CVD are unchanged.
@@ -64,12 +64,12 @@ PREVENT and PCE coefficients, term definitions, model choice and validity ranges
 
 - 6 cases for the 10-year base PREVENT ASCVD and total CVD (3 decimals) and PCE (6 decimals), across both sexes, both PCE race groups, and one age (38) where PCE is out of range.
 - 9 cases for heart failure, 30-year results and the HbA1c, UACR and full models (3 decimals), including an age over 59 and an out-of-range HbA1c that falls back to the UACR model.
-- The null-with-note behaviour for out-of-range age, missing BMI and out-of-range BMI.
+- The null-with-note behavior for out-of-range age, missing BMI and out-of-range BMI.
 
 ### Limits
 
 - PREVENT was derived and validated in US adults aged 30-79 without known CVD (Khan 2024). It is not for people who already have CVD.
-- PCE has equations for non-Hispanic white and African American adults aged 40-79. For other groups the guideline says the white equations "may be considered" (Goff 2013); how well they fit those groups is not known from the equations themselves.
+- PCE has equations for non-Hispanic white and African American adults aged 40-79. For other groups the guideline says the white equations "may be considered" (Goff 2013); the equations themselves do not establish how well they are calibrated in those groups.
 - PREVENT and PCE estimate different things (PREVENT includes heart failure in total CVD and adjusts for competing risk). The two numbers are not interchangeable.
 - GA does not choose a treatment threshold or interpret the result.
 
@@ -111,7 +111,7 @@ Two non-invasive scores that sort a person into low, indeterminate or high likel
   | FIB-4 | 1.3 | 2.0 | 2.67 |
   | NFS | −1.455 | 0.12 | 0.676 |
 
-  FIB-4 1.3 and 2.67 are the AASLD 2023 bands (Sterling's original paper used 1.45 and 3.25). The NFS cut-offs are Angulo's. The age-65 low cut-offs are McPherson's ("aged 65 years or over"); AASLD 2023 gives the FIB-4 2.0 cut-off for patients "older than age 65" and lists 2.67 itself as "likely" advanced fibrosis, while GA calls exactly 2.67 indeterminate.
+  The FIB-4 cut-offs 1.3 and 2.67 are the AASLD 2023 bands; Sterling's original paper used 1.45 and 3.25. The NFS cut-offs are Angulo's. The age-65 low cut-offs are McPherson's ("aged 65 years or over"). AASLD 2023 gives the FIB-4 2.0 cut-off for patients "older than age 65" and lists 2.67 itself as "likely" advanced fibrosis; GA calls exactly 2.67 indeterminate.
 - **Age 35 or under.** Both scores are returned with a note that they are not validated at that age.
 - **Unit guard.** Any input that is zero or negative is refused. Albumin over 10 is refused as probably g/L, and platelets over 2000 as probably per µL, because a wrong unit would give a falsely reassuring "low".
 
@@ -121,7 +121,7 @@ Two non-invasive scores that sort a person into low, indeterminate or high likel
 
 ### Limits
 
-- FIB-4 was derived in people with HIV/HCV coinfection (Sterling 2006); NFS in people with biopsy-proven NAFLD (Angulo 2007). Their use in MASLD rests on later validation, as summarised in the AASLD guidance.
+- FIB-4 was derived in people with HIV/HCV coinfection (Sterling 2006); NFS in people with biopsy-proven NAFLD (Angulo 2007). Their use in MASLD rests on later validation, as summarized in the AASLD guidance.
 - The scores were mostly developed and validated between ages 35 and 65. They performed poorly at 35 or under, and specificity fell at 65 and over (McPherson 2017).
 - AASLD 2023 advises a secondary assessment (elastography or ELF) for FIB-4 of 1.3 or more, and says FIB-4 has low accuracy under age 35. GA reports the band only and does not suggest a next test.
 
@@ -165,8 +165,8 @@ Risk factors as quoted in the rule file: lung, "20 pack-year smoking history and
 
 ### How GA computes it
 
-- **Which records count.** Procedures, diagnostic reports, conditions, and lab or vital-sign observations from clinic sources, dated on or before the as-of date. Apple Health readings never count. Records that are not done, stopped, cancelled, refuted or entered in error, or have a data-absent reason, do not count. A date before birth is treated as a placeholder.
-- **Matching.** A record matches a method by an exact standard code (LOINC, SNOMED CT, CPT, HCPCS, ICD-10-CM), or by a text phrase whose every word appears as a whole word in the record's name (a trailing `*` matches a prefix; `FIT` must be in capitals). Text matches are rejected when the name contains a word from the method's not-list (for example "virtual" or "ct" for colonoscopy, "diagnostic" for mammogram) or from GA's list of order, refusal and conversation words ("ordered", "declined", "referral", "risk assessment", "due" and similar).
+- **Which records count.** Procedures, diagnostic reports, conditions, and lab or vital-sign observations from clinic sources, dated on or before the as-of date. Apple Health readings never count. A record does not count if it is not done, stopped, cancelled, refuted or entered in error, or if it has a data-absent reason. A date before birth is treated as a placeholder.
+- **Matching.** A record matches a method by an exact standard code (LOINC, SNOMED CT, CPT, HCPCS, ICD-10-CM). It can also match by a text phrase whose every word appears as a whole word in the record's name; a trailing `*` matches a prefix, and `FIT` must be in capitals. A text match is rejected when the name contains a word from the method's not-list (for example "virtual" or "ct" for colonoscopy, "diagnostic" for mammogram). It is also rejected when the name contains a word from GA's list of order, refusal and conversation words ("ordered", "declined", "referral", "risk assessment", "due" and similar).
 - **Interval.** Each record counts by its shortest matching interval; the record that keeps the person covered longest wins. A once-only test never falls due again.
 - **History exclusions.** A hysterectomy (not supracervical) for cervical screening, or a bilateral mastectomy for breast screening, turns the item into "discuss": GA does not decide that the screening no longer applies.
 - **Statuses.** Outside the age range or the wrong sex: "not for you". Sex-specific topic and no male/female sex in the record: "discuss". No qualifying record: "due". Due date passed: "overdue". Due within 90 days: "due soon". Otherwise "done".
@@ -180,7 +180,7 @@ Code: `src/maintenance.ts`. Epic health maintenance from an Epic EHI export is t
 - A plan is joined to a guideline item by topic name; a plan for a topic that is "not for you" or that matches no topic becomes a follow-up item of its own.
 - Several plans for one topic: the earliest is kept. An undated Epic "Overdue" counts as earliest; an undated "Due" counts as today.
 - The due date shown is the earlier of the guideline date and the plan date. The earlier date drives the status.
-- An undated Epic "Overdue" or "Due" only says Epic has no completion on file. If GA holds a dated record that keeps the guideline current, the guideline status wins.
+- An undated Epic "Overdue" or "Due" means only that Epic has no completion on file. If GA holds a dated record that keeps the guideline current, the guideline status wins.
 - A plan's "Overdue" or "due soon" can raise a "discuss" item; an Epic "Due" does not settle an eligibility question.
 - Epic's "Not Due" with a date on or before the export date, and any date on or before birth, are placeholders and are ignored. Epic "Aged Out" changes nothing.
 - When the person tells GA a topic is done, plans dated on or before that day stop driving the status (they stay visible). "Done" for a screening becomes a synthetic record that the rule's own matching and interval read.
@@ -194,7 +194,7 @@ Code: `src/maintenance.ts`. Epic health maintenance from an Epic EHI export is t
 
 ### Limits
 
-- Only the topics above are shipped. Many USPSTF recommendations (counselling, pregnancy, children, and others) are not evaluated.
+- Only the topics above are shipped. Many USPSTF recommendations (counseling, pregnancy, children, and others) are not evaluated.
 - GA cannot see family history, symptoms or prior abnormal results that change the interval, so it shows the average-risk interval.
 - Text matching can miss a test with an unusual name, or rarely count the wrong one. The matched record and its date are shown as evidence so the person can check.
 - A newer USPSTF statement replaces these only when the rule file is updated.
@@ -231,9 +231,16 @@ Birth date and sex from the Patient record, completed Immunization records (CVX 
 ### How GA computes it
 
 - **Doses.** Completed Immunization records dated on or before the as-of date. A dose matches a vaccine by CVX code (a combination code counts for each of its vaccines), or by name only when the name points to exactly one vaccine. Undated or unmatched doses are listed as unmatched. Doses under 28 days after the previous counted dose are treated as copies of one dose.
-- **Immunity.** A qualitative lab result that starts with a positive word (positive, reactive, immune) counts as evidence of immunity for MMR, varicella, hepatitis A and hepatitis B. IgM results never count; numeric titres are not interpreted.
+- **Immunity.** A qualitative lab result that starts with a positive word (positive, reactive, immune) counts as evidence of immunity for MMR, varicella, hepatitis A and hepatitis B. IgM results never count; numeric titers are not interpreted.
 - **Evaluated by age and birth year:** influenza (one dose per August-July season), Tdap/Td (one Tdap ever, then a booster every 10 years), MMR (born 1957 or later: 1 dose; earlier: not recommended), varicella (born 1980 or later: 2 doses), recombinant zoster (50 and over: 2 doses; overdue 6 months after an unfinished first dose), RSV (75 and over: 1 dose), hepatitis B (19-59: 3 doses, or 2 if all Heplisav-B), pneumococcal (50 and over: complete with any PCV20 or PCV21; due with no dose at all).
-- **Not evaluated, with the schedule's words**, unless the full series is already on record (then "complete"): RSV 50-74 (risk-based; 1 dose completes); HPV 19-26 (none: due; 1-2 doses: not judged, since a 2- or 3-dose series depends on age at the first dose; 3: complete) and 27-45 (shared clinical decision-making; 3 complete); varicella born before 1980 (depends on US birth, which GA does not record; 2 complete); hepatitis B 60 and over (risk factors; 3, or 2 Heplisav-B, complete); hepatitis A (risk-based or on request; 2 complete); polio (childhood history; 3 complete); pneumococcal after doses other than PCV20/PCV21.
+- **Not evaluated, with the schedule's words**, unless the full series is already on record (then "complete"):
+  - RSV 50-74: risk-based; 1 dose completes.
+  - HPV 19-26: with no dose on record, due; 1-2 doses are not judged, because a 2- or 3-dose series depends on age at the first dose; 3 doses complete. HPV 27-45: shared clinical decision-making; 3 doses complete.
+  - Varicella, born before 1980: depends on US birth, which GA does not record; 2 doses complete.
+  - Hepatitis B, 60 and over: risk factors; 3 doses, or 2 of Heplisav-B, complete.
+  - Hepatitis A: risk-based or on request; 2 doses complete.
+  - Polio: childhood history; 3 doses complete.
+  - Pneumococcal after doses other than PCV20/PCV21.
 - **Always not evaluated:** COVID-19 (the notes depend on product and prior doses, and the 2024-25 formula no longer matches the current season) and meningococcal (indication-based).
 - **Never evaluated:** the medical-condition table and special-situation notes (pregnancy, immunocompromise, chronic disease and others), occupational, travel and exposure indications, Hib and Mpox, contraindications, and minimum-interval validation.
 
