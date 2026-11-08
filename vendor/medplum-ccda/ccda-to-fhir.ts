@@ -165,6 +165,7 @@ import type {
   CcdaTelecom,
   CcdaTemplateId,
   CcdaText,
+  CcdaTimestampOrBoolean,
 } from './types.ts';
 import { convertToCompactXml } from './xml.ts';
 
@@ -1880,13 +1881,8 @@ class CcdaToFhirConverter {
           break;
 
         case 'TS': // Timestamp, such as a last menstrual period date
-          result.valueDateTime = mapCcdaToFhirDateTime(observation.value['@_value']);
-          break;
-
         case 'BL': // Boolean
-          if (observation.value['@_value'] === 'true' || observation.value['@_value'] === 'false') {
-            result.valueBoolean = observation.value['@_value'] === 'true';
-          }
+          Object.assign(result, mapTimestampOrBooleanValue(observation.value));
           break;
 
         case 'INT': // Integer
@@ -2244,6 +2240,32 @@ const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot:
  * @param node - The parsed title: a string, or an object with `#text` when the title has attributes.
  * @returns The plain text, or undefined when there is none.
  */
+const DATA_ABSENT_REASON_CODE_SYSTEM = 'http://terminology.hl7.org/CodeSystem/data-absent-reason';
+// FHIR R4 dateTime
+const FHIR_DATE_TIME =
+  /^([0-9]([0-9]([0-9][1-9]|[1-9]0)|[1-9]00)|[1-9]000)(-(0[1-9]|1[0-2])(-(0[1-9]|[1-2][0-9]|3[0-1])(T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)(\.[0-9]{1,9})?)?)?(Z|(\+|-)((0[0-9]|1[0-3]):[0-5][0-9]|14:00)?)?)?$/;
+
+/**
+ * A TS or BL observation value: `valueDateTime` or `valueBoolean` (true/false in any case); data-absent when the value has
+ * none (a nullFlavor); nothing when it does not parse, so a caller can tell an unread value apart.
+ * @param value - The observation value.
+ * @returns The Observation value fields.
+ */
+export function mapTimestampOrBooleanValue(
+  value: CcdaTimestampOrBoolean
+): Pick<Observation, 'valueDateTime' | 'valueBoolean' | 'dataAbsentReason'> {
+  const raw = value['@_value']?.trim();
+  if (!raw) {
+    return { dataAbsentReason: { coding: [{ system: DATA_ABSENT_REASON_CODE_SYSTEM, code: 'unknown' }] } };
+  }
+  if (value['@_xsi:type'] === 'BL') {
+    const bool = raw.toLowerCase();
+    return bool === 'true' || bool === 'false' ? { valueBoolean: bool === 'true' } : {};
+  }
+  const dateTime = /^\d{4,14}(\.\d+)?([+-]\d{4})?$/.test(raw) ? mapCcdaToFhirDateTime(raw) : undefined;
+  return dateTime && FHIR_DATE_TIME.test(dateTime) ? { valueDateTime: dateTime } : {};
+}
+
 export function nodeToPlainText(node: unknown): string | undefined {
   const raw = node && typeof node === 'object' ? (node as Record<string, unknown>)['#text'] : node;
   if (typeof raw !== 'string') {

@@ -254,6 +254,20 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   ]);
 });
 
+test('a TS or BL value that does not parse is named; one in another case or with a nullFlavor is converted', () => {
+  const inr = (v: string) => {
+    const out = convertCcdaLocal(EPIC.replace('<value xsi:type="REAL" value="1.1"/>', v));
+    return { notImported: out.notImported, obs: out.resources.find((r): r is Observation => r.resourceType === 'Observation' && JSON.stringify(r.identifier).includes('EX-RES-2')) };
+  };
+  for (const [v, type] of [['<value xsi:type="TS" value="garbage"/>', 'TS'], ['<value xsi:type="BL" value="yes"/>', 'BL']]) {
+    const { notImported, obs } = inr(v);
+    expect(notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: `${type} value not converted` }]);
+    expect([obs?.valueDateTime, obs?.valueBoolean]).toEqual([undefined, undefined]);
+  }
+  expect(inr('<value xsi:type="BL" value="TRUE"/>')).toMatchObject({ notImported: [], obs: { valueBoolean: true } });
+  expect(inr('<value xsi:type="TS" nullFlavor="UNK"/>')).toMatchObject({ notImported: [], obs: { dataAbsentReason: { coding: [{ code: 'unknown' }] } } });
+});
+
 test('TS and BL values are converted (valueDateTime, valueBoolean), not named; lab rows show them', () => {
   for (const [v, field, row] of [['<value xsi:type="TS" value="20240101"/>', 'valueDateTime', '2024-01-01'], ['<value xsi:type="BL" value="true"/>', 'valueBoolean', 'true']] as const) {
     const out = convertCcdaLocal(EPIC.replace('<value xsi:type="REAL" value="1.1"/>', v));

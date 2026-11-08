@@ -19,10 +19,10 @@ Reproduction (synthetic):
 </observation>
 ```
 
-Expected: `"valueDateTime": "2024-01-01"`; with `<value xsi:type="BL" value="true"/>`, `"valueBoolean": true`.
+Expected: `"valueDateTime": "2024-01-01"`; with `<value xsi:type="BL" value="true"/>` (or `TRUE`), `"valueBoolean": true`; with `nullFlavor="UNK"`, `"dataAbsentReason": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/data-absent-reason", "code": "unknown" }] }`; with a value that does not parse (`value="garbage"`, `value="20241345"`), no value rather than an invalid `dateTime`.
 
 ## PR: fix(ccda): map TS and BL observation values
 
-- `ccda-to-fhir.ts`: `case 'TS'` → `valueDateTime` through `mapCcdaToFhirDateTime`; `case 'BL'` → `valueBoolean` for `true`/`false` only. A nullFlavor gives no value and no warning.
+- `ccda-to-fhir.ts`: `case 'TS'` and `case 'BL'` → exported `mapTimestampOrBooleanValue`: `valueDateTime` through `mapCcdaToFhirDateTime` when the timestamp is well formed and its result is a valid R4 dateTime; `valueBoolean` for `true`/`false` in any case; `dataAbsentReason` `unknown` when the value has no `@value` (a nullFlavor); nothing otherwise (exported so a caller can report the unread value).
 - `types.ts`: `CcdaTimestampOrBoolean` (`'@_xsi:type': 'TS' | 'BL'`) joins `CcdaValue`.
-- Test `observation-ts-bl.test.ts`: TS, BL true and BL false give those values without a warning; nullFlavor gives none.
+- Test `observation-ts-bl.test.ts`: TS, BL true and BL false give those values without a warning; BL in another case parses; a malformed TS or BL gives no value; a nullFlavor gives `dataAbsentReason`.

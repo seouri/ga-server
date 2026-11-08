@@ -26,3 +26,18 @@ test('a TS or BL without a value gives none', () => {
   expect(result('<value xsi:type="TS" nullFlavor="UNK"/>').valueDateTime).toBeUndefined();
   expect(result('<value xsi:type="BL" nullFlavor="UNK"/>').valueBoolean).toBeUndefined();
 });
+
+test('a BL value in another case parses; a TS or BL value that does not parse gives no value (never a mangled dateTime)', () => {
+  expect(result('<value xsi:type="BL" value="TRUE"/>').valueBoolean).toBe(true);
+  expect(result('<value xsi:type="BL" value="False"/>').valueBoolean).toBe(false);
+  for (const bad of ['<value xsi:type="BL" value="maybe"/>', '<value xsi:type="TS" value="garbage"/>', '<value xsi:type="TS" value="20241345"/>']) {
+    const o = result(bad);
+    expect([o.valueBoolean, o.valueDateTime, o.dataAbsentReason]).toEqual([undefined, undefined, undefined]);
+  }
+});
+
+test('a TS or BL value with a nullFlavor is data-absent', () => {
+  const absent = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/data-absent-reason', code: 'unknown' }] };
+  expect(result('<value xsi:type="TS" nullFlavor="UNK"/>').dataAbsentReason).toEqual(absent);
+  expect(result('<value xsi:type="BL" nullFlavor="NI"/>').dataAbsentReason).toEqual(absent);
+});

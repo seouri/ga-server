@@ -3,11 +3,11 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
-import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
+import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, mapTimestampOrBooleanValue, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
-import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
+import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId, CcdaTimestampOrBoolean } from '../vendor/medplum-ccda/types.ts';
 import { type GaConfig, GaError, isGaNotRunning } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
@@ -372,7 +372,9 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
         return;
       }
       const type = o.value?.['@_xsi:type'];
-      if (type && !VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))) add(name, root0(o.templateId), 1, `${type} value not converted`);
+      // A TS or BL value that does not parse (the library's own reader decides) is unread like an unknown type.
+      const unread = (type === 'TS' || type === 'BL') && !Object.keys(mapTimestampOrBooleanValue(o.value as CcdaTimestampOrBoolean)).length;
+      if (type && (unread || (!VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))))) add(name, root0(o.templateId), 1, `${type} value not converted`);
       for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
     };
     const family = (o: CcdaObservation) => {
