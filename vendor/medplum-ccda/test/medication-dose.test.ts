@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, test } from 'vitest';
 import { UCUM } from '@medplum/core';
-import type { DosageDoseAndRate, MedicationRequest } from '@medplum/fhirtypes';
+import type { DosageDoseAndRate, MedicationStatement } from '@medplum/fhirtypes';
 import { convertCcdaToFhir } from '../ccda-to-fhir.ts';
 import { convertXmlToCcda } from '../xml.ts';
 
@@ -44,10 +44,10 @@ describe('medication doseQuantity', () => {
   </component>
 </ClinicalDocument>`;
     const bundle = convertCcdaToFhir(convertXmlToCcda(xml));
-    const medicationRequest = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationRequest')
-      ?.resource as MedicationRequest;
-    expect(medicationRequest).toBeDefined();
-    return medicationRequest.dosageInstruction?.[0]?.doseAndRate;
+    const medicationStatement = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationStatement')
+      ?.resource as MedicationStatement;
+    expect(medicationStatement).toBeDefined();
+    return medicationStatement.dosage?.[0]?.doseAndRate;
   }
 
   test('maps value and UCUM unit from the document', () => {

@@ -167,6 +167,13 @@ export function repair(rs: Resource[], xml: string): Resource[] {
       const info = drugOf.get(`Medication/${r.id}`);
       return info ? { ...r, code: named((r as Medication).code, info) } : r;
     }
+    // The in-process path names the drug inline (or in a contained Medication): the same narrative name and RxNorm.
+    const info = (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') && lookup(drug, r);
+    if (info) {
+      const m = r as MedicationStatement;
+      if (m.medicationCodeableConcept) r = { ...m, medicationCodeableConcept: named(m.medicationCodeableConcept, info) } as Resource;
+      if (m.contained) r = { ...r, contained: m.contained.map((c) => (c.resourceType === 'Medication' ? { ...c, code: named(c.code, info) } : c)) } as Resource;
+    }
     if (r.resourceType === 'MedicationStatement') {
       return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
     }

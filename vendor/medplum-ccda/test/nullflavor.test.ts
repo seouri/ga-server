@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from 'vitest';
-import type { AllergyIntolerance, Immunization, MedicationRequest } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Immunization, MedicationStatement } from '@medplum/fhirtypes';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { convertCcdaToFhir } from '../ccda-to-fhir.ts';
@@ -59,10 +59,10 @@ describe('nullFlavor handling', () => {
       readFileSync(join(testDataFolder, 'MedicationRouteCodeSingleTranslation.xml'), 'utf8')
     );
     const bundle = convertCcdaToFhir(ccda);
-    const medRequest = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationRequest')
-      ?.resource as MedicationRequest;
-    expect(medRequest).toBeDefined();
-    expect(medRequest.dosageInstruction?.[0]?.route?.coding).toHaveLength(2);
-    expect(medRequest.dosageInstruction?.[0]?.route?.coding?.[1]?.code).toBe('PO');
+    const medStatement = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationStatement')
+      ?.resource as MedicationStatement;
+    expect(medStatement).toBeDefined();
+    expect(medStatement.dosage?.[0]?.route?.coding).toHaveLength(2);
+    expect(medStatement.dosage?.[0]?.route?.coding?.[1]?.code).toBe('PO');
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import type { AllergyIntolerance, Bundle, CodeableConcept, MedicationRequest, Observation } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Bundle, CodeableConcept, MedicationStatement, Observation } from '@medplum/fhirtypes';
 import { convertCcdaToFhir } from '../ccda-to-fhir.ts';
 import { CCDA_NARRATIVE_REFERENCE_URL } from '../systems.ts';
 import { convertXmlToCcda } from '../xml.ts';
@@ -48,10 +48,10 @@ describe('narrative references in codes', () => {
         </entry>
       </section>
     </component>`);
-    const medicationRequest = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationRequest')
-      ?.resource as MedicationRequest;
-    expect(medicationRequest).toBeDefined();
-    return medicationRequest.medicationCodeableConcept;
+    const medicationStatement = bundle.entry?.find((e) => e.resource?.resourceType === 'MedicationStatement')
+      ?.resource as MedicationStatement;
+    expect(medicationStatement).toBeDefined();
+    return medicationStatement.medicationCodeableConcept;
   }
 
   const medicationTable = `<table><tbody>

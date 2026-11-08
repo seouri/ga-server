@@ -209,7 +209,7 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
   ]);
   const types = out.resources.map((r) => r.resourceType);
-  expect(types).toContain('MedicationRequest'); // Epic lists Medications' entries-optional root first: no throw
+  expect(types).toContain('MedicationStatement'); // Epic lists Medications' entries-optional root first: no throw
   const [cond] = out.resources.filter((r) => r.resourceType === 'Condition') as Condition[];
   expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item'); // repair, by the problem observation id
   // The document id keys the Composition, so a re-issued document updates it instead of adding a second one.
@@ -292,7 +292,7 @@ test('every section of the Epic-style fixture is imported', () => {
   const byRef = new Map(out.resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
   const made = Object.fromEntries((comp.section ?? []).map((s) => [s.title, [...new Set((s.entry ?? []).map((e) => byRef.get(e.reference ?? '')?.resourceType))]]));
   expect(made).toEqual({
-    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
+    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationStatement'], Results: ['Observation'], 'Vital Signs': ['Observation'],
     Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
@@ -392,4 +392,24 @@ test('ccdaConverter picks medplum when the flag is set or the record has no C-CD
       meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
     expect(await ccdaConverter(cfgFor('other'), client)).toBe('microsoft');
   });
+});
+
+test('a taking entry stays a MedicationStatement with its source id and name', () => {
+  const meds = convertCcdaLocal(EPIC).resources.filter((r) => /^Medication/.test(r.resourceType));
+  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationStatement']);
+  expect(meds[0]).toMatchObject({
+    identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.798268', value: 'EX-MED-1' }],
+    status: 'active',
+    effectivePeriod: { start: '2023-01-15' },
+    // The narrative's name (what the clinician sees), RxNorm kept.
+    medicationCodeableConcept: { text: 'examplepril 10 mg tablet', coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '314076' }] },
+  });
+});
+
+test('an order is a MedicationRequest with its source id and status', () => {
+  const meds = convertCcdaLocal(SYNTHETIC).resources.filter((r) => /^Medication/.test(r.resourceType));
+  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationRequest']); // moodCode INT
+  expect(meds[0]).toMatchObject({ identifier: [{ system: 'urn:oid:2.25.5001', value: 'syn-med-1' }], status: 'active', intent: 'order' });
+  const stopped = convertCcdaLocal(SYNTHETIC.replace('<statusCode code="active"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>', '<statusCode code="aborted"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>'));
+  expect(stopped.resources.find((r) => r.resourceType === 'MedicationRequest')).toMatchObject({ status: 'stopped' });
 });

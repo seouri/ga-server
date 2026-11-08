@@ -18,6 +18,7 @@ import type {
   ContactPoint,
   Coverage,
   DocumentReference,
+  Dosage,
   DosageDoseAndRate,
   Encounter,
   EncounterDiagnosis,
@@ -30,6 +31,7 @@ import type {
   ImmunizationPerformer,
   Medication,
   MedicationRequest,
+  MedicationStatement,
   Observation,
   ObservationReferenceRange,
   Organization,
@@ -176,6 +178,15 @@ export interface CcdaToFhirOptions {
 export function convertCcdaToFhir(ccda: Ccda, options?: CcdaToFhirOptions): Bundle {
   return new CcdaToFhirConverter(sanitizeNullFlavors(ccda), options).convert();
 }
+
+// Medication Activity statusCode → MedicationStatement.status (MEDICATION_STATUS_MAPPER has MedicationRequest values, e.g. cancelled)
+const MEDICATION_STATEMENT_STATUSES: Record<string, MedicationStatement['status']> = {
+  active: 'active',
+  completed: 'completed',
+  aborted: 'stopped',
+  suspended: 'on-hold',
+  nullified: 'entered-in-error',
+};
 
 class CcdaToFhirConverter {
   private readonly ccda: Ccda;
@@ -842,20 +853,53 @@ class CcdaToFhirConverter {
       };
     }
 
-    return {
-      resourceType: 'MedicationRequest',
+    const dosage: Dosage[] = [
+      {
+        text: typeof substanceAdmin.text === 'string' ? substanceAdmin.text : undefined,
+        extension: this.mapTextReference(instructions?.text),
+        route: routeCode ? this.mapCode(routeCode) : undefined,
+        timing: {
+          repeat: substanceAdmin.effectiveTime?.[1]?.period
+            ? {
+                period: Number(substanceAdmin.effectiveTime?.[1]?.period['@_value']),
+                periodUnit: substanceAdmin.effectiveTime?.[1]?.period['@_unit'],
+              }
+            : undefined,
+        },
+        doseAndRate: this.mapDoseAndRate(doseQuantity),
+      },
+    ];
+    const shared = {
       id: cdaId,
       identifier: this.mapIdentifiers(substanceAdmin.id),
       contained: medication ? [medication] : undefined,
-      meta: {
-        profile: [US_CORE_MEDICATION_REQUEST_URL],
-      },
       extension: this.mapTextReference(substanceAdmin.text),
-      status: MEDICATION_STATUS_MAPPER.mapCcdaToFhirWithDefault(substanceAdmin.statusCode?.['@_code'], 'active'),
-      intent,
       medicationReference: medication ? { reference: '#med-' + cdaId } : undefined,
       medicationCodeableConcept,
       subject: createReference(this.patient as Patient),
+    };
+
+    if (substanceAdmin['@_moodCode'] === 'EVN') {
+      // EVN: the patient takes or took it (C-CDA on FHIR CF-MedActivityMood), a statement rather than an order
+      const effectivePeriod = this.mapEffectiveTimeToPeriod(effectiveTime);
+      return {
+        resourceType: 'MedicationStatement',
+        ...shared,
+        status: MEDICATION_STATEMENT_STATUSES[substanceAdmin.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+        ...(effectivePeriod ? { effectivePeriod } : { effectiveDateTime: this.mapEffectiveTimeToDateTime(effectiveTime) }),
+        dateAsserted: mapCcdaToFhirDateTime(substanceAdmin.author?.[0]?.time?.['@_value']),
+        dosage,
+      };
+    }
+
+    return {
+      resourceType: 'MedicationRequest',
+      ...shared,
+      meta: {
+        profile: [US_CORE_MEDICATION_REQUEST_URL],
+      },
+      status: MEDICATION_STATUS_MAPPER.mapCcdaToFhirWithDefault(substanceAdmin.statusCode?.['@_code'], 'active'),
+      intent,
       authoredOn: mapCcdaToFhirDateTime(substanceAdmin.author?.[0]?.time?.['@_value']),
       dispenseRequest: effectiveTime
         ? {
@@ -866,22 +910,7 @@ class CcdaToFhirConverter {
             },
           }
         : undefined,
-      dosageInstruction: [
-        {
-          text: typeof substanceAdmin.text === 'string' ? substanceAdmin.text : undefined,
-          extension: this.mapTextReference(instructions?.text),
-          route: routeCode ? this.mapCode(routeCode) : undefined,
-          timing: {
-            repeat: substanceAdmin.effectiveTime?.[1]?.period
-              ? {
-                  period: Number(substanceAdmin.effectiveTime?.[1]?.period['@_value']),
-                  periodUnit: substanceAdmin.effectiveTime?.[1]?.period['@_unit'],
-                }
-              : undefined,
-          },
-          doseAndRate: this.mapDoseAndRate(doseQuantity),
-        },
-      ],
+      dosageInstruction: dosage,
     };
   }
 

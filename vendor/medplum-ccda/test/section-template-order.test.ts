@@ -1,4 +1,4 @@
-import type { Condition, MedicationRequest } from '@medplum/fhirtypes';
+import type { Condition, MedicationStatement } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { convertSections, resourcesOf } from './convert-sections.ts';
 
@@ -13,11 +13,11 @@ const medications = (templates: string[]) =>
 
 test('a section is routed by any of its templateIds: Medications with the entries-optional root first (Epic)', () => {
   const bundle = convertSections(medications(['2.16.840.1.113883.10.20.22.2.1', '2.16.840.1.113883.10.20.22.2.1.1']));
-  expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')).toHaveLength(1);
+  expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(1);
 });
 
 test('an entries-optional-only Medications section converts its medications', () => {
-  expect(resourcesOf<MedicationRequest>(convertSections(medications(['2.16.840.1.113883.10.20.22.2.1'])), 'MedicationRequest')).toHaveLength(1);
+  expect(resourcesOf<MedicationStatement>(convertSections(medications(['2.16.840.1.113883.10.20.22.2.1'])), 'MedicationStatement')).toHaveLength(1);
 });
 
 test('a Problems section whose routed template is not first, and the V2 entries-required root', () => {
