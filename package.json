@@ -11,8 +11,8 @@
     "ga": "./src/cli.ts"
   },
   "scripts": {
-    "test": "vitest run --exclude 'tests/integration/**'",
-    "test:int": "vitest run --no-file-parallelism --dir tests/integration",
+    "test": "vitest run --project unit",
+    "test:int": "vitest run --project integration",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

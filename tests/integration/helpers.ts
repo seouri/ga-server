@@ -8,6 +8,20 @@ import { COMPARTMENT } from '../../src/engine.ts';
 import { setup } from '../../src/setup.ts';
 import type { Bundle, DocumentReference, Patient } from '@medplum/fhirtypes';
 
+// Medplum's local login limit (5 a minute) answers 429; wait out its _msBeforeNext and retry. Any other error is rethrown at once.
+export async function retryLimited<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.message} ${JSON.stringify((e as { outcome?: unknown }).outcome ?? '')}` : '';
+      if (attempt >= 3 || !/Too Many Requests/.test(msg)) throw e;
+      const wait = Number(/_msBeforeNext"?\s*[:=]\s*(\d+)/.exec(msg)?.[1] ?? 60_000);
+      await new Promise((r) => setTimeout(r, wait + 1000));
+    }
+  }
+}
+
 // Tests must never write onto the real Patient (identifier ...|self).
 export async function createTestPatient(client: MedplumClient): Promise<string> {
   const p = await client.createResource<Patient>({
@@ -38,7 +52,7 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
   const real = loadConfig();
   const me = (await (await getClient(real)).get('auth/me')) as { project: { id: string } };
   const session = new MedplumClient({ baseUrl: real.baseUrl });
-  const { code } = await session.startLogin({ email: 'admin@example.com', password: real.adminPassword as string, projectId: me.project.id });
+  const { code } = await retryLimited(() => session.startLogin({ email: 'admin@example.com', password: real.adminPassword as string, projectId: me.project.id }));
   await session.processCode(code as string);
   const dir = mkdtempSync(join(tmpdir(), 'ga-test-'));
   const path = join(dir, 'config.json');
@@ -51,7 +65,7 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
 // one the first time and finds it by name after. A project per run leaked: the sandbox admin can't expunge projects.
 export async function testProject(name = 'ga-test'): Promise<{ dir: string; baseUrl: string; session: MedplumClient; cfg: GaConfig }> {
   const t = await throwawayConfig();
-  return { ...t, cfg: await setup(t.baseUrl, undefined, { projectName: name }) };
+  return { ...t, cfg: await retryLimited(() => setup(t.baseUrl, undefined, { projectName: name })) };
 }
 
 // Everything GA clients wrote into a ga-test* project (records, files, maps, Provenance, logs), read and deleted through

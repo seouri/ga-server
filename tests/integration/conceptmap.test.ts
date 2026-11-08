@@ -17,7 +17,7 @@ beforeAll(async () => {
   const t = await testProject();
   pid = t.cfg.patientId;
   client = await getClient(t.cfg);
-});
+}, 240_000);
 afterAll(async () => {
   delete process.env.GA_CONFIG;
   await emptyTestProject(client);

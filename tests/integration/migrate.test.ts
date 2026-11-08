@@ -19,7 +19,7 @@ import { setup } from '../../src/setup.ts';
 import { logAccess } from '../../src/share/audit.ts';
 import { listShares, type Share } from '../../src/share/store.ts';
 import { writeAtomic } from '../../src/smart/store.ts';
-import { emptyTestProject, throwawayConfig } from './helpers.ts';
+import { emptyTestProject, retryLimited, throwawayConfig } from './helpers.ts';
 
 const FIX = join(import.meta.dirname, '..', 'fixtures');
 
@@ -27,17 +27,17 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
   const { dir, baseUrl, session } = await throwawayConfig();
   const clients: GaConfig[] = []; // each project's GA client empties it afterwards (the old one is gone after --delete-old)
   try {
-    const made = await setup(baseUrl, undefined, { projectName: 'ga-test-old' });
+    const made = await retryLimited(() => setup(baseUrl, undefined, { projectName: 'ga-test-old' }));
     clients.push(made);
     await emptyTestProject(await getClient(made)); // an earlier run that stopped half-way
     // The admin logged in to that project: the Super Admin session doesn't see a reused project's memberships.
     const admin = new MedplumClient({ baseUrl });
-    await admin.processCode((await admin.startLogin({ email: 'admin@example.com', password: loadConfig().adminPassword as string, projectId: made.projectId })).code as string);
+    await admin.processCode((await retryLimited(() => admin.startLogin({ email: 'admin@example.com', password: loadConfig().adminPassword as string, projectId: made.projectId }))).code as string);
     const m = (await admin.searchOne('ProjectMembership', { profile: `ClientApplication/${made.clientId}` }, { cache: 'no-cache' })) as ProjectMembership;
     await admin.updateResource<ProjectMembership>({ ...m, admin: true, accessPolicy: undefined });
     const { projectId: _p, ...legacy } = made; // an install from before GA had its own project
     writeFileSync(join(dir, 'config.json'), JSON.stringify(legacy), { mode: 0o600 });
-    await expect(setup(baseUrl)).rejects.toThrow('run ga migrate'); // a plain setup must not repoint an old install
+    await expect(retryLimited(() => setup(baseUrl))).rejects.toThrow('run ga migrate'); // a plain setup must not repoint an old install
 
     const src = join(dir, 'sources');
     mkdirSync(join(src, 'ccda'), { recursive: true });
@@ -65,7 +65,7 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
     writeAtomic(join(dir, 'share', 'shares.json'), JSON.stringify([share, { ...share, id: 'share2', patientId: 'someone-else' }]), 0o600);
 
     await new Promise((r) => setTimeout(r, 61_000)); // Medplum allows 5 admin auth calls a minute; migrate's setup needs 2
-    const { rows } = await migrate({ projectName: 'ga-test' });
+    const { rows } = await retryLimited(() => migrate({ projectName: 'ga-test' }));
     const now = loadConfig();
     clients.push(now);
     expect(now.projectId).not.toBe(made.projectId);
