@@ -156,6 +156,16 @@ test('an old reference to a Practitioner holds through a new PractitionerRole of
     .toEqual([{ type: 'Encounter', path: 'participant.individual.reference', count: 1 }]);
 });
 
+test('a coding display repeating its CodeableConcept text is that text; a different display, or a text the new record lacks, is a loss', () => {
+  const med = (code: unknown) => ({ resourceType: 'MedicationStatement', identifier: id('m'), status: 'active', subject, medicationCodeableConcept: code });
+  const rx = (display?: string) => ({ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '1', ...(display && { display }) });
+  expect(pairLosses([med({ coding: [rx('drug A')], text: 'drug A' })], [med({ coding: [rx()], text: 'drug A' })])).toEqual([]);
+  expect(pairLosses([med({ coding: [rx('drug B')], text: 'drug A' })], [med({ coding: [rx()], text: 'drug A' })]))
+    .toEqual([{ type: 'MedicationStatement', path: 'medication[x].coding.display', count: 1 }]);
+  expect(pairLosses([med({ coding: [rx('drug A')], text: 'drug A' })], [med({ coding: [rx()] })]))
+    .toEqual([{ type: 'MedicationStatement', path: 'medication[x].text', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))

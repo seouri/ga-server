@@ -87,7 +87,7 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
     if (any ? n === undefined || n === '' : !same(o, n, DATED.test(key))) out.push(path);
     return out;
   }
-  const a = o as R;
+  const a = textDisplay(o as R);
   const b = n && typeof n === 'object' && !Array.isArray(n) ? (n as R) : undefined;
   if (isCoding(a)) {
     if (!b || !isCoding(b) || codingKey(a) !== codingKey(b)) out.push(path);
@@ -109,6 +109,17 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
     } else diff(v, b?.[k], at(k), k === 'display' && typeof a.code !== 'string' && typeof a.reference !== 'string' ? LABEL : k, ref, out);
   }
   return out;
+}
+
+// One equivalence: a coding's display that repeats its CodeableConcept's text (the Microsoft path copies the narrative name of a
+// drug into both; the new path keeps it as text only) is that text, compared as `text`; a display that differs stays compared.
+function textDisplay(a: R): R {
+  if (typeof a.text !== 'string' || !Array.isArray(a.coding)) return a;
+  return { ...a, coding: a.coding.map((c: R) => {
+    if (!c || !isCoding(c) || !same(c.display, a.text)) return c;
+    const { display: _, ...rest } = c;
+    return rest;
+  }) };
 }
 
 // Array elements paired one to one, each old element with the unused new one it loses least to (a different `code` loses most:
