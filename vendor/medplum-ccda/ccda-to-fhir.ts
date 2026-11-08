@@ -1705,7 +1705,6 @@ class CcdaToFhirConverter {
     if (observation.value?.['@_xsi:type']) {
       switch (observation.value['@_xsi:type']) {
         case 'PQ': // Physical Quantity
-        case 'CO': // Count of individuals
           result.valueQuantity = {
             value: observation.value['@_value'] ? Number.parseFloat(observation.value['@_value']) : undefined,
             unit: observation.value['@_unit'],
@@ -1720,6 +1719,7 @@ class CcdaToFhirConverter {
 
         case 'CD': // Code
         case 'CE': // Code with Extensions
+        case 'CO': // Coded Ordinal (a code with an order, such as 1+ or Positive)
           result.valueCodeableConcept = this.mapCode(observation.value);
           break;
 

@@ -210,6 +210,8 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([]);
   // The REAL value (medplum#11241): a unitless number, no UCUM claim.
   expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-2'))).toMatchObject({ valueQuantity: { value: 1.1 } });
+  // A coded ordinal (dipstick Negative) is a code, as on the Microsoft path, not an empty quantity.
+  expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-4'))).toMatchObject({ valueCodeableConcept: { coding: [{ code: 'LA6577-6' }] } });
   // The result's interpretation, in the system the Microsoft path and FHIR use.
   expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-1'))).toMatchObject({
     interpretation: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation', code: 'N', display: 'Normal' }] }],
@@ -401,7 +403,7 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const [report] = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` });
     const labs = await client.searchResources('Observation', { subject: `Patient/${pid}`, category: 'laboratory' });
     expect(report.result?.map((r) => r.reference).sort()).toEqual(labs.map((o) => `Observation/${o.id}`).sort());
-    expect(labs).toHaveLength(3);
+    expect(labs).toHaveLength(4);
     const [coverage] = await client.searchResources('Coverage', {});
     expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });

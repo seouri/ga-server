@@ -96,7 +96,7 @@ export interface CcdaTemplateId {
 }
 
 export interface CcdaCode<T extends string = string> {
-  '@_xsi:type'?: 'CD' | 'CE';
+  '@_xsi:type'?: 'CD' | 'CE' | 'CO';
   '@_code'?: T;
   '@_codeSystem'?: string;
   '@_codeSystemName'?: string;
@@ -295,7 +295,7 @@ export interface CcdaSubstanceAdministration {
 }
 
 export interface CcdaQuantity {
-  '@_xsi:type'?: 'PQ' | 'CO' | 'IVL_PQ' | 'REAL';
+  '@_xsi:type'?: 'PQ' | 'IVL_PQ' | 'REAL';
   '@_value'?: string;
   '@_unit'?: string;
   low?: CcdaQuantity;

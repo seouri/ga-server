@@ -247,6 +247,17 @@
                   <value xsi:type="ED"><reference value="#res3"/></value>
                 </observation>
               </component>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2" extension="2015-08-01"/>
+                  <id root="1.2.840.114350.1.13.999.2.7.2.798268.2" extension="EX-RES-4"/>
+                  <code code="20454-5" codeSystem="2.16.840.1.113883.6.1" displayName="Protein [Presence] in Urine by Test strip"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20240210091000-0500"/>
+                  <value xsi:type="CO" code="LA6577-6" codeSystem="2.16.840.1.113883.6.1" displayName="Negative"/>
+                </observation>
+              </component>
             </organizer>
           </entry>
         </section>
