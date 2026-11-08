@@ -49,3 +49,10 @@ test('one row per item across sources; best currency wins, inactive never hides 
   expect(p).toHaveLength(1);
   expect(p[0]).toMatchObject({ source: 'one; two', ids: ['1', '2'] });
 });
+
+test('medications: a planned or proposed MedicationRequest is not a current medication; an order or an intent-less one is', () => {
+  const req = (id: string, intent?: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', ...(intent && { intent }), medicationCodeableConcept: { text: `Drug ${id}` } });
+  const rows = [req('plan', 'plan'), req('prop', 'proposal'), req('order', 'order'), req('none')] as Resource[];
+  expect(listRows(rows, ctx, 'medications').map((r) => r.id)).toEqual(['order', 'none']);
+  expect(listRows(rows, ctx, 'medications', 'all').filter((r) => r.currency === 'inactive').map((r) => r.id)).toEqual(['plan', 'prop']);
+});

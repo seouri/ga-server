@@ -39,9 +39,12 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[], ne
   return { lastSuccess, newestImport, portal };
 }
 
+// Planned or proposed medications (a C-CDA Plan of Treatment's moodCode INT/PRP): not something the patient takes yet.
+const NOT_TAKEN = new Set(['plan', 'proposal']);
 // Active medication, problem or allergy: the records the currency rule covers.
 export function isActive(r: Resource): boolean {
   const a = r as R;
+  if (r.resourceType === 'MedicationRequest' && NOT_TAKEN.has(r.intent)) return false;
   return DATED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 
