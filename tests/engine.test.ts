@@ -300,3 +300,19 @@ test('only a C-CDA import also looks for a patientless record by its stable iden
     expect(params.some((p) => 'subject:missing' in p), source.kind).toBe(expected);
   }
 });
+
+test('an id-less PractitionerRole whose practitioner is refused keys the same on every import: no duplicate', async () => {
+  await onStore(async ({ client }) => {
+    const p = await client.createResource({ resourceType: 'Patient' });
+    const batch = () => [
+      { resourceType: 'Practitioner', id: crypto.randomUUID(), notAField: true, name: [{ family: 'Refused' }] },
+      { resourceType: 'Practitioner', id: crypto.randomUUID(), name: [{ family: 'Kept' }] },
+    ].flatMap((doc) => [doc, { resourceType: 'PractitionerRole', id: crypto.randomUUID(), practitioner: { reference: `Practitioner/${doc.id}` } }]) as Resource[];
+    const first = await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    expect(first.invalid).toBeGreaterThan(0);
+    await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    // One role per practitioner, however many imports (converter ids change every time).
+    expect(await client.searchResources('PractitionerRole', {})).toHaveLength(first.invalid === 1 ? 2 : 1);
+  });
+});

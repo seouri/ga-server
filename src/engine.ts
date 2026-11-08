@@ -300,7 +300,17 @@ export async function importResources(
 
   // Same stable identifier twice in one batch with different content would make the second a silent skip:
   // give every member of such a group source id + content hash (deterministic, order-independent).
-  const keyOf = (r: Resource) => stableIdentifier(r, source, fileHash, patientId).value as string;
+  // A reference in the batch reads as its target's key (C-CDA links: identity.ts), computed from the batch as the source sent it.
+  const bySource = new Map(ordered.flatMap((r) => sourceKeys(r).map((k) => [k, r] as const)));
+  const keys = new Map<Resource, string>();
+  const resolve = (ref: string): string | undefined => {
+    const t = bySource.get(ref);
+    return t && keyOf(t);
+  };
+  const keyOf = (r: Resource): string => {
+    if (!keys.has(r)) keys.set(r, stableIdentifier(r, source, fileHash, patientId, resolve).value as string);
+    return keys.get(r) as string;
+  };
   const groups = new Map<string, Set<string>>();
   for (const r of ordered) {
     const k = keyOf(r);
@@ -362,7 +372,8 @@ export async function importResources(
       report.invalid++;
       continue;
     }
-    let ident = stableIdentifier(r, source, fileHash, patientId);
+    // C-CDA keys come from the record as the source sent it (its links resolve in the batch); they ignore what the rewrite changes.
+    let ident = source.kind === 'ccda' ? { ...stableIdentifier(r, source, fileHash, patientId), value: keyOf(src) } : stableIdentifier(r, source, fileHash, patientId);
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
     if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };
     const incoming = stamp(r, source, ident) as R;

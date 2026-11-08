@@ -62,11 +62,11 @@ export const sorted = (_k: string, v: unknown) =>
 
 // Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
 // Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
-// refs: keep references (for a record that is its links, once they point at stored records).
-export function contentHash(r: Resource, patientId = '', refs = false): string {
+// refs: a reference read as its target's own key (for a record that is its links); without it references are left out.
+export function contentHash(r: Resource, patientId = '', refs?: (ref: string) => string | undefined): string {
   const { id: _id, meta: _meta, ...rest } = r;
   const scope = 'subject' in r || 'patient' in r ? patientId : '';
-  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' && !refs ? undefined : sorted(k, v)))}`);
+  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? (refs && typeof v === 'string' ? refs(v) : undefined) : sorted(k, v)))}`);
 }
 
 // Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
@@ -75,11 +75,12 @@ const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
 
 const LINKED = new Set(['PractitionerRole', 'CareTeam']);
 // Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
-function ccdaKey(r: Resource, patientId: string): string {
+function ccdaKey(r: Resource, patientId: string, resolve?: (ref: string) => string | undefined): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
   // A PractitionerRole or CareTeam is mostly its links (practitioner, organization, members): without them id-less ones hash
-  // alike and merge into one. The engine keys a record after pointing its references at their stored targets (dependencies first): stable.
-  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, LINKED.has(r.resourceType))}`;
+  // alike and merge into one. Each link reads as its target's own source key (resolve: the batch's converter id -> that key),
+  // never a stored or converter id, so the key holds across imports even when a target is refused.
+  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, LINKED.has(r.resourceType) ? (resolve ?? (() => undefined)) : undefined)}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
   return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }
@@ -93,7 +94,7 @@ const OWN_ID: Partial<Record<SourceInfo['kind'], { name: string; ok: (system: st
   smart: { name: 'SMART', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
 };
 
-export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = ''): Identifier {
+export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = '', resolve?: (ref: string) => string | undefined): Identifier {
   const own = OWN_ID[s.kind];
   if (own) {
     // EHI, Apple and SMART mappers put the GA identifier (urn:ga-server:id:ehi:<org> | <TABLE>|<pk>, APPLE, or
@@ -102,7 +103,7 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, p
     if (!id?.system || !own.ok(id.system) || !id.value) throw new GaError(`${r.resourceType} has no ${own.name} identifier`);
     return { system: id.system, value: id.value };
   }
-  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId) };
+  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId, resolve) };
   let key: string;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;
