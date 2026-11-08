@@ -1,6 +1,6 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Composition, Identifier, Medication, Resource } from '@medplum/fhirtypes';
-import { convertXmlToCcda, mapFhirSystemToCcda } from '../vendor/medplum-ccda/index.ts';
+import { convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import { addNotImported, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
 import type { NotImported } from './engine.ts';
@@ -230,6 +230,14 @@ function deviceModel(o: Resource, n: Resource): Resource {
   return out as unknown as Resource;
 }
 
+// One path equivalence: a CDA legal name (use="L") is `usual` on the Microsoft path and `official` in the library (FHIR's own v3
+// map pairs neither with L). The old `usual` reads as `official` only for a Patient name whose family is that of a source L name.
+function legalName(o: Resource, legal: Set<string | undefined>): Resource {
+  if (o.resourceType !== 'Patient' || !legal.size) return o;
+  const names = (o as unknown as { name?: { use?: string; family?: string }[] }).name;
+  return { ...o, name: names?.map((nm) => (nm.use === 'usual' && legal.has(nm.family) ? { ...nm, use: 'official' } : nm)) } as unknown as Resource;
+}
+
 // One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
 // (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
 // The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
@@ -257,7 +265,9 @@ function asDispense(o: Resource, n: Resource): Resource {
 const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
 
 export function compareCcda(xml: string, old: Resource[], neu: Resource[], notImported: NotImported[]): { losses: Loss[]; gains: Record<string, number>; unaccounted: NotImported[] } {
-  const [o, n] = [inlineMedications(old), inlineMedications(neu)];
+  const ccda = sanitizeNullFlavors(convertXmlToCcda(xml));
+  const legal = new Set((ccda.recordTarget?.[0]?.patientRole?.patient?.name ?? []).filter((nm) => nm['@_use'] === 'L').map((nm) => nodeToPlainText(nm.family)));
+  const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
   const match = matchEntries(o, n);
   const losses = new Map<string, Loss>();
   const add = (type: string, path: string, explained?: string) => {
@@ -288,7 +298,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
     gains[r.resourceType] = (gains[r.resourceType] ?? 0) + 1;
   }
   // Accounting: each section's entries are records the Composition lists (and that exist) or named in notImported.
-  const sections = (sanitizeNullFlavors(convertXmlToCcda(xml)).component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
+  const sections = (ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
   const comp = n.find((r): r is Composition => r.resourceType === 'Composition');
   const ids = new Set(n.map((r) => `${r.resourceType}/${r.id}`));
   const left = new Map<string, NotImported>();

@@ -68,9 +68,7 @@ test('an entry neither imported nor named is unaccounted', () => {
 test('the Epic-style fixture against the real Microsoft output: every loss by path, all accounted', () => {
   const r = run(EPIC, MS_EPIC());
   // Shrinks as Tasks 4-8 land.
-  expect(r.losses).toEqual([
-    { type: 'Patient', path: 'name.use', count: 1 },
-  ]);
+  expect(r.losses).toEqual([]);
   expect(r.unaccounted).toEqual([]);
 });
 
@@ -301,4 +299,12 @@ test('an authoring device: the old manufacturer and bare type display are covere
     { type: 'Device', path: 'manufacturer', count: 1 },
   ]);
   expect(pairLosses([dev({ manufacturer: 'Example EHR' })], [dev({ deviceName: [{ name: 'Example EHR', type: 'user-friendly-name' }] })])).toEqual([{ type: 'Device', path: 'manufacturer', count: 1 }]);
+});
+
+test('a legal name: the old usual and the new official are one name use when the source name is use="L"; otherwise a loss', () => {
+  const pt = (use: string, family = 'Epicstyle') => ({ resourceType: 'Patient', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.5.737384.14', value: 'EXAMPLE-MRN-42' }], name: [{ use, family }] });
+  const losses = (xml: string, o: object, n: object) => compareCcda(xml, [o as Resource], [n as Resource], []).losses;
+  expect(losses(EPIC, pt('usual'), pt('official'))).toEqual([]);
+  expect(losses(EPIC.replace('<name use="L">', '<name use="C">'), pt('usual'), pt('official'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
+  expect(losses(EPIC, pt('usual', 'Other'), pt('official', 'Other'))).toEqual([{ type: 'Patient', path: 'name.use', count: 1 }]);
 });
