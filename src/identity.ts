@@ -27,6 +27,8 @@ export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
+// From a hospital source (EHI export, C-CDA, portal sync). A PDF or photo does not say where a reading was taken.
+export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart'].some((c) => hasTag(r, c));
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);

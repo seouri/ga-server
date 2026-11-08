@@ -3,7 +3,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Basic, Condition, Extension, Observation, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { loadObservations, searchAll } from './labs.ts';
 import { GaError } from './config.ts';
-import { evaluateScreenings, loadRules, SOON_DAYS } from './screenings.ts';
+import { evaluateScreenings, loadRules, SOON_DAYS, TOLD } from './screenings.ts';
 import { SRC_DATE } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
 import { addDays, addMonths, loadSchedule, vaccineGaps } from './vaccines.ts';
@@ -173,11 +173,11 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
     const t = rules.topics.find((x) => x.id === get(X.topic)?.toLowerCase());
     if (b.code?.coding?.[0]?.code !== 'done' || !method || !date || !t) return [];
     const type = t.doneBy.find((d) => d.name === method)?.types[0] ?? 'Procedure';
-    return [{ resourceType: type, id: b.id, status: type === 'Procedure' ? 'completed' : 'final', code: { text: method }, meta: { source: 'you told GA' },
+    return [{ resourceType: type, id: b.id, status: type === 'Procedure' ? 'completed' : 'final', code: { text: method }, meta: { source: TOLD },
       ...(type === 'Procedure' ? { performedDateTime: fullDay(date) } : { effectiveDateTime: fullDay(date) }) } as unknown as Resource];
   });
   const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions, ...told] }, asOf);
-  for (const g of guideline) if (g.last?.source === 'you told GA' && g.last.id) g.last.id = g.last.id.replace(/^\w+\//, 'Basic/'); // the synthetic record is the Basic
+  for (const g of guideline) if (g.last?.source === TOLD && g.last.id) g.last.id = g.last.id.replace(/^\w+\//, 'Basic/'); // the synthetic record is the Basic
   const items = combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf);
   return { asOf, edition: rules.edition, items, upcoming: upcoming(items, asOf, months), byTheWay: byTheWay(items, asOf), note: NOTE };
 }

@@ -2,7 +2,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { codesFor, conceptNamed, isVitalCode } from './concepts.ts';
-import { TAG } from './identity.ts';
+import { isClinic, TAG } from './identity.ts';
 import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
 
 // Apple's per-day (and per-night) summaries are stored with these words in code.text (src/apple/daily.ts).
@@ -32,7 +32,7 @@ export function vitalRow(o: Observation): VitalRow {
     ...(!row.value && parts?.length ? { value: parts.join('; ') } : {}),
     kind: SUMMARY.exec(row.name ?? '')?.[1] ?? 'reading',
     // A PDF or photo doesn't say where a reading was taken (a home monitor log looks like a clinic printout).
-    setting: apple ? 'home' : tags.has('src-ehi') || tags.has('src-ccda') || tags.has('src-smart') ? 'clinic' : 'unknown',
+    setting: apple ? 'home' : isClinic(o) ? 'clinic' : 'unknown',
     source: src,
   };
 }

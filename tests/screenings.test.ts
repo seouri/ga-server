@@ -58,8 +58,12 @@ test('records that are not evidence are skipped', () => {
 });
 
 test('Apple Health readings never satisfy blood pressure', () => {
-  const bp: Observation = { resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '85354-9' }] }, effectiveDateTime: '2026-10-01' };
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const bp: Observation = { resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '85354-9' }] }, effectiveDateTime: '2026-10-01', ...tag('src-ehi') };
   expect(item([bp], 'blood-pressure-40').status).toBe('done');
+  // A PDF of home readings (or any non-hospital source) is not a clinic measurement.
+  expect(item([{ ...bp, ...tag('src-pdf') }], 'blood-pressure-40').status).toBe('due');
+  expect(item([{ ...bp, meta: undefined }], 'blood-pressure-40').status).toBe('due');
   expect(item([{ ...bp, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] } }], 'blood-pressure-40').status).toBe('due');
 });
 
@@ -189,7 +193,7 @@ test('history reason prefers a dated match', () => {
 });
 
 test('blood pressure: every 3 years under 40, every year from 40', () => {
-  const bp = (date: string): Observation => ({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '85354-9' }] }, effectiveDateTime: date });
+  const bp = (date: string): Observation => ({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '85354-9' }] }, effectiveDateTime: date, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } });
   const at = (age: number, id: string, d: string) => item([bp(d)], id, { birthDate: `${2026 - age}-01-01` }).status;
   expect(at(30, 'blood-pressure', '2024-11-01')).toBe('done');
   expect(at(30, 'blood-pressure-40', '2024-11-01')).toBe('not for you');

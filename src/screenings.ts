@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { CodeableConcept, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
-import { TAG } from './identity.ts';
+import { isClinic, TAG } from './identity.ts';
 import { addDays, addMonths, ageOn } from './vaccines.ts';
 
 export type Topic = {
@@ -12,7 +12,7 @@ export type Topic = {
   riskBased?: string; doneBy: (Method & { years: number | null; minAge?: number })[]; history?: Method[]; why: string; cost: string; epic?: string[];
 };
 // text: any phrase whose every word is a whole word of the record's name (a trailing * matches a prefix); not: words that rule the name out.
-type Method = { name: string; types: string[]; codes: string[]; text?: string[]; not?: string[] };
+type Method = { name: string; types: string[]; codes: string[]; text?: string[]; not?: string[]; clinic?: boolean }; // clinic: hospital sources only
 export type Rules = { edition: string; topics: Topic[] };
 export type ScreenInput = { birthDate: string; sex?: 'male' | 'female'; records: Resource[] };
 export type Status = 'done' | 'due soon' | 'due' | 'overdue' | 'postponed' | 'not for you' | 'discuss';
@@ -36,7 +36,9 @@ const phrase = (f: Found, p: string) => p.split(' ').every((w) => word(f, w));
 // Names of an order, a refusal or a conversation, not of a test done: never evidence for any topic. Not bare "risk" ("HPV, high risk").
 const NOT_DONE = ['refus*', 'declin*', 'not performed', 'not done', 'order*', 'discuss*', 'defer*', 'offer*', 'counsel*', 'referral',
   'risk assessment', 'risk factor*', 'education', 'reminder', 'due', 'overdue', 'scheduled', 'cancel*'];
-const matches = (m: Method, f: Found) => m.types.includes(f.r.resourceType) && (m.codes.some((c) => f.codes.has(c))
+// What the person told GA (postpone done) counts for a clinic-only method too: they say where it was done.
+export const TOLD = 'you told GA';
+const matches = (m: Method, f: Found) => m.types.includes(f.r.resourceType) && (!m.clinic || isClinic(f.r) || f.r.meta?.source === TOLD) && (m.codes.some((c) => f.codes.has(c))
   || (!!m.text?.some((p) => phrase(f, p)) && ![...NOT_DONE, ...(m.not ?? [])].some((p) => phrase(f, p))));
 export const SOON_DAYS = 90; // "due soon" window, shared with the doctor's-plan dates in maintenance.ts
 const NEVER = '9999-12-31'; // a once-in-a-lifetime test never falls due again

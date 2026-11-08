@@ -173,7 +173,7 @@
    "published": "2021-04-27",
    "ages": [18, 39],
    "doneBy": [
-    { "name": "clinic blood pressure reading", "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 3 }
+    { "name": "clinic blood pressure reading", "clinic": true, "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 3 }
    ],
    "why": "Hypertension is a prevalent condition, affects approximately 45% of the adult US population, and is the most commonly diagnosed condition at outpatient office visits.",
    "cost": "Hypertension is a major contributing risk factor for heart failure, myocardial infarction, stroke, and chronic kidney disease.",
@@ -187,7 +187,7 @@
    "published": "2021-04-27",
    "ages": [40, 120],
    "doneBy": [
-    { "name": "clinic blood pressure reading", "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 1 }
+    { "name": "clinic blood pressure reading", "clinic": true, "types": ["Observation"], "codes": ["http://loinc.org|85354-9", "http://loinc.org|8480-6"], "text": ["blood pressure"], "years": 1 }
    ],
    "why": "Hypertension is a prevalent condition, affects approximately 45% of the adult US population, and is the most commonly diagnosed condition at outpatient office visits.",
    "cost": "Hypertension is a major contributing risk factor for heart failure, myocardial infarction, stroke, and chronic kidney disease.",
