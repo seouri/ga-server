@@ -436,6 +436,7 @@ class CcdaToFhirConverter {
         sections.push({
           title: nodeToPlainText(section.title),
           code: this.mapCode(section.code),
+          mode: 'snapshot',
           text: {
             status: 'generated',
             div: `<div xmlns="http://www.w3.org/1999/xhtml">${convertToCompactXml(section.text)}</div>`,
@@ -455,6 +456,7 @@ class CcdaToFhirConverter {
         ? (this.mapCode(this.ccda.code) as CodeableConcept)
         : { coding: [{ system: LOINC, code: LOINC_SUMMARY_OF_EPISODE_NOTE }] },
       confidentiality: this.ccda.confidentialityCode?.['@_code'] as Composition['confidentiality'],
+      subject: this.patient ? createReference(this.patient) : undefined,
       author: this.ccda.author?.[0]
         ? [
             this.mapAuthorToReference(this.ccda.author?.[0]) as Reference<
@@ -1493,6 +1495,7 @@ class CcdaToFhirConverter {
       resourceType: 'CareTeam',
       id: this.mapId(organizer.id),
       identifier: this.mapIdentifiers(organizer.id),
+      subject: this.patient ? createReference(this.patient) : undefined,
       participant: participants.length > 0 ? participants : undefined,
     };
 

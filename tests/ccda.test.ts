@@ -459,9 +459,9 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     await importPath(client, cfg, writeDoc(EPIC.replace('EPICSTYLE-DOC-1', 'EPICSTYLE-DOC-2')), pid);
     expect(await client.searchResources('Encounter', { subject: `Patient/${pid}` })).toHaveLength(1);
     expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
-    // Known gap: the library gives a CareTeam no subject, so it sits outside the patient compartment (not yet assigned to a fix task).
-    const [team] = await client.searchResources('CareTeam', {});
-    expect(team.subject).toBeUndefined();
+    // The CareTeam and the Composition are in the patient's compartment.
+    expect(await client.searchResources('CareTeam', { subject: `Patient/${pid}` })).toHaveLength(1);
+    expect(await client.searchResources('Composition', { subject: `Patient/${pid}` })).toHaveLength(2);
   });
 });
 
