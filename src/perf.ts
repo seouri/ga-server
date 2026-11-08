@@ -21,6 +21,7 @@ export const countingFetch: typeof fetch = (input, init) => {
 
 // Fire and forget: a log problem never fails or slows a call. shortcut: a prune racing an append can drop that one line.
 export function record(l: Omit<Line, 't'>): void {
+  if (process.env.VITEST && process.env.GA_PERF_TEST !== '1') return; // tests never write the real .ga
   const f = file();
   void (async () => {
     await mkdir(dirname(f), { recursive: true, mode: 0o700 });

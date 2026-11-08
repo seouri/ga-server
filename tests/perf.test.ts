@@ -10,8 +10,8 @@ import { countingFetch, perfSummary, record, timed } from '../src/perf.ts';
 
 let dir: string, f: string;
 const old = process.env.GA_CONFIG;
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'perf-')); f = join(dir, 'perf.jsonl'); process.env.GA_CONFIG = join(dir, 'config.json'); });
-afterEach(() => { process.env.GA_CONFIG = old; vi.unstubAllGlobals(); });
+beforeEach(() => { process.env.GA_PERF_TEST = '1'; dir = mkdtempSync(join(tmpdir(), 'perf-')); f = join(dir, 'perf.jsonl'); process.env.GA_CONFIG = join(dir, 'config.json'); });
+afterEach(() => { delete process.env.GA_PERF_TEST; process.env.GA_CONFIG = old; vi.unstubAllGlobals(); });
 const settle = () => new Promise((r) => setTimeout(r, 100));
 const lines = () => readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 
@@ -71,4 +71,11 @@ test('an unwritable log dir does not fail the call', async () => {
   const r = (await call({ resourceType: 'Observation' })) as { isError?: boolean };
   await settle();
   expect(r.isError).toBeFalsy();
+});
+
+test('under vitest without the opt-in nothing is written', async () => {
+  delete process.env.GA_PERF_TEST;
+  record({ tool: 'x', app: 'a', ms: 1, ok: true });
+  await settle();
+  expect(() => readFileSync(f)).toThrow();
 });
