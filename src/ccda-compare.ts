@@ -222,18 +222,18 @@ export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Re
 }
 
 // Explained only when an old record with no counterpart holds no information: an Observation holding nothing beyond these
-// elements, with a code of text only (the Microsoft path's empty lab placeholders).
-const PLACEHOLDER = 'no value and no code beyond text';
-const PLACEHOLDER_KEYS = new Set(['resourceType', 'status', 'category', 'code', 'subject', 'identifier', 'effective[x]']);
+// elements and no code at all (the Microsoft path's empty lab placeholders; a code's text alone is information).
+const PLACEHOLDER = 'no value and no code';
+const PLACEHOLDER_KEYS = new Set(['resourceType', 'status', 'category', 'subject', 'identifier', 'effective[x]']);
 const placeholder = (r: Resource) => {
   const p = prep(r) as R;
-  return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string) && Object.keys((p.code as R | undefined) ?? {}).every((k) => k === 'text');
+  return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string);
 };
 // And any record holding nothing but its id (the Microsoft path's Location for a facility it read nothing from).
 const ID_ONLY = 'nothing but its id';
 const explain = (r: Resource) => (placeholder(r) ? PLACEHOLDER : Object.keys(prep(r) as R).every((k) => k === 'resourceType') ? ID_ONLY : undefined);
 
-// A reference to such a record carries nothing: it is taken out of the old record (an array element left empty with it) and
+// A reference to such a record carries nothing: its `reference` is taken out of the old record (an element left empty with it) and
 // counted as explained at its path, never compared (it would starve the pairing of the array it sits in).
 const REF_TO_NOTHING = 'reference to a record holding no information';
 function dropRefs(n: unknown, gone: (ref: string) => boolean, path: string, hit: (path: string) => void): unknown {
@@ -242,12 +242,13 @@ function dropRefs(n: unknown, gone: (ref: string) => boolean, path: string, hit:
     return a.length ? a : undefined;
   }
   if (!n || typeof n !== 'object') return n;
-  if (typeof (n as R).reference === 'string' && gone((n as R).reference as string)) {
-    hit(path ? `${path}.reference` : 'reference');
-    return undefined;
-  }
   const out: R = {};
   for (const [k, v] of Object.entries(n)) {
+    // Only the reference goes: its siblings (a display, an identifier) are still compared.
+    if (k === 'reference' && typeof v === 'string' && gone(v)) {
+      hit(path ? `${path}.reference` : 'reference');
+      continue;
+    }
     const x = dropRefs(v, gone, path ? `${path}.${k}` : k, hit);
     if (x !== undefined) out[k] = x;
   }

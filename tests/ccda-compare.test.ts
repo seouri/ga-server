@@ -34,14 +34,15 @@ test('a field present in the old record and missing in the new is a loss with it
   expect(JSON.stringify(r)).not.toMatch(/FAKE-MRN|syn-|atorvastatin|Hyperlipidemia|mg\/dL|55822004|617310/);
 });
 
-test('an empty old placeholder (no value, no code beyond text) is explained, not a loss', () => {
-  const empty = { resourceType: 'Observation', id: 'e', status: 'final', category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }], code: { text: 'Lipid panel' }, subject };
+test('an empty old placeholder (no value, no code) is explained, not a loss; a code text alone is information', () => {
+  const empty = { resourceType: 'Observation', id: 'e', status: 'final', category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }], subject };
   const noted = { ...empty, id: 'n', note: [{ text: 'critical' }], interpretation: [{ coding: [{ system: 'urn:oid:2.16.840.1.113883.5.83', code: 'HH' }] }], referenceRange: [{ text: '3.5-5.1' }] };
   const valued = { ...empty, id: 'v', valueString: 'never' };
-  const records = run(SYNTHETIC, [...MS_SYNTHETIC(), empty, noted, valued] as Resource[]).losses.filter((l) => l.path === '(record)');
+  const named = { ...empty, id: 't', code: { text: 'Lipid panel' } };
+  const records = run(SYNTHETIC, [...MS_SYNTHETIC(), empty, noted, valued, named] as Resource[]).losses.filter((l) => l.path === '(record)');
   expect(records).toEqual([
-    { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code beyond text' },
-    { type: 'Observation', path: '(record)', count: 2 }, // a note, interpretation, range or value is information
+    { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code' },
+    { type: 'Observation', path: '(record)', count: 3 }, // a note, interpretation, range, value or code text is information
   ]);
   // A matched placeholder's lost fields are losses, never explained.
   expect(pairLosses([{ ...noted, identifier: id('a') }], [{ ...empty, identifier: id('a') }])).toEqual([
@@ -59,12 +60,19 @@ test('a record holding no information never matches (even by a shared id); a ref
   const neu = [report('Observation/n1'), val('n1', 'a')];
   expect(compareCcda(SYNTHETIC, [report('Observation/ph', 'Observation/o1'), ph, val('o1', 'a')] as Resource[], neu as Resource[], []).losses).toEqual([
     { type: 'DiagnosticReport', path: 'result.reference', count: 1, explained: 'reference to a record holding no information' },
-    { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code beyond text' },
+    { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code' },
   ]);
   // An id-only record (a facility the Microsoft path read nothing from), and the reference to it.
   const enc = (ref: string) => ({ resourceType: 'Encounter', identifier: id('e'), status: 'finished', location: [{ location: { reference: ref } }] });
   expect(pairLosses([enc('Location/L'), { resourceType: 'Location', id: 'L' }], [{ ...enc('Location/x'), location: undefined }])).toEqual([
     { type: 'Encounter', path: 'location.location.reference', count: 1, explained: 'reference to a record holding no information' },
+    { type: 'Location', path: '(record)', count: 1, explained: 'nothing but its id' },
+  ]);
+  // Only the reference is explained: a display beside it is still compared.
+  expect(pairLosses([{ ...enc('Location/L'), location: [{ location: { reference: 'Location/L', display: 'Clinic' } }] }, { resourceType: 'Location', id: 'L' }],
+    [{ ...enc('Location/x'), location: undefined }])).toEqual([
+    { type: 'Encounter', path: 'location.location.reference', count: 1, explained: 'reference to a record holding no information' },
+    { type: 'Encounter', path: 'location.location.display', count: 1 },
     { type: 'Location', path: '(record)', count: 1, explained: 'nothing but its id' },
   ]);
   // A reference to an unmatched record that holds information stays a loss, and so does the record.
