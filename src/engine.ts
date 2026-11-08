@@ -531,7 +531,7 @@ export async function importResources(
     const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
     // No stored date yet: seeded from the scan of Epic records, else an older import would hide a newer one already stored.
     const value = Math.max(newest, Number.isNaN(had) ? await newestEpicImport(client, patientId) : had);
-    if (value !== had && Number.isFinite(value)) await storeNewestImport(client, p, value);
+    if (value !== had && Number.isFinite(value)) await storeNewestImport(client, patientId, value);
   }
   return report;
 }

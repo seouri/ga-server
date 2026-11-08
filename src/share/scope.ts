@@ -1,5 +1,5 @@
 // What a share may show: the security core. Every share route and Ask tool reads only loadScoped's result.
-import type { MedplumClient } from '@medplum/core';
+import { getStatus, OperationOutcomeError, type MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
 import { hasTag, NEWEST_IMPORT, TAG } from '../identity.ts';
@@ -148,12 +148,23 @@ export async function newestEpicImport(client: MedplumClient, patientId: string)
     for await (const page of client.searchResourcePages(type, q, { cache: 'no-cache' })) newest = Math.max(newest, currencyContext(page, []).newestImport);
   }
   // Seed it so the next call skips the scan.
-  if (Number.isFinite(newest)) await storeNewestImport(client, patient, newest);
+  if (Number.isFinite(newest)) await storeNewestImport(client, patientId, newest);
   return newest;
 }
 
-export async function storeNewestImport(client: MedplumClient, p: Patient, value: number): Promise<void> {
-  await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(value).toISOString() }] });
+// Versioned like conceptmap.upsertEntries: re-read fresh, never move the stored date back, If-Match on the version, one retry on a lost race.
+export async function storeNewestImport(client: MedplumClient, patientId: string, value: number, retry = true): Promise<void> {
+  const p = await client.readResource('Patient', patientId, { cache: 'no-cache' });
+  const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+  const next = Math.max(value, Number.isNaN(had) ? -Infinity : had);
+  if (next === had || !Number.isFinite(next)) return;
+  try {
+    await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(next).toISOString() }] },
+      { headers: { 'If-Match': `W/"${p.meta?.versionId}"` } });
+  } catch (e) {
+    if (!retry || !(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 412) throw e;
+    await storeNewestImport(client, patientId, value, false);
+  }
 }
 
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {

@@ -43,14 +43,16 @@ describe('labResults', () => {
     expect(q.get('_tag:not')).toBe('urn:ga-server:tag|src-apple-health');
     expect(seen[1]).toBe('fhir/R4/Observation?p=1');
   });
-  it('name list: each name searched, merged once per record, newest first, limit on the merged set', async () => {
-    const byName: Record<string, Observation[]> = {
-      zzfoo: [obs(1, { effectiveDateTime: '2024-01-01' }), obs(2, { effectiveDateTime: '2024-03-01' })],
-      zzbar: [obs(2, { effectiveDateTime: '2024-03-01' }), obs(3, { effectiveDateTime: '2024-02-01' })],
-    };
-    const client = { search: async (_t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: byName[q.get('code:text') ?? ''].map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  it('name list: one scan, a result kept once when any name matches, newest first, limit on the merged set', async () => {
+    let searches = 0;
+    const all = [
+      obs(1, { effectiveDateTime: '2024-01-01', code: { text: 'ZZFOO level' } }), obs(2, { effectiveDateTime: '2024-03-01', code: { text: 'zzfoo zzbar' } }),
+      obs(3, { effectiveDateTime: '2024-02-01', code: { text: 'ZZBAR' } }), obs(4, { code: { text: 'other' } }),
+    ];
+    const client = { search: async () => (searches++, { resourceType: 'Bundle', entry: all.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
     const r = await labResults(client, 'p', { name: ['zzfoo', 'zzbar'] });
     expect((r.rows as LabRow[]).map((x) => x.id)).toEqual(['id2', 'id3', 'id1']);
+    expect(searches).toBe(1);
     expect((await labResults(client, 'p', { name: ['zzfoo', 'zzbar'], limit: 2 })).rows).toHaveLength(2);
   });
   it('drops rows past the remote size budget instead of letting the cap cut JSON', async () => {

@@ -204,8 +204,9 @@ export async function labResults(
     const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
     if (n && !key) q.append('code:text', n);
     dateRange(q, 'date', since, until);
-    const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(n)));
-    return { q, key, named };
+    const text = (o: Observation) => [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(n)));
+    const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || text(o);
+    return { q, key, named, matches: (o: Observation) => (key ? named(o) : text(o)) };
   };
   // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
   const scan = async (n?: string) => {
@@ -219,9 +220,9 @@ export async function labResults(
     summary ? fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit)
       : fit(obs.map((o) => labRow(o)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
   if (Array.isArray(name)) {
-    // Each name searched in parallel, one record once (the same result can match two names).
-    const found = (await Promise.all(name.map(scan))).flat();
-    return finish([...new Map(found.map((o, i) => [o.id ?? `#${i}`, o])).values()]);
+    // One scan of every lab; a result is kept once when any name matches it (concept names match by code, others by text).
+    const matchers = name.map((n) => query(n).matches);
+    return finish((await scan()).filter((o) => matchers.some((m) => m(o))));
   }
   const { q, key } = query(name);
   if (summary || key) return finish(await scan(name));

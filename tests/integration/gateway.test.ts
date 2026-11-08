@@ -22,6 +22,7 @@ const PUBLIC = 'https://ga-test.example.ts.net';
 const RESOURCE = `${PUBLIC}/mcp`;
 const REDIRECT = 'http://localhost:9/cb';
 let client: MedplumClient;
+let spy: MedplumClient;
 let pid: string;
 let dir: string;
 let server: Server;
@@ -29,17 +30,21 @@ let base: string;
 const start = new Date().toISOString();
 let passkeyOk = false;
 const seen: string[] = [];
+const created: string[] = []; // AuditEvents the gateway's log wrote: only these are deleted
 
 beforeAll(async () => {
   const cfg = loadConfig();
   client = await getClient(cfg);
   pid = await createTestPatient(client);
+  spy = new Proxy(client, { get: (t, k) => (k === 'createResource'
+    ? async (r: { resourceType: string }) => { const c = await t.createResource(r as never) as { id?: string }; if (r.resourceType === 'AuditEvent') created.push(c.id as string); return c; }
+    : Reflect.get(t, k).bind?.(t) ?? Reflect.get(t, k)) });
   dir = mkdtempSync(join(tmpdir(), 'ga-gw-int-'));
   writeJson(dir, 'passkeys.json', [{ id: 'AAAA', publicKey: 'AAAA', counter: 0 }]); // so the sign-in page offers a passkey
   server = createGateway({
     publicUrl: PUBLIC,
     dir,
-    tools: remoteTools(client, cfg, pid),
+    tools: remoteTools(spy, cfg, pid),
     share: { dir: join(dir, 'share'), load: async () => { throw new Error('unused'); }, log: async () => {}, fetchBinary: async () => { throw new Error('unused'); } },
     completeLogin: async () => ({}),
     verifyPasskey: async (_r, challenge) => { seen.push(challenge); return passkeyOk; },
@@ -50,9 +55,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise((ok) => server?.close(ok));
-  for (const a of await client.searchResources('AuditEvent', { _tag: `${REMOTE_TAG}|Claude Code`, date: `ge${start}`, _count: '1000' }, { cache: 'no-cache' })) {
-    await client.deleteResource('AuditEvent', a.id!); // every tool's log entry, not only fhir_search
-  }
+  for (const id of created) await client.deleteResource('AuditEvent', id).catch(() => {}); // every tool's log entry, not only fhir_search
   for (const d of pid ? await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' }) : []) {
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
     if (bin) await client.deleteResource('Binary', bin);

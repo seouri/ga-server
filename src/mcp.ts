@@ -185,6 +185,8 @@ const STDIO_INSTRUCTIONS =
         'Records without last-seen: an active one whose urn:ga-server:ext:source-date is older than the newest C-CDA or EHI import, or than the newest sync of a portal with that record type in its urn:ga-server:ext:smart-enabled-types (MedicationStatement and MedicationRequest count as one), is unconfirmed. ' +
         'health_summary is the one-call snapshot to start with; current_medications, current_problems and allergies apply this rule for you; lab_results reads lab results (summary: true for trends), vitals vital signs, notes_search the text of notes and messages.';
 
+const ID = z.string().regex(/^[A-Za-z0-9.-]{1,64}$/);
+
 export function buildMcpServer(deps: ToolDeps): McpServer {
   const { client, cfg, patientId, remote } = deps;
   // Stale-source check on every read tool result (one small Endpoint search; the gateway builds a server per request, so no cache).
@@ -213,6 +215,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
     (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
       register(name, config, async (...a: unknown[]) => {
+        // A read-only tool's only possible write is the cached newest-import date on the Patient: accepted as unlogged if the parallel log fails.
         // Read-only tools log in parallel (a failed log still fails the call); anything else logs first, so a write never happens unlogged.
         let r: any;
         if ((config as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true) [, r] = await Promise.all([remote.log(name), cb(...a)]);
@@ -256,17 +259,17 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     'fhir_read',
     {
       description: "Read one resource from the user's personal health record (GA) by id, or several of one type with ids (1-20; they are read in parallel and answered as {resources: [...]}, a missing one as {id, error}).",
-      inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string().optional(), ids: z.array(z.string()).min(1).max(20).optional() },
+      inputSchema: { resourceType: z.string().regex(TYPE_RE), id: ID.optional(), ids: z.array(ID).min(1).max(20).optional() },
       annotations: { readOnlyHint: true },
     },
     async ({ resourceType, id, ids }) => {
       const no = refuseAdmin(resourceType);
       if (no) return no;
+      if (!id === !ids) return fail(new GaError('give exactly one of id or ids'));
       try {
         const one = async (i: string) => readable(await client.readResource(resourceType as 'Observation', i, { cache: 'no-cache' })) as object;
         if (!ids) {
-          if (!id) return fail(new GaError('give id or ids'));
-          return warned(await one(id));
+          return warned(await one(id!));
         }
         const resources = await Promise.all(ids.map((i) => one(i).catch((e) => ({ id: i, error: e instanceof Error ? e.message : String(e) }))));
         return warned({ resources });

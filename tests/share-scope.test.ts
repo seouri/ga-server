@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Patient, Resource } from '@medplum/fhirtypes';
-import type { MedplumClient } from '@medplum/core';
-import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, newestEpicImport, scopedCache, selectScoped, trimPatient } from '../src/share/scope.ts';
+import { OperationOutcomeError, preconditionFailed, type MedplumClient } from '@medplum/core';
+import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, newestEpicImport, scopedCache, selectScoped, storeNewestImport, trimPatient } from '../src/share/scope.ts';
 import type { Scoped } from '../src/share/scope.ts';
 import type { Group, Share } from '../src/share/store.ts';
 
@@ -255,4 +255,31 @@ test('newestEpicImport seeds the Patient after a finding scan; second call reads
   writes.length = 0;
   expect(await newestEpicImport(mk([]), 'p')).toBe(-Infinity);
   expect(writes).toHaveLength(0);
+});
+
+test('storeNewestImport never moves the stored date back; a 412 re-reads and retries once', async () => {
+  const mk = (stored: string | undefined, failures: number) => {
+    const writes: { extension?: { valueDateTime?: string }[]; }[] = [];
+    let reads = 0, fails = failures;
+    const client = {
+      readResource: async () => ({ resourceType: 'Patient', id: 'p', meta: { versionId: String(++reads) }, extension: stored ? [{ url: 'urn:ga-server:ext:newest-epic-import', valueDateTime: stored }] : [] }),
+      updateResource: async (r: never, o: { headers: Record<string, string> }) => {
+        if (fails-- > 0) throw new OperationOutcomeError(preconditionFailed);
+        writes.push(r); expect(o.headers['If-Match']).toBe(`W/"${reads}"`); return r;
+      },
+    } as unknown as MedplumClient;
+    return { client, writes, reads: () => reads };
+  };
+  const a = mk('2025-06-01T00:00:00.000Z', 0);
+  await storeNewestImport(a.client, 'p', Date.parse('2025-01-01'));
+  expect(a.writes).toHaveLength(0);
+  const b = mk('2025-01-01T00:00:00.000Z', 0);
+  await storeNewestImport(b.client, 'p', Date.parse('2025-06-01'));
+  expect(b.writes[0].extension?.[0].valueDateTime).toBe('2025-06-01T00:00:00.000Z');
+  const c = mk(undefined, 1);
+  await storeNewestImport(c.client, 'p', Date.parse('2025-06-01'));
+  expect(c.writes).toHaveLength(1);
+  expect(c.reads()).toBe(2);
+  const d = mk(undefined, 2);
+  await expect(storeNewestImport(d.client, 'p', Date.parse('2025-06-01'))).rejects.toThrow();
 });
