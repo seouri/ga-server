@@ -2,7 +2,7 @@
 
 First of the one-click-deploy projects (then: C-CDA converter swap, "Deploy GA" page, passkey-encrypted backups; native apps later). Legend: **[user]** decided by the owner, **[call]** designer's call (open to override), **[spike]** measured in a throwaway spike.
 
-Spike write-up: branch `spike-sqlite-store`, `docs/superpowers/spikes/2026-11-07-sqlite-fhir-store.md` (prototype `src/store/` on that branch, 370 lines).
+Spike write-up: `docs/superpowers/spikes/2026-11-07-sqlite-fhir-store.md` (its throwaway prototype is superseded by `src/store/`).
 
 ## Intent
 

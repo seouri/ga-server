@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 26 strip-only TypeScript, `node:sqlite`, `@medplum/core` (+ trimmed `@medplum/definitions`), vitest.
 
-**Spec:** `docs/superpowers/specs/2026-11-08-sqlite-store-design.md`. Prototype to port: branch `spike-sqlite-store` (`src/store/store.ts`, `src/store/fetch.ts`, harness `src/store/spike/`), write-up `docs/superpowers/spikes/2026-11-07-sqlite-fhir-store.md`.
+**Spec:** `docs/superpowers/specs/2026-11-08-sqlite-store-design.md`. Spike write-up (its throwaway prototype branch is deleted; the store is `src/store/`): `docs/superpowers/spikes/2026-11-07-sqlite-fhir-store.md`.
 
 ## Global Constraints
 
