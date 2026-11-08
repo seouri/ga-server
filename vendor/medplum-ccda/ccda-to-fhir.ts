@@ -32,6 +32,7 @@ import type {
   Identifier,
   Immunization,
   ImmunizationPerformer,
+  Location,
   Medication,
   MedicationDispense,
   MedicationDispensePerformer,
@@ -150,6 +151,7 @@ import type {
   CcdaOrganizer,
   CcdaOrganizerComponent,
   CcdaParticipant,
+  CcdaParticipantRole,
   CcdaPatientRole,
   CcdaPerformer,
   CcdaProcedure,
@@ -1941,6 +1943,20 @@ class CcdaToFhirConverter {
     return result;
   }
 
+  private mapLocationToReference(role: CcdaParticipantRole): Reference<Location> {
+    const location: Location = {
+      resourceType: 'Location',
+      id: this.mapId(role.id),
+      identifier: this.mapIdentifiers(role.id),
+      name: nodeToString(role.playingEntity?.name?.[0] as string | undefined),
+      type: role.code ? [this.mapCode(role.code) as CodeableConcept] : undefined,
+      address: this.mapAddresses(role.addr)?.[0],
+      telecom: this.mapTelecom(role.telecom),
+    };
+    this.resources.push(location);
+    return createReference(location);
+  }
+
   /**
    * Encounter.class is a v3 ActCode (ActEncounterCode): the encounter code or one of its translations in that system. Another
    * code (a CPT visit code) is only the encounter type; with no ActCode the class is data-absent.
@@ -1969,6 +1985,14 @@ class CcdaToFhirConverter {
       subject: createReference(this.patient as Patient),
       period: this.mapEffectiveTimeToPeriod(encounter.effectiveTime?.[0]),
     };
+
+    // Service delivery locations (participant typeCode LOC)
+    const locations = (encounter.participant ?? EMPTY)
+      .filter((participant) => participant['@_typeCode'] === 'LOC' && participant.participantRole)
+      .map((participant) => ({ location: this.mapLocationToReference(participant.participantRole as CcdaParticipantRole) }));
+    if (locations.length > 0) {
+      result.location = locations;
+    }
 
     // Add participant information
     if (encounter.performer) {

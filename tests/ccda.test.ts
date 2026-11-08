@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
-import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Reference, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -609,4 +609,15 @@ test('allergy category follows the source: a drug allergy is medication/allergy,
   expect(allergy(other).category).toBeUndefined();
   expect(allergy(other).type).toBeUndefined();
   expect(convertCcdaLocal(other).notImported).toEqual([{ section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.7', entries: 1, reason: 'allergy type not converted' }]);
+});
+
+test('encounter has its location: the visit points at a stored Location with the clinic\'s id, name, type and address', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    expect(await importPath(client, cfgFor(pid), writeDoc(EPIC), pid)).toMatchObject({ invalid: 0 });
+    const [enc] = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
+    const loc = await client.readReference(enc.location?.[0].location as Reference<Location>);
+    expect(loc.identifier?.[0].value).toBe('EX-DEPT-1');
+    expect(loc).toMatchObject({ name: 'Example Clinic', type: [{ coding: [{ code: '1160-1' }] }], address: { city: 'Testville' } });
+  });
 });

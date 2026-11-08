@@ -70,8 +70,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
   // Shrinks as Tasks 4-8 land.
   expect(r.losses).toEqual([
     { type: 'Patient', path: 'name.use', count: 1 },
-    { type: 'Encounter', path: 'location.location.reference', count: 1 },
-    { type: 'Location', path: '(record)', count: 1 },
   ]);
   expect(r.unaccounted).toEqual([]);
 });
