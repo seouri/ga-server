@@ -873,7 +873,7 @@ class CcdaToFhirConverter {
       };
     }
 
-    const supplies = this.processMedicationSupplies(substanceAdmin, medicationCode);
+    const supplies = this.processMedicationSupplies(substanceAdmin, medicationCode, intent);
     const dosage: Dosage[] = [
       {
         text: typeof substanceAdmin.text === 'string' ? substanceAdmin.text : undefined,
@@ -941,11 +941,13 @@ class CcdaToFhirConverter {
    * Medication Supply Orders (INT) and Medication Dispenses (EVN) recorded inside a Medication Activity.
    * @param substanceAdmin - The Medication Activity.
    * @param medicationCode - The Medication Activity's drug, used when a supply names no product of its own.
+   * @param intent - A planned medication's intent, which its supply orders share; undefined (a medication list entry): order.
    * @returns A MedicationRequest per supply order and a MedicationDispense per dispense.
    */
   private processMedicationSupplies(
     substanceAdmin: CcdaSubstanceAdministration,
-    medicationCode: CcdaCode | undefined
+    medicationCode: CcdaCode | undefined,
+    intent: MedicationRequest['intent'] | undefined
   ): (MedicationRequest | MedicationDispense)[] {
     const result: (MedicationRequest | MedicationDispense)[] = [];
     for (const supply of (substanceAdmin.entryRelationship ?? EMPTY).flatMap((rel) => rel.supply ?? EMPTY)) {
@@ -974,7 +976,7 @@ class CcdaToFhirConverter {
         ...shared,
         meta: { profile: [US_CORE_MEDICATION_REQUEST_URL] },
         status: MEDICATION_STATUS_MAPPER.mapCcdaToFhirWithDefault(supply.statusCode?.['@_code'], 'active'),
-        intent: 'order',
+        intent: intent ?? 'order',
         authoredOn: mapCcdaToFhirDateTime(supply.author?.[0]?.time?.['@_value']),
         requester: this.mapAuthorToReference(supply.author?.[0]),
         dispenseRequest: {

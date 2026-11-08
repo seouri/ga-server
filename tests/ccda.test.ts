@@ -443,3 +443,16 @@ test('a supply order that reuses its medication\'s id is still stored next to th
     expect([await stored('MedicationStatement'), await stored('MedicationRequest')]).toEqual([1, 1]);
   });
 });
+
+test('a planned medication and its supply order sharing one id are both stored', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const med = /<substanceAdministration classCode="SBADM" moodCode="EVN">[\s\S]*?<\/substanceAdministration>/.exec(EPIC)?.[0] as string;
+    const planned = med.replace('moodCode="EVN"', 'moodCode="INT"').replace('<id root="1.2.840.114350.1.13.999.2.7.2.798268.1" extension="EX-ORDER-1"/>', '<id root="1.2.840.114350.1.13.999.2.7.2.798268" extension="EX-MED-1"/>');
+    const xml = EPIC.replace(/(<title>Plan of Treatment<\/title>[\s\S]*?<\/text>)/, `$1<entry>${planned}</entry>`);
+    expect(xml).not.toBe(EPIC);
+    expect(await importPath(client, cfgFor(pid), writeDoc(xml), pid)).toMatchObject({ invalid: 0 });
+    const requests = await client.searchResources('MedicationRequest', { subject: `Patient/${pid}` });
+    expect(requests.map((r) => r.identifier?.find((i) => i.value === 'EX-MED-1') && r.dispenseRequest?.quantity?.value).sort()).toEqual([90, undefined, undefined]);
+  });
+});

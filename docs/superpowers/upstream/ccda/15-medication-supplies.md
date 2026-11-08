@@ -104,7 +104,7 @@ The same supply with `moodCode="EVN"` (`22.4.18`):
     - `quantity`.
     - `whenHandedOver` from effectiveTime.
   - **Any other mood → `MedicationRequest`:**
-    - intent `order`.
+    - intent `order`; inside a Plan of Treatment medication, that medication's intent (draft 12), so a planned prescription is not read as an authorized order.
     - status via `MEDICATION_STATUS_MAPPER`.
     - `authoredOn` and `requester` from the author.
     - `dispenseRequest`: `validityPeriod`, `quantity`, and `numberOfRepeatsAllowed` = `repeatNumber` − 1. C-CDA counts every allowed fill; FHIR counts the refills after the first.

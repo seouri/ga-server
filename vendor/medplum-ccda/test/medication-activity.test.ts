@@ -102,3 +102,11 @@ test('a dispense of a medication is a MedicationDispense; a supply with its own 
   expect(dispense.subject?.reference).toMatch(/^Patient\//);
   expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(1); // the INT medication itself
 });
+
+test('a supply order inside a planned medication carries the plan\'s intent, not order', () => {
+  const plan = medications('INT', supply('INT', '2.16.840.1.113883.10.20.22.4.17', 'ORDER-2'))
+    .replace('<templateId root="2.16.840.1.113883.10.20.22.2.1.1" extension="2014-06-09"/>', '<templateId root="2.16.840.1.113883.10.20.22.2.10" extension="2014-06-09"/>')
+    .replace('<templateId root="2.16.840.1.113883.10.20.22.4.16" extension="2014-06-09"/>', '<templateId root="2.16.840.1.113883.10.20.22.4.42" extension="2014-06-09"/>');
+  const requests = resourcesOf<MedicationRequest>(convertSections(plan), 'MedicationRequest');
+  expect(requests.map((r) => [r.identifier?.[0].value, r.intent])).toEqual([['MED-1', 'plan'], ['ORDER-2', 'plan']]);
+});
