@@ -427,6 +427,27 @@
               <value xsi:type="CD" code="266919005" codeSystem="2.16.840.1.113883.6.96" displayName="Never smoker"/>
             </observation>
           </entry>
+          <entry>
+            <observation classCode="OBS" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.85"/>
+              <templateId root="2.16.840.1.113883.10.20.22.4.85" extension="2014-06-09"/>
+              <id root="1.2.840.114350.1.13.999.2.7.2.778011" extension="EX-TOBACCO-1"/>
+              <code code="11367-0" codeSystem="2.16.840.1.113883.6.1" displayName="History of tobacco use"/>
+              <statusCode code="completed"/>
+              <effectiveTime><low value="20000101"/><high value="20100101"/></effectiveTime>
+              <value xsi:type="CD" code="8517006" codeSystem="2.16.840.1.113883.6.96" displayName="Ex-smoker"/>
+            </observation>
+          </entry>
+          <entry>
+            <observation classCode="OBS" moodCode="EVN">
+              <templateId root="1.2.840.114350.1.13.999.2.7.9.1"/>
+              <id root="1.2.840.114350.1.13.999.2.7.2.778012" extension="EX-ALCOHOL-1"/>
+              <code code="11331-6" codeSystem="2.16.840.1.113883.6.1" displayName="History of alcohol use"/>
+              <statusCode code="completed"/>
+              <effectiveTime><low value="20240210"/></effectiveTime>
+              <value xsi:type="ST">Not currently</value>
+            </observation>
+          </entry>
         </section>
       </component>
       <!-- Functional status -->

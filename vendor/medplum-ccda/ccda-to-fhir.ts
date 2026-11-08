@@ -1442,12 +1442,12 @@ class CcdaToFhirConverter {
       return this.processFamilyHistoryOrganizer(organizer);
     }
     if (templateIds.includes(OID_RESULT_ORGANIZER) || templateIds.includes(OID_RESULT_ORGANIZER_V2)) {
-      return this.processResultOrganizer(organizer);
+      return this.processResultOrganizer(section, organizer);
     }
-    return this.processVitalsOrganizer(organizer);
+    return this.processVitalsOrganizer(section, organizer);
   }
 
-  private processResultOrganizer(organizer: CcdaOrganizer): DiagnosticReport {
+  private processResultOrganizer(section: CcdaSection, organizer: CcdaOrganizer): DiagnosticReport {
     // A result panel is a report whose results are its observations (C-CDA on FHIR: Result Organizer → DiagnosticReport)
     const statuses: Record<string, DiagnosticReport['status']> = {
       completed: 'final',
@@ -1457,7 +1457,7 @@ class CcdaToFhirConverter {
     };
     const results: Reference<Observation>[] = [];
     for (const component of organizer.component ?? EMPTY) {
-      results.push(...this.processVitalsComponent(component));
+      results.push(...this.processVitalsComponent(component, section));
     }
     return {
       resourceType: 'DiagnosticReport',
@@ -1568,13 +1568,13 @@ class CcdaToFhirConverter {
     };
   }
 
-  private processVitalsOrganizer(organizer: CcdaOrganizer): Observation {
+  private processVitalsOrganizer(section: CcdaSection, organizer: CcdaOrganizer): Observation {
     const result: Observation = {
       resourceType: 'Observation',
       id: this.mapId(organizer.id),
       identifier: this.mapIdentifiers(organizer.id),
       status: 'final',
-      category: this.mapObservationTemplateIdToObservationCategory(organizer.templateId),
+      category: this.mapObservationCategory(organizer.templateId, section),
       code: this.mapCode(organizer.code) as CodeableConcept,
       subject: createReference(this.patient as Patient),
     };
@@ -1583,7 +1583,7 @@ class CcdaToFhirConverter {
 
     const members: Reference<Observation>[] = [];
     for (const component of organizer.component ?? EMPTY) {
-      members.push(...this.processVitalsComponent(component));
+      members.push(...this.processVitalsComponent(component, section));
     }
 
     if (members.length > 0) {
@@ -1592,10 +1592,10 @@ class CcdaToFhirConverter {
     return result;
   }
 
-  private processVitalsComponent(component: CcdaOrganizerComponent): Reference<Observation>[] {
+  private processVitalsComponent(component: CcdaOrganizerComponent, section: CcdaSection): Reference<Observation>[] {
     const result: Reference<Observation>[] = [];
     for (const observation of component.observation ?? EMPTY) {
-      const child = this.processVitalsObservation(observation);
+      const child = this.processVitalsObservation(observation, section);
       if (child) {
         result.push(createReference(child));
         this.resources.push(child);
@@ -1617,7 +1617,7 @@ class CcdaToFhirConverter {
     }
 
     // Treat this as a normal observation by default
-    return this.processVitalsObservation(observation);
+    return this.processVitalsObservation(observation, section);
   }
 
   private processGoalObservation(observation: CcdaObservation): Goal {
@@ -1680,7 +1680,7 @@ class CcdaToFhirConverter {
     return map[observation.statusCode?.['@_code'] ?? 'active'];
   }
 
-  private processVitalsObservation(observation: CcdaObservation): Observation | undefined {
+  private processVitalsObservation(observation: CcdaObservation, section: CcdaSection): Observation | undefined {
     // Skip observations without a valid code (e.g., nullFlavor="NA")
     const code = this.mapCode(observation.code);
     if (!code) {
@@ -1692,7 +1692,7 @@ class CcdaToFhirConverter {
       id: this.mapId(observation.id),
       identifier: this.mapIdentifiers(observation.id),
       status: 'final',
-      category: this.mapObservationTemplateIdToObservationCategory(observation.templateId),
+      category: this.mapObservationCategory(observation.templateId, section),
       code,
       subject: createReference(this.patient as Patient),
       referenceRange: this.mapReferenceRangeArray(observation.referenceRange),
@@ -1751,7 +1751,7 @@ class CcdaToFhirConverter {
     for (const relationship of relationships ?? EMPTY) {
       const childObservation = relationship.observation;
       for (const child of childObservation ?? EMPTY) {
-        const childResource = this.processVitalsObservation(child);
+        const childResource = this.processVitalsObservation(child, section);
         if (childResource) {
           this.resources.push(childResource);
           if (!result.hasMember) {
@@ -1780,6 +1780,22 @@ class CcdaToFhirConverter {
       return undefined;
     }
     return value['#text'] || this.resolveNarrativeReference(value.reference);
+  }
+
+  private mapObservationCategory(
+    templateIds: CcdaTemplateId[] | undefined,
+    section: CcdaSection
+  ): CodeableConcept[] | undefined {
+    // Its own templates' categories, then its section's: an observation may carry only a vendor template
+    const result = this.mapObservationTemplateIdToObservationCategory([...(templateIds ?? []), ...(section.templateId ?? [])]) ?? [];
+    if (result.length === 0) {
+      // Nothing classifies it (such as a Reason for Visit observation): its section's code says what it is
+      const sectionCode = this.mapCode(section.code);
+      if (sectionCode) {
+        result.push(sectionCode);
+      }
+    }
+    return result.length > 0 ? result : undefined;
   }
 
   private mapObservationTemplateIdToObservationCategory(

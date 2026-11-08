@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
-import type { CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -308,6 +308,18 @@ test('family history: a relative\'s condition is a FamilyMemberHistory, never th
   const note = '<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/><value xsi:type="ST">x</value></observation></entryRelationship>';
   expect(convertCcdaLocal(EPIC.replace('<value xsi:type="PQ" value="60" unit="a"/>\n                    </observation>\n                  </entryRelationship>', `<value xsi:type="PQ" value="60" unit="a"/>\n                    </observation>\n                  </entryRelationship>${note}`)).notImported)
     .toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.46', entries: 1, reason: 'family history detail not converted' }]);
+});
+
+test('social history, functional status and reason for visit each keep their own category, never vital-signs; social history is dated', () => {
+  const out = convertCcdaLocal(EPIC);
+  const obs = (id: string) => out.resources.find((r): r is Observation => r.resourceType === 'Observation' && JSON.stringify(r.identifier).includes(id));
+  const cats = (id: string) => obs(id)?.category?.map((c) => c.coding?.[0].code);
+  expect(cats('EX-SMOKING-1')).toEqual(['social-history']);
+  expect(cats('EX-ALCOHOL-1')).toEqual(['social-history']); // a vendor template only: its section says so
+  expect(cats('EX-FUNC-1')).toEqual(['survey']);
+  expect(cats('EX-RFV-1')).toEqual(['29299-5']); // nothing classifies it: its section's code (Reason for visit)
+  expect(obs('EX-ALCOHOL-1')?.effectiveDateTime).toBe('2024-02-10'); // <low> only (medplum#11244)
+  expect(obs('EX-TOBACCO-1')?.effectivePeriod).toEqual({ start: '2000-01-01', end: '2010-01-01' });
 });
 
 test('every section of the Epic-style fixture is imported', () => {
