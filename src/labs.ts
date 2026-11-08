@@ -66,6 +66,10 @@ export async function searchAll(client: MedplumClient, type: ResourceType, q: Re
   return out;
 }
 
+// Every non-Apple Observation, loaded once so health maintenance, vaccines and what's new derive their subsets in memory.
+export const loadObservations = (client: MedplumClient, patientId: string) =>
+  searchAll(client, 'Observation', { subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` }) as Promise<Observation[]>;
+
 export async function collect<T extends Resource, R>(
   client: MedplumClient, type: ResourceType, q: URLSearchParams, row: (r: T) => R | undefined, limit: number, scan = Infinity,
 ): Promise<{ rows: R[]; more: boolean }> {

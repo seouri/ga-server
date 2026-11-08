@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
-import { searchAll, validDay } from './labs.ts';
+import { loadObservations, searchAll, validDay } from './labs.ts';
 import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
@@ -142,14 +142,13 @@ export function doseOf(i: Immunization): Dose {
 }
 
 // Reads the patient's own GA data so values never pass through the agent.
-export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA')) {
+export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), loaded?: Observation[]) {
   if (!validDay(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
-  const all = (type: 'Immunization' | 'Observation', q: Record<string, string>) => searchAll(client, type, q);
-  const imms = ((await all('Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
-  const obs = ((await all('Observation', { subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` })) as Observation[]).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
+  const imms = ((await searchAll(client, 'Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
+  const obs = (loaded ?? await loadObservations(client, patientId)).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
   const immunizations = imms.map(doseOf);
   const immunity = obs.flatMap((o) => {
     const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;

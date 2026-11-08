@@ -227,7 +227,7 @@ test('no Observation read of a health maintenance check includes Apple Health da
   } as unknown as MedplumClient;
   await healthMaintenance(client, 'p', '2026-11-07');
   expect(qs.filter((q) => q['code:text'] !== 'Health maintenance').every((q) => q['_tag:not'] === 'urn:ga-server:tag|src-apple-health')).toBe(true);
-  expect(qs.length).toBeGreaterThanOrEqual(4);
+  expect(qs.length).toBeGreaterThanOrEqual(2);
 });
 
 test('an Epic due date on the birth date is a placeholder, not a date', () => {
@@ -274,4 +274,38 @@ test('a done reminder clears a joined plan written on or before it was told; a n
   }
   const real = (await withBasics([{ ...doneBasic('colorectal', '2024', 'colonoscopy'), created: '2026-11-07' }], '1971-01-01', 'female', '2026-11-07')).items.find((x) => x.topic === 'colorectal');
   expect(real?.evidence[0].id).toBe('Basic/b1');
+});
+
+// Fake store that honours the Observation filters healthMaintenance and vaccineGaps use.
+const obsStore = (): { client: MedplumClient; qs: Record<string, string>[] } => {
+  const apple = { meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] } };
+  const cat = (c: string) => ({ category: [{ coding: [{ code: c }] }] });
+  const all = [
+    { resourceType: 'Observation', id: 'l1', status: 'final', ...cat('laboratory'), code: { text: 'Hemoglobin A1c' }, effectiveDateTime: '2025-05-01', valueQuantity: { value: 5.4 } },
+    { resourceType: 'Observation', id: 'v1', status: 'final', ...cat('vital-signs'), code: { text: 'Weight' }, effectiveDateTime: '2025-05-01' },
+    { resourceType: 'Observation', id: 'x1', status: 'final', ...cat('exam'), code: { text: 'Spirometry' }, effectiveDateTime: '2025-05-01' },
+    { resourceType: 'Observation', id: 'u1', status: 'final', code: { text: 'Hepatitis B surface antibody' }, valueString: 'Immune', effectiveDateTime: '2024-01-01' },
+    { resourceType: 'Observation', id: 'a1', status: 'final', ...apple, ...cat('vital-signs'), code: { text: 'Heart rate' } },
+    { resourceType: 'Observation', id: 'h1', status: 'final', code: { text: 'Health maintenance: LIPID PANEL - YEARLY' }, valueString: 'Overdue',
+      extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-01-01' }], component: [{ code: { text: 'Next due date' }, valueDateTime: '2026-02-01' }] },
+  ] as unknown as Observation[];
+  const qs: Record<string, string>[] = [];
+  const client = {
+    readResource: async () => ({ resourceType: 'Patient', birthDate: '1970-01-01', gender: 'female' }),
+    searchResourcePages: async function* (type: string, q: Record<string, string>) {
+      if (type !== 'Observation') { yield []; return; }
+      qs.push(q);
+      const has = (o: Observation, c: string) => o.category?.some((x) => x.coding?.some((k) => c.split(',').includes(k.code ?? '')));
+      yield all.filter((o) => (!q['_tag:not'] || !o.meta?.tag?.some((t) => t.code === 'src-apple-health'))
+        && (!q['code:text'] || o.code?.text?.startsWith(q['code:text']))
+        && (!q.category || has(o, q.category)) && (q['category:missing'] !== 'true' || !o.category?.length));
+    },
+  } as unknown as MedplumClient;
+  return { client, qs };
+};
+
+test('healthMaintenance: same result from one non-Apple Observation load', async () => {
+  const { client, qs } = obsStore();
+  expect(await healthMaintenance(client, 'p', '2026-11-07')).toMatchSnapshot();
+  expect(qs.length).toBeLessThanOrEqual(2); // the plan read and one load; was 4
 });

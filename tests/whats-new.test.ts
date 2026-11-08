@@ -205,7 +205,7 @@ test('whatsNew: lists, labs or arrivals failing is isolated, trimmed and never m
   const boom = (what: string) => { throw new Error(`${what} ${'x'.repeat(100_000)}`); };
   const cases: [string, object, (r: Awaited<ReturnType<typeof whatsNew>>) => unknown][] = [
     ['lists', { search: async (type: string, q: unknown) => (type === 'MedicationStatement' ? boom('lists') : big().client.search(type as 'Observation', q as URLSearchParams)) }, (r) => [r.context.currentMedications, r.sectionErrors?.['new medications']]],
-    ['labs', { search: async (type: string, q: unknown) => (String(q).includes('_filter') ? boom('labs') : big().client.search(type as 'Observation', q as URLSearchParams)) }, (r) => [r.context.recentOutOfRange, r.sectionErrors?.labs]],
+    ['labs', { searchResourcePages: async function* (type: string, q: Record<string, string>) { if (type === 'Observation' && !q._lastUpdated && !q['code:text']) boom('labs'); yield []; } }, (r) => [r.context.recentOutOfRange, r.sectionErrors?.labs]],
     ['arrivals', { searchResourcePages: async function* (type: string) { if (type === 'Observation') boom('arrivals'); yield []; } }, (r) => [r.tally, r.sectionErrors?.labs]],
   ];
   for (const [name, over, pick] of cases) {

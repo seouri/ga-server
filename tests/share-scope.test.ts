@@ -232,11 +232,12 @@ test('newestEpicImport reads the date stored on the Patient and scans nothing; w
 
 test('newestEpicImport seeds the Patient after a finding scan; second call reads it; -Infinity writes nothing', async () => {
   let scans = 0;
-  const writes: { extension?: { url: string; valueDateTime?: string }[] }[] = [];
-  let patient: { resourceType: 'Patient'; id: string; extension?: object[] } = { resourceType: 'Patient', id: 'p' };
+  type P = { resourceType: 'Patient'; id: string; extension?: { url: string; valueDateTime?: string }[] };
+  const writes: P[] = [];
+  let patient: P = { resourceType: 'Patient', id: 'p' };
   const page = [{ resourceType: 'Condition', meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2025-03-01T00:00:00Z' }] }];
   const mk = (pages: object[]) => ({
-    readResource: async () => patient,
+    readResource: async () => patient as never,
     searchResourcePages: async function* () { scans++; yield pages; },
     updateResource: async (r: typeof patient) => { writes.push(r); patient = r; return r; },
   }) as unknown as MedplumClient;

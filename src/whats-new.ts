@@ -8,11 +8,12 @@ import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { collect, fit, groupLabs, highLow, labRow, searchAll } from './labs.ts';
+import { fit, groupLabs, highLow, labRow, loadObservations, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
 import { messageText, noteText, snippet } from './notes.ts';
+import { hasCategory } from './share/scope.ts';
 import { addDays } from './vaccines.ts';
 
 export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
@@ -237,15 +238,15 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
   const stored = opts.since ? undefined : readLastSeen(opts.dir);
   const since = opts.since ?? stored ?? addDays(asOf, -90);
-  const subject = `Patient/${patientId}`;
-  const q = (f: string[][]) => collect(client, 'Observation', new URLSearchParams([['subject', subject], ...f, ['_sort', '_lastUpdated'], ['_count', '1000']]), (o: Observation) => o, Infinity).then((x) => x.rows);
+  // One non-Apple Observation load serves the labs section and health maintenance.
+  const obsP = loadObservations(client, patientId);
   const listsP = eps.then((e) => loadLists(client, patientId, e));
   const [arrived, lists, labs, status, upkeep] = await Promise.all([
     part(arrivedSince(client, patientId, since)),
     part(listsP),
-    part(q([['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`], ['_tag:not', `${TAG}|src-apple-health`]])),
+    part(obsP.then((o) => o.filter((r) => hasCategory(r, 'laboratory') || hasTag(r, 'extracted-by-llm')))),
     part(statusItems(client, patientId, since, listsP.then((l) => l.all, () => []))), // names of referenced drugs come from the lists
-    part(healthMaintenance(client, patientId, asOf)),
+    part(obsP.then((o) => healthMaintenance(client, patientId, asOf, undefined, o))),
   ]);
   const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
   const errors: Record<string, string> = {};
