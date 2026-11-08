@@ -73,12 +73,13 @@ export function contentHash(r: Resource, patientId = '', refs = false): string {
 // diagnostic: 32 Observation and 6 Encounter groups), so for these types the source id alone is not unique.
 const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
 
+const LINKED = new Set(['PractitionerRole', 'CareTeam']);
 // Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
 function ccdaKey(r: Resource, patientId: string): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-  // A PractitionerRole is its links (practitioner, organization): without them every id-less role hashes alike and they merge
-  // into one. The engine keys a record after pointing its references at their stored targets (dependencies first): stable.
-  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, r.resourceType === 'PractitionerRole')}`;
+  // A PractitionerRole or CareTeam is mostly its links (practitioner, organization, members): without them id-less ones hash
+  // alike and merge into one. The engine keys a record after pointing its references at their stored targets (dependencies first): stable.
+  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, LINKED.has(r.resourceType))}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
   return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }

@@ -716,3 +716,23 @@ test('id-less PractitionerRoles of different practitioners stay apart on import;
     expect(await who()).toEqual(['NPI-A', 'NPI-B']);
   });
 });
+
+test('id-less CareTeams with different members stay apart on import; a re-import adds none', async () => {
+  const team = (doc: string, npi: string) => `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="${doc}"/><effectiveTime value="20240102"/>
+    <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
+    <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.500"/><code code="85847-2" codeSystem="2.16.840.1.113883.6.1"/>
+    <title>Care Team</title><text>x</text><entry><organizer classCode="CLUSTER" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.500"/>
+      <code code="86744-0" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="active"/>
+      <component><act classCode="PCPR" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.500.1"/><code code="85847-2" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="active"/><performer typeCode="PRF"><assignedEntity><id root="2.16.840.1.113883.4.6" extension="${npi}"/></assignedEntity></performer></act></component>
+    </organizer></entry></section></component></structuredBody></component></ClinicalDocument>`;
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const [a, b] = [writeDoc(team('TEAM-DOC-1', 'NPI-A')), writeDoc(team('TEAM-DOC-2', 'NPI-B'))];
+    await importPath(client, cfgFor(pid), a, pid);
+    await importPath(client, cfgFor(pid), b, pid);
+    expect(await client.searchResources('CareTeam', { subject: `Patient/${pid}` })).toHaveLength(2);
+    expect(await importPath(client, cfgFor(pid), a, pid)).toMatchObject({ created: 0 });
+    expect(await client.searchResources('CareTeam', { subject: `Patient/${pid}` })).toHaveLength(2);
+  });
+});
