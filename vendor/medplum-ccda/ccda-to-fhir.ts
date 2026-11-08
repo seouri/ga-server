@@ -1589,6 +1589,7 @@ class CcdaToFhirConverter {
       code,
       subject: createReference(this.patient as Patient),
       referenceRange: this.mapReferenceRangeArray(observation.referenceRange),
+      interpretation: this.mapInterpretation(observation.interpretationCode),
       performer: observation.author
         ?.map((author) => this.mapAuthorToReference(author))
         .filter(Boolean) as Reference<Practitioner>[],
@@ -1655,6 +1656,12 @@ class CcdaToFhirConverter {
     }
 
     return result;
+  }
+
+  private mapInterpretation(codes: CcdaCode[] | undefined): CodeableConcept[] | undefined {
+    // Every interpretationCode (High, Abnormal, ...); a nullFlavor maps to nothing
+    const result = codes?.map((code) => this.mapCode(code)).filter(Boolean) as CodeableConcept[] | undefined;
+    return result?.length ? result : undefined;
   }
 
   private mapEncapsulatedDataToString(value: CcdaReference): string | undefined {

@@ -1,7 +1,7 @@
 [
  {
   "resourceType": "Composition",
-  "id": "bdbc2d45-cd9a-07bd-ae52-86cf9c453cd7",
+  "id": "483efa86-178e-0e98-f589-2bdf293b823c",
   "identifier": {
    "use": "official",
    "value": "1.2.840.114350.1.13.999.2.7.8.688883.900001"
@@ -520,7 +520,7 @@
  },
  {
   "resourceType": "DiagnosticReport",
-  "id": "87197137-0e29-eb5e-3125-49d73bf7529d",
+  "id": "d81ab7cb-4961-266f-e920-a3414a99d209",
   "identifier": [
    {
     "system": "urn:oid:1.2.840.114350.1.13.999.2.7.2.798268.1",
@@ -546,7 +546,7 @@
   },
   "result": [
    {
-    "reference": "Observation/9313d66f-07d2-cc59-15e3-bb23641fec48"
+    "reference": "Observation/d855538f-11ea-1573-dd93-ecc822d9fe53"
    },
    {
     "reference": "Observation/6adc6729-c3b8-2958-3352-d7a3bf8372fe"
@@ -558,7 +558,7 @@
  },
  {
   "resourceType": "Observation",
-  "id": "9313d66f-07d2-cc59-15e3-bb23641fec48",
+  "id": "d855538f-11ea-1573-dd93-ecc822d9fe53",
   "meta": {
    "profile": [
     "http://hl7.org/fhir/us/core/StructureDefinition/us-core-observationresults"
@@ -605,6 +605,17 @@
      "value": 99,
      "unit": "mg/dL"
     }
+   }
+  ],
+  "interpretation": [
+   {
+    "coding": [
+     {
+      "code": "N",
+      "display": "Normal",
+      "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation"
+     }
+    ]
    }
   ],
   "subject": {

@@ -220,6 +220,7 @@ export interface CcdaObservation {
   author?: CcdaAuthor[];
   text?: CcdaText;
   referenceRange?: CcdaReferenceRange[];
+  interpretationCode?: CcdaCode[];
 }
 
 export interface CcdaReferenceRange {

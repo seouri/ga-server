@@ -78,6 +78,7 @@ const ARRAY_PATHS = [
   'observation.participant',
   'observation.entryRelationship',
   'observation.referenceRange',
+  'observation.interpretationCode',
 
   'consumable.manufacturedProduct',
   'product.manufacturedProduct',

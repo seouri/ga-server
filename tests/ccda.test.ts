@@ -210,6 +210,10 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([]);
   // The REAL value (medplum#11241): a unitless number, no UCUM claim.
   expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-2'))).toMatchObject({ valueQuantity: { value: 1.1 } });
+  // The result's interpretation, in the system the Microsoft path and FHIR use.
+  expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-1'))).toMatchObject({
+    interpretation: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation', code: 'N', display: 'Normal' }] }],
+  });
   const types = out.resources.map((r) => r.resourceType);
   expect(types).toContain('MedicationStatement'); // Epic lists Medications' entries-optional root first: no throw
   const [cond] = out.resources.filter((r) => r.resourceType === 'Condition') as Condition[];

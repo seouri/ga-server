@@ -44,6 +44,7 @@ import {
   OID_RESULT_ORGANIZER,
   OID_RESULT_ORGANIZER_V2,
   OID_ROLE_CODE_CODE_SYSTEM,
+  OID_OBSERVATION_INTERPRETATION_CODE_SYSTEM,
   OID_RXNORM_CODE_SYSTEM,
   OID_SECTION_TIME_RANGE,
   OID_SEX_OBSERVATION,
@@ -192,6 +193,7 @@ export const DIAGNOSIS_ROLE_CODE_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSyste
 export const CONFIDENTIALITY_CODE_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSystem/v3-Confidentiality`;
 export const OBSERVATION_CATEGORY_CODE_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSystem/observation-category`;
 export const ROLE_CODE_CODE_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSystem/v3-RoleCode`;
+export const OBSERVATION_INTERPRETATION_CODE_SYSTEM = `${HTTP_TERMINOLOGY_HL7_ORG}/CodeSystem/v3-ObservationInterpretation`;
 
 /*
  * FHIR Value Sets
@@ -355,6 +357,11 @@ export const SYSTEM_MAPPER = new EnumMapper<string, string>({}, [
     ccdaValue: OID_ROLE_CODE_CODE_SYSTEM,
     fhirValue: ROLE_CODE_CODE_SYSTEM,
     displayName: 'Role Code',
+  },
+  {
+    ccdaValue: OID_OBSERVATION_INTERPRETATION_CODE_SYSTEM,
+    fhirValue: OBSERVATION_INTERPRETATION_CODE_SYSTEM,
+    displayName: 'Observation Interpretation',
   },
   {
     ccdaValue: OID_SOURCE_OF_PAYMENT_TYPOLOGY_CODE_SYSTEM,

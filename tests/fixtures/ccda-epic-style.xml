@@ -221,6 +221,7 @@
                   <statusCode code="completed"/>
                   <effectiveTime value="20240210091000-0500"/>
                   <value xsi:type="PQ" value="95" unit="mg/dL"/>
+                  <interpretationCode code="N" codeSystem="2.16.840.1.113883.5.83" displayName="Normal"/>
                   <referenceRange><observationRange><value xsi:type="IVL_PQ"><low value="70" unit="mg/dL"/><high value="99" unit="mg/dL"/></value></observationRange></referenceRange>
                 </observation>
               </component>
