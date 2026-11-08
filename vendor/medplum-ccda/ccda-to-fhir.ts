@@ -376,7 +376,7 @@ class CcdaToFhirConverter {
       for (const section of component.section) {
         const resources = this.processSection(section);
         sections.push({
-          title: section.title,
+          title: nodeToPlainText(section.title),
           code: this.mapCode(section.code),
           text: {
             status: 'generated',
@@ -407,7 +407,7 @@ class CcdaToFhirConverter {
       custodian: this.mapCustodianToReference(this.ccda.custodian),
       event: this.mapDocumentationOfToEvent(this.ccda.documentationOf),
       date: mapCcdaToFhirDateTime(this.ccda.effectiveTime?.[0]?.['@_value']) ?? new Date().toISOString(),
-      title: this.ccda.title ?? 'Medical Summary',
+      title: nodeToPlainText(this.ccda.title) ?? 'Medical Summary',
       section: sections,
     };
   }
@@ -682,7 +682,7 @@ class CcdaToFhirConverter {
           attachment: {
             contentType: 'text/plain',
             data: text ? encodeBase64(text) : undefined,
-            title: section.title,
+            title: nodeToPlainText(section.title),
           },
         },
       ],
@@ -1735,6 +1735,20 @@ function nodeToString(node: CcdaText | string | undefined): string | undefined {
     return node['#text'];
   }
   return undefined;
+}
+
+/**
+ * Returns all the text of a node that may hold markup (a title with `<content>`), whitespace collapsed.
+ * The parsed node does not keep the order of mixed content: its own text comes first, then its elements' text.
+ * @param node - The parsed node.
+ * @returns The plain text, or undefined when there is none.
+ */
+function nodeToPlainText(node: unknown): string | undefined {
+  if (node && typeof node === 'object' && '#text' in node) {
+    const { '#text': text, ...rest } = node as Record<string, unknown>;
+    node = [text, rest];
+  }
+  return indexNarrativeText(node, new Map()).replace(/\s+/g, ' ').trim() || undefined;
 }
 
 /**

@@ -328,6 +328,16 @@ test('a later document repeating an entry updates it', async () => {
   });
 });
 
+test('a section title with markup: its note is imported, not refused', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const xml = EPIC.replace('<title>Patient Instructions</title>', '<title>Patient <content styleCode="Bold">Instructions</content></title>');
+    expect(await importPath(client, cfgFor(pid), writeDoc(xml), pid)).toMatchObject({ invalid: 0 });
+    const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}` });
+    expect(notes.map((d) => d.content[0].attachment.title)).toContain('Patient Instructions');
+  });
+});
+
 test('the Epic-style fixture imports with no record refused, and a re-import changes nothing', async () => {
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
