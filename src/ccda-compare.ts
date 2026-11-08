@@ -168,6 +168,11 @@ export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Re
   const out = new Map<Resource, Resource | undefined>();
   const comps = [old, neu].map((rs) => rs.filter((r) => r.resourceType === 'Composition'));
   for (const o of old) {
+    // A record holding no information has no counterpart (its id may be another record's: a placeholder shares its organizer's).
+    if (explain(o)) {
+      out.set(o, undefined);
+      continue;
+    }
     if (o.resourceType === 'Composition' && comps[0].length === 1 && comps[1].length === 1) {
       out.set(o, comps[1][0]);
       continue;
@@ -180,7 +185,7 @@ export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Re
   const used = new Set(out.values());
   const idless = neu.filter((n) => !keys(n).length);
   for (const o of old) {
-    if (out.get(o)) continue;
+    if (out.get(o) || explain(o)) continue;
     const s = sig(o);
     const n = idless.find((c) => !used.has(c) && family(c.resourceType) === family(o.resourceType) && (!s.size || [...sig(c)].some((x) => s.has(x))));
     out.set(o, n);
@@ -197,6 +202,30 @@ const placeholder = (r: Resource) => {
   const p = prep(r) as R;
   return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string) && Object.keys((p.code as R | undefined) ?? {}).every((k) => k === 'text');
 };
+// And any record holding nothing but its id (the Microsoft path's Location for a facility it read nothing from).
+const ID_ONLY = 'nothing but its id';
+const explain = (r: Resource) => (placeholder(r) ? PLACEHOLDER : Object.keys(prep(r) as R).every((k) => k === 'resourceType') ? ID_ONLY : undefined);
+
+// A reference to such a record carries nothing: it is taken out of the old record (an array element left empty with it) and
+// counted as explained at its path, never compared (it would starve the pairing of the array it sits in).
+const REF_TO_NOTHING = 'reference to a record holding no information';
+function dropRefs(n: unknown, gone: (ref: string) => boolean, path: string, hit: (path: string) => void): unknown {
+  if (Array.isArray(n)) {
+    const a = n.map((x) => dropRefs(x, gone, path, hit)).filter((x) => x !== undefined);
+    return a.length ? a : undefined;
+  }
+  if (!n || typeof n !== 'object') return n;
+  if (typeof (n as R).reference === 'string' && gone((n as R).reference as string)) {
+    hit(path ? `${path}.reference` : 'reference');
+    return undefined;
+  }
+  const out: R = {};
+  for (const [k, v] of Object.entries(n)) {
+    const x = dropRefs(v, gone, path ? `${path}.${k}` : k, hit);
+    if (x !== undefined) out[k] = x;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 // One path equivalence: the Microsoft path files a Coverage's policy type (the Policy Activity code, e.g. PPO) under
 // `relationship`; the new path under `type`, its FHIR field. The old `relationship` is compared as `type` only when the old
@@ -307,9 +336,13 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
     const m = match.get(t);
     return m ? `${m.resourceType}/${m.id}` : null;
   }, { role: (v: string) => roles.get(v) });
+  const gone = (v: string) => { const t = byRef.get(v); return !!t && !!explain(t); };
   for (const [r, m] of match) {
-    if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
+    if (!m) add(r.resourceType, '(record)', explain(r));
+    else {
+      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
+      for (const p of new Set(diff(old, prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
+    }
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());

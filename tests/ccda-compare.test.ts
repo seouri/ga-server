@@ -51,6 +51,29 @@ test('an empty old placeholder (no value, no code beyond text) is explained, not
   ]);
 });
 
+test('a record holding no information never matches (even by a shared id); a reference to it is explained, a reference to a record with information is not', () => {
+  const cat = [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }];
+  const ph = { resourceType: 'Observation', id: 'ph', identifier: id('org'), status: 'final', category: cat, subject }; // shares the organizer's id
+  const val = (i: string, v: string) => ({ resourceType: 'Observation', id: i, identifier: id(v), status: 'final', category: cat, code: { text: 'K' }, valueString: v, subject });
+  const report = (...refs: string[]) => ({ resourceType: 'DiagnosticReport', identifier: id('org'), status: 'final', subject, result: refs.map((reference) => ({ reference })) });
+  const neu = [report('Observation/n1'), val('n1', 'a')];
+  expect(compareCcda(SYNTHETIC, [report('Observation/ph', 'Observation/o1'), ph, val('o1', 'a')] as Resource[], neu as Resource[], []).losses).toEqual([
+    { type: 'DiagnosticReport', path: 'result.reference', count: 1, explained: 'reference to a record holding no information' },
+    { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code beyond text' },
+  ]);
+  // An id-only record (a facility the Microsoft path read nothing from), and the reference to it.
+  const enc = (ref: string) => ({ resourceType: 'Encounter', identifier: id('e'), status: 'finished', location: [{ location: { reference: ref } }] });
+  expect(pairLosses([enc('Location/L'), { resourceType: 'Location', id: 'L' }], [{ ...enc('Location/x'), location: undefined }])).toEqual([
+    { type: 'Encounter', path: 'location.location.reference', count: 1, explained: 'reference to a record holding no information' },
+    { type: 'Location', path: '(record)', count: 1, explained: 'nothing but its id' },
+  ]);
+  // A reference to an unmatched record that holds information stays a loss, and so does the record.
+  expect(compareCcda(SYNTHETIC, [report('Observation/o2', 'Observation/o1'), val('o2', 'b'), val('o1', 'a')] as Resource[], neu as Resource[], []).losses).toEqual([
+    { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
+    { type: 'Observation', path: '(record)', count: 1 },
+  ]);
+});
+
 test('an entry only the new path produces is a gain', () => {
   const r = run(SYNTHETIC, MS_SYNTHETIC());
   expect(r.gains).toEqual({ Observation: 1 }); // the vital signs organizer
@@ -207,10 +230,10 @@ test('placeholder, root-id, status and date rules stay narrow', () => {
   const cancelled = { resourceType: 'Observation', identifier: id('x'), status: 'cancelled', code: { text: 'K' } };
   expect(pairLosses([cancelled], [])).toEqual([{ type: 'Observation', path: '(record)', count: 1 }]);
   // The root-id rule is for the document Compositions only.
-  expect(pairLosses([{ resourceType: 'Observation', identifier: [...id('o'), { value: '2.25.7' }] }], [{ resourceType: 'Observation', identifier: [...id('o'), { system: 'urn:oid:2.25.7', value: 'z' }] }]))
+  expect(pairLosses([{ resourceType: 'Observation', identifier: [...id('o'), { value: '2.25.7' }], valueString: 'v' }], [{ resourceType: 'Observation', identifier: [...id('o'), { system: 'urn:oid:2.25.7', value: 'z' }], valueString: 'v' }]))
     .toEqual([{ type: 'Observation', path: 'identifier', count: 1 }]);
   // 'unknown' -> entered-in-error changes the meaning.
-  expect(pairLosses([{ resourceType: 'Observation', identifier: id('u'), status: 'unknown' }], [{ resourceType: 'Observation', identifier: id('u'), status: 'entered-in-error' }]))
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('u'), status: 'unknown', valueString: 'v' }], [{ resourceType: 'Observation', identifier: id('u'), status: 'entered-in-error', valueString: 'v' }]))
     .toEqual([{ type: 'Observation', path: 'status', count: 1 }]);
   // Date precision only for date elements: a string that looks like a year is not covered by one that looks like a month.
   expect(pairLosses([{ resourceType: 'Observation', identifier: id('s'), valueString: '1000' }], [{ resourceType: 'Observation', identifier: id('s'), valueString: '1000-12' }]))
