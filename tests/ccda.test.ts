@@ -348,6 +348,14 @@ test('family history: a relative\'s condition is a FamilyMemberHistory, never th
   const timed = EPIC.replace('<value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/>\n                  <entryRelationship',
     '<effectiveTime value="20000101"/><value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/>\n                  <entryRelationship');
   expect(convertCcdaLocal(timed).notImported).toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.46', entries: 1, reason: 'family history onset date not converted' }]);
+  // An age with no number is no onset: the time is the onset, nothing named.
+  const ageless = timed.replace('<value xsi:type="PQ" value="60" unit="a"/>', '<value xsi:type="PQ" nullFlavor="UNK"/>');
+  expect(convertCcdaLocal(ageless).notImported).toEqual([]);
+  expect((convertCcdaLocal(ageless).resources.find((r) => r.resourceType === 'FamilyMemberHistory') as FamilyMemberHistory).condition?.[0].onsetPeriod).toEqual({ start: '2000-01-01' });
+  // A death time beside deceasedInd="false" contradicts it: kept out of the record, and named.
+  const alive = EPIC.replace(/<sdtc:deceasedInd value="true"\/>/, '<sdtc:deceasedInd value="false"/>');
+  expect((convertCcdaLocal(alive).resources.find((r) => r.resourceType === 'FamilyMemberHistory') as FamilyMemberHistory).deceasedBoolean).toBe(false);
+  expect(convertCcdaLocal(alive).notImported).toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.45', entries: 1, reason: 'family history death date not converted' }]);
   expect(out.resources.some((r) => r.resourceType === 'Observation' && /445518008|64572001/.test(JSON.stringify(r)))).toBe(false);
   // A negated condition (FHIR has none) and a related observation other than age at onset or death are named.
   const xml = EPIC.replace('<observation classCode="OBS" moodCode="EVN">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>', '<observation classCode="OBS" moodCode="EVN" negationInd="true">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>');

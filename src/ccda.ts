@@ -383,12 +383,18 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       const unread = related.filter((c) => negated(c) || !hasTemplate(c, ...FAMILY_DETAILS));
       add(name, root0(o.templateId), unread.length, 'family history detail not converted');
       // FHIR has one onset: an age at onset wins over the observation's own time.
-      const aged = related.some((c) => !negated(c) && hasTemplate(c, OID.OID_AGE_OBSERVATION));
+      // Only an age with a number is an onset (processFamilyHistoryObservation reads it as a quantity); else the time is the onset.
+      const aged = related.some((c) => !negated(c) && hasTemplate(c, OID.OID_AGE_OBSERVATION) && Number.isFinite(Number.parseFloat(attr(c.value, 'value') ?? '')));
       add(name, root0(o.templateId), aged && o.effectiveTime?.[0] ? 1 : 0, 'family history onset date not converted');
     };
     for (const e of entries) {
       for (const o of e.observation ?? []) walk(o, false);
       for (const org of e.organizer ?? []) {
+        // FHIR has one deceased[x]: a death time beside deceasedInd="false" contradicts it and is kept out, so it is named.
+        const person = org.subject?.relatedSubject?.subject;
+        if (hasTemplate(org, OID.OID_FAMILY_HISTORY_ORGANIZER) && person?.['sdtc:deceasedInd']?.['@_value'] === 'false' && person['sdtc:deceasedTime']?.['@_value']) {
+          add(name, root0(org.templateId), 1, 'family history death date not converted');
+        }
         const read = hasTemplate(org, OID.OID_FAMILY_HISTORY_ORGANIZER) ? family : (o: CcdaObservation) => walk(o, true);
         for (const c of org.component ?? []) for (const o of c.observation ?? []) read(o);
       }
