@@ -7,7 +7,7 @@ import { importResources, type ImportReport } from '../engine.ts';
 import { withImportLock } from '../lock.ts';
 import { ehiDate } from './dates.ts';
 import { mapEncounters } from './encounters.ts';
-import { type EhiCtx, ehiId, encounterRef, localId, PATIENT_REF, resolveUnlinked } from './ids.ts';
+import { type EhiCtx, ehiId, epicId, encounterRef, localId, PATIENT_REF, resolveUnlinked } from './ids.ts';
 import type { EhiTables, Row } from './read.ts';
 import { rtfToText } from './rtf.ts';
 
@@ -92,7 +92,7 @@ export function mapNotes(t: EhiTables, ctx: EhiCtx, dir: string): { resources: R
     return {
       resourceType: 'DocumentReference',
       id,
-      identifier: [ehiId(ctx, 'HNO_INFO', r.NOTE_ID)],
+      identifier: [ehiId(ctx, 'HNO_INFO', r.NOTE_ID), ...epicId(ctx, 'note', r.NOTE_ID)],
       status: r.DELETE_INSTANT_DTTM ? 'entered-in-error' : 'current',
       ...(type && { type: { text: type } }),
       ...(r.NOTE_DESC && { description: r.NOTE_DESC }),

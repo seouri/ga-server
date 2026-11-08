@@ -48,6 +48,8 @@ export const COMPARTMENT: Record<string, string> = {
   ...Object.fromEntries(['Immunization', 'AllergyIntolerance', 'FamilyMemberHistory', 'Device', 'EpisodeOfCare', 'Consent'].map((t) => [t, 'patient'])),
   Coverage: 'beneficiary',
 };
+// Epic's note id (HNO) under an org root: the id of a clinical note, the EHI export's HNO_INFO NOTE_ID.
+const EPIC_NOTE = /^urn:oid:1\.2\.840\.114350\.1\.13\.\d+\.2\.7\.2\.727879$/;
 // Not patient data: linked globally. Any other type is not linked.
 const SHARED = new Set(['Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Medication']);
 // Medplum's validator reports 400 with structure/invariant issues carrying an element path. Generic 'invalid'
@@ -324,6 +326,18 @@ export async function importResources(
   // record from the same kind of source (Epic reuses entry ids; one batch must not merge into itself). One remaining
   // candidate is a link; several, or only same-source ones, are possible duplicates (C-CDA excepted: milestone 1 already
   // tells same-id entries apart by content, and real documents reuse ids across whole groups of entries).
+  // The EHI systems (one per export org) of the patient's notes, read once per import when a note carries an Epic note id.
+  let noteSystems: Promise<string[]> | undefined;
+  const ehiNotes = async (ids: string[]): Promise<R[]> => {
+    if (!ids.length) return [];
+    noteSystems ??= client.searchResources('DocumentReference', { subject: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' })
+      .then((ds) => [...new Set(ds.flatMap((d) => (d.identifier ?? []).filter((i) => i.system?.startsWith('urn:ga-server:id:ehi:') && i.value?.startsWith('HNO_INFO|')).map((i) => i.system as string)))]);
+    const out: R[] = [];
+    for (const system of await noteSystems) for (const id of ids) {
+      out.push(...((await client.searchResources('DocumentReference', { identifier: `${system}|HNO_INFO|${id}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' })) as R[]));
+    }
+    return out;
+  };
   const linkHit = async (incoming: R, ident: Identifier): Promise<{ hit?: R; dups: R[] }> => {
     const type = incoming.resourceType;
     const field = COMPARTMENT[type];
@@ -338,6 +352,15 @@ export async function importResources(
     const { found: all, free: open } = await linkCandidates(client, type, epic, patientId, ident.system as string);
     const found = all as R[];
     const free = open as R[];
+    // A note's Epic id (HNO note id) is the NOTE_ID of the EHI note GA may already hold (identifier <ehi system>|HNO_INFO|<id>,
+    // with no Epic-OID identifier of its own): such a note is a candidate too.
+    if (type === 'DocumentReference') {
+      for (const n of await ehiNotes(epic.filter((i) => EPIC_NOTE.test(i.system ?? '')).map((i) => i.value as string))) {
+        if (found.some((f) => f.id === n.id)) continue;
+        found.push(n);
+        if (!idList(n).some((x) => x.system === ident.system)) free.push(n);
+      }
+    }
     if (free.length === 1) return { hit: free[0], dups: [] };
     if (free.length) return { dups: free };
     return { dups: source.kind === 'ccda' ? [] : found };

@@ -395,7 +395,7 @@ describe('EHI mappers', () => {
     const text = (d: DocumentReference) => d.content.map((x) => (x.attachment.data ? Buffer.from(x.attachment.data, 'base64').toString('utf8') : x.attachment.title));
     expect(a).toMatchObject({
       id: 'HNO_INFO-1001',
-      identifier: [{ system: SYS, value: 'HNO_INFO|1001' }],
+      identifier: [{ system: SYS, value: 'HNO_INFO|1001' }, { system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.727879', value: '1001' }], // its Epic note id links C-CDA notes
       status: 'current',
       type: { text: 'Progress Notes' },
       description: 'Progress Notes',

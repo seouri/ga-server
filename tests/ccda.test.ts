@@ -736,3 +736,26 @@ test('id-less CareTeams with different members stay apart on import; a re-import
     expect(await client.searchResources('CareTeam', { subject: `Patient/${pid}` })).toHaveLength(2);
   });
 });
+
+test('a C-CDA note whose Epic note id is an EHI note GA holds merges into it: one record, both identifiers', async () => {
+  const root = '1.2.840.114350.1.13.999.2.7.2.727879'; // a synthetic Epic org root, the note-id suffix
+  const xml = `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="NOTE-DOC"/><effectiveTime value="20240210"/>
+    <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
+    <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.65"/><code code="11506-3" codeSystem="2.16.840.1.113883.6.1"/>
+    <title>Progress Notes</title><text><paragraph ID="n1">Seen today, improving.</paragraph></text>
+    <entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.202"/><id root="${root}" extension="5551"/>
+      <code code="34109-9" codeSystem="2.16.840.1.113883.6.1"/><text><reference value="#n1"/></text><statusCode code="completed"/><effectiveTime value="20240210"/></act></entry>
+    </section></component></structuredBody></component></ClinicalDocument>`;
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const ehiNote = (id: string) => client.createResource({ resourceType: 'DocumentReference', status: 'current', subject: { reference: `Patient/${pid}` },
+      identifier: [{ system: 'urn:ga-server:id:ehi:test-org', value: `HNO_INFO|${id}` }], content: [{ attachment: { contentType: 'text/plain', data: 'eA==' } }] });
+    const kept = await ehiNote('5551');
+    await ehiNote('5552');
+    await importPath(client, cfgFor(pid), writeDoc(xml), pid);
+    const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}` });
+    const merged = notes.filter((d) => d.identifier?.some((i) => i.system === `urn:oid:${root}`));
+    expect(merged.map((d) => d.id)).toEqual([kept.id]);
+    expect(notes.filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'))).toHaveLength(2);
+  });
+});
