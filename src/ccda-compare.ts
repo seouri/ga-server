@@ -321,6 +321,16 @@ function asDispense(o: Resource, n: Resource): Resource {
     ...(requester ? { performer: [{ function: DATA_ENTERER, actor: requester }] } : {}) } as unknown as Resource;
 }
 
+// One correction, not a loss: the Microsoft path reads a PQ value written with a leading dot (value=".14") without the dot (14);
+// the new path reads the number (0.14). The old value is replaced by the new one only when the source holds such a value whose
+// digits are the old number and whose number is the new one.
+const DOT_VALUE = /<value\b[^>]*\bvalue="(\.\d+)"/g;
+function leadingDot(o: Resource, n: Resource, dots: string[]): Resource {
+  const [a, b] = [(o as { valueQuantity?: { value?: number } }).valueQuantity, (n as { valueQuantity?: { value?: number } }).valueQuantity];
+  if (o.resourceType !== 'Observation' || a?.value === undefined || !dots.some((d) => Number(d.slice(1)) === a.value && Number(d) === b?.value)) return o;
+  return { ...o, valueQuantity: { ...a, value: b?.value } } as Resource;
+}
+
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
 const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
 
@@ -331,6 +341,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
   const negated = new Set((ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []).flatMap((sec) => sec.entry ?? [])
     .flatMap((e) => e.substanceAdministration ?? []).filter((sa) => sa['@_negationInd'] === 'true').flatMap((sa) => cdaKeys(sa as unknown as R)));
+  const dots = [...xml.matchAll(DOT_VALUE)].map((m) => m[1]);
   const match = matchEntries(o, n);
   const losses = new Map<string, Loss>();
   const add = (type: string, path: string, explained?: string) => {
@@ -353,7 +364,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', explain(r));
     else {
-      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
+      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(leadingDot(refusedVaccine(r, m, negated), m, dots), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
       for (const p of new Set(diff(old, prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
     }
   }

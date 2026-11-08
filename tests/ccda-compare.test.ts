@@ -166,6 +166,15 @@ test('a coding display repeating its CodeableConcept text is that text; a differ
     .toEqual([{ type: 'MedicationStatement', path: 'medication[x].text', count: 1 }]);
 });
 
+test('a leading-dot PQ value the Microsoft path read without its dot is a correction; any other number difference is a loss', () => {
+  const xml = (v: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody/></component><value xsi:type="PQ" value="${v}" unit="/d"/></ClinicalDocument>`;
+  const obs = (value: number) => ({ resourceType: 'Observation', identifier: id('q'), status: 'final', subject, code: { text: 'K' }, valueQuantity: { value, unit: '/d' } });
+  const losses = (v: string, a: number, b: number) => compareCcda(xml(v), [obs(a)] as Resource[], [obs(b)] as Resource[], []).losses;
+  expect(losses('.25', 25, 0.25)).toEqual([]);
+  expect(losses('.25', 25, 2.5)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
+  expect(losses('0.25', 25, 0.25)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))
