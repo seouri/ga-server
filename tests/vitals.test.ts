@@ -80,3 +80,31 @@ test('pairBloodPressure never pairs a reading with itself', async () => {
   const one = { resourceType: 'Observation', status: 'final', id: 'x', code: { text: 'Systolic/diastolic BP - diastolic', coding: [{ code: '8462-4' }] }, valueQuantity: { value: 80 }, effectiveDateTime: '2026-11-03T13:01:00Z' } as never;
   expect(pairBloodPressure([one])).toEqual([one]);
 });
+
+const ref = (code: string) => ({ coding: [{ system: 'http://loinc.org', code }] });
+const bpPanel = (id: string, s: number, d: number, extra: Partial<Observation> = {}): Observation => o('Blood pressure panel', { id, meta: apple, device: { display: 'Cuff' }, effectiveDateTime: '2026-11-04T08:00:00Z',
+  component: [{ code: { text: 'Systolic' }, valueQuantity: { value: s, unit: 'mm[Hg]' } }, { code: { text: 'Diastolic' }, valueQuantity: { value: d, unit: 'mm[Hg]' } }], ...extra });
+const pdf = { source: '/x/Health_log.pdf', tag: [{ system: 'urn:ga-server:tag', code: 'src-pdf' }, { system: 'urn:ga-server:tag', code: 'extracted-by-llm' }] };
+const pdfBp = (s: number, d: number): Observation[] => [
+  o('Systolic', { id: 'ps', meta: pdf, code: { text: 'Systolic', ...ref('8480-6') }, effectiveDateTime: '2026-11-04', valueQuantity: { value: s, unit: 'mmHg' } }),
+  o('Diastolic', { id: 'pd', meta: pdf, code: { text: 'Diastolic', ...ref('8462-4') }, effectiveDateTime: '2026-11-04', valueQuantity: { value: d, unit: 'mmHg' } }),
+];
+const run = (obs: Observation[]) => vitals({ search: async () => ({ resourceType: 'Bundle', entry: obs.map((resource) => ({ resource })) }) } as unknown as MedplumClient, 'p', { name: 'blood pressure' });
+
+test('vitals: the same reading from a document and Apple Health is one row (known setting, both sources and ids)', async () => {
+  const { rows } = await run([bpPanel('a', 112, 72), ...pdfBp(112, 72)]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ setting: 'home', source: 'Apple Health (Cuff); Health_log.pdf', id: 'a', ids: ['a', 'ps'], flags: ['read from a document by AI'] });
+});
+test('vitals: different numbers, same source or two known settings stay separate rows', async () => {
+  expect((await run([bpPanel('a', 99, 70), ...pdfBp(99, 69)])).rows).toHaveLength(2);
+  expect((await run([bpPanel('a', 120, 80), bpPanel('b', 120, 80)])).rows).toHaveLength(2);
+  const clinic = o('Blood pressure', { id: 'c', meta: { source: '/e', tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, effectiveDateTime: '2026-11-04',
+    component: [{ code: { text: 'Systolic' }, valueQuantity: { value: 120 } }, { code: { text: 'Diastolic' }, valueQuantity: { value: 80 } }] });
+  expect((await run([bpPanel('a', 120, 80), clinic])).rows).toHaveLength(2);
+});
+test('vitals: a single-value reading (weight) from a document and Apple Health is one row', async () => {
+  const w = (id: string, meta: Observation['meta'], date: string, unit: string): Observation => o('Weight', { id, meta, effectiveDateTime: date, code: { text: 'Weight', ...ref('29463-7') }, valueQuantity: { value: 70, unit } });
+  const client = { search: async () => ({ resourceType: 'Bundle', entry: [w('a', apple, '2026-11-04T07:00:00Z', 'kg'), w('p', pdf, '2026-11-04', 'kilogram')].map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await vitals(client, 'p', { name: 'weight' })).rows).toMatchObject([{ setting: 'home', ids: ['a', 'p'] }]);
+});

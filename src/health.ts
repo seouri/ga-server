@@ -1,7 +1,7 @@
 // health_summary: a one-call snapshot of the record, built from the other read tools' code; each section fails on its own.
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Encounter, Endpoint, Patient } from '@medplum/fhirtypes';
+import type { Encounter, Endpoint, Observation, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
 import { collect, fit, labResults } from './labs.ts';
 import { concept, type Kind, listRows, loadLists } from './lists.ts';
@@ -9,7 +9,7 @@ import { part, SOURCES } from './whats-new.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { healthMaintenance, raiseNow } from './maintenance.ts';
 import { ageOn } from './vaccines.ts';
-import { newestFirst, vitalRow, vitalSearches } from './vitals.ts';
+import { newestFirst, pairBloodPressure, readingRows, vitalSearches } from './vitals.ts';
 
 const VITALS = ['weight', 'bmi', 'blood pressure', 'resting heart rate'];
 
@@ -18,14 +18,14 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
   const tomorrow = new Date(Date.parse(asOf) + 864e5).toISOString().slice(0, 10);
   const opts = { cache: 'no-cache' as const };
   const subject = `Patient/${patientId}`;
-  // Newest reading per setting, by name and by concept code; a second one the same day under another name pairs a separate systolic
-  // and diastolic (found by text: "blood pressure" as a concept is only the panel).
-  const vital = async (name: string, home: boolean) => {
-    const found = await Promise.all(vitalSearches(name).map((p) => collect(client, 'Observation', new URLSearchParams([
+  // Newest reading per setting, by name and by concept code; one row per reading (a separate systolic and diastolic pair up, and the same
+  // reading from a document and another source is one: readingRows). BP is found by text: "blood pressure" as a concept is only the panel.
+  const vital = async (name: string) => {
+    const found = await Promise.all(vitalSearches(name).flatMap((p) => [true, false].map((home) => collect(client, 'Observation', new URLSearchParams([
       ['subject', subject], ['category', 'vital-signs'], p, [home ? '_tag' : '_tag:not', `${TAG}|src-apple-health`], ['_sort', '-date,_id'], ['_count', '2'],
-    ]), vitalRow, Infinity, 1)));
-    const rows = newestFirst(found.flatMap((f) => f.rows));
-    return rows.filter((r, i) => i === 0 || (r.date === rows[0].date && r.name !== rows[0].name)).slice(0, 2);
+    ]), (o: Observation) => o, Infinity, 1))));
+    const rows = newestFirst(readingRows(pairBloodPressure([...new Map(found.flatMap((f) => f.rows).map((o) => [o.id, o])).values()])));
+    return [rows.find((r) => r.setting === 'home'), rows.find((r) => r.setting !== 'home')].filter((r) => !!r);
   };
   // shortcut: a source counts only when it left an Observation (a medication-only PDF is not listed); check DocumentReferences too if that matters.
   const imported = async ([tag, source]: [string, string]) => {
@@ -36,7 +36,7 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
     part(client.readResource('Patient', patientId, opts).then((p: Patient) => ({ age: p.birthDate ? ageOn(p.birthDate, asOf) : undefined, sex: p.gender }))),
     part(eps.then((e) => loadLists(client, patientId, e))),
     part(labResults(client, patientId, { summary: true, keyOnly: true, limit: 1000 })),
-    part(Promise.all(VITALS.flatMap((n) => [vital(n, false), vital(n, true)])).then((r) => r.flat())),
+    part(Promise.all(VITALS.map(vital)).then((r) => r.flat())),
     // The engine's short view, so a chat app whose tool list predates health_maintenance still answers "what's due" from it.
     part(healthMaintenance(client, patientId, asOf).then((m) => ({
       due: m.items.filter((i) => raiseNow(i, asOf)).map(({ name, kind, status, dueDate, importance }) => ({ name, kind, status, dueDate, importance })),

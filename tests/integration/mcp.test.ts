@@ -429,7 +429,7 @@ describe('purpose-built read tools', () => {
     ]);
     const v = s.vitals.map((r: { name: string; setting: string; value: string }) => [r.setting, r.name, r.value]);
     expect(v).toEqual(expect.arrayContaining([['clinic', 'Wt', '71 kg'], ['home', 'Body weight', '70 kg'], ['home', 'Blood pressure panel', 'Systolic: 118 mmHg; Diastolic: 76 mmHg']]));
-    expect(v.filter((r: string[]) => r[0] === 'clinic' && /blood pressure/.test(r[1])).map((r: string[]) => r[1]).sort()).toEqual(['Diastolic blood pressure', 'Systolic blood pressure']);
+    expect(v.filter((r: string[]) => r[0] === 'clinic' && /blood pressure/i.test(r[1]))).toEqual([['clinic', 'Blood pressure', 'Systolic: 120 mmHg; Diastolic: 80 mmHg']]); // a separate systolic and diastolic pair up
     expect(s.maintenance).toMatchObject({ due: expect.any(Array), upcoming: expect.any(Array), note: expect.stringContaining('health_maintenance') });
     expect(s.lastVisit).toMatchObject({ date: '2025-06-01', type: 'Office visit', class: 'ambulatory' });
     expect(s.imports.sources.map((x: { source: string }) => x.source)).toEqual(expect.arrayContaining(['Epic EHI export', 'Apple Health', 'PDF or photo', expect.stringMatching(/^hospital portal/)]));

@@ -62,7 +62,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 
 `ga import <unzipped apple_health_export folder>` (CLI only; no extra args, unzip `export.zip` first). Identifiers use `urn:ga-server:id:apple-health`; tag `src-apple-health`; re-import is a no-op, a newer export updates changed records (its last day is partial).
 
-- Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each. The `vitals` tool applies the rules below (readings by default, summaries with `daily: true`).
+- Per-reading vitals (heart rate, BP, weight, SpO2, ...) are measurements, one Observation each. The `vitals` tool applies the rules below (readings by default, summaries with `daily: true`); the same reading from a document and another source is one row.
 - Records coded "daily mean" or "daily total" are summaries, not readings. Steps and distance take the largest single source per day.
 - Sleep is one Observation per night (stage components).
 - "Activity rings, daily (Apple Health)" is Apple's own per-day ring totals: components Active energy burned (kcal), Exercise minutes, Stand hours.
