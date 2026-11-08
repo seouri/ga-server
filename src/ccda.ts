@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
-import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir } from '../vendor/medplum-ccda/index.ts';
+import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
@@ -251,7 +251,7 @@ const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
-export const sectionName = (s: CcdaSection) => textOf(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
+export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
 export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length;
 
 // Converts in process with the vendored @medplum/ccda. Accounting: every section is on the Composition (its narrative); every

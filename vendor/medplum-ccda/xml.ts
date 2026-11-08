@@ -95,6 +95,8 @@ export function convertXmlToCcda(xml: string): Ccda {
     parseTagValue: false,
     jPath: true,
     isArray: (_tagName, jPath, _isLeafNode, _isAttribute) => ARRAY_PATHS.some((p) => (jPath as string).endsWith(p)),
+    // A title may hold markup (<content>, <sup>): kept as its raw inner XML, in order, for nodeToPlainText
+    stopNodes: ['*.title'],
   });
 
   const parsedData = parser.parse(xml);

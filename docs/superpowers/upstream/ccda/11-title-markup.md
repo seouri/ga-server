@@ -40,8 +40,12 @@ Expected FHIR (fields this fix changes):
 { "resourceType": "DocumentReference", "content": [{ "attachment": { "contentType": "text/plain", "title": "Patient Instructions" } }] }
 ```
 
-## PR: fix(ccda): flatten document and section titles to text
+## PR: fix(ccda): read titles as plain text, in order
 
-- New `nodeToPlainText(node)` returns all the node's text with whitespace collapsed. It puts the node's own `#text` first, then its elements' text, using the existing `indexNarrativeText` walk with a scratch map. It is used for `Composition.title`, `Composition.section.title` and the note `attachment.title`.
-- Limitation: the parsed node does not keep the order of mixed content, and the parser trims each text piece. That means `A <content>B</content> C` reads as `AC B`. All the text is kept, but the order can be lost. Fixing this needs the parser's `preserveOrder`, which is out of scope.
+- `convertXmlToCcda` makes `<title>` a parser stop node (`stopNodes: ['*.title']`). The parser then returns the title's raw inner XML in document order. A title with attributes still has them under `@_`, with the text under `#text`.
+- A new exported `nodeToPlainText(node)` removes tags, decodes the XML entities (a stop node is not entity-decoded) and collapses whitespace. It is used for `Composition.title`, `Composition.section.title` and the note's `attachment.title`.
+  - `Patient <content>Instructions</content> for Visit` becomes `Patient Instructions for Visit`.
+  - `Lab <sup>2</sup> x` becomes `Lab 2 x`.
+  - `Notes &amp; Plan` becomes `Notes & Plan`.
+- The parsed object form loses the order of mixed content and fuses the trimmed text pieces, so it cannot be used for this. No other code reads `title`: section routing uses templateIds.
 - Test: `title-markup.test.ts`.

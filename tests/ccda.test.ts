@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import type { CareTeam, Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
-import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
+import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
+import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
 
@@ -336,6 +337,12 @@ test('a section title with markup: its note is imported, not refused', async () 
     const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}` });
     expect(notes.map((d) => d.content[0].attachment.title)).toContain('Patient Instructions');
   });
+});
+
+test('a section title with markup is named as plain text, in order', () => {
+  const xml = EPIC.replace('<title>Insurance</title>', '<title>Insurance <content>for</content> Visit &amp; Plan</title>');
+  const sections = (convertXmlToCcda(xml).component?.structuredBody?.component ?? []).flatMap((c) => c.section);
+  expect(sections.map(sectionName)).toContain('Insurance for Visit & Plan');
 });
 
 test('the Epic-style fixture imports with no record refused, and a re-import changes nothing', async () => {

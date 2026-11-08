@@ -25,3 +25,19 @@ test('a document or section title with markup becomes plain text (Composition an
   expect(composition.section?.[0].title).toBe('Patient Instructions');
   expect(note.content[0].attachment.title).toBe('Patient Instructions');
 });
+
+test('a title with markup keeps its words in document order, entities decoded', () => {
+  const titles = (title: string) => {
+    const bundle = convertCcdaToFhir(
+      convertXmlToCcda(`<ClinicalDocument xmlns="urn:hl7-org:v3"><title>${title}</title>
+  <component><structuredBody><component><section><code code="69730-0" codeSystem="2.16.840.1.113883.6.1"/><title lang="en">${title}</title><text>x</text></section></component></structuredBody></component>
+</ClinicalDocument>`)
+    );
+    const [composition] = resourcesOf<Composition>(bundle, 'Composition');
+    return [composition.title, composition.section?.[0].title];
+  };
+  expect(titles('Patient <content styleCode="Bold">Instructions</content> for Visit')).toEqual(['Patient Instructions for Visit', 'Patient Instructions for Visit']);
+  expect(titles('Lab <sup>2</sup> x')).toEqual(['Lab 2 x', 'Lab 2 x']);
+  expect(titles('Notes &amp; <content>Plan</content>')).toEqual(['Notes & Plan', 'Notes & Plan']);
+  expect(titles('Plain &lt;title&gt;')).toEqual(['Plain <title>', 'Plain <title>']);
+});

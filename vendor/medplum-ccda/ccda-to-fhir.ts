@@ -1737,18 +1737,32 @@ function nodeToString(node: CcdaText | string | undefined): string | undefined {
   return undefined;
 }
 
+const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
 /**
- * Returns all the text of a node that may hold markup (a title with `<content>`), whitespace collapsed.
- * The parsed node does not keep the order of mixed content: its own text comes first, then its elements' text.
- * @param node - The parsed node.
+ * Returns the plain text of a title: its raw inner XML (a parser stop node, so markup such as `<content>` stays in
+ * order) without tags, entities decoded, whitespace collapsed.
+ * @param node - The parsed title: a string, or an object with `#text` when the title has attributes.
  * @returns The plain text, or undefined when there is none.
  */
-function nodeToPlainText(node: unknown): string | undefined {
-  if (node && typeof node === 'object' && '#text' in node) {
-    const { '#text': text, ...rest } = node as Record<string, unknown>;
-    node = [text, rest];
+export function nodeToPlainText(node: unknown): string | undefined {
+  const raw = node && typeof node === 'object' ? (node as Record<string, unknown>)['#text'] : node;
+  if (typeof raw !== 'string') {
+    return undefined;
   }
-  return indexNarrativeText(node, new Map()).replace(/\s+/g, ' ').trim() || undefined;
+  return (
+    raw
+      .replace(/<[^>]*>/g, '')
+      .replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (m, dec, hex, name) => {
+        const code = dec ? +dec : hex ? parseInt(hex, 16) : undefined;
+        if (code === undefined) {
+          return XML_ENTITIES[name] ?? m;
+        }
+        return code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      })
+      .replace(/\s+/g, ' ')
+      .trim() || undefined
+  );
 }
 
 /**
