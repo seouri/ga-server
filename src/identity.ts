@@ -62,10 +62,11 @@ export const sorted = (_k: string, v: unknown) =>
 
 // Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
 // Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
-export function contentHash(r: Resource, patientId = ''): string {
+// refs: keep references (for a record that is its links, once they point at stored records).
+export function contentHash(r: Resource, patientId = '', refs = false): string {
   const { id: _id, meta: _meta, ...rest } = r;
   const scope = 'subject' in r || 'patient' in r ? patientId : '';
-  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? undefined : sorted(k, v)))}`);
+  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' && !refs ? undefined : sorted(k, v)))}`);
 }
 
 // Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
@@ -75,7 +76,9 @@ const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
 // Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
 function ccdaKey(r: Resource, patientId: string): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
-  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId)}`;
+  // A PractitionerRole is its links (practitioner, organization): without them every id-less role hashes alike and they merge
+  // into one. The engine keys a record after pointing its references at their stored targets (dependencies first): stable.
+  if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, r.resourceType === 'PractitionerRole')}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
   return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }

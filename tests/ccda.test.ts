@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
-import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Reference, Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Practitioner, PractitionerRole, Reference, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -687,4 +687,32 @@ test('a value with a nullFlavor is data-absent and not named; a number that does
   const { notImported, obs } = inr('<value xsi:type="PQ" value="abc" unit="mg/dL"/>');
   expect(notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'PQ value not converted' }]);
   expect(obs.valueQuantity).toBeUndefined();
+});
+
+test('id-less PractitionerRoles of different practitioners stay apart on import; a re-import adds none', async () => {
+  const visit = (id: string, npi: string) => `<entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+    <id root="2.16.840.1.113883.19.5" extension="${id}"/><code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+    <effectiveTime value="20240102"/><performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="${npi}"/></assignedEntity></performer></encounter></entry>`;
+  const xml = `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="ROLES-DOC"/>
+    <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
+    <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/>
+    <title>Encounters</title><text>x</text>${visit('V-1', 'NPI-A')}${visit('V-2', 'NPI-B')}</section></component></structuredBody></component></ClinicalDocument>`;
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const file = writeDoc(xml);
+    await importPath(client, cfgFor(pid), file, pid);
+    const who = async () => {
+      const encounters = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
+      const npis = [];
+      for (const e of encounters) {
+        const role = await client.readReference(e.participant?.[0].individual as Reference<PractitionerRole>);
+        const doc = await client.readReference(role.practitioner as Reference<Practitioner>);
+        npis.push(doc.identifier?.[0].value);
+      }
+      return npis.sort();
+    };
+    expect(await who()).toEqual(['NPI-A', 'NPI-B']);
+    expect(await importPath(client, cfgFor(pid), file, pid)).toMatchObject({ created: 0 });
+    expect(await who()).toEqual(['NPI-A', 'NPI-B']);
+  });
 });
