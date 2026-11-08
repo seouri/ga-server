@@ -124,3 +124,9 @@ test('sameDay reads the instant in the first value\'s offset; a date-only side c
   expect(sameDay('2024-03-01', '2024-03-01T22:00:00-05:00')).toBe(true);
   expect(sameDay('2024-03-01', '2024-03-02')).toBe(false);
 });
+
+test('a C-CDA Encounter keys on its id alone from the in-process converter; the Microsoft path keeps id + content hash', () => {
+  const enc = { resourceType: 'Encounter', identifier: [{ system: 'urn:oid:1.2', value: 'v1' }], status: 'finished' } as Resource;
+  expect(stableIdentifier(enc, { ...ccda, local: true }, 'h').value).toBe('Encounter|urn:oid:1.2|v1');
+  expect(stableIdentifier(enc, ccda, 'h').value).toMatch(/^Encounter\|urn:oid:1\.2\|v1\|[0-9a-f]{64}$/);
+});
