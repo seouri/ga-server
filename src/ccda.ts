@@ -4,6 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
+import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
@@ -264,9 +265,10 @@ const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT', 'REAL', 'TS', 
 const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
 const ENCOUNTER_DIAGNOSIS = [OID.OID_ENCOUNTER_DIAGNOSIS, OID.OID_ENCOUNTER_DIAGNOSIS_V2];
 // Sections whose concern acts the library reads as one record per SUBJ observation (processConditionAct, processAllergyIntoleranceAct).
+const ALLERGIES = [OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
+  OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2];
 const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
-  OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED,
-  OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2];
+  OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION, ...ALLERGIES];
 // A goal observation (by its template, in any section, and every observation in the plan of care and goals sections) is read by
 // processGoalObservation, which keeps only these value types and no child observation.
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
@@ -309,6 +311,14 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
     // Concern acts: one record per SUBJ observation (none: the act produced no record).
     const concerns = hasTemplate(s, ...CONCERN) ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length) : [];
+    // An allergy observation's value is read only as the category and type it states (medplum#11308): a code stating neither is named.
+    if (hasTemplate(s, ...ALLERGIES)) {
+      const subj = entries.flatMap((e) => e.act ?? []).flatMap((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ')).flatMap((er) => er.observation ?? []);
+      add(name, OID.OID_ALLERGY_OBSERVATION, subj.filter((o) => {
+        const m = mapCcdaAllergyCategoryAndType(o.value);
+        return (o.value as X | undefined)?.['@_code'] && !m.category && !m.type;
+      }).length, 'allergy type not converted');
+    }
     const expected = statements.length + supplies(s) + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
     add(name, root0(s.templateId), expected - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
     // The library keeps the payer, covered party and subscriber id; a guarantor and the policy holder's own details (name, address) have no Coverage field.

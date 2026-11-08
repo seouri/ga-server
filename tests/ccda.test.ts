@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
-import type { CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -181,7 +181,10 @@ test('a concern act with more than one problem or allergy observation: one recor
   expect(out.resources.filter((r) => r.resourceType === 'Condition').map((c) => (c as Condition).identifier?.[0].value)).toContain('syn-problem-x');
   const allergies = EPIC.replace('</participant>\n                </observation>\n              </entryRelationship>', `</participant>\n                </observation>\n              </entryRelationship>${SECOND}`);
   expect(convertCcdaLocal(allergies).resources.filter((r) => r.resourceType === 'AllergyIntolerance')).toHaveLength(2);
-  expect(convertCcdaLocal(allergies).notImported.filter((n) => n.section === 'Allergies')).toEqual([]);
+  // The second observation's value (a problem code) is no allergy type: named, never a silent food allergy.
+  expect(convertCcdaLocal(allergies).notImported.filter((n) => n.section === 'Allergies')).toEqual([
+    { section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.7', entries: 1, reason: 'allergy type not converted' },
+  ]);
   // Two records from one act must not hide an act that made none.
   const empty = '<entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.3"/><code code="CONC" codeSystem="2.16.840.1.113883.5.6"/><statusCode code="active"/></act></entry>';
   expect(convertCcdaLocal(problems.replace('<text>Hyperlipidemia</text>', `<text>Hyperlipidemia</text>${empty}`)).notImported).toEqual([
@@ -595,4 +598,15 @@ test('vaccine_gaps counts a converted immunization by its CVX code', async () =>
     const flu = (await vaccineGaps(client, pid, '2024-01-01')).results.find((r) => r.vaccine === 'influenza');
     expect(flu).toMatchObject({ status: 'complete', records: [{ date: '2023-10-15' }] });
   });
+});
+
+test('allergy category follows the source: a drug allergy is medication/allergy, not food; a value outside the type value set sets neither and is named', () => {
+  const allergy = (xml: string) => convertCcdaLocal(xml).resources.find((r): r is AllergyIntolerance => r.resourceType === 'AllergyIntolerance') as AllergyIntolerance;
+  expect(allergy(EPIC)).toMatchObject({ category: ['medication'], type: 'allergy' }); // 416098002 Drug allergy
+  const intolerance = EPIC.replace('code="416098002" codeSystem="2.16.840.1.113883.6.96" displayName="Drug allergy"', 'code="235719002" codeSystem="2.16.840.1.113883.6.96" displayName="Food intolerance"');
+  expect(allergy(intolerance)).toMatchObject({ category: ['food'], type: 'intolerance' });
+  const other = EPIC.replace('code="416098002" codeSystem="2.16.840.1.113883.6.96"', 'code="22298006" codeSystem="2.16.840.1.113883.6.96"');
+  expect(allergy(other).category).toBeUndefined();
+  expect(allergy(other).type).toBeUndefined();
+  expect(convertCcdaLocal(other).notImported).toEqual([{ section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.7', entries: 1, reason: 'allergy type not converted' }]);
 });

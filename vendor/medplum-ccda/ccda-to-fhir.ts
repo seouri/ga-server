@@ -115,6 +115,7 @@ import {
   HUMAN_NAME_USE_MAPPER,
   IMMUNIZATION_STATUS_MAPPER,
   LOINC_SUMMARY_OF_EPISODE_NOTE,
+  mapCcdaAllergyCategoryAndType,
   mapCcdaCodeToCodeableConcept,
   mapCcdaSystemToFhir,
   MEDICATION_STATUS_MAPPER,
@@ -601,18 +602,12 @@ class CcdaToFhirConverter {
       identifier: this.mapConcernIdentifiers(act, observation, index),
       clinicalStatus: this.createClinicalStatus(act),
       verificationStatus: this.createVerificationStatus(),
-      type: 'allergy',
-      category: ['food'],
+      ...mapCcdaAllergyCategoryAndType(observation.value),
       patient: createReference(this.patient as Patient),
       recorder: this.mapAuthorToReference(act.author?.[0]),
       recordedDate: this.mapEffectiveTimeToDateTime(act.effectiveTime?.[0]),
       onsetDateTime: this.mapEffectiveTimeToDateTime(observation.effectiveTime?.[0]),
     };
-
-    // Set category based on the observation.value code
-    if ((observation.value as CcdaCode)?.['@_code'] === '414285001') {
-      allergy.category = ['food'];
-    }
 
     allergy.extension = this.mapTextReference(observation.text);
 
