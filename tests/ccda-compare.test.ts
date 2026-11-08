@@ -188,8 +188,8 @@ test('compare never writes', async () => {
 });
 
 test('a document the new path cannot convert is counted and fails the gate', async () => {
-  // An observation without a templateId still crashes the library (deferred library fix).
-  const crash = SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.4.78" extension="2014-06-09"/>', '');
+  // A custodian without assignedCustodian still crashes the library (mapCustodianToReference dereferences it unguarded).
+  const crash = SYNTHETIC.replace(/<custodian>[\s\S]*?<\/custodian>/, '<custodian><x/></custodian>');
   expect(() => convertCcdaLocal(crash)).toThrow();
   const report = await ccdaCompare(reader([doc('Binary/b1')], { 'Binary/b1': crash }), 'p1', 'http://converter/', async () => MS_SYNTHETIC());
   expect(report).toMatchObject({ documents: 1, failed: 1, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] });

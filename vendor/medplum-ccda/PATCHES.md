@@ -6,6 +6,7 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 |---|------|--------|-----|----------|
 | 0 | all `*.ts` | mechanical: strip-only TypeScript: relative imports get `.ts`; `index.ts` no longer re-exports `./fhir-to-ccda/convert` | Node runs .ts directly; `fhir-to-ccda/` is not vendored | none (GA only) |
 | 1 | `ccda-to-fhir.ts`, `oids.ts` | section entries routed by any of the section's templateIds (`getTemplateIds`), not `templateId[0]`; Medications entries-optional and V2 roots routed; `OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED` loses its stray space. Test `test/section-template-order.test.ts` | Epic lists the entries-optional root first: every Epic document threw (or, ignoring unsupported sections, lost its medications); replaces GA's `promote()` pre-pass | existing issue medplum#10671 (proposes this fix; no PR yet); draft `docs/superpowers/upstream/ccda/1-section-template-order.md` |
+| 2 | `ccda-to-fhir.ts` | an observation with no templateId (and a goal with no statusCode) converts: `processObservation` uses `getTemplateIds(observation)` (a goal matched by any of its templates), `mapGoalLifecycleStatus` reads `statusCode?.` Test `test/observation-without-template.test.ts` | `observation.templateId[0]` threw a TypeError and refused the whole document | new issue (none open); may fold into the #10671 PR, same cause; draft `docs/superpowers/upstream/ccda/2-observation-without-template.md` |
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 

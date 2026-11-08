@@ -1154,8 +1154,8 @@ class CcdaToFhirConverter {
   }
 
   private processObservation(section: CcdaSection, observation: CcdaObservation): Resource | undefined {
-    const observationTemplateId = observation.templateId[0]['@_root'];
-    if (observationTemplateId === OID_GOALS_SECTION || observationTemplateId === OID_GOAL_OBSERVATION) {
+    const observationTemplateIds = getTemplateIds(observation);
+    if (observationTemplateIds.includes(OID_GOALS_SECTION) || observationTemplateIds.includes(OID_GOAL_OBSERVATION)) {
       // Goal template
       return this.processGoalObservation(observation);
     }
@@ -1226,7 +1226,7 @@ class CcdaToFhirConverter {
       cancelled: 'cancelled',
       aborted: 'cancelled',
     };
-    return map[observation.statusCode['@_code'] ?? 'active'];
+    return map[observation.statusCode?.['@_code'] ?? 'active'];
   }
 
   private processVitalsObservation(observation: CcdaObservation): Observation | undefined {
