@@ -8,7 +8,8 @@ import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
 import { isPlanned } from '../src/current.ts';
-import { labRow } from '../src/labs.ts';
+import { labResults, labRow, type LabRow } from '../src/labs.ts';
+import { vitals } from '../src/vitals.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -522,4 +523,21 @@ test('a dispense is named from the narrative like its medication', () => {
   expect(xml).not.toBe(EPIC);
   const dispense = convertCcdaLocal(xml).resources.find((r) => r.resourceType === 'MedicationDispense');
   expect(dispense).toMatchObject({ medicationCodeableConcept: { text: 'examplepril 10 mg tablet', coding: [{ code: '314076' }] } });
+});
+
+test('GA\'s readers read the in-process output: lab rows with values, units, interpretation and dates; blood pressure as one reading', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    await importPath(client, cfgFor(pid), writeDoc(EPIC), pid);
+    const labs = (await labResults(client, pid, {})).rows as LabRow[];
+    expect(labs.map(({ date, name, value, range, interpretation }) => ({ date, name, value, range, interpretation }))).toEqual(expect.arrayContaining([
+      { date: '2024-02-10', name: 'Glucose', value: '95 mg/dL', range: '70–99 mg/dL', interpretation: 'N' },
+      { date: '2024-02-10', name: 'INR', value: '1.1', range: undefined, interpretation: undefined },
+      { date: '2024-02-10', name: 'Appearance of Urine', value: 'Specimen looks normal.', range: undefined, interpretation: undefined },
+      { date: '2024-02-10', name: 'Protein [Presence] in Urine by Test strip', value: 'Negative', range: undefined, interpretation: undefined },
+    ]));
+    expect(labs).toHaveLength(4); // the panel is a report, not an empty lab row
+    const { rows } = await vitals(client, pid, {});
+    expect(rows.map(({ name, value, date }) => ({ name, value, date }))).toEqual([{ name: 'Blood pressure', value: 'Systolic: 128 mm[Hg]; Diastolic: 82 mm[Hg]', date: '2024-02-10' }]);
+  });
 });

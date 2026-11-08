@@ -48,6 +48,9 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   };
 }
 
+// A panel that only groups its members (C-CDA vital signs organizer: hasMember, no value): its members are the rows.
+export const isPanel = (o: Observation) => !!o.hasMember?.length && !o.component?.length && !Object.keys(o).some((k) => k.startsWith('value'));
+
 export const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
 
 // since/until (YYYY-MM-DD, inclusive) as repeated date params; le<day> would drop results later on that day, so lt the next day.
@@ -188,7 +191,7 @@ export async function labResults(
   { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string | string[]; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
 ): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
   // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
-  const isLab = (o: Observation) => (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
+  const isLab = (o: Observation) => !isPanel(o) && (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const query = (n?: string) => {
     const q = new URLSearchParams([
