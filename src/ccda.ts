@@ -38,11 +38,11 @@ export async function convertCcdaMs(xml: string, converterUrl: string): Promise<
 type X = Record<string, unknown>;
 const arr = <T>(v: T | T[] | undefined): T[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
 const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
-const cdaKeys = (n: X): string[] =>
+export const cdaKeys = (n: X): string[] =>
   arr(n.id as X | X[] | undefined)
     .filter((i) => i['@_root'] && !i['@_nullFlavor']) // nullFlavor/empty ids identify nothing
     .map((i) => (i['@_extension'] ? `${norm(String(i['@_root']))}|${i['@_extension']}` : norm(String(i['@_root']))));
-const fhirKey = (i: Identifier): string | undefined =>
+export const fhirKey = (i: Identifier): string | undefined =>
   !i.value ? undefined : i.system === 'urn:ietf:rfc:3986' ? norm(i.value) : `${norm(i.system ?? '')}|${i.value}`;
 
 const attr = (n: unknown, k: string) => (n as X | undefined)?.[`@_${k}`] as string | undefined;
@@ -206,7 +206,7 @@ export function ccdaDate(xml: string): string {
   return h && tz ? `${day}T${h}:${mi}:${s ?? '00'}${tz.slice(0, 3)}:${tz.slice(3)}` : day;
 }
 
-const isCcda = (xml: string) => /^﻿?\s*(?:<\?[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*)*<(?:\w+:)?ClinicalDocument[\s/>]/.test(xml);
+export const isCcda = (xml: string) => /^﻿?\s*(?:<\?[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*)*<(?:\w+:)?ClinicalDocument[\s/>]/.test(xml);
 
 export function ccdaFiles(path: string): string[] {
   if (!statSync(path).isDirectory()) return [path];
@@ -252,6 +252,8 @@ const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, root: string) => !!n.templateId?.some((t) => t['@_root'] === root);
+export const sectionName = (s: CcdaSection) => textOf(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
+export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length;
 
 // Converts in process with the vendored @medplum/ccda. Accounting: every section is on the Composition (its narrative); every
 // entry with no record, visit diagnosis the converter drops, and observation value it cannot read is in notImported, with a reason.
@@ -265,7 +267,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
   const untemplated = new Map<CcdaSection, number>();
   for (const s of sections) {
     if (!s.templateId?.length) {
-      untemplated.set(s, (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length);
+      untemplated.set(s, statementCount(s));
       s.entry = [];
       continue;
     }
@@ -282,7 +284,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     if (entries > 0) addNotImported(notImported, [{ section, ...(templateId && { templateId }), entries, reason }]);
   };
   sections.forEach((s: CcdaSection, i) => {
-    const name = textOf(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
+    const name = sectionName(s);
     const made = (comp?.section?.[i]?.entry ?? []).map((e) => byRef.get(e.reference ?? ''));
     const entries = s.entry ?? [];
     add(name, undefined, untemplated.get(s) ?? 0, 'section without template');
