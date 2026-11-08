@@ -446,13 +446,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    async (input) => {
-      try {
-        return await warned(liverFibrosisRisk(input));
-      } catch (e) {
-        return fail(e);
-      }
-    },
+    read(async (input) => liverFibrosisRisk(input)), // bad input (e.g. g/L albumin) comes back as a tool error
   );
   server.registerTool(
     'vaccine_gaps',
