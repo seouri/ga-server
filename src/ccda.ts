@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
-import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, mapTimestampOrBooleanValue, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
+import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, mapTimestampOrBooleanValue, nodeToPlainText, OBSERVATION_VALUE_CONTENT } from '../vendor/medplum-ccda/index.ts';
 import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
@@ -280,8 +280,10 @@ const PLANNED_MOODS = new Set(['INT', 'PRP', 'RQO', 'ARQ']);
 // (age at onset, caused death); a negated one is none (medplum#11243).
 const FAMILY_DETAILS = [OID.OID_AGE_OBSERVATION, OID.OID_FAMILY_HISTORY_DEATH_OBSERVATION];
 const negated = (o: CcdaObservation) => o['@_negationInd'] === 'true';
-// What makes an observation value say something (processVitalsObservation keeps an uncoded observation that has one).
-const VALUED = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText'];
+// What makes an observation value say something (processVitalsObservation keeps an uncoded observation that has one; a typed
+// value without it is data-absent, not converted).
+const VALUED = OBSERVATION_VALUE_CONTENT;
+const NUMERIC = new Set(['PQ', 'REAL', 'INT']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
 export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
@@ -376,7 +378,10 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       }
       const type = o.value?.['@_xsi:type'];
       // A TS or BL value that does not parse (the library's own reader decides) is unread like an unknown type.
-      const unread = (type === 'TS' || type === 'BL') && !Object.keys(mapTimestampOrBooleanValue(o.value as CcdaTimestampOrBoolean)).length;
+      const raw = (o.value as X | undefined)?.['@_value'] as string | undefined;
+      // A number that does not parse: the library writes no value, never NaN.
+      const unread = ((type === 'TS' || type === 'BL') && !Object.keys(mapTimestampOrBooleanValue(o.value as CcdaTimestampOrBoolean)).length) ||
+        (NUMERIC.has(type ?? '') && raw !== undefined && !Number.isFinite(Number.parseFloat(raw)));
       if (type && (unread || (!VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))))) add(name, root0(o.templateId), 1, `${type} value not converted`);
       for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
     };

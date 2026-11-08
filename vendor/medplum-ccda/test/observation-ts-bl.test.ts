@@ -41,3 +41,19 @@ test('a TS or BL value with a nullFlavor is data-absent', () => {
   expect(result('<value xsi:type="TS" nullFlavor="UNK"/>').dataAbsentReason).toEqual(absent);
   expect(result('<value xsi:type="BL" nullFlavor="NI"/>').dataAbsentReason).toEqual(absent);
 });
+
+test('a value of any type with a nullFlavor is data-absent, never an empty value', () => {
+  const absent = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/data-absent-reason', code: 'unknown' }] };
+  for (const type of ['PQ', 'REAL', 'CD', 'CE', 'CO', 'ST', 'INT', 'ED']) {
+    const o = result(`<value xsi:type="${type}" nullFlavor="UNK"/>`);
+    expect(o.dataAbsentReason).toEqual(absent);
+    expect([o.valueQuantity, o.valueCodeableConcept, o.valueString, o.valueInteger]).toEqual([undefined, undefined, undefined, undefined]);
+  }
+  expect(result('<value xsi:type="PQ" nullFlavor="UNK" unit="mg/dL"/>').valueQuantity).toBeUndefined();
+  // A value with content keeps it.
+  expect(result('<value xsi:type="PQ" value="5" unit="mg/dL"/>')).toMatchObject({ valueQuantity: { value: 5 } });
+  expect(result('<value xsi:type="CD" nullFlavor="OTH"><originalText>Other</originalText></value>').dataAbsentReason).toBeUndefined();
+  // A number that does not parse: no value (never NaN) and no data-absent reason (the caller names it).
+  for (const type of ['PQ', 'REAL', 'INT']) expect(result(`<value xsi:type="${type}" value="abc" unit="mg/dL"/>`)).not.toHaveProperty('valueQuantity.value');
+  expect(result('<value xsi:type="INT" value="abc"/>').valueInteger).toBeUndefined();
+});

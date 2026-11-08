@@ -1836,7 +1836,7 @@ class CcdaToFhirConverter {
     // Skip observations with neither a valid code (e.g., nullFlavor="NA") nor a value; a value without a code is still a result,
     // and FHIR requires a code, so it is data-absent
     const value = observation.value as Record<string, unknown> | undefined;
-    const valued = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText'].some((k) => value?.[k] !== undefined);
+    const valued = OBSERVATION_VALUE_CONTENT.some((k) => value?.[k] !== undefined);
     const code =
       this.mapCode(observation.code) ??
       (valued
@@ -1861,16 +1861,23 @@ class CcdaToFhirConverter {
         .filter(Boolean) as Reference<Practitioner>[],
     };
 
-    if (observation.value?.['@_xsi:type']) {
+    if (observation.value?.['@_xsi:type'] && !valued) {
+      // A typed value with no content (its nullFlavor, stripped by sanitizeNullFlavors) is data-absent, never an empty value
+      result.dataAbsentReason = { coding: [{ system: DATA_ABSENT_REASON_CODE_SYSTEM, code: 'unknown' }] };
+    } else if (observation.value?.['@_xsi:type']) {
       switch (observation.value['@_xsi:type']) {
-        case 'PQ': // Physical Quantity
-          result.valueQuantity = {
-            value: observation.value['@_value'] ? Number.parseFloat(observation.value['@_value']) : undefined,
-            unit: observation.value['@_unit'],
-            system: UCUM,
-            code: observation.value['@_unit'],
-          };
+        case 'PQ': { // Physical Quantity; a number that does not parse gives no value (never NaN)
+          const number = Number.parseFloat(observation.value['@_value'] ?? '');
+          if (Number.isFinite(number)) {
+            result.valueQuantity = {
+              value: number,
+              unit: observation.value['@_unit'],
+              system: UCUM,
+              code: observation.value['@_unit'],
+            };
+          }
           break;
+        }
 
         case 'REAL': // Real number, with a unit only if the document gives one
           result.valueQuantity = this.mapQuantity(observation.value);
@@ -1896,8 +1903,8 @@ class CcdaToFhirConverter {
           break;
 
         case 'INT': // Integer
-          result.valueInteger = observation.value['@_value']
-            ? Number.parseInt(observation.value['@_value'], 10)
+          result.valueInteger = Number.isFinite(Number.parseInt(observation.value['@_value'] ?? '', 10))
+            ? Number.parseInt(observation.value['@_value'] as string, 10)
             : undefined;
           break;
 
@@ -2250,6 +2257,8 @@ const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot:
  * @param node - The parsed title: a string, or an object with `#text` when the title has attributes.
  * @returns The plain text, or undefined when there is none.
  */
+// What makes an observation value say something (anything else is its nullFlavor, stripped by sanitizeNullFlavors)
+export const OBSERVATION_VALUE_CONTENT = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText', 'translation'];
 const DATA_ABSENT_REASON_CODE_SYSTEM = 'http://terminology.hl7.org/CodeSystem/data-absent-reason';
 // FHIR R4 dateTime
 const FHIR_DATE_TIME =

@@ -672,3 +672,19 @@ test('a vaccine not given (negationInd) is stored not-done and vaccine_gaps does
     expect(flu).toMatchObject({ status: 'due', records: [] });
   });
 });
+
+test('a value with a nullFlavor is data-absent and not named; a number that does not parse is named, never an empty or NaN value', () => {
+  const inr = (v: string) => {
+    const out = convertCcdaLocal(EPIC.replace('<value xsi:type="REAL" value="1.1"/>', v));
+    return { notImported: out.notImported, obs: out.resources.find((r): r is Observation => r.resourceType === 'Observation' && JSON.stringify(r.identifier).includes('EX-RES-2')) as Observation };
+  };
+  for (const type of ['PQ', 'REAL', 'CD', 'ST', 'INT']) {
+    const { notImported, obs } = inr(`<value xsi:type="${type}" nullFlavor="UNK"/>`);
+    expect(notImported).toEqual([]);
+    expect(obs.dataAbsentReason?.coding?.[0].code).toBe('unknown');
+    expect([obs.valueQuantity, obs.valueCodeableConcept, obs.valueString]).toEqual([undefined, undefined, undefined]);
+  }
+  const { notImported, obs } = inr('<value xsi:type="PQ" value="abc" unit="mg/dL"/>');
+  expect(notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'PQ value not converted' }]);
+  expect(obs.valueQuantity).toBeUndefined();
+});
