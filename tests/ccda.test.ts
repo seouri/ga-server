@@ -10,6 +10,8 @@ import { onStore } from './temp-store.ts';
 import { isPlanned } from '../src/current.ts';
 import { labResults, labRow, type LabRow } from '../src/labs.ts';
 import { vitals } from '../src/vitals.ts';
+import { reviewList } from '../src/concepts-cli.ts';
+import { whatsNew } from '../src/whats-new.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -548,5 +550,21 @@ test('GA\'s readers read the in-process output: lab rows with values, units, int
     expect(labs).toHaveLength(4); // the panel is a report, not an empty lab row
     const { rows } = await vitals(client, pid, {});
     expect(rows.map(({ name, value, date }) => ({ name, value, date }))).toEqual([{ name: 'Blood pressure', value: 'Systolic: 128 mm[Hg]; Diastolic: 82 mm[Hg]', date: '2024-02-10' }]);
+  });
+});
+
+test('an uncoded observation with a value is stored, reviewed and read without a name', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const child = '<entryRelationship typeCode="COMP"><observation classCode="OBS" moodCode="EVN"><code nullFlavor="UNK"/><statusCode code="completed"/><value xsi:type="ST">Lives alone</value></observation></entryRelationship>';
+    const report = await importPath(client, cfgFor(pid), writeDoc(EPIC.replace('<value xsi:type="ST">Not currently</value>', `<value xsi:type="ST">Not currently</value>${child}`)), pid);
+    expect(report).toMatchObject({ invalid: 0, notImported: [] });
+    expect(report.unmapped.every((u) => !!u.name)).toBe(true);
+    const [o] = (await client.searchResources('Observation', { subject: `Patient/${pid}` })).filter((x) => x.valueString === 'Lives alone');
+    expect(o.code.extension?.[0].valueCode).toBe('unknown');
+    expect(labRow(o).value).toBe('Lives alone');
+    expect((await reviewList(client, pid, 'unmapped')).every((u) => !!u.name)).toBe(true);
+    const news = await whatsNew(client, pid, Promise.resolve([]), { dir: mkdtempSync(join(tmpdir(), 'ga-wn-')), fetch: async () => new Response('{}', { status: 404 }) });
+    expect(news).toBeDefined();
   });
 });
