@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, test } from 'vitest';
-import { type MigrateReport, SWITCH_READY, SWITCH_REFUSED, copyRecord, gate, migrateStore, orphanCompartment, switchConfig } from '../src/migrate-store.ts';
+import { type MigrateReport, SWITCH_READY, SWITCH_REFUSED, copyRecord, gate, migrateStore, switchConfig } from '../src/migrate-store.ts';
 import type { MedplumClient } from '@medplum/core';
 import { statSync } from 'node:fs';
 import { Store } from '../src/store/store.ts';
@@ -19,7 +19,7 @@ afterAll(() => { if (saved !== undefined) process.env.GA_STORE = saved; });
 
 const clean = (): MigrateReport => ({
   types: { Observation: { copied: 3, skipped: 0 } }, uncounted: {}, historyVersions: { MedicationRequest: 2 }, binaries: { copied: 1, failed: 0 },
-  compartmentMismatches: {}, allowedCompartments: {}, versionMismatches: {}, blockedWrites: 0, normalized: [],
+  compartmentMismatches: {}, versionMismatches: {}, blockedWrites: 0, normalized: [],
   replay: [{ category: 'tool', name: 'health_summary', keys: [], result: 'equal', kinds: [] }],
 });
 
@@ -145,20 +145,6 @@ test('eqDayExtras: store-only extras timed inside the UTC day (not midnight) for
   expect(why(bundle([ob('1', '2024-03-01T00:00:00Z'), ob('2', '2024-03-01T12:00:00Z')]), ['eq2024-03'])).toBe(false); // not day precision
   const two = bundle([ob('1', '2024-03-01T00:00:00Z'), ob('3', '2024-03-01T00:00:00Z')]);
   expect(why(bundle([ob('3', '2024-03-01T00:00:00Z'), ob('1', '2024-03-01T00:00:00Z')]), ['eq2024-03-01'], two)).toBe(false); // order only
-});
-
-test('orphanCompartment: only C-CDA records Medplum left without a Patient, pointing at a Patient the store lacks (not self)', () => {
-  const tag = { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] };
-  const rec = (ref: string, meta: object = tag, extra: object = {}) => ({ resourceType: 'Observation', id: 'o1', status: 'final', code: { text: 'x' }, subject: { reference: ref },
-    meta: { ...meta, compartment: [{ reference: ref }] }, ...extra }) as never;
-  const none = () => false;
-  expect(orphanCompartment(rec('Patient/src-1'), '', 'self', none)).toBe(true);
-  expect(orphanCompartment(rec('Patient/src-1', {}, { identifier: [{ system: 'urn:ga-server:id:ccda', value: 'k' }] }), '', 'self', none)).toBe(true);
-  // near misses
-  expect(orphanCompartment(rec('Patient/src-1'), '', 'self', (id) => id === 'src-1')).toBe(false); // the store holds that Patient
-  expect(orphanCompartment(rec('Patient/self'), '', 'self', none)).toBe(false); // the self Patient
-  expect(orphanCompartment(rec('Patient/src-1'), 'Patient/self', 'self', none)).toBe(false); // Medplum had a Patient compartment
-  expect(orphanCompartment(rec('Patient/src-1', { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }), '', 'self', none)).toBe(false); // not C-CDA
 });
 
 test('toolTieOk: a tool difference is a tie only when its searches tied and nothing it read was skipped', () => {

@@ -352,6 +352,13 @@ export async function importResources(
     const before = { ...report };
     const r = structuredClone(src) as R;
     walkReferences(r, (ref) => idMap.get(ref));
+    // A record pointing at a Patient other than this import's would sit outside every compartment GA reads and cleans up.
+    const patientRef = COMPARTMENT[r.resourceType] && (r as unknown as Record<string, { reference?: string } | undefined>)[COMPARTMENT[r.resourceType]]?.reference;
+    if (patientRef && /^(Patient\/|urn:)/.test(patientRef) && patientRef !== `Patient/${patientId}`) {
+      console.error(`invalid ${r.resourceType}: its patient is not the one being imported`);
+      report.invalid++;
+      continue;
+    }
     let ident = stableIdentifier(r, source, fileHash, patientId);
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
     if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };

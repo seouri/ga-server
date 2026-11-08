@@ -84,6 +84,17 @@ test('on the store: an agent-written record then a differing import is a source-
   });
 });
 
+test("a record pointing at another patient than the import's is invalid and never written", async () => {
+  await onStore(async ({ client }) => {
+    const p = await client.createResource({ resourceType: 'Patient' });
+    const obs = (id: string, subject?: string) => ({ resourceType: 'Observation', id, identifier: [{ system: 'urn:test:src', value: id }], status: 'final',
+      code: { text: 'synthetic' }, effectiveDateTime: '2024-01-01', ...(subject && { subject: { reference: subject } }) }) as Resource;
+    const r = await importResources(client, [obs('o1', 'Patient/x'), obs('o2', `Patient/${p.id}`)], src('2024-01-01'), p.id as string, 'h');
+    expect(r).toMatchObject({ invalid: 1, created: 1 });
+    expect((await client.searchResources('Observation', {})).map((o) => o.subject?.reference)).toEqual([`Patient/${p.id}`]);
+  });
+});
+
 // Fake client: one failure injected at search or create.
 const fake = (where: 'search' | 'create', err: Error) =>
   ({

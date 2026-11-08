@@ -113,7 +113,7 @@ Results of the first run:
    - The `subject` points at a Patient id that is not a UUID and does not exist in GA.
    - Medplum gives them no compartment, presumably because its compartment ids are UUIDs (not checked in Medplum's source). The store gives them that Patient's compartment.
    - Neither side puts them in the owner's compartment, so no tool, share or search for the owner sees them on either store.
-   - So this difference is explained. Separately, 8 C-CDA Observations that never got the GA patient as subject look like an importer gap the owner may want to know about.
+   - So this difference is explained. **Later finding (2026-11-08):** these 8, plus 6 with no subject, were test records a draft integration test wrote into the live project on 2026-11-07, not an importer gap. They were deleted, the importer now refuses a record whose patient is not the one being imported, and the `orphanCompartment` rule below was removed.
 2. **Replay: agent search `Observation` [`date`, `_sort`], extra:1** (the parity probe `date=eq<day>`).
    - The store returns one more record: a timed Observation whose UTC instant falls inside the queried day.
    - The cause was found with synthetic records in the ga-test project:
@@ -123,7 +123,7 @@ Results of the first run:
    - The integration probe agreed on both stores only because it falls outside the UTC day.
 
 **Fix round 1: two narrow gate rules, then a rerun.** Both are reported as allowed and listed, with a count.
-- Compartment (`orphanCompartment`): allowed only when all three hold:
+- Compartment (`orphanCompartment`, since removed: see the later finding above): allowed only when all three hold:
   - the record came from C-CDA (tag or identifier);
   - Medplum's compartment has no Patient;
   - every Patient compartment the store assigns is a Patient the store doesn't hold and not the self Patient.

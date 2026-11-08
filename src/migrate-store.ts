@@ -12,7 +12,6 @@ import { dirname, join } from 'node:path';
 import { ClientStorage, MedplumClient, MemoryStorage } from '@medplum/core';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
 import { bearer, GaError, type GaConfig, storeKind, storeUrl } from './config.ts';
-import { hasTag } from './identity.ts';
 import { writeAtomic } from './smart/store.ts';
 import { GA_STORE_TYPES, gaStoreError } from './store-serve.ts';
 import { serveStore } from './store/server.ts';
@@ -28,7 +27,6 @@ export type MigrateReport = {
   historyVersions: Record<string, number>;
   binaries: { copied: number; failed: number; unresolved?: number }; // unresolved: a stored url still signed, or Binary/<id> with no file
   compartmentMismatches: Record<string, number>;
-  allowedCompartments: Record<string, string[]>; // ids of C-CDA records with an orphan Patient subject (orphanCompartment): allowed, listed
   versionMismatches: Record<string, number>; // id, versionId or lastUpdated differ from Medplum's
   blockedWrites: number; // writes the replayed tools tried (answered with an echo, never sent)
   normalized: string[];
@@ -71,16 +69,6 @@ export function gate(r: MigrateReport): string[] {
   if (bad.length) out.push(`${plural(bad.length, 'unexplained replay difference', 'unexplained replay differences')} (${[...new Set(bad.map((x) => `${x.category} ${x.name}`))].join(', ')})`);
   return out;
 }
-
-// Medplum gives no Patient compartment to a record whose subject is a Patient id it doesn't hold (C-CDA records that kept the
-// source document's own patient id); the store lists that id. Allowed only for C-CDA records (tag or identifier) whose Medplum
-// compartment has no Patient, when every Patient compartment the store gives is one it doesn't hold and not the self Patient.
-export function orphanCompartment(got: Resource, medplumRefs: string, selfId: string, hasPatient: (id: string) => boolean): boolean {
-  const ccda = hasTag(got, 'src-ccda') || ((got as { identifier?: { system?: string }[] }).identifier ?? []).some((i) => i.system === 'urn:ga-server:id:ccda');
-  const refs = patientRefs(got.meta?.compartment).split(',').filter(Boolean);
-  return ccda && medplumRefs === '' && refs.length > 0 && refs.every((ref) => { const id = ref.slice('Patient/'.length); return id !== selfId && !hasPatient(id); });
-}
-
 
 // Attachment urls pointing at this Medplum's Binaries (as stored, or presigned /storage/ links) become Binary/<id>; the ids are collected.
 function ownBinaries(base: string) {
@@ -195,7 +183,7 @@ export async function migrateStore(o: MigrateOptions): Promise<{ report: Migrate
     const mstate = guardState();
     const medplum = new MedplumClient({ baseUrl, fetch: guard((i, n) => fetch(i, n), mstate, true), storage: new ClientStorage(new MemoryStorage()), cacheTime: 0 });
     await medplum.startClientLogin(clientId, clientSecret);
-    const report: MigrateReport = { types: {}, uncounted: {}, historyVersions: {}, binaries: { copied: 0, failed: 0 }, compartmentMismatches: {}, allowedCompartments: {}, versionMismatches: {}, blockedWrites: 0, normalized: NORMALIZED, replay: [] };
+    const report: MigrateReport = { types: {}, uncounted: {}, historyVersions: {}, binaries: { copied: 0, failed: 0 }, compartmentMismatches: {}, versionMismatches: {}, blockedWrites: 0, normalized: NORMALIZED, replay: [] };
 
     const { want, ids } = await copyRecord(medplum, store, report);
     await medplum.startClientLogin(clientId, clientSecret); // a fresh token: the copy may have outlived the first
@@ -221,10 +209,7 @@ export async function migrateStore(o: MigrateOptions): Promise<{ report: Migrate
       }
       const [vid, lu, refs] = w.split('|');
       if (!got || got.meta?.versionId !== vid || got.meta?.lastUpdated !== lu) report.versionMismatches[type] = (report.versionMismatches[type] ?? 0) + 1;
-      if (got && patientRefs(got.meta?.compartment) !== refs) {
-        if (orphanCompartment(got, refs, o.cfg.patientId, (pid) => !!store!.read('Patient', pid))) (report.allowedCompartments[type] ??= []).push(id);
-        else report.compartmentMismatches[type] = (report.compartmentMismatches[type] ?? 0) + 1;
-      }
+      if (got && patientRefs(got.meta?.compartment) !== refs) report.compartmentMismatches[type] = (report.compartmentMismatches[type] ?? 0) + 1;
     }
     store.close();
     store = undefined;
@@ -253,8 +238,6 @@ export async function migrateStore(o: MigrateOptions): Promise<{ report: Migrate
     log(`Copied ${Object.values(report.types).reduce((n, c) => n + c.copied, 0)} records (${Object.keys(report.types).length} types), ` +
       `${sum(report.historyVersions)} history versions, ${report.binaries.copied} Binaries. Replay: ${eq} equal, ${allowed} allowed differences, ` +
       `${report.replay.length - eq - allowed} unexplained. Report: ${o.reportFile}`);
-    if (Object.keys(report.allowedCompartments).length)
-      log(`Allowed, listed in the report: ${Object.entries(report.allowedCompartments).map(([t, ids]) => `${t}: ${ids.length}`).join(', ')} C-CDA records whose subject is a Patient GA doesn't hold (Medplum gives them no compartment).`);
     if (problems.length) log(`Not switched:\n${problems.map((p) => `  - ${p}`).join('\n')}\nGA stays on Medplum. To try again, move ${o.file} aside first.`);
     else if (!o.yes) log(o.allowSwitch ?? SWITCH_READY ? `The copy checks out; GA stays on Medplum. Read the report, then move ${o.file} aside and run ga migrate-store --yes to switch.`
       : `The copy checks out; GA stays on Medplum. ${SWITCH_REFUSED}.`);
