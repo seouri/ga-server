@@ -921,7 +921,7 @@ test('one visit: two entries with the same visit id in one document are one Enco
   }
 });
 
-test('a visit another source wrote (EHI), linked by its Epic id, keeps its values and extensions; the C-CDA id is added', async () => {
+test('a visit another source wrote (EHI), linked by its Epic id, keeps its values, extensions and tags; the C-CDA id is added', async () => {
   const csn = '1.2.840.114350.1.13.999.2.7.3.698084.8';
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
@@ -938,7 +938,7 @@ test('a visit another source wrote (EHI), linked by its Epic id, keeps its value
     expect(after).toMatchObject({ status: 'finished', class: { code: 'AMB' }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' } });
     expect(after.extension?.map((e) => e.url)).toContain('urn:test:keep');
     expect(after.identifier?.map((i) => i.system)).toContain('urn:ga-server:id:ccda');
-    expect(after.meta?.tag?.map((t) => t.code)).toEqual(expect.arrayContaining(['src-ehi', 'src-ccda']));
+    expect(after.meta?.tag?.map((t) => t.code)).toEqual(['src-ehi']); // another source's visit keeps its own tags
     expect((await client.searchResources('Encounter', { subject: `Patient/${pid}` }))).toHaveLength(1);
   });
 });
@@ -964,5 +964,41 @@ test('a visit another source wrote keeps its values for every later C-CDA docume
     expect(after.type?.map((t) => t.coding?.[0].code).sort()).toEqual(['99213', '99214', '99215']);
     expect(after.extension?.map((e) => e.url)).toContain('urn:test:keep');
     expect(await client.searchResources('Encounter', { subject: `Patient/${pid}` })).toHaveLength(1);
+  });
+});
+
+test("a portal visit a C-CDA document links keeps its own tags and meta: the newest Epic import and EHI problems' currency never move, across resync and re-import", async () => {
+  const { importResources } = await import('../src/engine.ts');
+  const { currencyContext, explain } = await import('../src/current.ts');
+  const csn = '1.2.840.114350.1.13.999.2.7.3.698084.8';
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const cond = { resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:ehi:org-999', value: 'PROBLEM_LIST|1' }], subject: { reference: `Patient/${pid}` },
+      clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] },
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'problem-list-item' }] }], code: { text: 'hypertension' } } as Resource;
+    await importResources(client, [cond], { kind: 'ehi', file: '/x/ehi', org: 'org-999', date: '2024-01-01T00:00:00Z', writer: 'importer' }, pid, 'h1');
+    const enc = (end?: string) => ({ resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' }, subject: { reference: `Patient/${pid}` },
+      period: { start: '2022-03-01T09:00:00Z', ...(end && { end }) }, identifier: [{ system: 'urn:ga-server:id:smart:k1', value: 'Encounter/456' }, { system: `urn:oid:${csn}`, value: '456' }] }) as Resource;
+    const doc = (id: string, code: string) => writeDoc(visitDoc(id, '20230101', { body: `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+      <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="${csn}" extension="456"/><code code="${code}" codeSystem="2.16.840.1.113883.6.12"/><effectiveTime value="20220301"/></encounter></entry></section></component>` }));
+    await importResources(client, [enc()], { kind: 'smart', file: 'https://fhir.x/api', date: '2026-10-01T00:00:00Z', writer: 'importer' }, pid, 'hs');
+    const meta0 = (await client.searchResources('Encounter', { subject: `Patient/${pid}` }))[0].meta;
+    const check = async () => {
+      const encs = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
+      const cs = await client.searchResources('Condition', { subject: `Patient/${pid}` });
+      expect(encs).toHaveLength(1);
+      expect(encs[0].meta?.tag?.map((t) => t.code).sort()).toEqual(meta0?.tag?.map((t) => t.code).sort());
+      expect(encs[0].meta?.source).toBe(meta0?.source);
+      const ctx = currencyContext([...encs, ...cs], []);
+      expect(new Date(ctx.newestImport).toISOString().slice(0, 10)).toBe('2024-01-01');
+      expect(explain(cs[0], ctx)?.currency).toBe('current');
+    };
+    await importPath(client, cfgFor(pid), doc('E', '99214'), pid);
+    await check();
+    expect((await client.searchResources('Encounter', { subject: `Patient/${pid}` }))[0].identifier?.map((i) => i.system)).toContain('urn:ga-server:id:ccda');
+    await importResources(client, [enc('2022-03-01T09:30:00Z')], { kind: 'smart', file: 'https://fhir.x/api', date: '2026-10-02T00:00:00Z', writer: 'importer' }, pid, 'hs2');
+    await check();
+    await importPath(client, cfgFor(pid), doc('H', '99215'), pid);
+    await check();
   });
 });

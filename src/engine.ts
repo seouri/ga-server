@@ -253,6 +253,8 @@ export function mergeCopies(existing: R, incoming: R, keepExisting = false): R {
   }
   const ga = ((newer ? incoming : existing).extension ?? []).filter((e) => e.url === SRC_DATE || e.url === LAST_SEEN);
   out.extension = [...byUrl.values(), ...ga];
+  // meta is never merged: another source's visit keeps its own tags and meta.source (the currency rule and migrate read them).
+  out.meta = (keepExisting || !newer ? existing : incoming).meta;
   return out as unknown as R;
 }
 
