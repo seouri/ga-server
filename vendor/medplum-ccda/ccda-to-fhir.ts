@@ -1671,11 +1671,13 @@ class CcdaToFhirConverter {
     }
 
     for (const entryRelationship of observation.entryRelationship ?? EMPTY) {
-      target.push({
-        measure: this.mapCode(entryRelationship.act?.[0]?.code),
-        detailCodeableConcept: this.mapCode(entryRelationship.act?.[0]?.code),
-        dueDate: mapCcdaToFhirDateTime(entryRelationship.act?.[0]?.effectiveTime?.[0]?.low?.['@_value']),
-      });
+      const act = entryRelationship.act?.[0];
+      const measure = this.mapCode(act?.code);
+      const dueDate = mapCcdaToFhirDateTime(act?.effectiveTime?.[0]?.low?.['@_value']);
+      // Only an act is a target: an observation-only relationship (or an act with neither code nor time) says nothing about one
+      if (measure || dueDate) {
+        target.push({ measure, detailCodeableConcept: measure, dueDate });
+      }
     }
 
     const result: Goal = {
@@ -1684,11 +1686,11 @@ class CcdaToFhirConverter {
       extension: this.mapTextReference(observation.text),
       identifier: this.mapIdentifiers(observation.id),
       lifecycleStatus: this.mapGoalLifecycleStatus(observation),
-      category,
+      category: category.length > 0 ? category : undefined,
       description: description ?? { text: 'Unknown goal' },
       subject: createReference(this.patient as Patient),
       startDate: mapCcdaToFhirDate(observation.effectiveTime?.[0]?.['@_value']),
-      target,
+      target: target.length > 0 ? target : undefined,
     };
 
     return result;

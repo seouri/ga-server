@@ -34,6 +34,19 @@ test('its intent follows moodCode: INT plan, PRP proposal, ARQ order', () => {
   expect([intent('INT'), intent('PRP'), intent('ARQ')]).toEqual(['plan', 'proposal', 'order']);
 });
 
-test('a goal (GOL) in Plan of Treatment stays a Goal', () => {
+test('a goal (GOL, or the Goal Observation template) stays a Goal, with no empty target or category', () => {
+  const goal = (extra: string) => `<observation classCode="OBS" moodCode="GOL">
+    <templateId root="2.16.840.1.113883.10.20.22.4.121"/><id root="2.16.840.1.113883.19.5" extension="GOAL-1"/>
+    <statusCode code="active"/><value xsi:type="ST">Walk daily</value>${extra}</observation>`;
+  const child = '<entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/></observation></entryRelationship>';
+  const [g] = resourcesOf<Goal>(convertSections(plan(goal(child))), 'Goal');
+  expect(g.description).toEqual({ text: 'Walk daily' });
+  expect(g.target).toBeUndefined(); // an observation-only entryRelationship is no target
+  expect(g.category).toBeUndefined(); // no code: no category, never []
+  const act = '<entryRelationship typeCode="REFR"><act classCode="ACT" moodCode="INT"><code code="229065009" codeSystem="2.16.840.1.113883.6.96"/><effectiveTime><low value="20240601"/></effectiveTime></act></entryRelationship>';
+  expect(resourcesOf<Goal>(convertSections(plan(goal(act))), 'Goal')[0].target).toEqual([
+    { measure: { coding: [{ system: 'http://snomed.info/sct', code: '229065009' }] }, detailCodeableConcept: { coding: [{ system: 'http://snomed.info/sct', code: '229065009' }] }, dueDate: '2024-06-01' },
+  ]);
+  // A GOL observation without the template is a goal too.
   expect(resourcesOf<Goal>(convertSections(plan(planned('GOL'))), 'Goal')).toHaveLength(1);
 });
