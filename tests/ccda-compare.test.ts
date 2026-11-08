@@ -81,7 +81,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'DiagnosticReport', path: 'effective[x].start', count: 1 },
     { type: 'DiagnosticReport', path: 'effective[x].end', count: 1 },
     { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
-    { type: 'Observation', path: 'value[x].value', count: 1 }, // REAL value (Task 7)
     { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
     { type: 'Encounter', path: 'location.location.reference', count: 1 },
     { type: 'Location', path: '(record)', count: 1 },

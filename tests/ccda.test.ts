@@ -206,10 +206,10 @@ test('a goal observation outside the plan reads only coded or text values', () =
 test('the Epic-style fixture converts (template order) and lists what it cannot import yet', () => {
   const out = convertCcdaLocal(EPIC);
   accounted(EPIC, out);
-  // Shrinks as the library fixes land: sections (Task 4), visit diagnoses (Task 5), values (Task 7).
-  expect(out.notImported).toEqual([
-    { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
-  ]);
+  // Everything is imported: sections (Task 4), visit diagnoses (Task 5), values (Task 7).
+  expect(out.notImported).toEqual([]);
+  // The REAL value (medplum#11241): a unitless number, no UCUM claim.
+  expect(out.resources.find((r) => r.resourceType === 'Observation' && JSON.stringify(r).includes('EX-RES-2'))).toMatchObject({ valueQuantity: { value: 1.1 } });
   const types = out.resources.map((r) => r.resourceType);
   expect(types).toContain('MedicationStatement'); // Epic lists Medications' entries-optional root first: no throw
   const [cond] = out.resources.filter((r) => r.resourceType === 'Condition') as Condition[];
@@ -299,8 +299,7 @@ test('every section of the Epic-style fixture is imported', () => {
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
   });
-  // Only the entries later tasks own remain: the REAL value (Task 7).
-  expect(out.notImported.map((n) => n.section)).toEqual(['Results']);
+  expect(out.notImported).toEqual([]);
 });
 
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
@@ -359,7 +358,7 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const first = await importPath(client, cfg, file, pid);
     expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
     expect(first.created).toBeGreaterThan(0);
-    expect(first.notImported?.map((n) => n.section)).toEqual(['Results']); // REAL value (Task 7)
+    expect(first.notImported).toEqual([]);
     const visitDx = async () => (await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.category?.[0]?.coding?.[0]?.code === 'encounter-diagnosis');
     const [enc] = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
     expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
