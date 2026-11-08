@@ -25,7 +25,13 @@ const keys = (r: Resource): string[] =>
 const CODING = new Set(['system', 'version', 'code', 'display', 'userSelected', 'extension']);
 const isCoding = (o: R) => typeof o.code === 'string' && Object.keys(o).every((k) => CODING.has(k));
 const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
-const codingKey = (o: R) => `${system(o.system as string).toLowerCase()}|${o.code}`;
+// AdministrativeGender: the library's own table maps the v3 OID to the FHIR system, whose codes spell the same genders out.
+const GENDER_SYSTEM = '2.16.840.1.113883.5.1';
+const GENDER: Record<string, string> = { M: 'male', F: 'female', UN: 'unknown' };
+const codingKey = (o: R) => {
+  const s = system(o.system as string).toLowerCase();
+  return `${s}|${s === GENDER_SYSTEM ? (GENDER[o.code as string] ?? o.code) : o.code}`;
+};
 // Labels, present or not: a narrative div, and a display beside the code or reference that carries the identity. A display that
 // is the element's only content (a Coding without code, a Reference without reference) is compared as text.
 const PRESENCE = new Set(['display', 'div']);

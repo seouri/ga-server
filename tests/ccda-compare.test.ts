@@ -85,7 +85,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Location', path: '(record)', count: 1 },
     { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
     { type: 'Immunization', path: 'route.coding', count: 1 },
-    { type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }, // v3 M, now FHIR male: same meaning, another spelling
   ]);
   expect(r.unaccounted).toEqual([]);
 });
@@ -266,4 +265,13 @@ test('the Microsoft requester of a dispense pairs with the dispense\'s dataenter
   expect(pairLosses(old, neu('2'))).toContainEqual({ type: 'MedicationRequest', path: 'performer.actor.reference', count: 1 });
   // The dispenser (a performer with no function) is not who the Microsoft path calls the requester.
   expect(pairLosses(old, neu('1', false))).toContainEqual({ type: 'MedicationRequest', path: 'performer.function.coding', count: 1 });
+});
+
+test('administrative gender: the v3 code (M, F, UN) and the FHIR code (male, female, unknown) are one coding; another gender is a loss', () => {
+  const fh = (system: string, code: string) => ({ resourceType: 'FamilyMemberHistory', identifier: id('f'), sex: { coding: [{ system, code }] } });
+  expect(pairLosses([fh('urn:oid:2.16.840.1.113883.5.1', 'M')], [fh('http://hl7.org/fhir/administrative-gender', 'male')])).toEqual([]);
+  expect(pairLosses([fh('urn:oid:2.16.840.1.113883.5.1', 'UN')], [fh('http://hl7.org/fhir/administrative-gender', 'unknown')])).toEqual([]);
+  expect(pairLosses([fh('urn:oid:2.16.840.1.113883.5.1', 'M')], [fh('http://hl7.org/fhir/administrative-gender', 'female')])).toEqual([{ type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }]);
+  // Only that system: M in another code system is not male.
+  expect(pairLosses([fh('urn:oid:2.25.1', 'M')], [fh('urn:oid:2.25.1', 'male')])).toEqual([{ type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }]);
 });
