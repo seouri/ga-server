@@ -234,3 +234,22 @@ test('a converter answer that is not a Bundle fails the document', async () => {
     await expect(convertCcdaMs(SYNTHETIC, 'http://converter/')).rejects.toThrow(/^converter failed: HTTP 200, unexpected response$/);
   }
 });
+
+test('a Microsoft MedicationRequest made from a dispense pairs with the new MedicationDispense of the same source id, by meaning', () => {
+  const rx = (code: string) => ({ coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code }] });
+  const msOrder = (status: string, code = '314076') => ({ resourceType: 'MedicationRequest', identifier: id('fill'), intent: 'order', status, medicationCodeableConcept: rx(code), subject,
+    dispenseRequest: { quantity: { value: 90 }, validityPeriod: { start: '2023-01-10' } } });
+  const dispense = (o: Record<string, unknown> = {}) => ({ resourceType: 'MedicationDispense', identifier: id('fill'), status: 'completed', medicationCodeableConcept: rx('314076'), subject,
+    quantity: { value: 90 }, whenHandedOver: '2023-01-10', ...o });
+  expect(pairLosses([msOrder('completed')], [dispense()])).toEqual([]);
+  expect(pairLosses([msOrder('active')], [dispense({ status: 'in-progress' })])).toEqual([]); // the same statusCode, each type's word
+  // Still losses: another drug, status, quantity or day; another source id is no pair at all.
+  expect(pairLosses([msOrder('completed', '197361')], [dispense()])).toEqual([{ type: 'MedicationRequest', path: 'medication[x].coding', count: 1 }]);
+  expect(pairLosses([msOrder('stopped')], [dispense()])).toEqual([{ type: 'MedicationRequest', path: 'status', count: 1 }]);
+  expect(pairLosses([msOrder('completed')], [dispense({ quantity: { value: 30 }, whenHandedOver: '2023-02-01' })]))
+    .toEqual([{ type: 'MedicationRequest', path: 'quantity.value', count: 1 }, { type: 'MedicationRequest', path: 'whenHandedOver', count: 1 }]);
+  expect(pairLosses([msOrder('completed')], [dispense({ identifier: id('other') })])).toEqual([{ type: 'MedicationRequest', path: '(record)', count: 1 }]);
+  // Only a dispense: a new MedicationStatement with that id is not paired by this rule.
+  expect(pairLosses([msOrder('completed')], [{ ...dispense(), resourceType: 'MedicationStatement', status: 'completed' }]))
+    .toContainEqual({ type: 'MedicationRequest', path: 'resourceType', count: 1 });
+});

@@ -160,7 +160,7 @@ export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Re
       out.set(o, comps[1][0]);
       continue;
     }
-    const hits = [...new Set(keys(o).flatMap((k) => byKey.get(k) ?? []))].filter((n) => family(n.resourceType) === family(o.resourceType));
+    const hits = [...new Set(keys(o).flatMap((k) => byKey.get(k) ?? []))].filter((n) => family(n.resourceType) === family(o.resourceType) || fromDispense(o, n));
     const typed = hits.filter((n) => n.resourceType === o.resourceType);
     const pool = typed.length ? typed : hits;
     out.set(o, pool.length > 1 ? pool.reduce((x, y) => (cost(o, y) < cost(o, x) ? y : x)) : pool[0]);
@@ -196,6 +196,22 @@ function policyType(o: Resource, n: Resource): Resource {
   return moved ? ({ ...rest, type: relationship } as unknown as Resource) : o;
 }
 
+// One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
+// (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
+// The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
+// preparation), quantity and the day (validityPeriod start or authoredOn as whenHandedOver); intent, an order's mood, is dropped.
+// Anything else it holds (a requester) is compared as is, so a field the dispense lacks stays a loss.
+const fromDispense = (o: Resource, n: Resource) => o.resourceType === 'MedicationRequest' && n.resourceType === 'MedicationDispense';
+const DISPENSE_STATUS: Record<string, string> = { active: 'in-progress', draft: 'preparation' };
+function asDispense(o: Resource, n: Resource): Resource {
+  if (!fromDispense(o, n)) return o;
+  const { resourceType: _t, intent: _i, status, dispenseRequest, authoredOn, ...rest } = o as unknown as R & { status?: string; authoredOn?: string;
+    dispenseRequest?: { quantity?: unknown; validityPeriod?: { start?: string } } };
+  const { quantity, validityPeriod, ...more } = dispenseRequest ?? {};
+  return { resourceType: 'MedicationDispense', ...rest, status: status && (DISPENSE_STATUS[status] ?? status), quantity,
+    whenHandedOver: validityPeriod?.start ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }) } as unknown as Resource;
+}
+
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
 const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
 
@@ -218,7 +234,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(policyType(r, m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(asDispense(policyType(r, m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());
