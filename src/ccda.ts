@@ -441,7 +441,7 @@ export async function importPath(client: MedplumClient, cfg: GaConfig, path: str
     const xml = readFileSync(file, 'utf8');
     const { resources, notImported } = local ? convertCcdaLocal(xml) : { resources: await convertCcdaMs(xml, cfg.converterUrl), notImported: undefined };
     const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-    const r = await withImportLock(() => importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash));
+    const r = await withImportLock(() => importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer', ...(local && { local: true }) }, patientId, fileHash));
     addReport(total, r);
     if (notImported && total.notImported) addNotImported(total.notImported, notImported);
   }

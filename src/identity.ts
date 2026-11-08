@@ -12,6 +12,7 @@ export type SourceInfo = {
   dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
   seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
+  local?: boolean; // C-CDA converted in process (@medplum/ccda): an Encounter is one per source id (ccdaKey); copies merge (engine mergeCopies)
 };
 // On the Patient: the newest source date of any C-CDA or EHI import, so list reads need not scan every Epic record (src/share/scope.ts newestEpicImport).
 export const NEWEST_IMPORT = 'urn:ga-server:ext:newest-epic-import';
@@ -75,13 +76,16 @@ const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
 
 const LINKED = new Set(['PractitionerRole', 'CareTeam']);
 // Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
-function ccdaKey(r: Resource, patientId: string, resolve?: (ref: string) => string | undefined): string {
+function ccdaKey(r: Resource, patientId: string, resolve?: (ref: string) => string | undefined, local = false): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
   // A PractitionerRole or CareTeam is mostly its links (practitioner, organization, members): without them id-less ones hash
   // alike and merge into one. Each link reads as its target's own source key (resolve: the batch's converter id -> that key),
   // never a stored or converter id, so the key holds across imports even when a target is refused.
   if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, LINKED.has(r.resourceType) ? (resolve ?? (() => undefined)) : undefined)}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
+  // The in-process converter makes one Encounter per visit id in a document (an entry, the header's visit and a panel's visit
+  // merge), so a visit is keyed by its id alone and documents merge into it (engine mergeCopies). The Microsoft path keeps its keys.
+  if (local && r.resourceType === 'Encounter') return key;
   return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
 }
 
@@ -103,7 +107,7 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, p
     if (!id?.system || !own.ok(id.system) || !id.value) throw new GaError(`${r.resourceType} has no ${own.name} identifier`);
     return { system: id.system, value: id.value };
   }
-  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId, resolve) };
+  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId, resolve, s.local) };
   let key: string;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;

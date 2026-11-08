@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
+import type { MedplumClient } from '@medplum/core';
 import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Practitioner, PractitionerRole, Reference, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
@@ -776,4 +777,82 @@ test('a result organizer\'s procedure and encounter components are imported, not
   expect(out.resources.map((r) => r.resourceType)).toEqual(expect.arrayContaining(['Procedure', 'Encounter']));
   const act = '<component><act classCode="ACT" moodCode="EVN"><code code="x" codeSystem="2.25.1"/></act></component>';
   expect(convertCcdaLocal(doc(act)).notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.1', entries: 1, reason: 'organizer component not converted' }]);
+});
+
+// One visit across documents (in-process converter): keyed by its id, merged field by field.
+const visitDoc = (docId: string, date: string, { header = '', body = '' }) => `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <id root="2.16.840.1.113883.19.5" extension="${docId}"/><effectiveTime value="${date}"/>
+  <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>${header}
+  <component><structuredBody>${body}</structuredBody></component></ClinicalDocument>`;
+const visitHeader = (inner: string) => `<componentOf><encompassingEncounter><id root="2.16.840.1.113883.19.5.3" extension="V1"/>${inner}</encompassingEncounter></componentOf>`;
+const ATTENDER = '<encounterParticipant typeCode="ATND"><assignedEntity><id root="2.16.840.1.113883.4.6" extension="NPI-9"/></assignedEntity></encounterParticipant>';
+const visitEntry = (inner = '') => `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+  <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="2.16.840.1.113883.19.5.3" extension="V1"/>
+  <code code="99213" codeSystem="2.16.840.1.113883.6.12"/>${inner}</encounter></entry></section></component>`;
+const panel = (p: string, extra = '') => `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.3.1"/><code code="30954-2" codeSystem="2.16.840.1.113883.6.1"/><title>Results</title><text>x</text>
+  <entry><organizer classCode="BATTERY" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.1"/><id root="2.16.840.1.113883.19.5" extension="${p}"/>
+  <code code="24323-8" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/>
+  <component><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.2"/><id root="2.16.840.1.113883.19.5" extension="${p}-R"/>
+    <code code="2345-7" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/><effectiveTime value="20240210"/><value xsi:type="PQ" value="1" unit="mg/dL"/></observation></component>
+  ${extra}</organizer></entry></section></component>`;
+const visits = async (client: MedplumClient, pid: string) => (await client.searchResources('Encounter', { subject: `Patient/${pid}` })).filter((e) => e.identifier?.some((i) => i.value === 'V1'));
+
+test('one visit across documents: a later document without the header keeps the header\'s participants and period (one Encounter)', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const a = writeDoc(visitDoc('A', '20200103', { header: visitHeader(`<effectiveTime><low value="20200102"/></effectiveTime>${ATTENDER}`), body: visitEntry() }));
+    await importPath(client, cfgFor(pid), a, pid);
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('B', '20200201', { body: visitEntry() })), pid);
+    const [v, ...more] = await visits(client, pid);
+    expect(more).toHaveLength(0);
+    expect(v.period?.start).toBe('2020-01-02');
+    expect(v.participant?.map((p) => p.type?.[0].coding?.[0].code)).toEqual(['ATND']);
+    expect(await importPath(client, cfgFor(pid), a, pid)).toMatchObject({ created: 0, updated: 0 });
+  });
+});
+
+test('one visit across documents: an older fuller document imported after a newer bare one still adds its details', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('B', '20200201', { body: visitEntry() })), pid);
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('A', '20200103', { header: visitHeader(`<effectiveTime><low value="20200102"/></effectiveTime>${ATTENDER}`), body: visitEntry() })), pid);
+    const [v, ...more] = await visits(client, pid);
+    expect(more).toHaveLength(0);
+    expect(v.period?.start).toBe('2020-01-02');
+    expect(v.participant).toHaveLength(1);
+    expect(v.extension?.filter((e) => e.url === 'urn:ga-server:ext:arrived')).toHaveLength(1);
+    expect(v.extension?.find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime).toBe('2020-02-01'); // the newer source's
+  });
+});
+
+test('one visit across documents: a panel\'s bare visit in one document and the full visit in another are one Encounter', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const bare = '<component><encounter classCode="ENC" moodCode="EVN"><id root="2.16.840.1.113883.19.5.3" extension="V1"/></encounter></component>';
+    const c = writeDoc(visitDoc('C', '20240211', { body: panel('P1', bare) }));
+    await importPath(client, cfgFor(pid), c, pid);
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('D', '20240301', { body: visitEntry('<effectiveTime value="20240210"/>') })), pid);
+    const [v, ...more] = await visits(client, pid);
+    expect(more).toHaveLength(0);
+    expect(v.type?.[0].coding?.[0].code).toBe('99213');
+    const [report] = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` });
+    expect(report.encounter?.reference).toBe(`Encounter/${v.id}`);
+    expect(await importPath(client, cfgFor(pid), c, pid)).toMatchObject({ created: 0, updated: 0 });
+  });
+});
+
+test('an id-less collection procedure shared by two panels links both reports', async () => {
+  const draw = '<component><procedure classCode="PROC" moodCode="EVN"><code code="82078001" codeSystem="2.16.840.1.113883.6.96"/><effectiveTime value="20240210080000-0500"/></procedure></component>';
+  const two = panel('P1', draw).replace('</section>', panel('P2', draw).replace(/^[\s\S]*?<entry>/, '<entry>').replace(/<\/section><\/component>$/, '') + '</section>');
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const file = writeDoc(visitDoc('E', '20240211', { body: two }));
+    await importPath(client, cfgFor(pid), file, pid);
+    const procs = await client.searchResources('Procedure', { subject: `Patient/${pid}` });
+    const reports = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` });
+    expect(reports).toHaveLength(2);
+    expect(procs).toHaveLength(1);
+    expect(procs[0].report?.map((r) => r.reference).sort()).toEqual(reports.map((r) => `DiagnosticReport/${r.id}`).sort());
+    expect(await importPath(client, cfgFor(pid), file, pid)).toMatchObject({ created: 0, updated: 0 });
+  });
 });

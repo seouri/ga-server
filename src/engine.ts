@@ -234,6 +234,28 @@ export function sameValue(a: Observation, b: Observation): boolean {
 }
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
+// Copies of one record from the in-process converter: a visit (one Encounter per visit id), or an id-less record keyed by its
+// content (references aside, so a second copy may link elsewhere: a collection procedure reporting in two panels). The stored
+// record and the incoming copy merge field by field, whatever their dates: a field only one holds is kept, arrays are unioned (equal elements once), and where both hold a
+// single value the newer source wins. A later document that says less never wipes what a fuller one added. Bookkeeping
+// (identifiers, meta, source-date extensions) is unionUpdate's.
+export function mergeCopies(existing: R, incoming: R): R {
+  const newer = !srcDate(existing) || !srcDate(incoming) || Date.parse(srcDate(incoming) as string) > Date.parse(srcDate(existing) as string);
+  // The stored record's arrays come first (a re-import is then a no-op), the incoming copy's new elements after.
+  const out: O = { ...(existing as unknown as O) };
+  for (const [k, v] of Object.entries(incoming as unknown as O)) {
+    if (v === undefined) continue;
+    const was = out[k];
+    if (Array.isArray(was) && Array.isArray(v) && k !== 'identifier') {
+      const seen = new Set(was.map((e) => JSON.stringify(e, sorted)));
+      out[k] = [...was, ...v.filter((e) => !seen.has(JSON.stringify(e, sorted)))];
+    } else if (was === undefined || newer) out[k] = v;
+  }
+  // The newer copy's source date and the oldest arrival stay (unionUpdate keeps the stored arrival).
+  out.extension = ((newer ? incoming : existing).extension ?? []).filter((e) => e.url !== ARRIVED);
+  return out as unknown as R;
+}
+
 async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promise<Resource> {
   const incoming = carryConcept(existing, coded);
   const ids = idList(existing);
@@ -472,7 +494,22 @@ export async function importResources(
     const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
     try {
       let target: Resource;
-      if (existing) {
+      const idless = ![(src as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0]?.value;
+      const copies = !!existing && source.kind === 'ccda' && !!source.local && (type === 'Encounter' || idless) && !agentOrShielded(existing);
+      if (copies) {
+        const merged = mergeCopies(existing as R, coded);
+        const body = (x: R) => JSON.stringify({ ...x, id: undefined, meta: undefined, extension: undefined, identifier: undefined }, sorted);
+        const have = new Set(idList(existing as R).map(idKey));
+        const ids = idList(incoming).some((i) => !have.has(idKey(i)));
+        if (body(merged) !== body(existing as R) || ids) {
+          target = await unionUpdate(client, existing as R, merged);
+          report.updated++;
+        } else {
+          await keep(existing as R, false);
+          target = existing as Resource;
+          report.skipped++;
+        }
+      } else if (existing) {
         target = existing;
         const filled = fillFrom(existing, coded, source);
         const d = decide(existing, filled);
