@@ -193,7 +193,6 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([
     { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
-    { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'ED value not converted' },
     { section: 'Patient Instructions', templateId: '2.16.840.1.113883.10.20.22.2.45', entries: 1, reason: 'section not supported by the converter' },
     { section: 'History of Present Illness', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.4', entries: 1, reason: 'section not supported by the converter' },
     { section: 'Reason for Referral', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.1', entries: 1, reason: 'section not supported by the converter' },
@@ -205,6 +204,11 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item'); // repair, by the problem observation id
   // The document id keys the Composition, so a re-issued document updates it instead of adding a second one.
   expect((out.resources.find((r) => r.resourceType === 'Composition') as Composition).identifier).toEqual({ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.8.688883.900001', value: 'EPICSTYLE-DOC-1' });
+});
+
+test('a binary ED value (no FHIR value type) is named; a text one is converted', () => {
+  const pdf = convertCcdaLocal(EPIC.replace('<value xsi:type="ED"><reference value="#res3"/></value>', '<value xsi:type="ED" mediaType="application/pdf" representation="B64">JVBERi0=</value>'));
+  expect(pdf.notImported).toContainEqual({ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'ED value not converted' });
 });
 
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });

@@ -6,7 +6,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir } from '../vendor/medplum-ccda/index.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
-import type { CcdaObservation, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
+import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId } from '../vendor/medplum-ccda/types.ts';
 import { type GaConfig, GaError, isGaNotRunning } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
@@ -240,6 +240,8 @@ export async function ccdaConverter(cfg: Pick<GaConfig, 'patientId' | 'ccdaConve
 const STATEMENTS = ['act', 'encounter', 'observation', 'observationMedia', 'organizer', 'procedure', 'regionOfInterest', 'substanceAdministration', 'supply'];
 // Observation value types the library converts (processVitalsObservation); any other is dropped with a console.warn.
 const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT']);
+// An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
+const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
 const ENCOUNTER_DIAGNOSIS = '2.16.840.1.113883.10.20.22.4.80';
 const NOT_VITALS = new Set(['2.16.840.1.113883.10.20.22.2.10', '2.16.840.1.113883.10.20.22.2.60', '2.16.840.1.113883.10.20.22.2.500']); // plan of care, goals, care teams
 // Sections whose concern acts the library reads as one record from the first SUBJ observation only (processConditionAct, processAllergyIntoleranceAct).
@@ -316,7 +318,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
         return;
       }
       const type = o.value?.['@_xsi:type'];
-      if (type && !VALUE_TYPES.has(type)) add(name, root0(o.templateId), 1, `${type} value not converted`);
+      if (type && !VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))) add(name, root0(o.templateId), 1, `${type} value not converted`);
       for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
     };
     for (const e of entries) {
