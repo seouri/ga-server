@@ -316,3 +316,21 @@ test('an id-less PractitionerRole whose practitioner is refused keys the same on
     expect(await client.searchResources('PractitionerRole', {})).toHaveLength(first.invalid === 1 ? 2 : 1);
   });
 });
+
+test('mergeCopies: nested fields merge, arrays union, the newer wins a leaf, a placeholder never wins, extensions union by url', async () => {
+  const { mergeCopies } = await import('../src/engine.ts');
+  const ext = (date: string, more: object[] = []) => [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }, ...more];
+  const older = { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, period: { start: '2020-01-02', end: '2020-01-05' },
+    type: [{ text: 'a' }], extension: ext('2020-01-10', [{ url: 'urn:x:one', valueString: '1' }]) } as unknown as Resource;
+  const newer = { resourceType: 'Encounter', status: 'unknown', class: { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] },
+    period: { start: '2020-01-03' }, type: [{ text: 'b' }], extension: ext('2020-02-01', [{ url: 'urn:x:two', valueString: '2' }]) } as unknown as Resource;
+  for (const [a, b] of [[older, newer], [newer, older]]) {
+    const m = mergeCopies(a as never, b as never) as unknown as Record<string, unknown>;
+    expect(m.status).toBe('finished');
+    expect(m.class).toEqual({ code: 'AMB' });
+    expect(m.period).toEqual({ start: '2020-01-03', end: '2020-01-05' });
+    expect((m.type as unknown[]).length).toBe(2);
+    expect((m.extension as { url: string; valueDateTime?: string }[]).map((e) => e.url).sort()).toEqual(['urn:ga-server:ext:source-date', 'urn:x:one', 'urn:x:two']);
+    expect((m.extension as { url: string; valueDateTime?: string }[]).find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime).toBe('2020-02-01');
+  }
+});

@@ -886,3 +886,56 @@ test('a C-CDA note never merges into an EHI note of another Epic org, nor into a
     expect((await client.readResource('DocumentReference', untagged.id as string)).identifier).toHaveLength(1);
   });
 });
+
+test('one visit across documents: a period end survives in either order (nested objects merge field by field)', async () => {
+  const full = (d: string) => visitDoc(d, '20200110', { header: visitHeader('<effectiveTime><low value="20200102"/><high value="20200105"/></effectiveTime>'), body: visitEntry() });
+  const bare = (d: string) => visitDoc(d, '20200201', { body: visitEntry('<effectiveTime><low value="20200102"/></effectiveTime>') });
+  for (const order of [[full('A'), bare('B')], [bare('B'), full('A')]]) {
+    await onStore(async ({ client }) => {
+      const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+      for (const x of order) await importPath(client, cfgFor(pid), writeDoc(x), pid);
+      const [v, ...more] = await visits(client, pid);
+      expect(more).toHaveLength(0);
+      expect(v.period).toEqual({ start: '2020-01-02', end: '2020-01-05' });
+    });
+  }
+});
+
+test('one visit: two entries with the same visit id in one document are one Encounter, and a later document adds no other', async () => {
+  const entry = (code: string, when: string) => `<entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+    <id root="2.16.840.1.113883.19.5.3" extension="V1"/><code code="${code}" codeSystem="2.16.840.1.113883.6.12"/><effectiveTime value="${when}"/></encounter></entry>`;
+  const section = (entries: string) => `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>${entries}</section></component>`;
+  for (const [first, second] of [['99213', '99215'], ['99215', '99213']]) {
+    await onStore(async ({ client }) => {
+      const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+      await importPath(client, cfgFor(pid), writeDoc(visitDoc('C', '20210101', { body: section(entry(first, '20210101') + entry(second, '20210301')) })), pid);
+      expect(await visits(client, pid)).toHaveLength(1);
+      await importPath(client, cfgFor(pid), writeDoc(visitDoc('D', '20210401', { body: section(entry('99213', '20210101')) })), pid);
+      const [v, ...more] = await visits(client, pid);
+      expect(more).toHaveLength(0);
+      expect(v.type?.map((t) => t.coding?.[0].code).sort()).toEqual(['99213', '99215']);
+    });
+  }
+});
+
+test('a visit another source wrote (EHI), linked by its Epic id, keeps its values and extensions; the C-CDA id is added', async () => {
+  const csn = '1.2.840.114350.1.13.999.2.7.3.698084.8';
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const ehi = await client.createResource({ resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
+      subject: { reference: `Patient/${pid}` }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' },
+      identifier: [{ system: 'urn:ga-server:id:ehi:org-999', value: 'PAT_ENC|123' }, { system: `urn:oid:${csn}`, value: '123' }],
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] },
+      extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2022-01-02' }, { url: 'urn:test:keep', valueString: 'x' }] });
+    const visit = `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+      <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="${csn}" extension="123"/>
+      <code code="99213" codeSystem="2.16.840.1.113883.6.12"/></encounter></entry></section></component>`;
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('E', '20230101', { body: visit })), pid);
+    const after = await client.readResource('Encounter', ehi.id as string);
+    expect(after).toMatchObject({ status: 'finished', class: { code: 'AMB' }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' } });
+    expect(after.extension?.map((e) => e.url)).toContain('urn:test:keep');
+    expect(after.identifier?.map((i) => i.system)).toContain('urn:ga-server:id:ccda');
+    expect(after.meta?.tag?.map((t) => t.code)).toEqual(expect.arrayContaining(['src-ehi', 'src-ccda']));
+    expect((await client.searchResources('Encounter', { subject: `Patient/${pid}` }))).toHaveLength(1);
+  });
+});
