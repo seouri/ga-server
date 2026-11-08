@@ -127,3 +127,7 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   ];
   return out;
 }
+
+// Same numbers in order, ignoring unit spelling: the value (or text value), then a panel's components. Two empty readings are not the same.
+const nums = (o: Observation) => JSON.stringify([o.valueQuantity?.value ?? o.valueString, ...(o.component ?? []).map((c) => c.valueQuantity?.value)]);
+export const sameNumbers = (a: Observation, b: Observation): boolean => nums(a) !== JSON.stringify([null]) && nums(a) === nums(b);

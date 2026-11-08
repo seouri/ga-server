@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Patient, Resource } from '@med
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
-import { APPLE, ARRIVED, hasTag, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
+import { APPLE, ARRIVED, hasTag, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, sameNumbers, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport, storeNewestImport } from './share/scope.ts';
 
@@ -221,8 +221,6 @@ const firstCoding = (o: Observation) => {
   return c?.code ? `${c.system ?? ''}|${c.code}` : undefined;
 };
 // The same numbers, ignoring units (sources spell them differently: K/uL vs 10*3/uL) and including a panel's components (BP).
-const nums = (o: Observation) => JSON.stringify([o.valueQuantity?.value ?? o.valueString, ...(o.component ?? []).map((c) => c.valueQuantity?.value)]);
-const sameNumbers = (a: Observation, b: Observation): boolean => nums(a) !== JSON.stringify([null]) && nums(a) === nums(b);
 
 export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueQuantity && b.valueQuantity) return a.valueQuantity.value === b.valueQuantity.value && a.valueQuantity.unit === b.valueQuantity.unit;
