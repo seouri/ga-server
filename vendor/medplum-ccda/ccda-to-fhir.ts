@@ -1097,10 +1097,7 @@ class CcdaToFhirConverter {
     const participants: CareTeamParticipant[] = [];
 
     for (const component of organizer.component ?? EMPTY) {
-      const participant = this.processCareTeamMember(component);
-      if (participant) {
-        participants.push(participant);
-      }
+      participants.push(...this.processCareTeamMembers(component));
     }
 
     const result: CareTeam = {
@@ -1113,22 +1110,19 @@ class CcdaToFhirConverter {
     return result;
   }
 
-  private processCareTeamMember(component: CcdaOrganizerComponent): CareTeamParticipant | undefined {
-    const act = component.act?.[0];
-    if (!act) {
-      return undefined;
+  private processCareTeamMembers(component: CcdaOrganizerComponent): CareTeamParticipant[] {
+    // Every member act, and every performer of each act, is a participant
+    const result: CareTeamParticipant[] = [];
+    for (const act of component.act ?? EMPTY) {
+      for (const performer of act.performer ?? EMPTY) {
+        result.push({
+          role: performer.functionCode ? [this.mapCode(performer.functionCode) as CodeableConcept] : undefined,
+          member: this.mapAssignedEntityToReference(performer.assignedEntity),
+          period: this.mapEffectiveTimeToPeriod(act.effectiveTime?.[0]),
+        });
+      }
     }
-
-    const performer = act.performer?.[0];
-    if (!performer) {
-      return undefined;
-    }
-
-    return {
-      role: performer.functionCode ? [this.mapCode(performer.functionCode) as CodeableConcept] : undefined,
-      member: this.mapAssignedEntityToReference(performer.assignedEntity),
-      period: this.mapEffectiveTimeToPeriod(act.effectiveTime?.[0]),
-    };
+    return result;
   }
 
   private processVitalsOrganizer(organizer: CcdaOrganizer): Observation {

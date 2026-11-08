@@ -298,12 +298,13 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       const subj = (act.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length;
       add(name, root0(act.templateId), subj - 1, `additional ${kind} in concern not converted`);
     }
-    // Organizer components: the library reads only observations (care teams: their member acts).
-    if (!hasTemplate(s, OID.OID_CARE_TEAMS_SECTION)) {
-      for (const org of entries.flatMap((e) => e.organizer ?? [])) {
-        const other = (org.component ?? []).reduce((n, c) => n + STATEMENTS.filter((k) => k !== 'observation').reduce((m, k) => m + arr((c as X)[k]).length, 0), 0);
-        add(name, root0(org.templateId), other, 'organizer component not converted');
-      }
+    // Organizer components: the library reads only observations (care teams: their member acts, one participant per performer).
+    const careTeam = hasTemplate(s, OID.OID_CARE_TEAMS_SECTION);
+    for (const org of entries.flatMap((e) => e.organizer ?? [])) {
+      const read = careTeam ? 'act' : 'observation';
+      const other = (org.component ?? []).reduce((n, c) => n + STATEMENTS.filter((k) => k !== read).reduce((m, k) => m + arr((c as X)[k]).length, 0), 0);
+      add(name, root0(org.templateId), other, 'organizer component not converted');
+      if (careTeam) add(name, root0(org.templateId), (org.component ?? []).flatMap((c) => c.act ?? []).filter((a) => !a.performer?.length).length, 'care team member without performer');
     }
     // Observations the library reads as results (its "vitals" path), with their children: a missing code drops the record, an unread value type the value.
     if (hasTemplate(s, ...NOT_VITALS)) return;

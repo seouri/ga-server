@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import type { Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { CareTeam, Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
@@ -209,6 +209,21 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
 test('a binary ED value (no FHIR value type) is named; a text one is converted', () => {
   const pdf = convertCcdaLocal(EPIC.replace('<value xsi:type="ED"><reference value="#res3"/></value>', '<value xsi:type="ED" mediaType="application/pdf" representation="B64">JVBERi0=</value>'));
   expect(pdf.notImported).toContainEqual({ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'ED value not converted' });
+});
+
+test('care team: every member and performer is a participant; a member without performer or a non-act component is named', () => {
+  const second = '<component><act classCode="PCPR" moodCode="EVN"><code code="85847-2" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="active"/>'
+    + '<performer typeCode="PRF"><assignedEntity><id root="2.16.840.1.113883.4.6" extension="1111111111"/></assignedEntity></performer>'
+    + '<performer typeCode="PRF"><assignedEntity><id root="2.16.840.1.113883.4.6" extension="2222222222"/></assignedEntity></performer></act></component>'
+    + '<component><act classCode="PCPR" moodCode="EVN"><code code="85847-2" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="active"/></act></component>'
+    + '<component><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/></observation></component>';
+  const out = convertCcdaLocal(EPIC.replace('</act>\n              </component>\n            </organizer>', `</act>\n              </component>${second}\n            </organizer>`));
+  const team = out.resources.find((r) => r.resourceType === 'CareTeam') as CareTeam;
+  expect(team.participant).toHaveLength(3);
+  expect(out.notImported).toEqual(expect.arrayContaining([
+    { section: 'Care Team', templateId: '2.16.840.1.113883.10.20.22.4.500', entries: 1, reason: 'care team member without performer' },
+    { section: 'Care Team', templateId: '2.16.840.1.113883.10.20.22.4.500', entries: 1, reason: 'organizer component not converted' },
+  ]));
 });
 
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
