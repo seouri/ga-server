@@ -241,7 +241,6 @@ const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT']);
 // An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
 const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
 const ENCOUNTER_DIAGNOSIS = '2.16.840.1.113883.10.20.22.4.80';
-const NOT_VITALS = new Set(['2.16.840.1.113883.10.20.22.2.10', '2.16.840.1.113883.10.20.22.2.60', '2.16.840.1.113883.10.20.22.2.500']); // plan of care, goals, care teams
 // Sections whose concern acts the library reads as one record from the first SUBJ observation only (processConditionAct, processAllergyIntoleranceAct).
 const CONCERN = new Map<string, string>([
   ...[OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
@@ -249,7 +248,8 @@ const CONCERN = new Map<string, string>([
   ...[OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
     OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2].map((o): [string, string] => [o, 'allergy']),
 ]);
-// A goal observation (by its template, in any section) is read by processGoalObservation, which keeps only these value types.
+// A goal observation (by its template, in any section, and every observation in the plan of care and goals sections) is read by
+// processGoalObservation, which keeps only these value types and no child observation.
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
@@ -315,11 +315,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       if (careTeam) add(name, root0(org.templateId), (org.component ?? []).flatMap((c) => c.act ?? []).filter((a) => !a.performer?.length).length, 'care team member without performer');
     }
     // Observations the library reads as results (its "vitals" path), with their children: a missing code drops the record, an unread value type the value.
-    if (hasTemplate(s, ...NOT_VITALS)) return;
+    const goals = hasTemplate(s, OID.OID_PLAN_OF_CARE_SECTION, OID.OID_GOALS_SECTION);
     const walk = (o: CcdaObservation, nested: boolean) => {
-      if (!nested && hasTemplate(o, ...GOAL_TEMPLATES)) {
+      if (!nested && (goals || hasTemplate(o, ...GOAL_TEMPLATES))) {
         const type = o.value?.['@_xsi:type'];
         if (type && !GOAL_VALUE_TYPES.has(type)) add(name, root0(o.templateId), 1, `${type} value not converted`);
+        add(name, root0(o.templateId), (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []).length, 'observation in goal not converted');
         return;
       }
       if (!o.code) {

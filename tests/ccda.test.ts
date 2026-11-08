@@ -250,6 +250,16 @@ test('payers: one Coverage per policy; a guarantor and the policy holder\'s own 
   expect(none.notImported).toContainEqual({ section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' });
 });
 
+test('goals and plan of care: an observation value the goal path cannot read, and child observations of a goal, are named', () => {
+  const planned = EPIC.replace('<code code="24323-8" codeSystem="2.16.840.1.113883.6.1" displayName="Comprehensive metabolic panel"/>\n              <statusCode code="active"/>',
+    '<code code="24323-8" codeSystem="2.16.840.1.113883.6.1" displayName="Comprehensive metabolic panel"/>\n              <statusCode code="active"/><value xsi:type="PQ" value="5" unit="kg"/>'
+    + '<entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/></observation></entryRelationship>');
+  expect(convertCcdaLocal(planned).notImported.filter((n) => n.section === 'Plan of Treatment')).toEqual([
+    { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'PQ value not converted' },
+    { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'observation in goal not converted' },
+  ]);
+});
+
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
 const writeDoc = (xml: string) => {
   const f = join(mkdtempSync(join(tmpdir(), 'ga-ccda-')), 'doc.xml');
