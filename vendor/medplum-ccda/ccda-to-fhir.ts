@@ -50,6 +50,7 @@ import type {
   PractitionerQualification,
   PractitionerRole,
   Procedure,
+  Specimen,
   Quantity,
   Reference,
   RelatedPerson,
@@ -99,6 +100,7 @@ import {
   OID_SOCIAL_HISTORY_SECTION_V2_ENTRIES_OPTIONAL,
   OID_RESULT_ORGANIZER,
   OID_RESULT_ORGANIZER_V2,
+  OID_SPECIMEN_RECEIVED,
   OID_REASON_FOR_REFERRAL_V2,
 } from './oids.ts';
 import { sanitizeNullFlavors } from './sanitize.ts';
@@ -247,6 +249,8 @@ class CcdaToFhirConverter {
   private readonly ccda: Ccda;
   private readonly options: CcdaToFhirOptions | undefined;
   private readonly resources: Resource[] = [];
+  private readonly specimens = new Map<string, Specimen>();
+  private readonly reportEncounters: { report: DiagnosticReport; section: CcdaSection; encounters: CcdaEncounter[] }[] = [];
   private readonly narrativeTexts: Map<string, string | undefined>;
   private patient?: Patient;
 
@@ -561,6 +565,7 @@ class CcdaToFhirConverter {
       }
     }
 
+    this.resolveReportEncounters();
     return {
       resourceType: 'Composition',
       id: this.mapId(this.ccda.id),
@@ -1736,9 +1741,30 @@ class CcdaToFhirConverter {
     for (const component of organizer.component ?? EMPTY) {
       results.push(...this.processVitalsComponent(component, section));
     }
-    return {
+    const id = this.mapId(organizer.id);
+    // The panel's specimens (organizer/specimen, and each collection procedure's specimen participant), one per specimen id
+    const specimens = (organizer.specimen ?? EMPTY).map((s) => this.mapSpecimen(s.specimenRole));
+    // Other components: a procedure (e.g. the specimen collection) is a Procedure reporting in this report; an encounter (the
+    // ordering visit) is the report's encounter (resolved after all sections: an entry's Encounter of the same id is reused)
+    for (const component of organizer.component ?? EMPTY) {
+      for (const procedure of component.procedure ?? EMPTY) {
+        const result = this.processProcedure(section, procedure);
+        result.report = [{ reference: `DiagnosticReport/${id}` }];
+        this.resources.push(result);
+        const received = (procedure.entryRelationship ?? EMPTY)
+          .flatMap((er) => er.act ?? EMPTY)
+          .find((a) => getTemplateIds(a).includes(OID_SPECIMEN_RECEIVED));
+        for (const participant of procedure.participant ?? EMPTY) {
+          if (participant['@_typeCode'] === 'PRD' && participant.participantRole?.['@_classCode'] === 'SPEC') {
+            specimens.push(this.mapSpecimen(participant.participantRole, procedure, received));
+          }
+        }
+      }
+    }
+    const encounters = (organizer.component ?? EMPTY).flatMap((c) => c.encounter ?? EMPTY);
+    const report: DiagnosticReport = {
       resourceType: 'DiagnosticReport',
-      id: this.mapId(organizer.id),
+      id,
       identifier: this.mapIdentifiers(organizer.id),
       status: statuses[organizer.statusCode?.['@_code'] ?? ''] ?? 'unknown',
       category: [{ coding: [{ system: DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM, code: 'LAB', display: 'Laboratory' }] }],
@@ -1752,8 +1778,74 @@ class CcdaToFhirConverter {
       performer: organizer.performer?.length
         ? organizer.performer.map((p) => this.mapAssignedEntityToReference(p.assignedEntity)).filter((r) => !!r)
         : undefined,
+      specimen: specimens.length > 0 ? [...new Set(specimens.map((r) => r.reference))].map((reference) => ({ reference })) : undefined,
       result: results.length > 0 ? results : undefined,
     };
+    if (encounters.length > 0) {
+      this.reportEncounters.push({ report, section, encounters });
+    }
+    return report;
+  }
+
+  /**
+   * A specimen (a specimenRole) is a Specimen, one per specimen id in the document: its id and type, and, from the procedure
+   * that collected it, when and where it was collected and when it was received (an IHE Specimen Received act).
+   * @param role - The specimen role.
+   * @param collection - The collection procedure, if any.
+   * @param received - Its specimen received act, if any.
+   * @returns A reference to the Specimen.
+   */
+  private mapSpecimen(role: CcdaParticipantRole | undefined, collection?: CcdaProcedure, received?: CcdaAct): Reference<Specimen> {
+    const identifier = this.mapIdentifiers(role?.id);
+    const key = identifier?.filter((i) => i.value).map((i) => `${i.system ?? ''}|${i.value}`)[0];
+    let specimen = key ? this.specimens.get(key) : undefined;
+    if (!specimen) {
+      specimen = {
+        resourceType: 'Specimen',
+        id: this.mapId(role?.id),
+        identifier,
+        subject: this.patient ? createReference(this.patient) : undefined,
+      };
+      this.resources.push(specimen);
+      if (key) {
+        this.specimens.set(key, specimen);
+      }
+    }
+    // A specimenRole names its material as specimenPlayingEntity, a participantRole as playingEntity
+    specimen.type ??= this.mapCode((role?.specimenPlayingEntity ?? role?.playingEntity)?.code);
+    const collected = mapCcdaToFhirDateTime(collection?.effectiveTime?.[0]?.['@_value'] ?? collection?.effectiveTime?.[0]?.low?.['@_value']);
+    if (collection && !specimen.collection) {
+      specimen.collection = {
+        collectedDateTime: collected,
+        method: this.mapCode(collection.code),
+        bodySite: this.mapCode(collection.targetSiteCode),
+      };
+    }
+    specimen.receivedTime ??= mapCcdaToFhirDateTime(received?.effectiveTime?.[0]?.['@_value']);
+    return createReference(specimen);
+  }
+
+  /**
+   * Each result report's encounter components (the ordering visit): an Encounter an entry made for the same id, else a new one;
+   * the report's encounter is the first.
+   */
+  private resolveReportEncounters(): void {
+    const key = (i: Identifier): string => `${i.system ?? ''}|${i.value ?? ''}`;
+    for (const { report, section, encounters } of this.reportEncounters) {
+      const refs = encounters.map((encounter) => {
+        const keys = new Set((this.mapIdentifiers(encounter.id) ?? EMPTY).filter((i) => i.value).map(key));
+        const existing = keys.size
+          ? this.resources.find((r): r is Encounter => r.resourceType === 'Encounter' && !!r.identifier?.some((i) => keys.has(key(i))))
+          : undefined;
+        if (existing) {
+          return createReference(existing);
+        }
+        const made = this.processEncounter(section, encounter);
+        this.resources.push(made);
+        return createReference(made);
+      });
+      report.encounter = refs[0];
+    }
   }
 
   private processCareTeamOrganizer(organizer: CcdaOrganizer): CareTeam {

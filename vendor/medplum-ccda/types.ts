@@ -162,6 +162,7 @@ export interface CcdaProcedure {
   targetSiteCode?: CcdaCode;
   text?: CcdaText;
   participant?: CcdaParticipant[];
+  entryRelationship?: { act?: CcdaAct[] }[];
 }
 
 export interface CcdaAct {
@@ -253,6 +254,7 @@ export interface CcdaParticipantRole {
   addr?: CcdaAddr[];
   telecom?: CcdaTelecom[];
   playingEntity?: CcdaPlayingEntity;
+  specimenPlayingEntity?: CcdaPlayingEntity;
   playingDevice?: CcdaPlayingDevice;
   scopingEntity?: CcdaScopingEntity;
 }
@@ -437,6 +439,7 @@ export interface CcdaOrganizer {
   statusCode?: CcdaCode;
   effectiveTime?: CcdaEffectiveTime[];
   subject?: CcdaSubject;
+  specimen?: { specimenRole?: CcdaParticipantRole }[];
   performer?: CcdaPerformer[];
   component: CcdaOrganizerComponent[];
 }
@@ -444,6 +447,8 @@ export interface CcdaOrganizer {
 export interface CcdaOrganizerComponent {
   act?: CcdaAct[];
   observation?: CcdaObservation[];
+  procedure?: CcdaProcedure[];
+  encounter?: CcdaEncounter[];
 }
 
 export interface CcdaSubject {

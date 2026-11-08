@@ -66,6 +66,11 @@ const ARRAY_PATHS = [
 
   'organizer.component',
   'organizer.performer',
+  'organizer.specimen',
+  'component.procedure',
+  'component.encounter',
+  'procedure.participant',
+  'procedure.entryRelationship',
 
   'substanceAdministration.consumable.manufacturedProduct',
   'substanceAdministration.entryRelationship',
