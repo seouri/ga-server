@@ -88,10 +88,12 @@ async function all(client: MedplumClient, type: string, q: Record<string, string
   return out;
 }
 
-// Everything in the patient's compartment, plus GA's reminders and follow-ups (Basic), one page at a time.
+// Everything in the patient's compartment, GA's reminders and follow-ups (Basic), and every Provenance (record_followup keeps the
+// note or report it quotes there; Provenance has no patient, and GA writes few), one page at a time. AuditEvents are access logs:
+// left as they were.
 async function scan(client: MedplumClient, pid: string, fn: (r: R) => void): Promise<void> {
-  for (const [type, field] of [...Object.entries(COMPARTMENT), ['Basic', 'subject']]) {
-    for await (const page of client.searchResourcePages(type as 'Observation', { [field]: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' })) {
+  for (const [type, field] of [...Object.entries(COMPARTMENT), ['Basic', 'subject'], ['Provenance', '']]) {
+    for await (const page of client.searchResourcePages(type as 'Observation', { ...(field && { [field]: `Patient/${pid}` }), _count: '1000' }, { cache: 'no-cache' })) {
       for (const r of page) fn(r as R);
     }
   }
@@ -154,37 +156,40 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
     o.log('nothing to replace: C-CDA documents already import with the new converter ("ccdaConverter": "medplum")');
     return report;
   }
-  // No Microsoft-era Composition left: nothing to replace (a crash after the last delete only lacks the flag). Records the new path
-  // wrote without this command (no MARK) must not be taken for old ones.
-  const ms = await client.search('Composition', { subject: `Patient/${pid}`, _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}`, _count: '1' }, { cache: 'no-cache' });
-  if (!ms.entry?.length) {
-    if (o.yes) setCcdaConverter(configFile);
-    o.log(`no Microsoft-era C-CDA records${o.yes ? `; ${configFile}: "ccdaConverter": "medplum"` : ''}`);
-    return report;
-  }
-
   // 1. read and refuse
   const docs = await storedDocs(client, pid);
-  report.documents = docs.length;
-  const records: R[] = [];
-  for (const [type, field] of Object.entries(COMPARTMENT)) records.push(...(await all(client, type, { identifier: `${CCDA}|`, [field]: `Patient/${pid}` })));
-  const old = records.filter((r) => !hasTag(r, MARK));
-  const merged = old.filter((r) => !isProtected(r) && otherSource(r));
-  const replaced = old.filter((r) => !merged.includes(r)); // C-CDA only, or protected
   const byHash = new Map(docs.map((d) => [d.hash, d]));
   const fileDoc = new Map<string, Doc | undefined>();
+  const hashOf = (source: string): string | undefined => { try { return sha256(readFileSync(source)); } catch { return undefined; } }; // moved or deleted
   // A record's source document: the file at meta.source by content hash; a file no longer there by its name, unless two stored
   // documents share that name (Epic exports reuse DOC0001.XML): then none, never a guess.
   const docOf = (source?: string): Doc | undefined => {
     if (!source) return undefined;
     if (!fileDoc.has(source)) {
-      let data: Buffer | undefined;
-      try { data = readFileSync(source); } catch { /* moved or deleted */ }
+      const hash = hashOf(source);
       const named = docs.filter((d) => d.title === basename(source));
-      fileDoc.set(source, data ? byHash.get(sha256(data)) : named.length === 1 ? named[0] : undefined);
+      fileDoc.set(source, hash ? byHash.get(hash) : named.length === 1 ? named[0] : undefined);
     }
     return fileDoc.get(source);
   };
+  // Microsoft-era Compositions: the patient's, and those the Microsoft path stored with no patient whose source file is one of this
+  // patient's stored documents by content (never by name: another patient's document may share it).
+  const msTags = { _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}` };
+  const unowned = (await all(client, 'Composition', { ...msTags, 'subject:missing': 'true' })).filter((c) => { const h = c.meta?.source && hashOf(c.meta.source); return !!h && byHash.has(h); });
+  const ms = await client.search('Composition', { ...msTags, subject: `Patient/${pid}`, _count: '1' }, { cache: 'no-cache' });
+  // None left: nothing to replace (a crash after the last delete only lacks the flag). Records the new path wrote without this
+  // command (no MARK) must not be taken for old ones.
+  if (!ms.entry?.length && !unowned.length) {
+    if (o.yes) setCcdaConverter(configFile);
+    o.log(`no Microsoft-era C-CDA records${o.yes ? `; ${configFile}: "ccdaConverter": "medplum"` : ''}`);
+    return report;
+  }
+  report.documents = docs.length;
+  const records: R[] = [...unowned];
+  for (const [type, field] of Object.entries(COMPARTMENT)) records.push(...(await all(client, type, { identifier: `${CCDA}|`, [field]: `Patient/${pid}` })));
+  const old = records.filter((r) => !hasTag(r, MARK));
+  const merged = old.filter((r) => !isProtected(r) && otherSource(r));
+  const replaced = old.filter((r) => !merged.includes(r)); // C-CDA only, or protected
   const unstored = [...replaced, ...merged.filter((r) => hasTag(r, 'src-ccda'))].filter((r) => !docOf(r.meta?.source));
   if (unstored.length) {
     const names = [...new Set(unstored.map((r) => (r.meta?.source ? basename(r.meta.source) : 'no source recorded')))].join(', ');
@@ -232,6 +237,7 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
   }
 
   const hidden = new Set(replaced.map(refOf));
+  let unlinked = 0;
   if (o.yes) {
     // 2. backup
     await (o.backup ?? composeBackup(cfg))();
@@ -250,6 +256,8 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
       o.after?.('document');
     }
     if (invalid) throw new GaError(`stopped, no old record deleted: ${invalid} new-path records were refused as invalid. Fix that, then run ga ccda replace --yes again`);
+    // A stripped record the new path did not link again may now have a separate new copy beside it: counted for the owner.
+    for (const r of merged) if (!idsOf((await client.readResource(r.resourceType as 'Observation', r.id as string)) as R).some((i) => i.system === CCDA)) unlinked++;
     o.after?.('write');
   } else {
     // New: a converted record no old one continues and no stored record already holds (a link to another source's record by
@@ -321,9 +329,12 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
     const [type, id] = k.split('/');
     const r = (await client.readResource(type as 'Observation', id)) as R;
     walkReferences(r, (ref) => next.get(ref));
-    // a pointer that now repeats another (both sides of a possible duplicate re-flagged by the import) is kept once
-    const seen = new Set<string>();
+    // A possible-duplicate pointer that now repeats another (the import re-flagged the pair) is kept once; one that now points at
+    // the record itself (the new path merged the old record into the very record it was flagged against) goes, and with the last
+    // one the possible-duplicate tag.
+    const seen = new Set<string>([k]);
     r.extension = r.extension?.filter((e) => e.url !== DUP_OF || !seen.has(e.valueReference?.reference ?? '') && !!seen.add(e.valueReference?.reference ?? ''));
+    if (!r.extension?.some((e) => e.url === DUP_OF) && r.meta?.tag) r.meta.tag = r.meta.tag.filter((t) => !(t.system === TAG && t.code === 'possible-duplicate'));
     await client.updateResource(r);
   }
   if (o.yes) o.after?.('repoint');
@@ -346,6 +357,6 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
     if (report.dangling) throw new GaError(`stopped: ${report.dangling} references still point at deleted records; the flag is not set. Run ga ccda replace --yes again`);
   }
   if (o.yes) setCcdaConverter(configFile);
-  o.log(`${o.yes ? 'replaced' : 'dry run, nothing changed'}: ${report.documents} documents; deleted ${sum(report.deleted)} (${byType(report.deleted)}); stripped ${sum(report.stripped)} (${byType(report.stripped)}); kept ${sum(report.kept)} (${byType(report.kept)}); ${o.yes ? 'created' : 'new'} ${sum(report.created)} (${byType(report.created)}); repointed ${report.repointed}${patientless ? `; left alone: ${patientless} C-CDA records with no patient that old records point at` : ''}${o.yes ? `; dangling ${report.dangling}; ${configFile}: "ccdaConverter": "medplum"` : '. Run ga ccda replace --yes to replace (it backs up first)'}`);
+  o.log(`${o.yes ? 'replaced' : 'dry run, nothing changed'}: ${report.documents} documents; deleted ${sum(report.deleted)} (${byType(report.deleted)}); stripped ${sum(report.stripped)} (${byType(report.stripped)}); kept ${sum(report.kept)} (${byType(report.kept)}); ${o.yes ? 'created' : 'new'} ${sum(report.created)} (${byType(report.created)}); repointed ${report.repointed}${patientless ? `; left alone: ${patientless} C-CDA records with no patient that old records point at` : ''}${unlinked ? `; ${unlinked} stripped records were not linked again (check for a copy beside each)` : ''}${o.yes ? `; dangling ${report.dangling}; ${configFile}: "ccdaConverter": "medplum"` : '. Run ga ccda replace --yes to replace (it backs up first)'}`);
   return report;
 }

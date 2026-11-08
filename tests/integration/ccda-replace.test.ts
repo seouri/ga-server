@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Basic, Encounter, Identifier, Resource } from '@medplum/fhirtypes';
+import type { Basic, Encounter, Identifier, Provenance, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { ccdaDate, convertCcdaLocal, custodian, importPath, repair } from '../../src/ccda.ts';
 import { replaceCcda } from '../../src/ccda-replace.ts';
@@ -33,6 +33,7 @@ let client: MedplumClient;
 let cfg: GaConfig;
 let pid: string;
 let fileHash: string;
+let prov: Provenance | undefined; // outside the compartment: deleted after
 const source = (local: boolean): SourceInfo => ({ kind: 'ccda', file: FILE, org: custodian(XML), date: ccdaDate(XML), writer: 'importer', ...(local && { local }) });
 
 beforeAll(async () => {
@@ -65,6 +66,7 @@ afterAll(async () => {
     if (bin) await client.deleteResource('Binary', bin).catch(() => undefined);
     await client.deleteResource('DocumentReference', d.id as string);
   }
+  if (prov) await client.deleteResource('Provenance', prov.id as string);
   await cleanupTestMaps(client);
   await cleanupTestPatient(client, pid);
 });
@@ -80,8 +82,12 @@ const run = (yes: boolean) => replaceCcda(client, cfg, { yes, log: () => undefin
 
 test('ga ccda replace: a dry run changes nothing; the replace keeps the EHI visit, repoints the follow-up, and a re-import is a no-op', async () => {
   const [report] = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
-  const followup = await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${pid}` }, code: { coding: [{ system: 'urn:ga-server:reminder', code: 'followup' }] },
-    extension: [{ url: 'urn:ga-server:ext:topic', valueString: 'x' }, { url: 'urn:ga-server:ext:document', valueReference: { reference: `DiagnosticReport/${report.id}` } }] });
+  // A recorded follow-up as record_followup writes it: the Basic, and a Provenance naming the report it quotes.
+  const followup = await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${pid}` }, created: '2026-01-01', code: { coding: [{ system: 'urn:ga-server:reminder', code: 'followup' }] },
+    extension: [{ url: 'urn:ga-server:ext:topic', valueString: 'x' }, { url: 'urn:ga-server:ext:due', valueDate: '2027-01-01' }, { url: 'urn:ga-server:ext:quote', valueString: 'q' }] });
+  prov = await client.createResource<Provenance>({ resourceType: 'Provenance', target: [{ reference: `Basic/${followup.id}` }], recorded: new Date().toISOString(),
+    activity: { coding: [{ system: 'urn:ga-server:activity', code: 'followup' }] }, agent: [{ who: { display: 'test' } }], reason: [{ text: 'x' }],
+    entity: [{ role: 'source', what: { reference: `DiagnosticReport/${report.id}` } }] });
   const [visit] = await client.searchResources('Encounter', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
   expect(idsOf(visit).some((i) => i.system === CCDA)).toBe(true); // linked on the Microsoft path
 
@@ -102,7 +108,7 @@ test('ga ccda replace: a dry run changes nothing; the replace keeps the EHI visi
   expect(idsOf(visits[0]).filter((i) => i.system === CCDA).map((i) => i.value)).toEqual([`Encounter|${ENC_ID.system}|${ENC_ID.value}`]);
   const [newReport] = all.filter((x) => x.resourceType === 'DiagnosticReport');
   expect(newReport.id).not.toBe(report.id);
-  expect((await client.readResource('Basic', followup.id as string)).extension?.[1].valueReference?.reference).toBe(`DiagnosticReport/${newReport.id}`);
+  expect((await client.readResource('Provenance', prov?.id as string)).entity?.[0].what.reference).toBe(`DiagnosticReport/${newReport.id}`);
   expect((all.find((x) => x.resourceType === 'Observation' && idsOf(x).some((i) => i.value === 'EX-RES-2')) as { valueQuantity?: { value?: number } }).valueQuantity?.value).toBe(0.11);
   expect(all.filter((x) => x.resourceType === 'Immunization').map((x) => (x as { status?: string }).status)).toEqual(['not-done']);
   expect(all.filter((x) => idsOf(x).some((i) => i.system === CCDA) && !hasTag(x, 'ccda-replace'))).toEqual([]);

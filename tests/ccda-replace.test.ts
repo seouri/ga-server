@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Mock, test, vi } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
-import type { Basic, Encounter, Identifier, Immunization, Observation, Resource } from '@medplum/fhirtypes';
-import { ccdaDate, custodian, importPath, repair } from '../src/ccda.ts';
+import type { Basic, Composition, Encounter, Identifier, Immunization, Observation, Provenance, Resource } from '@medplum/fhirtypes';
+import { ccdaDate, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
 import { replaceCcda } from '../src/ccda-replace.ts';
 import type { GaConfig } from '../src/config.ts';
 import { storeDocument } from '../src/document.ts';
@@ -31,7 +31,7 @@ const hasId = (r: Resource, value: string) => idsOf(r).some((i) => i.value === v
 type World = { client: MedplumClient; pid: string; cfg: GaConfig; configFile: string; file: string; backup: Mock<() => Promise<void>> };
 
 // A patient whose C-CDA document GA imported with the Microsoft converter (its records keyed the Microsoft way), stored or not.
-async function world(client: MedplumClient, o: { store?: boolean; ehiVisit?: boolean } = {}): Promise<World> {
+async function world(client: MedplumClient, o: { store?: boolean; ehiVisit?: boolean; ehiLab?: boolean } = {}): Promise<World> {
   const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
   const dir = mkdtempSync(join(tmpdir(), 'ga-replace-'));
   const file = join(dir, 'DOC0001.XML');
@@ -43,6 +43,13 @@ async function world(client: MedplumClient, o: { store?: boolean; ehiVisit?: boo
     // The same visit from an EHI export, which the Microsoft-era C-CDA import linked to by its Epic id.
     await importResources(client, [{ resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
       subject: { reference: `Patient/${pid}` }, identifier: [{ system: 'urn:ga-server:id:ehi:999', value: 'PAT_ENC|1' }, ENC_ID] } as Encounter],
+    { kind: 'ehi', file: '/ehi', date: '2024-01-01', writer: 'importer' }, pid, 'ehi');
+  }
+  if (o.ehiLab) {
+    // The leading-dot lab from an EHI export, right (0.11) at the same time: the Microsoft record (11) was flagged against it.
+    const lab = convertCcdaLocal(XML).resources.find((r) => hasId(r, 'EX-RES-2')) as Observation;
+    await importResources(client, [{ resourceType: 'Observation', status: 'final', category: lab.category, code: lab.code, effectiveDateTime: lab.effectiveDateTime,
+      valueQuantity: lab.valueQuantity, subject: { reference: `Patient/${pid}` }, identifier: [{ system: 'urn:ga-server:id:ehi:999', value: 'ORDER_RESULTS|1' }] } as Observation],
     { kind: 'ehi', file: '/ehi', date: '2024-01-01', writer: 'importer' }, pid, 'ehi');
   }
   const fileHash = o.store === false ? sha256(XML) : (await storeDocument(client, file, pid, 'application/xml')).fileHash;
@@ -174,8 +181,12 @@ test('references are repointed', async () => {
     const w = await world(client);
     const [report] = await client.searchResources('DiagnosticReport', { subject: `Patient/${w.pid}` });
     const lab = (await client.searchResources('Observation', { subject: `Patient/${w.pid}`, _count: '1000' })).find((o) => hasId(o, 'EX-RES-1')) as Observation;
-    const followup = await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, code: { coding: [{ system: 'urn:ga-server:reminder', code: 'followup' }] },
-      extension: [{ url: 'urn:ga-server:ext:topic', valueString: 'x' }, { url: 'urn:ga-server:ext:document', valueReference: { reference: `DiagnosticReport/${report.id}` } }] });
+    // A recorded follow-up as record_followup writes it (src/tools/maintenance.ts): the Basic, and a Provenance naming the report it quotes.
+    const followup = await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, created: '2026-01-01', code: { coding: [{ system: 'urn:ga-server:reminder', code: 'followup' }] },
+      extension: [{ url: 'urn:ga-server:ext:topic', valueString: 'x' }, { url: 'urn:ga-server:ext:due', valueDate: '2027-01-01' }, { url: 'urn:ga-server:ext:quote', valueString: 'q' }] });
+    const prov = await client.createResource<Provenance>({ resourceType: 'Provenance', target: [{ reference: `Basic/${followup.id}` }], recorded: new Date().toISOString(),
+      activity: { coding: [{ system: 'urn:ga-server:activity', code: 'followup' }] }, agent: [{ who: { display: 'Claude Code' } }], reason: [{ text: 'x' }],
+      entity: [{ role: 'source', what: { reference: `DiagnosticReport/${report.id}` } }] });
     const pdf = await client.createResource<Observation>({ resourceType: 'Observation', status: 'final', code: { text: 'Glucose' }, subject: { reference: `Patient/${w.pid}` },
       identifier: [{ system: 'urn:ga-server:id:pdf', value: 'p1' }], meta: { tag: [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }] },
       extension: [{ url: DUP_OF, valueReference: { reference: `Observation/${lab.id}` } }] });
@@ -185,7 +196,8 @@ test('references are repointed', async () => {
     const [newReport] = await client.searchResources('DiagnosticReport', { subject: `Patient/${w.pid}` });
     const newLab = (await client.searchResources('Observation', { subject: `Patient/${w.pid}`, _count: '1000' })).find((o) => hasId(o, 'EX-RES-1') && hasTag(o, 'ccda-replace')) as Observation;
     expect(newReport.id).not.toBe(report.id);
-    expect((await client.readResource('Basic', followup.id as string)).extension?.[1].valueReference?.reference).toBe(`DiagnosticReport/${newReport.id}`);
+    expect((await client.readResource('Provenance', prov.id as string)).entity?.[0].what.reference).toBe(`DiagnosticReport/${newReport.id}`);
+    expect((await client.readResource('Provenance', prov.id as string)).target[0].reference).toBe(`Basic/${followup.id}`);
     const dup = (await client.readResource('Observation', pdf.id as string)).extension?.filter((e) => e.url === DUP_OF).map((e) => e.valueReference?.reference);
     expect(dup).toEqual([`Observation/${newLab.id}`]);
     await clean(w);
@@ -210,6 +222,39 @@ test('a record with no counterpart that something points at is kept', async () =
     expect((await client.readResource('Basic', followup.id as string)).extension?.[0].valueReference?.reference).toBe(`Observation/${pointed.id}`);
     expect(flag(w)).toBe('medplum');
     await clean(w, 2);
+  });
+});
+
+test('an old record flagged against the very record the new path merges into: one record, no flag left', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client, { ehiLab: true });
+    const flagged = (await records(client, w.pid)).filter((x) => hasTag(x, 'possible-duplicate'));
+    expect(flagged.map((x) => (hasId(x, 'EX-RES-2') ? 'old' : 'ehi')).sort()).toEqual(['ehi', 'old']); // the Microsoft path's flag
+    const r = await run(w, true);
+    expect(r.dangling).toBe(0);
+    const labs = (await records(client, w.pid)).filter((x) => x.resourceType === 'Observation' && (hasId(x, 'EX-RES-2') || hasId(x, 'ORDER_RESULTS|1')));
+    expect(labs).toHaveLength(1);
+    expect(idsOf(labs[0]).some((i) => i.system === 'urn:ga-server:id:ehi:999')).toBe(true);
+    expect(hasTag(labs[0], 'possible-duplicate')).toBe(false);
+    expect((labs[0] as Observation).extension?.filter((e) => e.url === DUP_OF)).toEqual([]);
+    expect((labs[0] as Observation).valueQuantity?.value).toBe(0.11);
+    await clean(w);
+  });
+});
+
+test('a Microsoft-era Composition stored with no patient is replaced too', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client);
+    const [comp] = await client.searchResources('Composition', { subject: `Patient/${w.pid}` });
+    const { subject: _, ...rest } = comp as Composition;
+    await client.updateResource(rest as Composition);
+    expect(await client.searchResources('Composition', { subject: `Patient/${w.pid}` })).toHaveLength(0);
+    const r = await run(w, true);
+    expect(r.deleted.Composition).toBe(1);
+    await expect(client.readResource('Composition', comp.id as string)).rejects.toThrow();
+    expect([...(await client.searchResources('Composition', { subject: `Patient/${w.pid}` }))].map((c) => hasTag(c, 'ccda-medplum'))).toEqual([true]);
+    expect(flag(w)).toBe('medplum');
+    await clean(w);
   });
 });
 
