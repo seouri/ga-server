@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, test } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { CONCEPT_SRC } from '../src/concept-apply.ts';
-import { keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
+import { isPanel, keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
 
 describe('labRow', () => {
   it('keeps the comparator, unit, one-sided ranges and flags; omits empty fields', () => {
@@ -186,4 +186,15 @@ it('a name matches from the start of a word: "ast" never finds "FASTING STATUS";
   const client = { search: async () => ({ resourceType: 'Bundle', entry: entries.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   expect((await labResults(client, 'p', { name: 'ast' })).rows.map((r) => (r as LabRow).id)).toEqual(['a']);
   expect((await labResults(client, 'p', { name: ['ferr', 'ast'] })).rows.map((r) => (r as LabRow).id).sort()).toEqual(['a', 'r']);
+});
+
+test('isPanel: only a panel that holds nothing of its own is hidden behind its members', () => {
+  const members = [{ reference: 'Observation/a' }];
+  // A C-CDA vital signs organizer: members only.
+  expect(isPanel({ resourceType: 'Observation', status: 'final', code: { text: 'Vital signs' }, hasMember: members })).toBe(true);
+  // A portal panel with its own interpretation and note is shown.
+  const portal = { resourceType: 'Observation', status: 'final', code: { text: 'Lipid panel' }, hasMember: members, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-smart' }] } } as Observation;
+  expect(isPanel({ ...portal, interpretation: [{ coding: [{ code: 'A' }] }], note: [{ text: 'see members' }] })).toBe(false);
+  expect(isPanel({ ...portal, referenceRange: [{ text: 'normal' }] })).toBe(false);
+  expect(isPanel({ ...portal, dataAbsentReason: { text: 'not done' } })).toBe(false);
 });

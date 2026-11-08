@@ -48,8 +48,11 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   };
 }
 
-// A panel that only groups its members (C-CDA vital signs organizer: hasMember, no value): its members are the rows.
-export const isPanel = (o: Observation) => !!o.hasMember?.length && !o.component?.length && !Object.keys(o).some((k) => k.startsWith('value'));
+// A panel that only groups its members (C-CDA vital signs organizer: hasMember, nothing of its own): its members are the rows.
+// A panel with its own value, interpretation, note, range or absent reason (a portal's) is a row.
+const OWN = ['component', 'interpretation', 'note', 'referenceRange', 'dataAbsentReason'] as const;
+export const isPanel = (o: Observation) =>
+  !!o.hasMember?.length && !OWN.some((k) => { const v = o[k]; return Array.isArray(v) ? v.length > 0 : v !== undefined; }) && !Object.keys(o).some((k) => k.startsWith('value'));
 
 export const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
 
