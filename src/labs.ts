@@ -204,7 +204,9 @@ export async function labResults(
     const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
     if (n && !key) q.append('code:text', n);
     dateRange(q, 'date', since, until);
-    const text = (o: Observation) => [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(n)));
+    // From the start of a word: "ast" must not match "fasting", while "ferr" still finds "ferritin".
+    const word = new RegExp(`(^|[^a-z0-9])${norm(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+    const text = (o: Observation) => [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => word.test(norm(t)));
     const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || text(o);
     return { q, key, named, matches: (o: Observation) => (key ? named(o) : text(o)) };
   };

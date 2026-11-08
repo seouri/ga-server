@@ -178,3 +178,12 @@ describe('concepts: one test under different names and codes', () => {
     expect(keyLabs(s).map((x) => x.name)).toEqual(['LOW DENSITY LIPOPROTEIN CHOL']);
   });
 });
+
+it('a name matches from the start of a word: "ast" never finds "FASTING STATUS"; "ferr" still finds Ferritin', async () => {
+  const lab = [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }];
+  const o = (id: string, text: string) => ({ resourceType: 'Observation', id, status: 'final', category: lab, code: { text }, effectiveDateTime: '2026-11-03', valueString: 'x' });
+  const entries = [o('a', 'SGOT (AST)'), o('f', 'FASTING STATUS'), o('g', 'Fasting glucose'), o('r', 'Ferritin')];
+  const client = { search: async () => ({ resourceType: 'Bundle', entry: entries.map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  expect((await labResults(client, 'p', { name: 'ast' })).rows.map((r) => (r as LabRow).id)).toEqual(['a']);
+  expect((await labResults(client, 'p', { name: ['ferr', 'ast'] })).rows.map((r) => (r as LabRow).id).sort()).toEqual(['a', 'r']);
+});
