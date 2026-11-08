@@ -5,7 +5,7 @@ Nothing new to file. The issue is open: **medplum#10847** ("C-CDA to FHIR ignore
 What the commit changes:
 
 - In the Plan of Treatment section, `moodCode` sets `MedicationRequest.intent`: `PRP` → `proposal`, `INT` → `plan`, `PRMS` → `plan`, `RQO` → `order` (`PLANNED_MEDICATION_MOOD_MAPPER`). A missing or unknown moodCode keeps `order`.
-- The Medications section keeps `order`.
+- The Medications section keeps `order`. In GA, row 14 supersedes this: a Medications section entry is a MedicationStatement, so the fork test's INT case reads the statement.
 - A single `effectiveTime/@value` becomes `dispenseRequest.validityPeriod.start` instead of `{}`.
 
 How GA applied it:

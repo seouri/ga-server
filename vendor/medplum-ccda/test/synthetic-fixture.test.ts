@@ -10,6 +10,6 @@ test('vendored library converts the synthetic fixture like the npm package', () 
   for (const e of bundle.entry ?? []) counts[e.resource?.resourceType ?? '?'] = (counts[e.resource?.resourceType ?? '?'] ?? 0) + 1;
   expect(counts.Observation).toBe(5);
   expect(counts.Condition).toBe(2);
-  expect(counts.MedicationRequest).toBe(1);
+  expect(counts.MedicationStatement).toBe(1);
   expect(counts.DiagnosticReport ?? 0).toBe(0);
 });

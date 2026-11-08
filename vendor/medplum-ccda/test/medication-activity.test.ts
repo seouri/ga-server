@@ -22,8 +22,8 @@ const medications = (moodCode: string, inner = '') => `<component><section>
 </section></component>`;
 
 test('a medication record keeps its substanceAdministration id as its identifier', () => {
-  const [request] = resourcesOf<MedicationRequest>(convertSections(medications('INT')), 'MedicationRequest');
-  expect(request.identifier).toEqual([{ system: 'urn:oid:2.16.840.1.113883.19.5', value: 'MED-1' }]);
+  const [statement] = resourcesOf<MedicationStatement>(convertSections(medications('INT')), 'MedicationStatement');
+  expect(statement.identifier).toEqual([{ system: 'urn:oid:2.16.840.1.113883.19.5', value: 'MED-1' }]);
 });
 
 test('a taking entry (moodCode EVN) is a MedicationStatement with its source id, period, dosage and status', () => {
@@ -49,10 +49,12 @@ test('a taking entry has a MedicationStatement status for every C-CDA statusCode
   ]);
 });
 
-test('an order (moodCode INT) is a MedicationRequest', () => {
+test('a medication list entry in INT mood is a MedicationStatement too (the list says what the patient takes)', () => {
   const bundle = convertSections(medications('INT'));
-  expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(0);
-  expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')[0]).toMatchObject({ status: 'active', intent: 'order', authoredOn: '2023-01-10' });
+  expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')).toHaveLength(0);
+  expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')[0]).toMatchObject({
+    identifier: [{ value: 'MED-1' }], status: 'active', effectivePeriod: { start: '2023-01-15' }, dateAsserted: '2023-01-10',
+  });
 });
 
 // Medication Supply Order (22.4.17, INT) and Medication Dispense (22.4.18, EVN) inside a Medication Activity.
@@ -98,5 +100,5 @@ test('a dispense of a medication is a MedicationDispense; a supply with its own 
     whenHandedOver: '2023-01-10',
   });
   expect(dispense.subject?.reference).toMatch(/^Patient\//);
-  expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')).toHaveLength(1); // the INT medication itself
+  expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(1); // the INT medication itself
 });

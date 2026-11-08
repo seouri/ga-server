@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import type { MedicationRequest } from '@medplum/fhirtypes';
+import type { MedicationRequest, MedicationStatement } from '@medplum/fhirtypes';
 import { describe, expect, test } from 'vitest';
 import { convertCcdaToFhir } from '../ccda-to-fhir.ts';
 import { convertXmlToCcda } from '../xml.ts';
@@ -93,17 +93,22 @@ describe('planned medications in the Plan of Treatment section', () => {
   });
 });
 
+// GA: a Medication Activity in the Medications section is a MedicationStatement whatever its mood (PATCHES row 14), so the fork's
+// "keeps intent order for a Medication Activity in INT mood" case now reads the statement.
 describe('medications in the Medications section', () => {
-  test('keeps intent order for a Medication Activity in INT mood', () => {
-    const medicationRequest = medicationRequestFromXml(
-      MEDICATIONS_SECTION,
-      substanceAdministrationXml(
-        'INT',
-        MEDICATION_ACTIVITY,
-        '<effectiveTime xsi:type="IVL_TS" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><low value="20250101"/><high value="20250301"/></effectiveTime>'
-      )
-    );
-    expect(medicationRequest.intent).toBe('order');
-    expect(medicationRequest.dispenseRequest?.validityPeriod).toEqual({ start: '2025-01-01', end: '2025-03-01' });
+  test('a Medication Activity in INT mood is a MedicationStatement with its period', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><patient><name use="L"><given>Test</given><family>Patient</family></name></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>${MEDICATIONS_SECTION}<entry>${substanceAdministrationXml(
+    'INT',
+    MEDICATION_ACTIVITY,
+    '<effectiveTime xsi:type="IVL_TS" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><low value="20250101"/><high value="20250301"/></effectiveTime>'
+  )}</entry></section></component></structuredBody></component>
+</ClinicalDocument>`;
+    const types = convertCcdaToFhir(convertXmlToCcda(xml)).entry?.map((e) => e.resource);
+    const statement = types?.find((r) => r?.resourceType === 'MedicationStatement') as MedicationStatement | undefined;
+    expect(types?.some((r) => r?.resourceType === 'MedicationRequest')).toBe(false);
+    expect(statement?.effectivePeriod).toEqual({ start: '2025-01-01', end: '2025-03-01' });
   });
 });

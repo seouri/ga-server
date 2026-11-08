@@ -805,7 +805,8 @@ class CcdaToFhirConverter {
         case OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL:
         case OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED_V2:
         case OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL_V2:
-          return this.processMedicationSubstanceAdministration(substanceAdmin, 'order');
+          // A medication list entry says what the patient takes, whatever its mood (EVN or INT)
+          return this.processMedicationSubstanceAdministration(substanceAdmin, undefined);
         case OID_PLAN_OF_CARE_SECTION:
           // Planned Medication and Planned Immunization Activities carry a planned moodCode (INT, RQO, PRMS, PRP)
           return this.processMedicationSubstanceAdministration(
@@ -823,9 +824,15 @@ class CcdaToFhirConverter {
     throw new Error('Unhandled substance administration templateId: ' + templateIds[0]);
   }
 
+  /**
+   * A Medication Activity (Medications section) or a planned medication (Plan of Treatment).
+   * @param substanceAdmin - The substance administration.
+   * @param intent - The MedicationRequest intent of a planned medication; undefined for a medication list entry (a MedicationStatement).
+   * @returns The statement or request, then one record per supply inside it.
+   */
   private processMedicationSubstanceAdministration(
     substanceAdmin: CcdaSubstanceAdministration,
-    intent: MedicationRequest['intent']
+    intent: MedicationRequest['intent'] | undefined
   ): Resource[] {
     const cdaId = this.mapId(substanceAdmin.id);
     const effectiveTime = substanceAdmin.effectiveTime?.[0];
@@ -893,8 +900,8 @@ class CcdaToFhirConverter {
       subject: createReference(this.patient as Patient),
     };
 
-    if (substanceAdmin['@_moodCode'] === 'EVN') {
-      // EVN: the patient takes or took it (an event, not an intent), a statement rather than an order
+    if (!intent) {
+      // A medication list entry: the patient takes or took it, a statement rather than an order
       const effectivePeriod = this.mapEffectiveTimeToPeriod(effectiveTime);
       const statement: MedicationStatement = {
         resourceType: 'MedicationStatement',

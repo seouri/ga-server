@@ -407,12 +407,12 @@ test('a taking entry stays a MedicationStatement with its source id and name', (
   });
 });
 
-test('an order is a MedicationRequest with its source id and status', () => {
+test('a medication list entry in INT mood is a MedicationStatement too, with its source id and status', () => {
   const meds = convertCcdaLocal(SYNTHETIC).resources.filter((r) => /^Medication/.test(r.resourceType));
-  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationRequest']); // moodCode INT
-  expect(meds[0]).toMatchObject({ identifier: [{ system: 'urn:oid:2.25.5001', value: 'syn-med-1' }], status: 'active', intent: 'order' });
+  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationStatement']); // moodCode INT, as the Microsoft path files it
+  expect(meds[0]).toMatchObject({ identifier: [{ system: 'urn:oid:2.25.5001', value: 'syn-med-1' }], status: 'active', effectivePeriod: { start: '2023-01-01' } });
   const stopped = convertCcdaLocal(SYNTHETIC.replace('<statusCode code="active"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>', '<statusCode code="aborted"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>'));
-  expect(stopped.resources.find((r) => r.resourceType === 'MedicationRequest')).toMatchObject({ status: 'stopped' });
+  expect(stopped.resources.find((r) => r.resourceType === 'MedicationStatement')).toMatchObject({ status: 'stopped' });
 });
 
 test('a supply order inside a medication (the Microsoft path\'s extra orders) is a MedicationRequest named like its medication', () => {

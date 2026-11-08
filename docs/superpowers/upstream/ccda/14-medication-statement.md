@@ -1,12 +1,19 @@
-# 14. A Medication Activity in EVN mood becomes a MedicationStatement
+# 14. A Medication Activity in the Medications section becomes a MedicationStatement
 
-No existing issue or PR. medplum#10847 (draft 12) is about planned medications in the Plan of Treatment section and explicitly leaves the Medications section alone. Builds on drafts 12 (`intent` parameter) and 13 (identifier). Nothing filed.
+No existing issue or PR. medplum#10847 (draft 12) covers planned medications in the Plan of Treatment section and explicitly leaves the Medications section alone. Builds on drafts 12 (`intent` parameter) and 13 (identifier). Nothing filed. **This one may stay a GA patch:** upstream may prefer the C-CDA on FHIR mood → intent route (below). GA carries it either way, because its owner ruled that a medication list entry is what the patient takes.
 
-## Issue: @medplum/ccda: medications the patient takes (moodCode EVN) are converted to orders (MedicationRequest, intent order)
+## Issue: @medplum/ccda: the patient's medication list is converted to orders (MedicationRequest, intent order)
 
-A Medication Activity (`2.16.840.1.113883.10.20.22.4.16`) has `moodCode="EVN"` when it records a medication the patient takes or took, and `moodCode="INT"` when it records an intended or ordered one. `processMedicationSubstanceAdministration` ignores the mood and always returns a `MedicationRequest` with `intent: "order"`. So a patient's medication list reads as a list of prescriptions. The start of the period the patient was taking it lands in `dispenseRequest.validityPeriod`, and the dosage in `dosageInstruction`.
+The Medications section (`2.16.840.1.113883.10.20.22.2.1`, `.1.1`) is the patient's medication list. Each entry is a Medication Activity (`2.16.840.1.113883.10.20.22.4.16`) in `moodCode="EVN"` or `"INT"`, and EHRs use both for the current regimen. medplum#10847's reporter notes that INT is how the current regimen is commonly expressed. `processMedicationSubstanceAdministration` always returns a `MedicationRequest` with `intent: "order"`, so the medication list reads as a list of prescriptions:
 
-In HL7 v3, `EVN` is an act that happened and `INT` one that is intended. A MedicationStatement records the first, and a MedicationRequest the second. C-CDA on FHIR has no resource-type rule for this: its [`CF-MedActivityMood`](https://hl7.org/fhir/us/ccda/STU2/ConceptMap-CF-MedActivityMood.html) maps mood only to `MedicationRequest.intent`, loosely (EVN → `plan`, INT → `order`), with the note that "CDA mood codes are more general than FHIR intent codes". A maintainer may prefer that route, keeping MedicationRequest and setting `intent: plan` for EVN. This PR proposes MedicationStatement, because a medication list entry in EVN mood is what the patient takes, and that is the FHIR resource for it. The Microsoft FHIR-Converter also makes MedicationStatement from the Medications section.
+- the start of the period the patient takes it lands in `dispenseRequest.validityPeriod`
+- the dosage lands in `dosageInstruction`
+
+A MedicationStatement is FHIR's record of a medication a patient takes, has taken or intends to take. That is what a medication list entry is. The Microsoft FHIR-Converter also makes MedicationStatement from every Medications section entry, EVN or INT.
+
+**The alternative.** C-CDA on FHIR's [`CF-MedActivityMood`](https://hl7.org/fhir/us/ccda/STU2/ConceptMap-CF-MedActivityMood.html) keeps MedicationRequest and maps mood loosely to `intent` (EVN → `plan`, INT → `order`). It notes that "CDA mood codes are more general than FHIR intent codes". A maintainer may prefer that.
+
+Planned medications in the Plan of Treatment section are a different case. They stay MedicationRequest, with intent from mood (draft 12).
 
 Reproduction (synthetic):
 
@@ -58,18 +65,18 @@ Expected FHIR (today: a `MedicationRequest` with `intent: "order"`, `authoredOn`
 }
 ```
 
-The same entry with `moodCode="INT"` stays a MedicationRequest (`intent: "order"`), unchanged apart from draft 13's identifier.
+The same entry with `moodCode="INT"` gives the same MedicationStatement.
 
-## PR: fix(ccda): Medication Activities in EVN mood become MedicationStatement
+## PR: fix(ccda): Medications section entries become MedicationStatement
 
-- `processMedicationSubstanceAdministration`: the medication (inline code or contained Medication), dosage, identifier, text reference and subject are built once. Then:
-  - **`moodCode="EVN"`** → `MedicationStatement`:
+- `processMedicationSubstanceAdministration(substanceAdmin, intent)`: `intent` is undefined for a Medications section entry, or a planned medication's intent (draft 12). The medication (inline code or contained Medication), dosage, identifier, text reference and subject are built once. Then:
+  - **Medications section** (intent undefined) → `MedicationStatement`, whatever the mood:
     - `status` from statusCode: active → active, completed → completed, aborted → stopped, suspended → on-hold, nullified → entered-in-error, any other → unknown. `MEDICATION_STATUS_MAPPER` gives MedicationRequest values such as `cancelled`, which a MedicationStatement does not allow, so it is not used here.
     - `effectivePeriod` from an IVL effectiveTime, or `effectiveDateTime` from a single value.
     - `dateAsserted` from the author time.
-    - `dosage` is the dosage the request used to carry.
-  - **Any other mood** → `MedicationRequest`, as before.
+    - `dosage`: the dosage the request used to carry.
+  - **Plan of Treatment** → `MedicationRequest` with its intent, as before.
 - Tests:
-  - `medication-activity.test.ts`: EVN → statement, the status for every statusCode, and INT → request.
-  - Tests that build an EVN Medication Activity and read the MedicationRequest now read the MedicationStatement: `medication-dose`, `nullflavor` (routeCode translation), `narrative-reference` and `section-template-order`. Their assertions are unchanged; `dosageInstruction` is read as `dosage`.
-- **Breaking for consumers** that read medications only as MedicationRequest. The release notes should say so.
+  - `medication-activity.test.ts`: EVN → statement, INT → statement, the status for every statusCode.
+  - Tests that build a Medications section entry and read the MedicationRequest now read the MedicationStatement: `medication-dose`, `nullflavor` (routeCode translation), `narrative-reference`, `section-template-order`, and draft 12's `keeps intent order for a Medication Activity in INT mood`. Their assertions are unchanged; `dosageInstruction` is read as `dosage`.
+- **Breaking for consumers** that read the medication list only as MedicationRequest. The release notes should say so.
