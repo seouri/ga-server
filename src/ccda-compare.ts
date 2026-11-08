@@ -200,16 +200,20 @@ function policyType(o: Resource, n: Resource): Resource {
 // (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
 // The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
 // preparation), quantity and the day (validityPeriod start or authoredOn as whenHandedOver); intent, an order's mood, is dropped.
-// Anything else it holds (a requester) is compared as is, so a field the dispense lacks stays a loss.
+// Its requester is the dispense's C-CDA author, which the new path keeps as a performer with function dataenterer: compared as
+// that performer (the same practitioner, through the reference rule; another one, or a performer without the function, is a loss).
+// Anything else it holds is compared as is.
 const fromDispense = (o: Resource, n: Resource) => o.resourceType === 'MedicationRequest' && n.resourceType === 'MedicationDispense';
 const DISPENSE_STATUS: Record<string, string> = { active: 'in-progress', draft: 'preparation' };
+const DATA_ENTERER = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function', code: 'dataenterer' }] };
 function asDispense(o: Resource, n: Resource): Resource {
   if (!fromDispense(o, n)) return o;
-  const { resourceType: _t, intent: _i, status, dispenseRequest, authoredOn, ...rest } = o as unknown as R & { status?: string; authoredOn?: string;
-    dispenseRequest?: { quantity?: unknown; validityPeriod?: { start?: string } } };
+  const { resourceType: _t, intent: _i, status, dispenseRequest, authoredOn, requester, ...rest } = o as unknown as R & { status?: string; authoredOn?: string;
+    dispenseRequest?: { quantity?: unknown; validityPeriod?: { start?: string } }; requester?: unknown };
   const { quantity, validityPeriod, ...more } = dispenseRequest ?? {};
   return { resourceType: 'MedicationDispense', ...rest, status: status && (DISPENSE_STATUS[status] ?? status), quantity,
-    whenHandedOver: validityPeriod?.start ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }) } as unknown as Resource;
+    whenHandedOver: validityPeriod?.start ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }),
+    ...(requester ? { performer: [{ function: DATA_ENTERER, actor: requester }] } : {}) } as unknown as Resource;
 }
 
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).

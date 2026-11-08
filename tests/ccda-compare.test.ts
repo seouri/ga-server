@@ -253,3 +253,15 @@ test('a Microsoft MedicationRequest made from a dispense pairs with the new Medi
   expect(pairLosses([msOrder('completed')], [{ ...dispense(), resourceType: 'MedicationStatement', status: 'completed' }]))
     .toContainEqual({ type: 'MedicationRequest', path: 'resourceType', count: 1 });
 });
+
+test('the Microsoft requester of a dispense pairs with the dispense\'s dataenterer performer (the same practitioner only)', () => {
+  const fn = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function', code: 'dataenterer' }] };
+  const doc = (npi: string, id: string) => ({ resourceType: 'Practitioner', id, identifier: [{ system: 'http://hl7.org/fhir/sid/us-npi', value: npi }] });
+  const old = [{ resourceType: 'MedicationRequest', identifier: id('fill'), intent: 'order', status: 'completed', subject, requester: { reference: 'Practitioner/ms-a' } }, doc('1', 'ms-a')];
+  const neu = (npi: string, withFunction = true) => [{ resourceType: 'MedicationDispense', identifier: id('fill'), status: 'completed', subject,
+    performer: [{ ...(withFunction && { function: fn }), actor: { reference: 'Practitioner/n' } }] }, doc(npi, 'n')];
+  expect(pairLosses(old, neu('1'))).toEqual([]);
+  expect(pairLosses(old, neu('2'))).toContainEqual({ type: 'MedicationRequest', path: 'performer.actor.reference', count: 1 });
+  // The dispenser (a performer with no function) is not who the Microsoft path calls the requester.
+  expect(pairLosses(old, neu('1', false))).toContainEqual({ type: 'MedicationRequest', path: 'performer.function.coding', count: 1 });
+});
