@@ -95,8 +95,10 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
     return out;
   }
   if (key === 'identifier') {
-    // The Microsoft path gives the document id as {value: <root OID>} with no system: the same id as the new path's system.
-    const root = ref.root && path === 'identifier' && !a.system && b?.system && same(norm(String(a.value)), norm(system(b.system as string)));
+    // The Microsoft path gives the document id as {value: <root OID>} with no system: the same id as the new path's system, or, for
+    // a root with no extension, as the new path's URI value (urn:oid:<root>, system urn:ietf:rfc:3986).
+    const root = ref.root && path === 'identifier' && !a.system && b?.system &&
+      same(norm(String(a.value)), norm(b.system === 'urn:ietf:rfc:3986' ? String(b.value) : system(b.system as string)));
     if (!b || (idKey(a as Identifier) !== idKey(b as Identifier) && !root)) out.push(path);
     return out;
   }

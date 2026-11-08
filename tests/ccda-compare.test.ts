@@ -229,6 +229,10 @@ test('placeholder, root-id, status and date rules stay narrow', () => {
   // An unmatched cancelled test is information.
   const cancelled = { resourceType: 'Observation', identifier: id('x'), status: 'cancelled', code: { text: 'K' } };
   expect(pairLosses([cancelled], [])).toEqual([{ type: 'Observation', path: '(record)', count: 1 }]);
+  // The root-id rule: a root with no extension is the new path's URI value; another root is a loss.
+  const comp = (identifier: unknown) => ({ resourceType: 'Composition', status: 'final', identifier });
+  expect(pairLosses([comp({ value: '2.25.7' })], [comp({ system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.25.7' })])).toEqual([]);
+  expect(pairLosses([comp({ value: '2.25.7' })], [comp({ system: 'urn:ietf:rfc:3986', value: 'urn:oid:2.25.8' })])).toEqual([{ type: 'Composition', path: 'identifier', count: 1 }]);
   // The root-id rule is for the document Compositions only.
   expect(pairLosses([{ resourceType: 'Observation', identifier: [...id('o'), { value: '2.25.7' }], valueString: 'v' }], [{ resourceType: 'Observation', identifier: [...id('o'), { system: 'urn:oid:2.25.7', value: 'z' }], valueString: 'v' }]))
     .toEqual([{ type: 'Observation', path: 'identifier', count: 1 }]);
