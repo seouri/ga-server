@@ -34,7 +34,7 @@ Then bring in your records and ask, in plain words:
 - **What's new:** what arrived since you last looked, from out-of-range labs to new medications with their FDA label.
 - **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates.
 - **GA texts you:** new out-of-range results as they arrive and what's due at a time you pick, by iMessage; reply to ask or to say done ([setup](docs/notifications.md)).
-- **Decision support:** 10-year cardiovascular risk (PREVENT and Pooled Cohort Equations) and charts such as your lipid trend.
+- **Decision support:** cardiovascular risk (PREVENT 10- and 30-year, heart failure; Pooled Cohort Equations), liver fibrosis (FIB-4, NAFLD Fibrosis Score) and charts such as your lipid trend.
 - **Sharing:** private, expiring links for a doctor or family, approved by you.
 - **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet ([setup](docs/chat-apps.md)).
 

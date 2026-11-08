@@ -13,6 +13,7 @@ import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
 import { sha256, type SourceInfo, stableIdentifier } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
+import { liverFibrosisRisk } from './liver-fibrosis.ts';
 import { vaccineGaps } from './vaccines.ts';
 import { labResults } from './labs.ts';
 import { healthSummary } from './health.ts';
@@ -415,16 +416,43 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     'cardiovascular_risk_10yr',
     {
       description:
-        '10-year cardiovascular risk from inputs you read from GA: AHA PREVENT base model (ASCVD and total CVD) and the 2013 Pooled Cohort Equations. ' +
-        'Use this instead of computing risk yourself. Cholesterol in mg/dL; returns probabilities (0-1) and notes on out-of-range inputs.',
+        'Cardiovascular risk from inputs you read from GA: AHA PREVENT 10-year and 30-year (ages 30-59) total CVD, ASCVD and heart failure, and ' +
+        'the 2013 Pooled Cohort Equations (10-year). Optional hba1c (%) and/or uacr (mg/g) select the PREVENT HbA1c, UACR or full model; ' +
+        'bmi (kg/m2) is needed for heart failure. Social deprivation index is not supported. Use this instead of computing risk yourself. ' +
+        'Cholesterol in mg/dL; returns probabilities (0-1), the PREVENT model used, and notes on out-of-range inputs (null, never extrapolated).',
       inputSchema: {
         age: z.number(), sex: z.enum(['male', 'female']), totalC: z.number(), hdlC: z.number(), sbp: z.number(),
         bpTx: z.boolean(), statin: z.boolean(), diabetes: z.boolean(), smoker: z.boolean(), egfr: z.number(),
         race: z.enum(['black', 'other']).optional(),
+        bmi: z.number().optional().describe('kg/m2; PREVENT heart failure needs it'),
+        hba1c: z.number().optional().describe('HbA1c, %'),
+        uacr: z.number().optional().describe('urine albumin-creatinine ratio, mg/g'),
       },
       annotations: { readOnlyHint: true },
     },
     async (input) => warned(cardiovascularRisk10yr(input)),
+  );
+  server.registerTool(
+    'liver_fibrosis_risk',
+    {
+      description:
+        'Liver fibrosis risk from inputs you read from GA: FIB-4 (needs age, AST, ALT, platelets) and the NAFLD Fibrosis Score (also BMI, ' +
+        'albumin and impaired fasting glucose or diabetes; null with a note when one is missing). Use this instead of computing them yourself. ' +
+        'Returns each value, its band (low/indeterminate/high), the cut-offs used (FIB-4 low cut-off 2.0 at age 65 or over), citations and notes.',
+      inputSchema: {
+        age: z.number().describe('years'), ast: z.number().describe('AST, U/L'), alt: z.number().describe('ALT, U/L'),
+        platelets: z.number().describe('platelets, 10^9/L'), bmi: z.number().optional().describe('kg/m2'),
+        albumin: z.number().optional().describe('albumin, g/dL'), ifgOrDiabetes: z.boolean().optional().describe('impaired fasting glucose or diabetes'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) => {
+      try {
+        return await warned(liverFibrosisRisk(input));
+      } catch (e) {
+        return fail(e);
+      }
+    },
   );
   server.registerTool(
     'vaccine_gaps',

@@ -92,13 +92,14 @@ const TOOLS = {
   cardiovascular_risk_10yr: {
     name: 'cardiovascular_risk_10yr',
     description:
-      '10-year cardiovascular risk from inputs you read from the records: AHA PREVENT base model (ASCVD and total CVD) and the 2013 Pooled Cohort Equations. Use this instead of computing risk yourself. Cholesterol in mg/dL; returns probabilities (0-1) and notes on out-of-range inputs.',
+      'Cardiovascular risk from inputs you read from the records: AHA PREVENT 10-year and 30-year (ages 30-59) total CVD, ASCVD and heart failure (needs bmi), with the HbA1c, UACR or full model when hba1c (%) or uacr (mg/g) is given, and the 2013 Pooled Cohort Equations. Use this instead of computing risk yourself. Cholesterol in mg/dL; returns probabilities (0-1) and notes on out-of-range inputs.',
     parameters: {
       type: 'object',
       properties: {
         age: { type: 'number' }, sex: { type: 'string', enum: ['male', 'female'] }, totalC: { type: 'number' }, hdlC: { type: 'number' },
         sbp: { type: 'number' }, bpTx: { type: 'boolean' }, statin: { type: 'boolean' }, diabetes: { type: 'boolean' },
         smoker: { type: 'boolean' }, egfr: { type: 'number' }, race: { type: 'string', enum: ['black', 'other'] },
+        bmi: { type: 'number' }, hba1c: { type: 'number' }, uacr: { type: 'number' },
       },
       required: ['age', 'sex', 'totalC', 'hdlC', 'sbp', 'bpTx', 'statin', 'diabetes', 'smoker', 'egfr'],
     },

@@ -22,7 +22,7 @@ If a reply could mean more than one item, GA asks which. Reactions (a heart or t
 
 ## What texts can and cannot do
 
-Texts use a fixed list of tools: the read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `whats_new`, `health_maintenance`, `vaccine_gaps`, `cardiovascular_risk_10yr`), `postpone`, and `share_create`, `hospital_enable` and `record_followup`.
+Texts use a fixed list of tools: the read tools (`health_summary`, `lab_results`, `current_medications`, `current_problems`, `allergies`, `vitals`, `notes_search`, `fhir_search`, `fhir_read`, `whats_new`, `health_maintenance`, `vaccine_gaps`, `cardiovascular_risk_10yr`, `liver_fibrosis_risk`), `postpone`, and `share_create`, `hospital_enable` and `record_followup`.
 
 Sharing, enabling a hospital data type and recording a follow-up are not done by text alone. GA texts you a link; you open it and press Confirm (passkey sign-in). These need `GA_PUBLIC_URL` ([chat apps](chat-apps.md)). Without it they are not offered.
 

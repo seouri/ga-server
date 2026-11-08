@@ -136,6 +136,14 @@ test('cardiovascular_risk_10yr returns PREVENT and PCE', async () => {
   expect(JSON.parse(r.text)).toMatchObject({ preventAscvd: expect.closeTo(0.019, 3), pce: expect.closeTo(0.0309, 3) });
 });
 
+test('cardiovascular_risk_10yr adds HF, 30-year and the add-on models; liver_fibrosis_risk returns FIB-4 and NFS', async () => {
+  const cv = JSON.parse((await call('cardiovascular_risk_10yr', { age: 45, sex: 'female', sbp: 138, bpTx: true, totalC: 230, hdlC: 55, statin: true, diabetes: true, smoker: false, egfr: 95, bmi: 32, hba1c: 7.2 })).text);
+  expect(cv).toMatchObject({ preventModel: 'hba1c', preventHeartFailure: expect.closeTo(0.036, 3), preventAscvd30yr: expect.closeTo(0.223, 3) });
+  const lv = JSON.parse((await call('liver_fibrosis_risk', { age: 50, ast: 40, alt: 40, platelets: 200, bmi: 30, albumin: 4, ifgOrDiabetes: true })).text);
+  expect(lv).toMatchObject({ fib4: { value: expect.closeTo(1.581, 3), band: 'indeterminate' }, nfs: { value: expect.closeTo(-0.125, 6), band: 'indeterminate' } });
+  expect((await call('liver_fibrosis_risk', { age: 50, ast: 40, alt: 0, platelets: 200 })).text).toMatch(/alt must be > 0/);
+});
+
 test('vaccine_gaps reads the test patient from GA and reports per-vaccine status', async () => {
   expect((await call('vaccine_gaps', {})).text).toBe('Patient has no birthDate in GA');
   const p = await client.readResource('Patient', pid);

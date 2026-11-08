@@ -40,7 +40,7 @@ test('read tools put portalWarning first; no Endpoints adds nothing; a failed ch
   const [a, b] = InMemoryTransport.createLinkedPair();
   const c = new Client({ name: 't', version: '0' });
   await Promise.all([buildMcpServer({ client: broken, cfg: {} as never, patientId: 'p' }).connect(a), c.connect(b)]);
-  for (const [name, args] of [['fhir_read', { resourceType: 'Observation', id: 'o' }], ['cardiovascular_risk_10yr', { age: 50, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 }]] as const)
+  for (const [name, args] of [['fhir_read', { resourceType: 'Observation', id: 'o' }], ['cardiovascular_risk_10yr', { age: 50, sex: 'male', sbp: 120, bpTx: false, totalC: 200, hdlC: 50, statin: false, diabetes: false, smoker: false, egfr: 90 }], ['liver_fibrosis_risk', { age: 50, ast: 26, alt: 100, platelets: 100 }]] as const)
     expect(JSON.parse(((await c.callTool({ name, arguments: args })) as { content: { text: string }[] }).content[0].text).portalWarning).toBe('Hospital connection status unknown: run `ga status`.');
 });
 

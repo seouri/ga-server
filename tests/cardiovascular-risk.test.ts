@@ -25,3 +25,50 @@ test('out-of-range inputs return null with a note instead of extrapolating', () 
   expect(r).toMatchObject({ preventAscvd: null, preventTotalCvd: null, pce: null });
   expect(r.notes.join(' ')).toMatch(/age/);
 });
+
+// PREVENT HF, 30-year and the HbA1c/UACR/full models. Expected values from preventr 0.12.2 (3 decimals):
+//   library(preventr)
+//   r <- estimate_risk(age=50, sex="male", sbp=120, bp_tx=FALSE, total_c=200, hdl_c=50, statin=FALSE, dm=FALSE,
+//                      smoking=FALSE, egfr=90, bmi=27, time="both", quiet=TRUE)   # plus hba1c=, uacr= per case
+//   r$risk_est_10yr[1, c("total_cvd","ascvd","heart_failure","model")]; r$risk_est_30yr[1, ...]
+// [input, model, 10yr [cvd, ascvd, hf], 30yr [cvd, ascvd, hf] or null (age > 59: preventr warns "questionable"; GA returns null)]
+const base = { bpTx: false, statin: false, diabetes: false, smoker: false } as const;
+const full: [CardiovascularRiskInput, string, number[], number[] | null][] = [
+  [{ ...base, age: 50, sex: 'male', sbp: 120, totalC: 200, hdlC: 50, egfr: 90, bmi: 27 }, 'base', [0.027, 0.019, 0.01], [0.178, 0.115, 0.082]],
+  [{ ...base, age: 45, sex: 'female', sbp: 138, bpTx: true, totalC: 230, hdlC: 55, statin: true, diabetes: true, egfr: 95, bmi: 32, hba1c: 7.2 }, 'hba1c', [0.069, 0.044, 0.036], [0.354, 0.223, 0.238]],
+  [{ ...base, age: 58, sex: 'male', sbp: 150, bpTx: true, totalC: 210, hdlC: 40, smoker: true, egfr: 55, bmi: 24, uacr: 45 }, 'uacr', [0.197, 0.125, 0.095], [0.485, 0.33, 0.294]],
+  [{ ...base, age: 40, sex: 'female', sbp: 105, totalC: 180, hdlC: 65, smoker: true, egfr: 110, bmi: 35, hba1c: 5.8, uacr: 12 }, 'full', [0.01, 0.006, 0.007], [0.071, 0.038, 0.062]],
+  [{ ...base, age: 66, sex: 'male', sbp: 162, bpTx: true, totalC: 250, hdlC: 38, statin: true, diabetes: true, egfr: 48, bmi: 31, hba1c: 8.1, uacr: 300 }, 'full', [0.456, 0.323, 0.289], null],
+  // hba1c 16 is outside 4.5-15: preventr drops it and runs the UACR model.
+  [{ ...base, age: 52, sex: 'female', sbp: 128, totalC: 215, hdlC: 58, egfr: 80, bmi: 22, hba1c: 16, uacr: 8 }, 'uacr', [0.024, 0.016, 0.009], [0.168, 0.102, 0.079]],
+];
+
+test.each(full)('PREVENT HF / 30-year / add-on models match preventr for %o', (input, model, ten, thirty) => {
+  const r = cardiovascularRisk10yr(input);
+  expect(r.preventModel).toBe(model);
+  const near = (v: number | null, e: number) => expect(Math.abs((v as number) - e)).toBeLessThanOrEqual(0.0005);
+  [r.preventTotalCvd, r.preventAscvd, r.preventHeartFailure].forEach((v, i) => near(v, ten[i]));
+  const t30 = [r.preventTotalCvd30yr, r.preventAscvd30yr, r.preventHeartFailure30yr];
+  if (thirty) t30.forEach((v, i) => near(v, thirty[i]));
+  else {
+    expect(t30).toEqual([null, null, null]);
+    expect(r.notes.join(' ')).toMatch(/30-year.*59/);
+  }
+  if (input.hba1c === 16) expect(r.notes.join(' ')).toMatch(/HbA1c 16 outside 4.5-15/);
+});
+
+test('without BMI: heart failure is null with a note; ASCVD and total CVD unchanged', () => {
+  const { bmi: _, ...noBmi } = full[0][0];
+  const r = cardiovascularRisk10yr(noBmi);
+  expect(r.preventHeartFailure).toBeNull();
+  expect(r.preventHeartFailure30yr).toBeNull();
+  expect(Math.abs((r.preventAscvd30yr as number) - 0.115)).toBeLessThanOrEqual(0.0005);
+  expect(r.notes.join(' ')).toMatch(/BMI.*heart failure/);
+});
+
+test('BMI outside 18.5-39.9 nulls every PREVENT result, as preventr does', () => {
+  const r = cardiovascularRisk10yr({ ...full[0][0], bmi: 45 });
+  expect(r).toMatchObject({ preventAscvd: null, preventTotalCvd: null, preventHeartFailure: null, preventAscvd30yr: null, preventModel: null });
+  expect(r.pce).not.toBeNull();
+  expect(r.notes.join(' ')).toMatch(/BMI 45 outside 18.5-39.9/);
+});
