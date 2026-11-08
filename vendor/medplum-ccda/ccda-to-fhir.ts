@@ -43,6 +43,7 @@ import type {
   ObservationReferenceRange,
   Organization,
   Patient,
+  PatientCommunication,
   Period,
   Practitioner,
   PractitionerQualification,
@@ -148,6 +149,7 @@ import type {
   CcdaEntry,
   CcdaId,
   CcdaInteger,
+  CcdaLanguageCommunication,
   CcdaName,
   CcdaObservation,
   CcdaOrganizer,
@@ -340,20 +342,26 @@ class CcdaToFhirConverter {
     if (patient.raceCode && patient.raceCode.length > 0) {
       extensions.push({
         url: US_CORE_RACE_URL,
-        extension: patient.raceCode.map((raceCode) => ({
-          url: 'ombCategory',
-          valueCoding: this.mapCodeToCoding(raceCode),
-        })),
+        extension: [
+          ...patient.raceCode.map((raceCode) => ({
+            url: 'ombCategory',
+            valueCoding: this.mapCodeToCoding(raceCode),
+          })),
+          ...this.mapCategoryText(patient.raceCode),
+        ],
       });
     }
 
     if (patient.ethnicGroupCode && patient.ethnicGroupCode.length > 0) {
       extensions.push({
         url: US_CORE_ETHNICITY_URL,
-        extension: patient.ethnicGroupCode.map((ethnicGroupCode) => ({
-          url: 'ombCategory',
-          valueCoding: this.mapCodeToCoding(ethnicGroupCode),
-        })),
+        extension: [
+          ...patient.ethnicGroupCode.map((ethnicGroupCode) => ({
+            url: 'ombCategory',
+            valueCoding: this.mapCodeToCoding(ethnicGroupCode),
+          })),
+          ...this.mapCategoryText(patient.ethnicGroupCode),
+        ],
       });
     }
 
@@ -367,7 +375,46 @@ class CcdaToFhirConverter {
       address: this.mapAddresses(patientRole.addr),
       telecom: this.mapTelecom(patientRole.telecom),
       extension: extensions.length > 0 ? extensions : undefined,
+      communication: this.mapLanguageCommunication(patient.languageCommunication),
     };
+  }
+
+  /**
+   * The US Core race and ethnicity extensions require a `text` sub-extension: the codes' original text or display names.
+   * @param codes - The raceCode or ethnicGroupCode elements.
+   * @returns The `text` sub-extension, or none when the codes name nothing.
+   */
+  private mapCategoryText(codes: CcdaCode[]): Extension[] {
+    const text = codes.map((c) => nodeToPlainText(c.originalText) || c['@_displayName']).filter(Boolean).join(', ');
+    return text ? [{ url: 'text', valueString: text }] : [];
+  }
+
+  /**
+   * Each languageCommunication is a Patient.communication: its BCP-47 language (display from the runtime's language names) and
+   * whether it is preferred (preferenceInd).
+   * @param languages - The patient's languageCommunication elements.
+   * @returns The Patient.communication entries, or undefined when there are none.
+   */
+  private mapLanguageCommunication(languages: CcdaLanguageCommunication[] | undefined): PatientCommunication[] | undefined {
+    const result: PatientCommunication[] = [];
+    for (const language of languages ?? EMPTY) {
+      const code = language.languageCode?.['@_code'];
+      if (!code) {
+        continue;
+      }
+      let display: string | undefined;
+      try {
+        display = new Intl.DisplayNames(['en'], { type: 'language' }).of(code);
+      } catch {
+        display = undefined; // not a well-formed BCP-47 tag: the code alone
+      }
+      const preferred = language.preferenceInd?.['@_value'];
+      result.push({
+        language: { coding: [{ system: 'urn:ietf:bcp:47', code, ...(display && display !== code && { display }) }] },
+        ...(preferred === 'true' || preferred === 'false' ? { preferred: preferred === 'true' } : {}),
+      });
+    }
+    return result.length > 0 ? result : undefined;
   }
 
   private createRelatedPersons(): void {

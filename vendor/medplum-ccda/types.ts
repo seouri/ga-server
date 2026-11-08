@@ -398,6 +398,7 @@ export interface CcdaManufacturedLabeledDrug {
 
 export interface CcdaLanguageCommunication {
   languageCode?: CcdaCode;
+  preferenceInd?: { '@_value'?: string };
 }
 
 export interface CcdaPerformer {
