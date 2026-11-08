@@ -380,7 +380,7 @@ export const SYSTEM_MAPPER = new EnumMapper<string, string>({}, [
   },
   {
     ccdaValue: OID_SOURCE_OF_PAYMENT_TYPOLOGY_CODE_SYSTEM,
-    fhirValue: '',
+    fhirValue: 'https://nahdo.org/sopt', // HL7 terminology's URI for this system (US Core Coverage.type)
     displayName: 'Insurance Type Code',
   },
 

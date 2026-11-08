@@ -1,0 +1,20 @@
+# 42. Source of Payment Typology keeps its system
+
+No existing issue or PR. Nothing filed.
+
+## Issue: @medplum/ccda: a Source of Payment Typology code loses its system
+
+`systems.ts` maps the Source of Payment Typology OID `2.16.840.1.113883.3.221.5` to `fhirValue: ''`. `mapCode` skips an empty system, so a Policy Activity coded in it (the usual coding for a payer type) becomes `Coverage.type.coding: [{ code: "6" }]`, a code with no system.
+
+Reproduction (synthetic), a Policy Activity in the Payers section:
+
+```xml
+<code code="6" codeSystem="2.16.840.1.113883.3.221.5" codeSystemName="SOP"/>
+```
+
+Expected: `{ system: "https://nahdo.org/sopt", code: "6" }` (the URI HL7 terminology and US Core's Coverage.type binding use). Actual: `{ code: "6" }`.
+
+## PR: fix(ccda): Source of Payment Typology URI
+
+- `systems.ts`: `fhirValue: 'https://nahdo.org/sopt'`.
+- Test `systems.test.ts` (both directions).

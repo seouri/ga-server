@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'vitest';
 import { LOINC, SNOMED } from '@medplum/core';
 import { OID_SNOMED_CT_CODE_SYSTEM } from '../oids.ts';
-import { EnumMapper, mapCcdaCodeToCodeableConcept, mapCodeableConceptToCcdaCode } from '../systems.ts';
+import { EnumMapper, mapCcdaCodeToCodeableConcept, mapCcdaSystemToFhir, mapCodeableConceptToCcdaCode, mapFhirSystemToCcda } from '../systems.ts';
 
 describe('EnumMapper', () => {
   const mapper = new EnumMapper<string, string>(
@@ -191,4 +191,9 @@ describe('EnumMapper', () => {
       expect(result?.coding?.[2]?.code).toBe('trans2');
     });
   });
+});
+
+test('the Source of Payment Typology has its HL7 URI both ways (a policy type keeps its system)', () => {
+  expect(mapCcdaSystemToFhir('2.16.840.1.113883.3.221.5')).toBe('https://nahdo.org/sopt');
+  expect(mapFhirSystemToCcda('https://nahdo.org/sopt')).toBe('2.16.840.1.113883.3.221.5');
 });
