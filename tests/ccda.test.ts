@@ -865,7 +865,7 @@ test('an id-less collection procedure shared by two panels links both reports', 
   });
 });
 
-test('a C-CDA note never merges into an EHI note of another Epic org, nor into a note GA did not import from EHI', async () => {
+test('a C-CDA note never merges into an EHI note of another Epic org; an EHI note is known by its EHI identifier, not its tag', async () => {
   const xml = (org: string) => `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="NOTE-DOC-${org}"/><effectiveTime value="20240210"/>
     <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
     <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.65"/><code code="11506-3" codeSystem="2.16.840.1.113883.6.1"/>
@@ -878,12 +878,13 @@ test('a C-CDA note never merges into an EHI note of another Epic org, nor into a
     const system = 'urn:ga-server:id:ehi:org-888';
     await client.createResource({ resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, subject: { reference: `Patient/${pid}` },
       identifier: [{ system, value: 'PAT_ENC|1' }, { system: 'urn:oid:1.2.840.114350.1.13.888.2.7.3.698084.8', value: '1' }] });
-    // Org 888's note has the NOTE_ID but no EHI tag (written by something else): never a candidate.
+    // Org 888's EHI note without its src-ehi tag (an update by another source drops it): still the EHI note, by its identifier.
     const untagged = await client.createResource({ resourceType: 'DocumentReference', status: 'current', subject: { reference: `Patient/${pid}` },
       identifier: [{ system, value: 'HNO_INFO|5551' }], content: [{ attachment: { contentType: 'text/plain', data: 'eA==' } }] });
     await importPath(client, cfgFor(pid), writeDoc(xml('999')), pid); // another org
-    await importPath(client, cfgFor(pid), writeDoc(xml('888')), pid); // same org, untagged
     expect((await client.readResource('DocumentReference', untagged.id as string)).identifier).toHaveLength(1);
+    await importPath(client, cfgFor(pid), writeDoc(xml('888')), pid); // same org
+    expect((await client.readResource('DocumentReference', untagged.id as string)).identifier?.length).toBeGreaterThan(1);
   });
 });
 
@@ -937,5 +938,29 @@ test('a visit another source wrote (EHI), linked by its Epic id, keeps its value
     expect(after.identifier?.map((i) => i.system)).toContain('urn:ga-server:id:ccda');
     expect(after.meta?.tag?.map((t) => t.code)).toEqual(expect.arrayContaining(['src-ehi', 'src-ccda']));
     expect((await client.searchResources('Encounter', { subject: `Patient/${pid}` }))).toHaveLength(1);
+  });
+});
+
+test('a visit another source wrote keeps its values for every later C-CDA document, not just the first; its times are never cut to a date', async () => {
+  const csn = '1.2.840.114350.1.13.999.2.7.3.698084.8';
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const ehi = await client.createResource({ resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
+      subject: { reference: `Patient/${pid}` }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' }, serviceType: { text: 'Cardiology' },
+      identifier: [{ system: 'urn:ga-server:id:ehi:org-999', value: 'PAT_ENC|123' }, { system: `urn:oid:${csn}`, value: '123' }],
+      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] },
+      extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2022-01-02' }, { url: 'urn:test:keep', valueString: 'x' }] });
+    const entry = (code: string, eff: string) => `<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/><code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+      <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/><id root="${csn}" extension="123"/>
+      <code code="${code}" codeSystem="2.16.840.1.113883.6.12"/>${eff}</encounter></entry></section></component>`;
+    const header = `<componentOf><encompassingEncounter><id root="${csn}" extension="123"/><effectiveTime><low value="20220101"/><high value="20220101"/></effectiveTime></encompassingEncounter></componentOf>`;
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('E', '20230101', { body: entry('99213', '<effectiveTime value="20220101"/>') })), pid);
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('F', '20230601', { body: entry('99214', '<effectiveTime value="20220101"/>') })), pid);
+    await importPath(client, cfgFor(pid), writeDoc(visitDoc('G', '20230701', { header, body: entry('99215', '') })), pid);
+    const after = await client.readResource('Encounter', ehi.id as string);
+    expect(after).toMatchObject({ status: 'finished', class: { code: 'AMB' }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' }, serviceType: { text: 'Cardiology' } });
+    expect(after.type?.map((t) => t.coding?.[0].code).sort()).toEqual(['99213', '99214', '99215']);
+    expect(after.extension?.map((e) => e.url)).toContain('urn:test:keep');
+    expect(await client.searchResources('Encounter', { subject: `Patient/${pid}` })).toHaveLength(1);
   });
 });
