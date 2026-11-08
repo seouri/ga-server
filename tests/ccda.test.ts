@@ -227,6 +227,10 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   expect(dx.map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`, `Encounter/${enc.id}`]);
   expect(dx.map((c) => c.clinicalStatus?.coding?.[0].code)).toEqual(['resolved', 'resolved']); // repair: the diagnosis act is completed
   expect(out.notImported.filter((n) => n.section === 'Encounters')).toEqual([]);
+  // A visit diagnosis reusing a problem-list observation id stays a visit diagnosis; the problem stays on the list.
+  const reused = convertCcdaLocal(EPIC.replace('768076.2" extension="EX-VISITDX-1"', '768076.1" extension="EX-PROBLEM-1"'));
+  expect((reused.resources.filter((r) => r.resourceType === 'Condition') as Condition[]).map((c) => [c.category?.[0].coding?.[0].code, !!c.encounter]))
+    .toEqual([['problem-list-item', false], ['encounter-diagnosis', true]]);
   // A diagnosis observation the library does not read (not SUBJ) is named.
   const comp = EPIC.replace('                  <entryRelationship typeCode="SUBJ">\n                    <observation', '                  <entryRelationship typeCode="COMP">\n                    <observation');
   expect(convertCcdaLocal(comp).notImported.filter((n) => n.section === 'Encounters')).toEqual([

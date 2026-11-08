@@ -172,7 +172,8 @@ export function repair(rs: Resource[], xml: string): Resource[] {
     }
     if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
     if (r.resourceType === 'Condition') {
-      const inList = lookup(problemList, r);
+      // A Condition linked to its encounter is a visit diagnosis, also when its observation id repeats a problem-list one.
+      const inList = (r as Condition).encounter ? false : lookup(problemList, r);
       if (inList !== undefined) r = { ...r, category: [cc(CATEGORY, inList ? 'problem-list-item' : 'encounter-diagnosis')] } as Condition;
       const s = lookup(prob, r);
       if (!s) return r;
