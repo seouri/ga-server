@@ -64,7 +64,6 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
     await logRemote(old, 'fhir_search', 'test app');
     writeAtomic(join(dir, 'share', 'shares.json'), JSON.stringify([share, { ...share, id: 'share2', patientId: 'someone-else' }]), 0o600);
 
-    await new Promise((r) => setTimeout(r, 61_000)); // Medplum allows 5 admin auth calls a minute; migrate's setup needs 2
     const { rows } = await retryLimited(() => migrate({ projectName: 'ga-test' }));
     const now = loadConfig();
     clients.push(now);
