@@ -7,6 +7,7 @@ import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, import
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
+import { isPlanned } from '../src/current.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -454,6 +455,8 @@ test('a planned medication and its supply order sharing one id are both stored',
     expect(await importPath(client, cfgFor(pid), writeDoc(xml), pid)).toMatchObject({ invalid: 0 });
     const requests = await client.searchResources('MedicationRequest', { subject: `Patient/${pid}` });
     expect(requests.map((r) => r.identifier?.find((i) => i.value === 'EX-MED-1') && r.dispenseRequest?.quantity?.value).sort()).toEqual([90, undefined, undefined]);
+    // Stored with the C-CDA tag: the planned medication and its order are not current medications.
+    expect(requests.filter((r) => r.identifier?.some((i) => i.value === 'EX-MED-1')).map(isPlanned)).toEqual([true, true]);
   });
 });
 
