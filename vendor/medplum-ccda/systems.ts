@@ -687,6 +687,16 @@ export const MEDICATION_STATUS_MAPPER = new EnumMapper<
   { ccdaValue: 'obsolete', fhirValue: 'cancelled', displayName: 'Obsolete' },
 ]);
 
+// C-CDA Planned moodCode (SubstanceAdministration/Supply): https://vsac.nlm.nih.gov/valueset/2.16.840.1.113883.11.20.9.24/expansion
+// FHIR MedicationRequest intent: https://hl7.org/fhir/R4/valueset-medicationrequest-intent.html
+// FHIR has no "promise" intent, so PRMS maps to plan.
+export const PLANNED_MEDICATION_MOOD_MAPPER = new EnumMapper<NonNullable<MedicationRequest['intent']>, string>({}, [
+  { ccdaValue: 'PRP', fhirValue: 'proposal', displayName: 'Proposal' },
+  { ccdaValue: 'INT', fhirValue: 'plan', displayName: 'Intent' },
+  { ccdaValue: 'PRMS', fhirValue: 'plan', displayName: 'Promise' },
+  { ccdaValue: 'RQO', fhirValue: 'order', displayName: 'Request' },
+]);
+
 export const OBSERVATION_CATEGORY_MAPPER = new EnumMapper<string, string>(
   {
     fhirSystemUrl: OBSERVATION_CATEGORY_CODE_SYSTEM,
