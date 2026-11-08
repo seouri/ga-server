@@ -155,6 +155,37 @@ test('a section inside a section is named, with its entries', () => {
   expect(out.notImported).toEqual([{ section: 'Social History', templateId: '2.16.840.1.113883.10.20.22.2.99', entries: 1, reason: 'nested section not read' }]);
 });
 
+const SECOND = '<entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.4"/><id root="2.25.6099" extension="syn-problem-x"/><code code="55607006" codeSystem="2.16.840.1.113883.6.96"/><statusCode code="completed"/><value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/></observation></entryRelationship>';
+test('a concern act with more than one problem or allergy observation names the ones not converted', () => {
+  const problems = SYNTHETIC.replace('</entryRelationship>\n            </act>', `</entryRelationship>${SECOND}\n            </act>`);
+  expect(convertCcdaLocal(problems).notImported).toEqual([
+    { section: 'Problems', templateId: '2.16.840.1.113883.10.20.22.4.3', entries: 1, reason: 'additional problem in concern not converted' },
+  ]);
+  const allergies = EPIC.replace('</participant>\n                </observation>\n              </entryRelationship>', `</participant>\n                </observation>\n              </entryRelationship>${SECOND}`);
+  expect(convertCcdaLocal(allergies).notImported).toContainEqual(
+    { section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.30', entries: 1, reason: 'additional allergy in concern not converted' },
+  );
+});
+
+test('an organizer component that is not an observation is named', () => {
+  const proc = '<component><procedure classCode="PROC" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/></procedure></component>';
+  const out = convertCcdaLocal(SYNTHETIC.replace('</component>\n            </organizer>', `</component>${proc}\n            </organizer>`));
+  expect(out.notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.1', entries: 1, reason: 'organizer component not converted' }]);
+});
+
+test('a section without a templateId is named and the rest of the document still converts', () => {
+  const out = convertCcdaLocal(SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.2.5.1" extension="2015-08-01"/>', ''));
+  expect(out.notImported).toEqual([{ section: 'Problems', entries: 2, reason: 'section without template' }]);
+  expect(out.resources.filter((r) => r.resourceType === 'Observation').length).toBeGreaterThan(0);
+});
+
+test('a goal observation outside the plan reads only coded or text values', () => {
+  const goal = '<entry><observation classCode="GOAL" moodCode="GOL"><templateId root="2.16.840.1.113883.10.20.22.4.121"/><id root="2.25.9100" extension="g1"/><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="active"/><value xsi:type="PQ" value="5" unit="kg"/></observation></entry>';
+  const out = convertCcdaLocal(SYNTHETIC.replace('</entry>\n        </section>\n      </component>\n    </structuredBody>', `</entry>${goal}\n        </section>\n      </component>\n    </structuredBody>`));
+  expect(out.resources.some((r) => r.resourceType === 'Goal')).toBe(true);
+  expect(out.notImported).toEqual([{ section: 'Social History', templateId: '2.16.840.1.113883.10.20.22.4.121', entries: 1, reason: 'PQ value not converted' }]);
+});
+
 test('the Epic-style fixture converts (template order) and lists what it cannot import yet', () => {
   const out = convertCcdaLocal(EPIC);
   accounted(EPIC, out);

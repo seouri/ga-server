@@ -71,6 +71,9 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
   // Microsoft-era records keep the next import on the Microsoft converter (Medplum honours _tag with _tag:not).
   expect(await ccdaConverter({ patientId: pid }, client)).toBe('microsoft');
+  // The patient-scoped search alone finds it (the subject:missing fallback must not be what decides here).
+  const scoped = await client.search('Composition', { subject: `Patient/${pid}`, _tag: 'urn:ga-server:tag|src-ccda', '_tag:not': 'urn:ga-server:tag|ccda-medplum', _count: '1' }, { cache: 'no-cache' });
+  expect(scoped.entry).toHaveLength(1);
 });
 
 test('importing the same ccda twice changes nothing', async () => {

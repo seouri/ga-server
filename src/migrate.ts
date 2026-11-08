@@ -133,7 +133,8 @@ async function sourcePaths(old: MedplumClient, project: string): Promise<Map<str
   return found;
 }
 
-async function plan(old: MedplumClient, project: string, oldPid: string, newClient: () => Promise<[MedplumClient, GaConfig]>, tmp: string): Promise<Job[]> {
+async function plan(old: MedplumClient, project: string, oldCfg: GaConfig, newClient: () => Promise<[MedplumClient, GaConfig]>, tmp: string): Promise<Job[]> {
+  const oldPid = oldCfg.patientId;
   const files = (await searchAll(old, 'DocumentReference', { identifier: `${FILE}|`, subject: `Patient/${oldPid}`, _project: project })) as DocumentReference[];
   const byId = (system: string, value: string) => files.find((d) => d.identifier?.some((i) => i.system === system && i.value === value));
   const sources = await sourcePaths(old, project);
@@ -141,7 +142,7 @@ async function plan(old: MedplumClient, project: string, oldPid: string, newClie
   const problems: string[] = [];
   const jobs: Job[] = [];
   // The copy keeps the old record's C-CDA converter: the new project starts empty, which alone would pick the in-process one.
-  const converter = await ccdaConverter({ patientId: oldPid }, old);
+  const converter = await ccdaConverter(oldCfg, old); // an explicit ccdaConverter in the old config wins
   const ccdaDocs = new Set<DocumentReference>();
   for (const [path, { tag, date }] of sources) {
     if (!existsSync(path)) {
@@ -300,7 +301,7 @@ export async function migrate({ projectName, accept = false }: { projectName?: s
       return fresh;
     };
     console.log('stop ga-gateway and ga-sync before migrating (docker compose stop ga-gateway ga-sync): their writes would go to the old copy.\nchecking the original sources...');
-    const jobs = await plan(old, project, oldCfg.patientId, newClient, tmp);
+    const jobs = await plan(old, project, oldCfg, newClient, tmp);
     const newCfg = await setup(oldCfg.baseUrl, oldCfg.converterUrl, { out: p.next, projectName });
     if (newCfg.projectId === project || newCfg.patientId === oldCfg.patientId) throw new GaError('the new project is the old one: refusing');
     const copied = await copyConceptMaps(old, project, (await newClient())[0]);
