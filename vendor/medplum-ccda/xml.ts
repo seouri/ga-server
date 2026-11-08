@@ -65,6 +65,7 @@ const ARRAY_PATHS = [
   'entryRelationship.supply',
 
   'organizer.component',
+  'organizer.performer',
 
   'substanceAdministration.consumable.manufacturedProduct',
   'substanceAdministration.entryRelationship',

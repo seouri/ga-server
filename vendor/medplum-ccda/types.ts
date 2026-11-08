@@ -437,6 +437,7 @@ export interface CcdaOrganizer {
   statusCode?: CcdaCode;
   effectiveTime?: CcdaEffectiveTime[];
   subject?: CcdaSubject;
+  performer?: CcdaPerformer[];
   component: CcdaOrganizerComponent[];
 }
 

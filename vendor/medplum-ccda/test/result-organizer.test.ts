@@ -1,4 +1,4 @@
-import type { DiagnosticReport, Observation } from '@medplum/fhirtypes';
+import type { DiagnosticReport, Observation, Organization, Practitioner, PractitionerRole } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { convertSections, resourcesOf } from './convert-sections.ts';
 
@@ -45,4 +45,21 @@ test('a Vital Signs Organizer stays a panel Observation', () => {
   const bundle = convertSections(results(organizer('2.16.840.1.113883.10.20.22.4.26')));
   expect(resourcesOf<DiagnosticReport>(bundle, 'DiagnosticReport')).toEqual([]);
   expect(resourcesOf<Observation>(bundle, 'Observation').map((o) => o.identifier?.[0].value)).toEqual(['RES-1', 'RES-2', 'PANEL-1']);
+});
+
+test('a Result Organizer performer (the lab) is the DiagnosticReport performer: a role of its assigned entity and organization', () => {
+  const lab = `<performer typeCode="PRF"><assignedEntity><id root="2.16.840.1.113883.4.7" extension="LAB-1"/>
+    <representedOrganization><name>Test Lab</name><addr><city>Town</city></addr></representedOrganization></assignedEntity></performer>`;
+  const bundle = convertSections(results(organizer('2.16.840.1.113883.10.20.22.4.1').replace('<statusCode', `${lab}<statusCode`)));
+  const [report] = resourcesOf<DiagnosticReport>(bundle, 'DiagnosticReport');
+  const [role] = resourcesOf<PractitionerRole>(bundle, 'PractitionerRole');
+  const [lab1] = resourcesOf<Practitioner>(bundle, 'Practitioner');
+  const [org] = resourcesOf<Organization>(bundle, 'Organization');
+  expect(report.performer).toEqual([{ reference: `PractitionerRole/${role.id}` }]);
+  expect(role.practitioner?.reference).toBe(`Practitioner/${lab1.id}`);
+  expect(lab1.identifier).toEqual([{ system: 'urn:oid:2.16.840.1.113883.4.7', value: 'LAB-1' }]);
+  expect(role.organization?.reference).toBe(`Organization/${org.id}`);
+  expect(org).toMatchObject({ name: 'Test Lab', address: [{ city: 'Town' }] });
+  // No performer: none.
+  expect(resourcesOf<DiagnosticReport>(convertSections(results(organizer('2.16.840.1.113883.10.20.22.4.1'))), 'DiagnosticReport')[0].performer).toBeUndefined();
 });

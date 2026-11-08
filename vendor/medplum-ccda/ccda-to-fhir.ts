@@ -1718,6 +1718,10 @@ class CcdaToFhirConverter {
       },
       subject: createReference(this.patient as Patient),
       ...this.mapObservationEffectiveTime(organizer.effectiveTime?.[0]),
+      // Who performed the tests (the lab, as an assigned entity)
+      performer: organizer.performer?.length
+        ? organizer.performer.map((p) => this.mapAssignedEntityToReference(p.assignedEntity)).filter((r) => !!r)
+        : undefined,
       result: results.length > 0 ? results : undefined,
     };
   }
