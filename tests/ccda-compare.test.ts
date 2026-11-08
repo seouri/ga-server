@@ -67,7 +67,7 @@ test('an entry neither imported nor named is unaccounted', () => {
 
 test('the Epic-style fixture against the real Microsoft output: every loss by path, all accounted', () => {
   const r = run(EPIC, MS_EPIC());
-  // Shrinks as Tasks 4-8 land.
+  // Every loss fixed (Tasks 4-8); the Microsoft path's other spellings of the same information are compare equivalences.
   expect(r.losses).toEqual([]);
   expect(r.unaccounted).toEqual([]);
 });

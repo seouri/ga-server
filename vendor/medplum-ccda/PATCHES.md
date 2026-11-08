@@ -44,19 +44,19 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 
-## Section → resource (with rows 1-26)
+## Section → resource (with rows 1-36)
 
-Every section's narrative is also on the Composition (`section.text`). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
+Every section's narrative is also on the Composition (`section.text`, `mode: snapshot`; the Composition's and a CareTeam's `subject` is the patient, row 30). Document authors: Practitioner, or Device for an authoring device (row 34). Practitioner, Organization, Location: one per identifier (row 33). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
 
 | Section (templateId root) | Entries become | Notes |
 |---|---|---|
 | Problems (22.2.5, .5.1, V2), Health Concerns (22.2.58) | Condition | concern act: one per SUBJ observation (row 9) |
-| Allergies (22.2.6, .6.1, V2) | AllergyIntolerance | concern act: one per SUBJ observation (row 9) |
+| Allergies (22.2.6, .6.1, V2) | AllergyIntolerance | concern act: one per SUBJ observation (row 9); category and type from the observation value (row 29) |
 | Medications (22.2.1, .1.1, V2) | MedicationStatement (any mood), keyed by the substanceAdministration id; per supply inside: MedicationRequest (supply order) or MedicationDispense (dispense) | entries-optional root routed (row 1); rows 13-15 |
-| Immunizations (22.2.2, .2.1) | Immunization | |
+| Immunizations (22.2.2, .2.1) | Immunization | CVX in `http://hl7.org/fhir/sid/cvx` (row 27), route (row 28), not given → not-done (row 36) |
 | Family History (22.2.15) | FamilyMemberHistory per Family History Organizer, one condition per observation | row 19 |
 | Results, Vital Signs, Social History, Functional Status (22.2.14), Reason for Visit (22.2.12), any other observation section | Observation; a Result Organizer: DiagnosticReport with `result` → its Observations; any other organizer: panel Observation with `hasMember` | the library's "vitals" path; rows 16-18, 20-22 (category: own template, then section; else the section code) |
-| Encounters (22.2.22, .22.1) | Encounter; Condition per RSON observation; Condition (`encounter-diagnosis`, `encounter` → its Encounter) per problem observation of an Encounter Diagnosis act (22.4.80) | row 10 |
+| Encounters (22.2.22, .22.1) | Encounter; Condition per RSON observation; Condition (`encounter-diagnosis`, `encounter` → its Encounter) per problem observation of an Encounter Diagnosis act (22.4.80) | row 10; class from an ActCode only (row 31); Service Delivery Location → Location (row 32) |
 | Procedures (22.2.7.1) | Procedure | |
 | Plan of Treatment (22.2.10) | CarePlan (acts, with their narrative text as `description`), ServiceRequest (observations in a planned mood: INT, PRP, RQO, ARQ), Goal (goal observations), MedicationRequest (substanceAdministrations; `intent` from moodCode); section narrative on the Composition | rows 8, 12, 23 |
 | Goals (22.2.60) | Goal | |
