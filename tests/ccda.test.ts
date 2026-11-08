@@ -12,6 +12,7 @@ import { labResults, labRow, type LabRow } from '../src/labs.ts';
 import { vitals } from '../src/vitals.ts';
 import { reviewList } from '../src/concepts-cli.ts';
 import { whatsNew } from '../src/whats-new.ts';
+import { doseOf, vaccineGaps } from '../src/vaccines.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -582,5 +583,16 @@ test('an uncoded observation with a value is stored, reviewed and read without a
     expect((await reviewList(client, pid, 'unmapped')).every((u) => !!u.name)).toBe(true);
     const news = await whatsNew(client, pid, Promise.resolve([]), { dir: mkdtempSync(join(tmpdir(), 'ga-wn-')), fetch: async () => new Response('{}', { status: 404 }) });
     expect(news).toBeDefined();
+  });
+});
+
+test('vaccine_gaps counts a converted immunization by its CVX code', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    await importPath(client, cfgFor(pid), writeDoc(EPIC), pid);
+    const [imm] = await client.searchResources('Immunization', { patient: `Patient/${pid}` });
+    expect(doseOf(imm)).toMatchObject({ date: '2023-10-15', cvx: '140' }); // by code, not only by name
+    const flu = (await vaccineGaps(client, pid, '2024-01-01')).results.find((r) => r.vaccine === 'influenza');
+    expect(flu).toMatchObject({ status: 'complete', records: [{ date: '2023-10-15' }] });
   });
 });

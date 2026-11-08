@@ -353,7 +353,11 @@ export const SYSTEM_MAPPER = new EnumMapper<string, string>({}, [
     fhirValue: NDFRT_URL,
     displayName: 'National Drug File Reference Terminology (NDF-RT)',
   },
-  { ccdaValue: OID_CVX_CODE_SYSTEM, fhirValue: CVX_URL, displayName: 'CVX' },
+  {
+    ccdaValue: OID_CVX_CODE_SYSTEM,
+    fhirValue: FHIR_CVX_URL,
+    displayName: 'Vaccine Administered Code Set (CVX)',
+  },
   {
     ccdaValue: OID_CONFIDENTIALITY_VALUE_SET,
     fhirValue: 'Confidentiality',
@@ -381,11 +385,7 @@ export const SYSTEM_MAPPER = new EnumMapper<string, string>({}, [
   },
 
   // Alternate FHIR System:
-  {
-    ccdaValue: OID_CVX_CODE_SYSTEM,
-    fhirValue: FHIR_CVX_URL,
-    displayName: 'Vaccine Administered Code Set (CVX)',
-  },
+  { ccdaValue: OID_CVX_CODE_SYSTEM, fhirValue: CVX_URL, displayName: 'CVX' },
   {
     ccdaValue: OID_ICF_CODE_SYSTEM,
     fhirValue: FHIR_ICF_URL,
