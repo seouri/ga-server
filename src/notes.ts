@@ -31,7 +31,7 @@ export function snippet(text: string, needle?: string): string {
   return `${start ? '…' : ''}${t.slice(start, start + SNIP)}${start + SNIP < t.length ? '…' : ''}`;
 }
 
-type Body = NoteRow & { body: string };
+type Body = Omit<NoteRow, 'snippet'> & { body: string };
 type Cached = { stamp: string; rows: Body[]; more: boolean };
 // Decoded rows per client and patient, in memory only. A type reloads when its (total, newest lastUpdated) stamp changes.
 const cache = new WeakMap<MedplumClient, Map<string, Cached>>();
@@ -65,12 +65,12 @@ export async function notesSearch(
       const body = noteText(d);
       if (body === undefined) return undefined;
       const kind = d.type?.text ?? d.type?.coding?.find((c) => c.display)?.display ?? 'note';
-      return { body, date: (d.date ?? d.context?.period?.start)?.slice(0, 10), kind, author: d.author?.[0]?.display, type: 'DocumentReference', id: d.id, snippet: '' };
+      return { body, date: (d.date ?? d.context?.period?.start)?.slice(0, 10), kind, author: d.author?.[0]?.display, type: 'DocumentReference', id: d.id };
     }),
     load(client, patientId, 'Communication', 'sent', (c: Communication) => {
       const body = messageText(c);
       if (!body) return undefined;
-      return { body, date: (c.sent ?? c.received)?.slice(0, 10), kind: 'message', author: c.sender?.display, type: 'Communication', id: c.id, snippet: '' };
+      return { body, date: (c.sent ?? c.received)?.slice(0, 10), kind: 'message', author: c.sender?.display, type: 'Communication', id: c.id };
     }),
   ]);
   const inRange = (d?: string) => (!since && !until) || (d !== undefined && (!since || d >= since) && (!until || d <= until));
