@@ -59,7 +59,7 @@ test('ga perf math: median, p95, requests, errors, text replies', () => {
   const rows = [10, 20, 30, 40, 100].map((ms, i) => ({ t, tool: 'lab_results', app: 'a', ms, requests: i, ok: i !== 4 }));
   rows.push({ t: '2020-01-01T00:00:00Z', tool: 'lab_results', app: 'a', ms: 9999, requests: 0, ok: true });
   rows.push({ t, tool: 'text reply', app: 'iMessage', ms: 500, llmMs: 400, toolMs: 80, ok: true } as never);
-  writeFileSync(f, rows.map((r) => JSON.stringify(r)).join('\n'));
+  writeFileSync(f, [...rows.map((r) => JSON.stringify(r)), '{"t": torn'].join('\n')); // a torn last line is skipped
   const out = perfSummary(7, f);
   expect(out).toMatch(/lab_results\s+5\s+30\s+100\s+2\.0\s+20/);
   expect(out).toContain('text replies: 1, median total 500 ms, llm 400 ms, tools 80 ms');

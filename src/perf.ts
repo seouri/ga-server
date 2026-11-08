@@ -25,10 +25,10 @@ export function record(l: Omit<Line, 't'>): void {
   const f = file();
   void (async () => {
     await mkdir(dirname(f), { recursive: true, mode: 0o700 });
-    await appendFile(f, `${JSON.stringify({ t: new Date().toISOString(), ...l })}\n`, { mode: 0o600 });
+    await appendFile(f, `${JSON.stringify({ t: new Date().toISOString(), ...l, app: l.app.slice(0, 40) })}\n`, { mode: 0o600 });
     if (Date.now() - (pruned.get(f) ?? 0) < DAY) return;
     pruned.set(f, Date.now());
-    const keep = readFileSync(f, 'utf8').split('\n').filter((x) => x && Date.parse(JSON.parse(x).t) >= Date.now() - 30 * DAY);
+    const keep = readFileSync(f, 'utf8').split('\n').filter((x) => (parse(x)?.t ?? '') >= new Date(Date.now() - 30 * DAY).toISOString());
     writeAtomic(f, keep.map((x) => `${x}\n`).join(''), 0o600);
   })().catch(() => {});
 }
@@ -46,12 +46,14 @@ export async function timed<R extends { isError?: boolean; content?: { type: str
   }
 }
 
+// A torn or bad line is skipped, never fatal.
+const parse = (x: string): Line | undefined => { try { return x ? JSON.parse(x) : undefined; } catch { return undefined; } };
 const q = (a: number[], p: number) => [...a].sort((x, y) => x - y)[Math.max(0, Math.ceil(p * a.length) - 1)];
 const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 
 export function perfSummary(days = 7, path = file()): string {
   const since = Date.now() - days * DAY;
-  const lines: Line[] = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((x) => JSON.parse(x)).filter((l) => Date.parse(l.t) >= since) : [];
+  const lines: Line[] = existsSync(path) ? readFileSync(path, 'utf8').split('\n').map(parse).filter((l): l is Line => !!l && Date.parse(l.t) >= since) : [];
   if (!lines.length) return `no calls logged in the last ${days} days`;
   const by = new Map<string, Line[]>();
   for (const l of lines) by.set(l.tool, [...(by.get(l.tool) ?? []), l]);
@@ -61,8 +63,8 @@ export function perfSummary(days = 7, path = file()): string {
     rows.push([tool, String(ls.length), String(q(ms, 0.5)), String(q(ms, 0.95)), avg(ls.map((l) => l.requests ?? 0)).toFixed(1), (100 * ls.filter((l) => !l.ok).length / ls.length).toFixed(0)]);
   }
   const w = rows[0].map((_, i) => Math.max(...rows.map((r) => r[i].length)));
-  const out = rows.map((r) => r.map((c, i) => (i ? c.padStart(w[i]) : c.padEnd(w[i]))).join('  '));
+  const out = rows.length < 2 ? [] : rows.map((r) => r.map((c, i) => (i ? c.padStart(w[i]) : c.padEnd(w[i]))).join('  '));
   const t = by.get('text reply');
-  if (t) out.push('', `text replies: ${t.length}, median total ${q(t.map((l) => l.ms), 0.5)} ms, llm ${q(t.map((l) => l.llmMs ?? 0), 0.5)} ms, tools ${q(t.map((l) => l.toolMs ?? 0), 0.5)} ms`);
+  if (t) out.push(...(out.length ? [''] : []), `text replies: ${t.length}, median total ${q(t.map((l) => l.ms), 0.5)} ms, llm ${q(t.map((l) => l.llmMs ?? 0), 0.5)} ms, tools ${q(t.map((l) => l.toolMs ?? 0), 0.5)} ms`);
   return out.join('\n');
 }
