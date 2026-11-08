@@ -166,19 +166,21 @@ function inlineMedications(rs: Resource[]): Resource[] {
   return out.filter((r) => !used.has(r));
 }
 
+// A record's names (a string name, or a HumanName's family).
+const namesOf = (r: Resource) => [(prep(r) as { name?: unknown }).name].flat().map((x) => (typeof x === 'string' ? x : (x as { family?: string } | undefined)?.family)).filter((x): x is string => !!x);
 // Matching key for an id-less record: its codes (code, vaccine, drug) and names.
 const sig = (r: Resource) => {
   const p = prep(r) as R & { code?: { coding?: R[] }; vaccineCode?: { coding?: R[] }; 'medication[x]'?: { coding?: R[] }; name?: unknown };
   const codes = [p.code, p.vaccineCode, p['medication[x]']].flatMap((c) => c?.coding ?? []).filter(isCoding).map(codingKey);
-  const names = [p.name].flat().map((x) => (typeof x === 'string' ? x : (x as { family?: string } | undefined)?.family)).filter((x): x is string => !!x);
-  return new Set([...codes, ...names]);
+  return new Set([...codes, ...namesOf(r)]);
 };
 
 // Old record -> its new counterpart. 0) A document's one Composition pairs with the other's (the Microsoft path gives it
 // no system, so no key matches). 1) The source CDA entry id: a new record of the same class sharing any identifier (the same
 // resource type first, then the copy it loses least to: the new path repeats a practitioner per occurrence); several old records
 // may share one. 2) Fallback for old records left over (the new path keeps no id on some entries: medications; Task 6):
-// a new record of the same class with no identifier, sharing a code or name (any, when the old one has none), in document order, one to one.
+// a new record of the same class with no identifier, sharing a code or name (any, when the old one has none), in document order, one to one;
+// for an old record with no identifier, also a keyed new record of the same type (below).
 export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Resource | undefined> {
   const byKey = new Map<string, Resource[]>();
   for (const n of neu) for (const k of keys(n)) byKey.set(k, [...(byKey.get(k) ?? []), n]);
@@ -200,11 +202,19 @@ export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Re
     out.set(o, pool.length > 1 ? pool.reduce((x, y) => (cost(o, y) < cost(o, x) ? y : x)) : pool[0]);
   }
   const used = new Set(out.values());
+  // An old record with no identifier (the Microsoft path keeps none on a payer, or on a policy whose id is a nullFlavor) may also
+  // pair with an unused new record of the same type that has one: by name (a name identifies an organization or person; a code
+  // does not identify an entry), or, when the old one has neither name nor code, when each document holds one record of that type.
   const idless = neu.filter((n) => !keys(n).length);
+  const only = (rs: Resource[], t: string) => rs.filter((r) => r.resourceType === t).length === 1;
   for (const o of old) {
     if (out.get(o) || explain(o)) continue;
     const s = sig(o);
-    const n = idless.find((c) => !used.has(c) && family(c.resourceType) === family(o.resourceType) && (!s.size || [...sig(c)].some((x) => s.has(x))));
+    const find = (pool: Resource[], match: (c: Resource) => boolean) => pool.find((c) => !used.has(c) && family(c.resourceType) === family(o.resourceType) && match(c));
+    const keyed = keys(o).length ? [] : neu.filter((c) => keys(c).length && c.resourceType === o.resourceType);
+    const names = new Set(namesOf(o));
+    const n = find(idless, (c) => !s.size || [...sig(c)].some((x) => s.has(x))) ??
+      find(keyed, (c) => (names.size ? namesOf(c).some((x) => names.has(x)) : !s.size && only(old, o.resourceType) && only(neu, o.resourceType)));
     out.set(o, n);
     if (n) used.add(n);
   }

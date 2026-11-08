@@ -190,6 +190,18 @@ test('an identifier value is compared without surrounding whitespace; another va
   expect(pairLosses([doc('  42')], [doc('4 2')])).toEqual([{ type: 'Practitioner', path: '(record)', count: 1 }]);
 });
 
+test('an old record with no identifier pairs with a keyed new one of its type by name, or as the only one; else it is lost', () => {
+  const org = (name: string, identifier?: unknown) => ({ resourceType: 'Organization', name, ...(identifier ? { identifier } : {}), address: [{ city: 'T' }] });
+  expect(pairLosses([org('Payer A')], [org('Payer B', id('b')), org('Payer A', id('a'))])).toEqual([]);
+  expect(pairLosses([org('Payer A')], [org('Payer B', id('b'))])).toEqual([{ type: 'Organization', path: '(record)', count: 1 }]);
+  const cov = (identifier?: unknown) => ({ resourceType: 'Coverage', status: 'active', ...(identifier ? { identifier } : {}), order: 1 });
+  expect(pairLosses([cov()], [cov(id('c'))])).toEqual([]);
+  expect(pairLosses([cov()], [cov(id('c')), cov(id('d'))])).toEqual([{ type: 'Coverage', path: '(record)', count: 1 }]);
+  expect(pairLosses([cov(), cov(id('d'))], [cov(id('c')), cov(id('d'))])).toEqual([{ type: 'Coverage', path: '(record)', count: 1 }]);
+  // A keyed old record never takes this path.
+  expect(pairLosses([org('Payer A', id('x'))], [org('Payer A', id('a'))])).toEqual([{ type: 'Organization', path: '(record)', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))
