@@ -337,9 +337,21 @@ function asDispense(o: Resource, n: Resource): Resource {
 }
 
 // One correction, not a loss: the Microsoft path reads a PQ value written with a leading dot (value=".14") without the dot (14);
-// the new path reads the number (0.14). The old value is replaced by the new one only when the source holds such a value whose
-// digits are the old number and whose number is the new one.
-const DOT_VALUE = /<value\b[^>]*\bvalue="(\.\d+)"/g;
+// the new path reads the number (0.14). The old value is replaced by the new one only when the record's own source entry (same id)
+// holds such a value whose digits are the old number and whose number is the new one.
+// Source entry id -> its leading-dot values, over every element of the document that has an id and a value.
+function leadingDots(node: unknown, out = new Map<string, string[]>()): Map<string, string[]> {
+  if (Array.isArray(node)) for (const x of node) leadingDots(x, out);
+  else if (node && typeof node === 'object') {
+    const n = node as R;
+    for (const v of [n.value ?? []].flat() as R[]) {
+      const raw = v?.['@_value'];
+      if (typeof raw === 'string' && /^\.\d+$/.test(raw)) for (const k of cdaKeys(n)) out.set(k, [...(out.get(k) ?? []), raw]);
+    }
+    for (const v of Object.values(n)) leadingDots(v, out);
+  }
+  return out;
+}
 function leadingDot(o: Resource, n: Resource, dots: string[]): Resource {
   const [a, b] = [(o as { valueQuantity?: { value?: number } }).valueQuantity, (n as { valueQuantity?: { value?: number } }).valueQuantity];
   if (o.resourceType !== 'Observation' || a?.value === undefined || !dots.some((d) => Number(d.slice(1)) === a.value && Number(d) === b?.value)) return o;
@@ -349,6 +361,8 @@ function leadingDot(o: Resource, n: Resource, dots: string[]): Resource {
 // One path equivalence: an assigned entity's code (a provider taxonomy) is a Practitioner qualification on the Microsoft path and
 // the specialty of the new path's PractitionerRole of that practitioner. An old qualification holding only a code is dropped when
 // every one of its codings is in the specialty of a new role pointing at the counterpart; otherwise it stays a compared leaf.
+// Codings are compared by system|code only: a display is presence-only everywhere in this comparison, so a display the role's
+// specialty lacks is not a loss here either.
 function roleSpecialty(o: Resource, m: Resource, neu: Resource[]): Resource {
   const quals = (o as { qualification?: { code?: { coding?: R[] } }[] }).qualification;
   if (o.resourceType !== 'Practitioner' || !quals) return o;
@@ -369,7 +383,8 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
   const negated = new Set((ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []).flatMap((sec) => sec.entry ?? [])
     .flatMap((e) => e.substanceAdministration ?? []).filter((sa) => sa['@_negationInd'] === 'true').flatMap((sa) => cdaKeys(sa as unknown as R)));
-  const dots = [...xml.matchAll(DOT_VALUE)].map((m) => m[1]);
+  const dotsBy = leadingDots(ccda);
+  const dots = (r: Resource) => keys(r).flatMap((k) => dotsBy.get(k) ?? []);
   const match = matchEntries(o, n);
   const losses = new Map<string, Loss>();
   const add = (type: string, path: string, explained?: string) => {
@@ -392,7 +407,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', explain(r));
     else {
-      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(roleSpecialty(leadingDot(refusedVaccine(r, m, negated), m, dots), m, n), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
+      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(roleSpecialty(leadingDot(refusedVaccine(r, m, negated), m, dots(r)), m, n), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
       for (const p of new Set(diff(old, prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
     }
   }

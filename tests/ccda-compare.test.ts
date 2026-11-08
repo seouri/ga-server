@@ -175,9 +175,16 @@ test('a coding display repeating its CodeableConcept text is that text; a differ
 });
 
 test('a leading-dot PQ value the Microsoft path read without its dot is a correction; any other number difference is a loss', () => {
-  const xml = (v: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody/></component><value xsi:type="PQ" value="${v}" unit="/d"/></ClinicalDocument>`;
-  const obs = (value: number) => ({ resourceType: 'Observation', identifier: id('q'), status: 'final', subject, code: { text: 'K' }, valueQuantity: { value, unit: '/d' } });
+  // The source entry with id q holds the value; another entry (id r) holds ".25" too.
+  const xml = (v: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><component><structuredBody><component><section><title>Results</title>
+    <entry><observation classCode="OBS" moodCode="EVN"><id root="2.25.1" extension="q"/><value xsi:type="PQ" value="${v}" unit="/d"/></observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN"><id root="2.25.1" extension="r"/><value xsi:type="PQ" value=".25" unit="/d"/></observation></entry>
+  </section></component></structuredBody></component></ClinicalDocument>`;
+  const obs = (value: number, i = 'q') => ({ resourceType: 'Observation', identifier: id(i), status: 'final', subject, code: { text: 'K' }, valueQuantity: { value, unit: '/d' } });
   const losses = (v: string, a: number, b: number) => compareCcda(xml(v), [obs(a)] as Resource[], [obs(b)] as Resource[], []).losses;
+  // Another entry's leading-dot value does not correct this record's number.
+  expect(losses('0.30', 25, 0.25)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
+  expect(compareCcda(xml('0.30'), [obs(25, 'r')] as Resource[], [obs(0.25, 'r')] as Resource[], []).losses).toEqual([]);
   expect(losses('.25', 25, 0.25)).toEqual([]);
   expect(losses('.25', 25, 2.5)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
   expect(losses('0.25', 25, 0.25)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
