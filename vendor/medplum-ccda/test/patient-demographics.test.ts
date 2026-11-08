@@ -40,4 +40,8 @@ test('a person name with no parts (a nullFlavor) is no name; a name given as tex
   expect(doctor('<name nullFlavor="UNK"/>').name).toBeUndefined();
   expect(doctor('<name>Pat Doe, MD</name>').name).toEqual([{ text: 'Pat Doe, MD' }]);
   expect(doctor('<name><given>Pat</given><family>Doe</family></name>').name).toEqual([{ family: 'Doe', given: ['Pat'] }]);
+  // Text keeps the name's use; text with only a prefix or suffix keeps both; loose text beside parts is kept as text.
+  expect(doctor('<name use="L">Pat Doe</name>').name).toEqual([{ use: 'official', text: 'Pat Doe' }]);
+  expect(doctor('<name><prefix>Dr.</prefix>Pat Doe<suffix>MD</suffix></name>').name).toEqual([{ prefix: ['Dr.'], suffix: ['MD'], text: 'Pat Doe' }]);
+  expect(doctor('<name>Pat<family>Doe</family></name>').name).toEqual([{ family: 'Doe', text: 'Pat' }]);
 });

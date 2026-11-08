@@ -494,12 +494,9 @@ class CcdaToFhirConverter {
     if (!name) {
       return undefined;
     }
-    // A name given as text only (no parts) is the name's text
-    if (typeof name === 'string' || (name as { '#text'?: string })['#text']) {
-      const text = (typeof name === 'string' ? name : (name as { '#text': string })['#text']).trim();
-      if (typeof name === 'string' || (!name.family && !name.given)) {
-        return text ? { text } : undefined;
-      }
+    // A name given as text (no markup), or with text beside its parts: that text is the name's text
+    if (typeof name === 'string') {
+      return name.trim() ? { text: name.trim() } : undefined;
     }
 
     const result: HumanName = {};
@@ -525,8 +522,13 @@ class CcdaToFhirConverter {
       result.suffix = name.suffix.map(nodeToString)?.filter(Boolean) as string[];
     }
 
-    // A name with no parts (a nullFlavor name, stripped by sanitizeNullFlavors) is no name: an empty HumanName is invalid FHIR
-    return result.family || result.given?.length || result.prefix?.length || result.suffix?.length ? result : undefined;
+    const text = (name as { '#text'?: string })['#text']?.trim();
+    if (text) {
+      result.text = text;
+    }
+
+    // A name with no parts and no text (a nullFlavor name, stripped by sanitizeNullFlavors) is no name: an empty HumanName is invalid FHIR
+    return result.family || result.given?.length || result.prefix?.length || result.suffix?.length || result.text ? result : undefined;
   }
 
   private mapAddresses(addresses: CcdaAddr[] | undefined): Address[] | undefined {

@@ -19,3 +19,9 @@ Expected: no `name`; `name: [{ text: "Pat Doe, MD" }]`. Actual: `name: [{}]` bot
 
 - `ccda-to-fhir.ts`: `mapCcdaNameToFhirHumanName` returns `{ text }` for a text-only name and nothing for a name with no parts; `mapCcdaNameArrayFhirHumanNameArray` returns undefined for an empty list.
 - Test `patient-demographics.test.ts`.
+
+## Amendment (PATCHES row 49)
+
+The text is kept with the name's other parts: `<name use="L">Pat Doe</name>` gives `{ use: "official", text: "Pat Doe" }`,
+`<name><prefix>Dr.</prefix>Pat Doe<suffix>MD</suffix></name>` gives prefix, suffix and text, and loose text beside a family or
+given name is kept as text.
