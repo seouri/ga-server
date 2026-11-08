@@ -388,7 +388,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     read((input) => notesSearch(client, patientId, input)),
   );
   const lists: [string, Kind, string][] = [
-    ['current_medications', 'medications', "The user's current medications from GA (active MedicationStatement and MedicationRequest, every source): use this for \"what am I taking\" instead of fhir_search."],
+    ['current_medications', 'medications', "The user's current medications from GA (active MedicationStatement and MedicationRequest, every source; planned or proposed requests left out): use this for \"what am I taking\" instead of fhir_search."],
     ['current_problems', 'problems', "The user's problem list from GA (active Conditions in the problem list, not one-visit diagnoses): use this instead of fhir_search."],
     ['allergies', 'allergies', "The user's allergies and intolerances from GA (active, plus any with no clinical status recorded): use this instead of fhir_search."],
   ];
