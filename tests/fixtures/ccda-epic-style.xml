@@ -33,6 +33,14 @@
       <assignedPerson><name><given>Example</given><family>Clinician</family></name></assignedPerson>
     </assignedAuthor>
   </author>
+  <author>
+    <time value="20240612101500-0500"/>
+    <assignedAuthor>
+      <id nullFlavor="NA"/>
+      <assignedAuthoringDevice><manufacturerModelName>Example EHR</manufacturerModelName><softwareName>Example EHR Version 10</softwareName></assignedAuthoringDevice>
+      <representedOrganization><id root="1.2.840.114350.1.13.999.2.7.2.696570" extension="EX-ORG-1"/><name>Example Health System</name></representedOrganization>
+    </assignedAuthor>
+  </author>
   <custodian>
     <assignedCustodian>
       <representedCustodianOrganization>

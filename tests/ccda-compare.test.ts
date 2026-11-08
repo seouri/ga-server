@@ -291,3 +291,14 @@ test('an encounter class of another system (a CPT visit code) is covered by the 
   expect(pairLosses([enc({ class: cpt })], [enc({ class: absent, type: [{ coding: [{ ...cpt, code: '99214' }] }] })])).toEqual([{ type: 'Encounter', path: 'class', count: 1 }]);
   expect(pairLosses([enc({ class: act })], [enc({ class: absent, type: [{ coding: [act] }] })])).toEqual([{ type: 'Encounter', path: 'class', count: 1 }]);
 });
+
+test('an authoring device: the old manufacturer and bare type display are covered by a new model-name deviceName of the same name, else losses', () => {
+  const dev = (x: object) => ({ resourceType: 'Device', ...x });
+  const old = dev({ type: { coding: [{ display: 'Example EHR' }] }, manufacturer: 'Example EHR', version: [{ value: 'v10' }] });
+  expect(pairLosses([old], [dev({ deviceName: [{ name: 'Example EHR', type: 'model-name' }], version: [{ value: 'v10' }] })])).toEqual([]);
+  expect(pairLosses([old], [dev({ deviceName: [{ name: 'Other EHR', type: 'model-name' }], version: [{ value: 'v10' }] })])).toEqual([
+    { type: 'Device', path: 'type.coding.display', count: 1 },
+    { type: 'Device', path: 'manufacturer', count: 1 },
+  ]);
+  expect(pairLosses([dev({ manufacturer: 'Example EHR' })], [dev({ deviceName: [{ name: 'Example EHR', type: 'user-friendly-name' }] })])).toEqual([{ type: 'Device', path: 'manufacturer', count: 1 }]);
+});

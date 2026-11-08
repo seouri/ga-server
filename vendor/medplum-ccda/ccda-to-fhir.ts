@@ -17,6 +17,7 @@ import type {
   Condition,
   ContactPoint,
   Coverage,
+  Device,
   DiagnosticReport,
   DocumentReference,
   Dosage,
@@ -511,12 +512,8 @@ class CcdaToFhirConverter {
         : { coding: [{ system: LOINC, code: LOINC_SUMMARY_OF_EPISODE_NOTE }] },
       confidentiality: this.ccda.confidentialityCode?.['@_code'] as Composition['confidentiality'],
       subject: this.patient ? createReference(this.patient) : undefined,
-      author: this.ccda.author?.[0]
-        ? [
-            this.mapAuthorToReference(this.ccda.author?.[0]) as Reference<
-              Practitioner | Organization | Patient | PractitionerRole
-            >,
-          ]
+      author: this.ccda.author?.length
+        ? this.ccda.author.map((author) => this.mapDocumentAuthorToReference(author))
         : [{ display: 'Medplum' }],
       custodian: this.mapCustodianToReference(this.ccda.custodian),
       event: this.mapDocumentationOfToEvent(this.ccda.documentationOf),
@@ -1371,6 +1368,43 @@ class CcdaToFhirConverter {
         },
       ],
     };
+  }
+
+  /**
+   * A document author: a person (Practitioner) or an authoring device (Device, owned by its represented organization).
+   * @param author - The ClinicalDocument author.
+   * @returns The Composition author reference.
+   */
+  private mapDocumentAuthorToReference(author: CcdaAuthor): Reference<Practitioner | Device | Organization> {
+    const authoringDevice = author.assignedAuthor?.assignedAuthoringDevice;
+    if (!authoringDevice) {
+      return this.mapAuthorToReference(author) as Reference<Practitioner>;
+    }
+    const organization = author.assignedAuthor?.representedOrganization;
+    let owner: Organization | undefined;
+    if (organization) {
+      owner = {
+        resourceType: 'Organization',
+        id: this.mapId(organization.id),
+        identifier: this.mapIdentifiers(organization.id),
+        name: organization.name?.[0],
+        address: this.mapAddresses(organization.addr),
+        telecom: this.mapTelecom(organization.telecom),
+      };
+      this.resources.push(owner);
+    }
+    const modelName = nodeToString(authoringDevice.manufacturerModelName);
+    const softwareName = nodeToString(authoringDevice.softwareName);
+    const device: Device = {
+      resourceType: 'Device',
+      id: this.mapId(author.assignedAuthor?.id),
+      identifier: this.mapIdentifiers(author.assignedAuthor?.id),
+      deviceName: modelName ? [{ name: modelName, type: 'model-name' }] : undefined,
+      version: softwareName ? [{ value: softwareName }] : undefined,
+      owner: owner ? createReference(owner) : undefined,
+    };
+    this.resources.push(device);
+    return createReference(device);
   }
 
   private mapAuthorToReference(author: CcdaAuthor | undefined): Reference<Practitioner> | undefined {

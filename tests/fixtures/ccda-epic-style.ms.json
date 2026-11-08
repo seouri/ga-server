@@ -1,7 +1,7 @@
 [
  {
   "resourceType": "Composition",
-  "id": "4d16eec5-b062-fe44-7eb7-8489b5a27657",
+  "id": "e7b005f1-4208-5d56-0394-d6439c67954f",
   "identifier": {
    "use": "official",
    "value": "1.2.840.114350.1.13.999.2.7.8.688883.900001"
@@ -319,6 +319,9 @@
   "author": [
    {
     "reference": "Practitioner/9d462302-0a12-54e1-1f30-4334818bddc9"
+   },
+   {
+    "reference": "Device/8f5fcca5-da31-1681-41f9-c73b86784079"
    }
   ]
  },
@@ -355,6 +358,26 @@
     ]
    }
   ]
+ },
+ {
+  "resourceType": "Device",
+  "id": "8f5fcca5-da31-1681-41f9-c73b86784079",
+  "type": {
+   "coding": [
+    {
+     "display": "Example EHR"
+    }
+   ]
+  },
+  "manufacturer": "Example EHR",
+  "version": [
+   {
+    "value": "Example EHR Version 10"
+   }
+  ],
+  "owner": {
+   "reference": "Organization/7e803ac5-2bc2-c648-dddc-83361cc078eb"
+  }
  },
  {
   "resourceType": "Patient",

@@ -217,6 +217,19 @@ function encounterClass(o: Resource, n: Resource): Resource {
   return types.includes(codingKey(cls)) ? (rest as unknown as Resource) : o;
 }
 
+// One path equivalence: the Microsoft path writes an authoring device's model name (CDA manufacturerModelName) as `manufacturer`
+// and as a code-less `type` coding's display; the new path as `deviceName` of type model-name. Each is dropped only when it is
+// that name exactly (a `type` only when every coding is a bare display of it); otherwise it stays a compared leaf.
+function deviceModel(o: Resource, n: Resource): Resource {
+  if (o.resourceType !== 'Device') return o;
+  const names = new Set(((n as unknown as { deviceName?: { name?: string; type?: string }[] }).deviceName ?? []).filter((d) => d.type === 'model-name').map((d) => d.name));
+  const out = { ...o } as unknown as R & { manufacturer?: string; type?: { coding?: R[] } };
+  const type = out.type;
+  if (type?.coding?.length && Object.keys(type).every((k) => k === 'coding') && type.coding.every((c) => Object.keys(c).every((k) => k === 'display') && names.has(c.display as string))) delete out.type;
+  if (out.manufacturer !== undefined && names.has(out.manufacturer)) delete out.manufacturer;
+  return out as unknown as Resource;
+}
+
 // One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
 // (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
 // The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
@@ -262,7 +275,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(r, m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(r, m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());
