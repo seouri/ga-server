@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { append, createReference, EMPTY, generateId, isUUID, LOINC, UCUM } from '@medplum/core';
+import { append, createReference, EMPTY, encodeBase64, generateId, isUUID, LOINC, UCUM } from '@medplum/core';
 import type {
   Address,
   AllergyIntolerance,
@@ -16,6 +16,7 @@ import type {
   CompositionSection,
   Condition,
   ContactPoint,
+  DocumentReference,
   DosageDoseAndRate,
   Encounter,
   EncounterDiagnosis,
@@ -51,13 +52,17 @@ import {
   OID_GOAL_OBSERVATION,
   OID_GOALS_SECTION,
   OID_HEALTH_CONCERNS_SECTION,
+  OID_HISTORY_OF_PRESENT_ILLNESS_SECTION,
   OID_IMMUNIZATIONS_SECTION_ENTRIES_OPTIONAL,
   OID_IMMUNIZATIONS_SECTION_ENTRIES_REQUIRED,
+  OID_INSTRUCTION_SECTION_V2,
+  OID_INSTRUCTIONS_SECTION,
   OID_MEDICATION_FREE_TEXT_SIG,
   OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL,
   OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL_V2,
   OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED,
   OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED_V2,
+  OID_NOTE_ACTIVITY,
   OID_NOTES_SECTION,
   OID_PAYERS_SECTION,
   OID_PLAN_OF_CARE_SECTION,
@@ -433,6 +438,11 @@ class CcdaToFhirConverter {
   }
 
   private processAct(section: CcdaSection, act: CcdaAct): Resource | undefined {
+    if (getTemplateIds(act).includes(OID_NOTE_ACTIVITY)) {
+      // A Note Activity may appear in any section
+      return this.processNoteAct(section, act);
+    }
+
     const templateIds = getTemplateIds(section);
     for (const templateId of templateIds) {
       switch (templateId) {
@@ -456,8 +466,10 @@ class CcdaToFhirConverter {
           // This is part of USCDI v3, which is optional, and not yet implemented
           return undefined;
         case OID_NOTES_SECTION:
-          // This is part of USCDI v3, which is optional, and not yet implemented
-          return undefined;
+        case OID_INSTRUCTIONS_SECTION:
+        case OID_INSTRUCTION_SECTION_V2:
+        case OID_HISTORY_OF_PRESENT_ILLNESS_SECTION:
+          return this.processNoteAct(section, act);
         case OID_PAYERS_SECTION:
           // This is part of USCDI v3, which is optional, and not yet implemented
           return undefined;
@@ -602,6 +614,36 @@ class CcdaToFhirConverter {
     };
 
     return result;
+  }
+
+  private processNoteAct(section: CcdaSection, act: CcdaAct): DocumentReference {
+    // The note text is the act's own text, or the section narrative it points at
+    const text = nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference);
+    const effectiveTime = act.effectiveTime?.[0];
+    const start = this.mapEffectiveTimeToDateTime(effectiveTime);
+    return {
+      resourceType: 'DocumentReference',
+      id: this.mapId(act.id),
+      identifier: this.mapIdentifiers(act.id),
+      status: 'current',
+      type: this.mapCode(act.code),
+      category: section.code ? [this.mapCode(section.code) as CodeableConcept] : undefined,
+      subject: createReference(this.patient as Patient),
+      author: act.author?.map((author) => this.mapAuthorToReference(author)).filter(Boolean) as Reference<Practitioner>[],
+      content: [
+        {
+          attachment: {
+            contentType: 'text/plain',
+            data: text ? encodeBase64(text) : undefined,
+            title: section.title,
+          },
+        },
+      ],
+      context: start
+        ? { period: this.mapEffectiveTimeToPeriod(effectiveTime) ?? { start } }
+        : undefined,
+      extension: this.mapTextReference(act.text),
+    };
   }
 
   private processSubstanceAdministration(

@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import type { CareTeam, Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -49,7 +49,7 @@ const ms = (system: string, value: string): MedicationStatement =>
   ({ resourceType: 'MedicationStatement', identifier: [{ system, value }], subject: { reference: 'Patient/p' } }) as MedicationStatement;
 const cond = (value: string): Condition => ({ resourceType: 'Condition', identifier: [{ system: 'urn:oid:2.2', value }], subject: { reference: 'Patient/p' } });
 
-test('repair recovers statuses from the source entries and drops the converter DocumentReference', () => {
+test('repair recovers statuses from the source entries', () => {
   const out = repair(
     [
       ms('urn:oid:1.1', 'm-active'),
@@ -60,7 +60,6 @@ test('repair recovers statuses from the source entries and drops the converter D
       cond('p-done'),
       cond('not-in-xml'),
       { resourceType: 'Encounter', class: { code: 'AMB' } } as Encounter,
-      { resourceType: 'DocumentReference', status: 'current', content: [] },
     ] as Resource[],
     xml,
   );
@@ -76,7 +75,18 @@ test('repair recovers statuses from the source entries and drops the converter D
   expect(d.verificationStatus?.coding?.[0]?.code).toBe('confirmed');
   expect(n.clinicalStatus).toBeUndefined();
   expect((out.find((r) => r.resourceType === 'Encounter') as Encounter).status).toBe('unknown');
-  expect(out.some((r) => r.resourceType === 'DocumentReference')).toBe(false);
+});
+
+test('the Microsoft path drops its whole-document DocumentReference (storeDocument keeps the file); the in-process path keeps note DocumentReferences', async () => {
+  const entry = [{ resource: { resourceType: 'DocumentReference', status: 'current', content: [] } }, { resource: { resourceType: 'Encounter', class: { code: 'AMB' } } }];
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ result: { resourceType: 'Bundle', type: 'batch', entry } }), { status: 200 }));
+  try {
+    const { convertCcdaMs } = await import('../src/ccda.ts');
+    expect((await convertCcdaMs('<ClinicalDocument/>', 'http://converter/')).map((r) => r.resourceType)).toEqual(['Encounter']);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  expect(convertCcdaLocal(EPIC).resources.filter((r) => r.resourceType === 'DocumentReference')).toHaveLength(2);
 });
 
 test('condition status precedence: status observation > effectiveTime/high > concern act', () => {
@@ -193,8 +203,6 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([
     { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
-    { section: 'Patient Instructions', templateId: '2.16.840.1.113883.10.20.22.2.45', entries: 1, reason: 'section not supported by the converter' },
-    { section: 'History of Present Illness', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.4', entries: 1, reason: 'section not supported by the converter' },
     { section: 'Reason for Referral', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.1', entries: 1, reason: 'section not supported by the converter' },
     { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' },
   ]);

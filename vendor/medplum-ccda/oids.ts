@@ -3,6 +3,7 @@
 
 // Source: https://confluence.hl7.org/spaces/SD/pages/51227465/C-CDA+OIDs
 
+export const OID_HISTORY_OF_PRESENT_ILLNESS_SECTION = '1.3.6.1.4.1.19376.1.5.3.1.3.4';
 export const OID_REASON_FOR_REFERRAL = '1.3.6.1.4.1.19376.1.5.3.1.3.1';
 export const OID_REASON_FOR_REFERRAL_V2 = '1.3.6.1.4.1.19376.1.5.3.1.3.1.2';
 export const OID_DISCHARGE_DIET_SECTION = '1.3.6.1.4.1.19376.1.5.3.1.3.33';

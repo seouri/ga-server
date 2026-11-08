@@ -34,7 +34,8 @@ export async function convertCcdaMs(xml: string, converterUrl: string): Promise<
   // Status only, also when the body is not the expected JSON: a parse error would quote it.
   const result = await res.json().then((b: { result?: Bundle }) => b?.result, () => undefined);
   if (result?.resourceType !== 'Bundle') throw new GaError(`converter failed: HTTP ${res.status}, unexpected response`);
-  return repair((result.entry ?? []).map((e) => e.resource as Resource), xml);
+  // Its whole-document DocumentReference is dropped: storeDocument keeps the original file.
+  return repair((result.entry ?? []).map((e) => e.resource as Resource).filter((r) => r.resourceType !== 'DocumentReference'), xml);
 }
 
 type X = Record<string, unknown>;
@@ -141,7 +142,6 @@ const cc = (system: string, code: string) => ({ coding: [{ system, code }] });
 const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
 // Fixes converter template gaps from the source XML; only neutral values ('unknown') when the source has nothing.
-// Drops the converter's DocumentReference: storeDocument keeps the original file.
 export function repair(rs: Resource[], xml: string): Resource[] {
   const { med, drug, prob, problemList } = sourceInfo(xml);
   const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
@@ -162,28 +162,26 @@ export function repair(rs: Resource[], xml: string): Resource[] {
     if (info.rxnorm && !coding.some((x) => x.system === RXNORM && x.code === info.rxnorm)) coding.push({ system: RXNORM, code: info.rxnorm, display: info.name });
     return { ...c, coding, text: info.name ?? c?.text };
   };
-  return rs
-    .filter((r) => r.resourceType !== 'DocumentReference')
-    .map((r) => {
-      if (r.resourceType === 'Medication') {
-        const info = drugOf.get(`Medication/${r.id}`);
-        return info ? { ...r, code: named((r as Medication).code, info) } : r;
-      }
-      if (r.resourceType === 'MedicationStatement') {
-        return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
-      }
-      if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
-      if (r.resourceType === 'Condition') {
-        const inList = lookup(problemList, r);
-        if (inList !== undefined) r = { ...r, category: [cc(CATEGORY, inList ? 'problem-list-item' : 'encounter-diagnosis')] } as Condition;
-        const s = lookup(prob, r);
-        if (!s) return r;
-        const clinicalStatus = cc('http://terminology.hl7.org/CodeSystem/condition-clinical', s);
-        if (s !== 'resolved') return { ...r, clinicalStatus };
-        return { ...r, clinicalStatus, verificationStatus: cc('http://terminology.hl7.org/CodeSystem/condition-ver-status', 'confirmed') };
-      }
-      return r;
-    });
+  return rs.map((r) => {
+    if (r.resourceType === 'Medication') {
+      const info = drugOf.get(`Medication/${r.id}`);
+      return info ? { ...r, code: named((r as Medication).code, info) } : r;
+    }
+    if (r.resourceType === 'MedicationStatement') {
+      return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
+    }
+    if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
+    if (r.resourceType === 'Condition') {
+      const inList = lookup(problemList, r);
+      if (inList !== undefined) r = { ...r, category: [cc(CATEGORY, inList ? 'problem-list-item' : 'encounter-diagnosis')] } as Condition;
+      const s = lookup(prob, r);
+      if (!s) return r;
+      const clinicalStatus = cc('http://terminology.hl7.org/CodeSystem/condition-clinical', s);
+      if (s !== 'resolved') return { ...r, clinicalStatus };
+      return { ...r, clinicalStatus, verificationStatus: cc('http://terminology.hl7.org/CodeSystem/condition-ver-status', 'confirmed') };
+    }
+    return r;
+  });
 }
 
 // Custodian organisation name, matched only inside its own element so a nameless custodian can never pick up a later (patient) <name>.
