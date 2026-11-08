@@ -13,17 +13,18 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 | 6 | `ccda-to-fhir.ts` | acts in the IHE Reason for Referral section (and V2) become a `ServiceRequest`: status and intent from statusCode/moodCode, category SNOMED 3457005 "Patient referral", code, occurrence, requester (author), performers, narrative text as `note`, source ids. Test `test/referral-section.test.ts` | referrals were skipped ("not yet implemented") | new issue (none open); draft `docs/superpowers/upstream/ccda/6-referral-section.md`; needs medplum#11242 for the text |
 | 7 | `ccda-to-fhir.ts`, `types.ts`, `xml.ts` | Payers section (and V2): each Policy Activity of a Coverage Activity becomes a `Coverage`: identifier (policy id, then covered party member id), status `active` (C-CDA has none), type (policy code), beneficiary, subscriberId (policy holder id), relationship and period (covered party), payor (payer performer org id and name; data-absent `unknown` when none), order (sequenceNumber). `processAct` may return several resources. `act.participant` parsed as an array; `CcdaParticipant.time`. Test `test/payers-section.test.ts` | payers were skipped ("not yet implemented"); the Microsoft path made Coverage. Guarantor and the policy holder's own name/address have no Coverage field: GA names them in notImported | new issue (none open); draft `docs/superpowers/upstream/ccda/7-payers-coverage.md` |
 | 8 | `ccda-to-fhir.ts` | a Plan of Treatment act's CarePlan `description` is the act's own text or the narrative it references (via row 3), with the narrative-reference extension. Test `test/care-plan-text.test.ts` | `nodeToString(act.text)` was empty for a `<reference>`, so the plan text lived only on the (never shared) Composition | new issue (none open); draft `docs/superpowers/upstream/ccda/8-care-plan-text.md`; needs medplum#11242 |
+| 9 | `ccda-to-fhir.ts` | a problem, health concern or allergy concern act becomes one `Condition` / `AllergyIntolerance` per SUBJ observation (`getSubjectObservations`), not only `entryRelationship.find(SUBJ).observation[0]`. Each record's identifiers are its own observation ids first, then (first record only) the act ids (`mapConcernIdentifiers`); `AllergyIntolerance` gains `identifier` (it had none). Test `test/concern-observations.test.ts` | a concern may track several problems or allergies; all but the first were silently lost. Observation id first: it is the per-record id (the act id is shared), as the Microsoft path keyed them | new issue (none open); draft `docs/superpowers/upstream/ccda/9-concern-observations.md` |
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 
-## Section → resource (with rows 1-8)
+## Section → resource (with rows 1-9)
 
 Every section's narrative is also on the Composition (`section.text`). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
 
 | Section (templateId root) | Entries become | Notes |
 |---|---|---|
-| Problems (22.2.5, .5.1, V2), Health Concerns (22.2.58) | Condition | concern act; first SUBJ observation (others named) |
-| Allergies (22.2.6, .6.1, V2) | AllergyIntolerance | |
+| Problems (22.2.5, .5.1, V2), Health Concerns (22.2.58) | Condition | concern act: one per SUBJ observation (row 9) |
+| Allergies (22.2.6, .6.1, V2) | AllergyIntolerance | concern act: one per SUBJ observation (row 9) |
 | Medications (22.2.1, .1.1, V2) | MedicationRequest | entries-optional root routed (row 1) |
 | Immunizations (22.2.2, .2.1) | Immunization | |
 | Results, Vital Signs, Social History, Functional Status (22.2.14), Reason for Visit (22.2.12), any other observation section | Observation (organizer: panel Observation with `hasMember`) | the library's "vitals" path |

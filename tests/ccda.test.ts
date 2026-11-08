@@ -166,15 +166,19 @@ test('a section inside a section is named, with its entries', () => {
 });
 
 const SECOND = '<entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.4"/><id root="2.25.6099" extension="syn-problem-x"/><code code="55607006" codeSystem="2.16.840.1.113883.6.96"/><statusCode code="completed"/><value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/></observation></entryRelationship>';
-test('a concern act with more than one problem or allergy observation names the ones not converted', () => {
+test('a concern act with more than one problem or allergy observation: one record each; a concern with none is still named', () => {
   const problems = SYNTHETIC.replace('</entryRelationship>\n            </act>', `</entryRelationship>${SECOND}\n            </act>`);
-  expect(convertCcdaLocal(problems).notImported).toEqual([
-    { section: 'Problems', templateId: '2.16.840.1.113883.10.20.22.4.3', entries: 1, reason: 'additional problem in concern not converted' },
-  ]);
+  const out = convertCcdaLocal(problems);
+  expect(out.notImported).toEqual([]);
+  expect(out.resources.filter((r) => r.resourceType === 'Condition').map((c) => (c as Condition).identifier?.[0].value)).toContain('syn-problem-x');
   const allergies = EPIC.replace('</participant>\n                </observation>\n              </entryRelationship>', `</participant>\n                </observation>\n              </entryRelationship>${SECOND}`);
-  expect(convertCcdaLocal(allergies).notImported).toContainEqual(
-    { section: 'Allergies', templateId: '2.16.840.1.113883.10.20.22.4.30', entries: 1, reason: 'additional allergy in concern not converted' },
-  );
+  expect(convertCcdaLocal(allergies).resources.filter((r) => r.resourceType === 'AllergyIntolerance')).toHaveLength(2);
+  expect(convertCcdaLocal(allergies).notImported.filter((n) => n.section === 'Allergies')).toEqual([]);
+  // Two records from one act must not hide an act that made none.
+  const empty = '<entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.3"/><code code="CONC" codeSystem="2.16.840.1.113883.5.6"/><statusCode code="active"/></act></entry>';
+  expect(convertCcdaLocal(problems.replace('<text>Hyperlipidemia</text>', `<text>Hyperlipidemia</text>${empty}`)).notImported).toEqual([
+    { section: 'Problems', templateId: '2.16.840.1.113883.10.20.22.2.5.1', entries: 1, reason: 'entry produced no record' },
+  ]);
 });
 
 test('an organizer component that is not an observation is named', () => {

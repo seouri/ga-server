@@ -80,7 +80,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Composition', path: 'section.mode', count: 1 },
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'Patient', path: 'name.use', count: 1 },
-    { type: 'AllergyIntolerance', path: 'identifier', count: 1 },
     { type: 'MedicationStatement', path: 'resourceType', count: 1 },
     { type: 'MedicationStatement', path: 'identifier', count: 1 },
     { type: 'MedicationStatement', path: 'effective[x].start', count: 1 },

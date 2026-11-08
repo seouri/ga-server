@@ -489,15 +489,43 @@ class CcdaToFhirConverter {
     throw new Error('Unhandled act templateId: ' + templateIds[0]);
   }
 
-  private processAllergyIntoleranceAct(act: CcdaAct): Resource | undefined {
-    const observation = act.entryRelationship?.find((rel) => rel['@_typeCode'] === 'SUBJ')?.observation?.[0];
-    if (!observation) {
-      return undefined;
-    }
+  /**
+   * Returns the observations of a concern act's SUBJ entryRelationships (a concern may hold several).
+   * @param act - The concern act.
+   * @returns The SUBJ observations, in document order.
+   */
+  private getSubjectObservations(act: CcdaAct): CcdaObservation[] {
+    return (act.entryRelationship ?? EMPTY)
+      .filter((rel) => rel['@_typeCode'] === 'SUBJ')
+      .flatMap((rel) => rel.observation ?? EMPTY);
+  }
 
+  /**
+   * Returns the identifiers of one record made from a concern act: its own observation ids first, then (first record only) the act ids.
+   * @param act - The concern act.
+   * @param observation - The SUBJ observation.
+   * @param index - The observation's position among the act's SUBJ observations.
+   * @returns The identifiers.
+   */
+  private mapConcernIdentifiers(act: CcdaAct, observation: CcdaObservation, index: number): Identifier[] | undefined {
+    return this.concatArrays(this.mapIdentifiers(observation.id), index === 0 ? this.mapIdentifiers(act.id) : undefined);
+  }
+
+  private processAllergyIntoleranceAct(act: CcdaAct): Resource[] {
+    return this.getSubjectObservations(act).map((observation, index) =>
+      this.processAllergyIntoleranceObservation(act, observation, index)
+    );
+  }
+
+  private processAllergyIntoleranceObservation(
+    act: CcdaAct,
+    observation: CcdaObservation,
+    index: number
+  ): AllergyIntolerance {
     const allergy: AllergyIntolerance = {
       resourceType: 'AllergyIntolerance',
-      id: this.mapId(act.id),
+      id: this.mapId(index === 0 ? act.id : observation.id),
+      identifier: this.mapConcernIdentifiers(act, observation, index),
       clinicalStatus: this.createClinicalStatus(act),
       verificationStatus: this.createVerificationStatus(),
       type: 'allergy',
@@ -537,16 +565,17 @@ class CcdaToFhirConverter {
     return allergy;
   }
 
-  private processConditionAct(act: CcdaAct): Resource | undefined {
-    const observation = act.entryRelationship?.find((rel) => rel['@_typeCode'] === 'SUBJ')?.observation?.[0];
-    if (!observation) {
-      return undefined;
-    }
+  private processConditionAct(act: CcdaAct): Resource[] {
+    return this.getSubjectObservations(act).map((observation, index) =>
+      this.processConditionObservation(act, observation, index)
+    );
+  }
 
+  private processConditionObservation(act: CcdaAct, observation: CcdaObservation, index: number): Condition {
     const result: Condition = {
       resourceType: 'Condition',
-      id: this.mapId(act.id),
-      identifier: this.concatArrays(this.mapIdentifiers(act.id), this.mapIdentifiers(observation.id)),
+      id: this.mapId(index === 0 ? act.id : observation.id),
+      identifier: this.mapConcernIdentifiers(act, observation, index),
       meta: {
         profile: [US_CORE_CONDITION_URL],
       },

@@ -148,7 +148,7 @@ const sig = (r: Resource) => {
 // Old record -> its new counterpart. 0) A document's one Composition pairs with the other's (the Microsoft path gives it
 // no system, so no key matches). 1) The source CDA entry id: a new record of the same class sharing any identifier (the same
 // resource type first, then the copy it loses least to: the new path repeats a practitioner per occurrence); several old records
-// may share one. 2) Fallback for old records left over (the new path keeps no id on some entries: medications, allergies; Task 6):
+// may share one. 2) Fallback for old records left over (the new path keeps no id on some entries: medications; Task 6):
 // a new record of the same class with no identifier, sharing a code or name (any, when the old one has none), in document order, one to one.
 export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Resource | undefined> {
   const byKey = new Map<string, Resource[]>();

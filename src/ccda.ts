@@ -241,13 +241,10 @@ const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT']);
 // An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
 const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
 const ENCOUNTER_DIAGNOSIS = '2.16.840.1.113883.10.20.22.4.80';
-// Sections whose concern acts the library reads as one record from the first SUBJ observation only (processConditionAct, processAllergyIntoleranceAct).
-const CONCERN = new Map<string, string>([
-  ...[OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
-    OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION].map((o): [string, string] => [o, 'problem']),
-  ...[OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
-    OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2].map((o): [string, string] => [o, 'allergy']),
-]);
+// Sections whose concern acts the library reads as one record per SUBJ observation (processConditionAct, processAllergyIntoleranceAct).
+const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL, OID.OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
+  OID.OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL, OID.OID_HEALTH_CONCERNS_SECTION, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED,
+  OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2];
 // A goal observation (by its template, in any section, and every observation in the plan of care and goals sections) is read by
 // processGoalObservation, which keeps only these value types and no child observation.
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
@@ -278,7 +275,9 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     // Payers: one Coverage per policy activity of a coverage act (none: the act produced no record).
     const payers = hasTemplate(s, OID.OID_PAYERS_SECTION, OID.OID_PAYERS_SECTION_V2);
     const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
-    const expected = statements.length + policies.reduce((n, p) => n + Math.max(0, p.length - 1), 0);
+    // Concern acts: one record per SUBJ observation (none: the act produced no record).
+    const concerns = hasTemplate(s, ...CONCERN) ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length) : [];
+    const expected = statements.length + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
     add(name, root0(s.templateId), expected - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
     // The library keeps the payer, covered party and subscriber id; a guarantor and the policy holder's own details (name, address) have no Coverage field.
     for (const p of policies.flat()) {
@@ -300,12 +299,6 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const dx = entries.flatMap((e) => e.encounter ?? []).flatMap((enc) => enc.entryRelationship ?? []).flatMap((er) => er.act ?? []).filter((a) => hasTemplate(a, ENCOUNTER_DIAGNOSIS)).length;
     const linked = made.reduce((n, r) => n + (r?.resourceType === 'Encounter' ? ((r as Encounter).diagnosis?.length ?? 0) : 0), 0);
     add(name, ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
-    // Concern acts: only the first SUBJ observation becomes a record.
-    const kind = s.templateId?.map((t) => CONCERN.get(t['@_root'])).find(Boolean);
-    for (const act of kind ? entries.flatMap((e) => e.act ?? []) : []) {
-      const subj = (act.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length;
-      add(name, root0(act.templateId), subj - 1, `additional ${kind} in concern not converted`);
-    }
     // Organizer components: the library reads only observations (care teams: their member acts, one participant per performer).
     const careTeam = hasTemplate(s, OID.OID_CARE_TEAMS_SECTION);
     for (const org of entries.flatMap((e) => e.organizer ?? [])) {
