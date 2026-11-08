@@ -176,8 +176,8 @@ export function repair(rs: Resource[], xml: string): Resource[] {
       const info = drugOf.get(`Medication/${r.id}`);
       return info ? { ...r, code: named((r as Medication).code, info) } : r;
     }
-    // The in-process path names the drug inline (or in a contained Medication): the same narrative name and RxNorm.
-    const info = (r.resourceType === 'MedicationStatement' || r.resourceType === 'MedicationRequest') && lookup(drug, r);
+    // The in-process path names the drug inline (or in a contained Medication) on statements, orders and dispenses: the same narrative name and RxNorm.
+    const info = ['MedicationStatement', 'MedicationRequest', 'MedicationDispense'].includes(r.resourceType) && lookup(drug, r);
     if (info) {
       const m = r as MedicationStatement;
       if (m.medicationCodeableConcept) r = { ...m, medicationCodeableConcept: named(m.medicationCodeableConcept, info) } as Resource;

@@ -456,3 +456,10 @@ test('a planned medication and its supply order sharing one id are both stored',
     expect(requests.map((r) => r.identifier?.find((i) => i.value === 'EX-MED-1') && r.dispenseRequest?.quantity?.value).sort()).toEqual([90, undefined, undefined]);
   });
 });
+
+test('a dispense is named from the narrative like its medication', () => {
+  const xml = EPIC.replace('<supply classCode="SPLY" moodCode="INT">', '<supply classCode="SPLY" moodCode="EVN">');
+  expect(xml).not.toBe(EPIC);
+  const dispense = convertCcdaLocal(xml).resources.find((r) => r.resourceType === 'MedicationDispense');
+  expect(dispense).toMatchObject({ medicationCodeableConcept: { text: 'examplepril 10 mg tablet', coding: [{ code: '314076' }] } });
+});
