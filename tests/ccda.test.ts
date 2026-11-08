@@ -203,7 +203,6 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([
     { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
-    { section: 'Reason for Referral', templateId: '1.3.6.1.4.1.19376.1.5.3.1.3.1', entries: 1, reason: 'section not supported by the converter' },
     { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' },
   ]);
   const types = out.resources.map((r) => r.resourceType);

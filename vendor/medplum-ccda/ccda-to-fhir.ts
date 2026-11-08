@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-import { append, createReference, EMPTY, encodeBase64, generateId, isUUID, LOINC, UCUM } from '@medplum/core';
+import { append, createReference, EMPTY, encodeBase64, generateId, isUUID, LOINC, SNOMED, UCUM } from '@medplum/core';
 import type {
   Address,
   AllergyIntolerance,
@@ -41,6 +41,7 @@ import type {
   Reference,
   RelatedPerson,
   Resource,
+  ServiceRequest,
 } from '@medplum/fhirtypes';
 import { mapCcdaToFhirDate, mapCcdaToFhirDateTime } from './datetime.ts';
 import {
@@ -72,6 +73,7 @@ import {
   OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID_PROCEDURES_SECTION_ENTRIES_REQUIRED,
   OID_REASON_FOR_REFERRAL,
+  OID_REASON_FOR_REFERRAL_V2,
 } from './oids.ts';
 import { sanitizeNullFlavors } from './sanitize.ts';
 import {
@@ -463,8 +465,8 @@ class CcdaToFhirConverter {
         case OID_PROCEDURES_SECTION_ENTRIES_REQUIRED:
           return this.processProcedureAct(act);
         case OID_REASON_FOR_REFERRAL:
-          // This is part of USCDI v3, which is optional, and not yet implemented
-          return undefined;
+        case OID_REASON_FOR_REFERRAL_V2:
+          return this.processReferralAct(act);
         case OID_NOTES_SECTION:
         case OID_INSTRUCTIONS_SECTION:
         case OID_INSTRUCTION_SECTION_V2:
@@ -642,6 +644,36 @@ class CcdaToFhirConverter {
       context: start
         ? { period: this.mapEffectiveTimeToPeriod(effectiveTime) ?? { start } }
         : undefined,
+      extension: this.mapTextReference(act.text),
+    };
+  }
+
+  private processReferralAct(act: CcdaAct): ServiceRequest {
+    const statuses: Record<string, ServiceRequest['status']> = {
+      active: 'active',
+      completed: 'completed',
+      aborted: 'revoked',
+      cancelled: 'revoked',
+      suspended: 'on-hold',
+    };
+    const intents: Record<string, ServiceRequest['intent']> = { INT: 'plan', PRP: 'proposal', RQO: 'order', ARQ: 'order' };
+    const text = nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference);
+    return {
+      resourceType: 'ServiceRequest',
+      id: this.mapId(act.id),
+      identifier: this.mapIdentifiers(act.id),
+      status: statuses[act.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+      intent: intents[act['@_moodCode']] ?? 'order',
+      category: [{ coding: [{ system: SNOMED, code: '3457005', display: 'Patient referral' }] }],
+      code: this.mapCode(act.code),
+      subject: createReference(this.patient as Patient),
+      occurrenceDateTime: this.mapEffectiveTimeToDateTime(act.effectiveTime?.[0]),
+      authoredOn: mapCcdaToFhirDateTime(act.author?.[0]?.time?.['@_value']),
+      requester: this.mapAuthorToReference(act.author?.[0]),
+      performer: act.performer
+        ?.map((performer) => this.mapAssignedEntityToReference(performer.assignedEntity))
+        .filter(Boolean) as Reference<PractitionerRole>[],
+      note: text ? [{ text }] : undefined,
       extension: this.mapTextReference(act.text),
     };
   }
