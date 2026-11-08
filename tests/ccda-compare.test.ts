@@ -75,7 +75,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Composition', path: 'section.mode', count: 1 },
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'Patient', path: 'name.use', count: 1 },
-    { type: 'DiagnosticReport', path: 'effective[x].end', count: 1 },
     { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
     { type: 'Encounter', path: 'location.location.reference', count: 1 },
     { type: 'Location', path: '(record)', count: 1 },
@@ -270,4 +269,16 @@ test('administrative gender: the v3 code (M, F, UN) and the FHIR code (male, fem
   expect(pairLosses([fh('urn:oid:2.16.840.1.113883.5.1', 'M')], [fh('http://hl7.org/fhir/administrative-gender', 'female')])).toEqual([{ type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }]);
   // Only that system: M in another code system is not male.
   expect(pairLosses([fh('urn:oid:2.25.1', 'M')], [fh('urn:oid:2.25.1', 'male')])).toEqual([{ type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }]);
+});
+
+test('a period that is one moment (end = start) is covered by a dateTime of that moment; a different end is a loss', () => {
+  const dr = (x: object) => ({ resourceType: 'DiagnosticReport', identifier: id('d'), ...x });
+  const t = '2024-02-10T09:10:00-05:00';
+  expect(pairLosses([dr({ effectivePeriod: { start: t, end: t } })], [dr({ effectiveDateTime: t })])).toEqual([]);
+  expect(pairLosses([dr({ effectivePeriod: { start: t, end: '2024-02-10T11:00:00-05:00' } })], [dr({ effectiveDateTime: t })]))
+    .toEqual([{ type: 'DiagnosticReport', path: 'effective[x].end', count: 1 }]);
+  // Only a choice element's Period: an ordinary Period keeps its end.
+  const cov = (x: object) => ({ resourceType: 'Coverage', identifier: id('c'), ...x });
+  expect(pairLosses([cov({ period: { start: '2024-01-01', end: '2024-01-01' } })], [cov({ period: { start: '2024-01-01' } })]))
+    .toEqual([{ type: 'Coverage', path: 'period.end', count: 1 }]);
 });

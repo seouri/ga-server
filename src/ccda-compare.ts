@@ -43,7 +43,8 @@ const CHOICE = new RegExp(`^(value|effective|onset|abatement|occurrence|performe
   'Base64Binary|Boolean|Canonical|Code|Date|DateTime|Decimal|Id|Instant|Integer|Markdown|Oid|PositiveInt|String|Time|UnsignedInt|Uri|Url|Uuid|Address|Age|Annotation|Attachment|CodeableConcept|Coding|ContactPoint|Count|Distance|Duration|HumanName|Identifier|Money|Period|Quantity|Range|Ratio|Reference|SampledData|Signature|Timing|Dosage'})$`);
 const TIME = new Set(['Date', 'DateTime', 'Instant']);
 
-// The comparable form of a record: no id or meta; choice elements renamed `name[x]` (a dateTime as `name[x].start`, so it equals a Period's start).
+// The comparable form of a record: no id or meta; choice elements renamed `name[x]` (a dateTime as `name[x].start`, so it equals a
+// Period's start; a choice Period that is one moment, end = start, as its start: the Microsoft path writes a panel's low = high so).
 function prep(n: unknown): unknown {
   if (Array.isArray(n)) return n.map(prep);
   if (!n || typeof n !== 'object') return n;
@@ -51,7 +52,8 @@ function prep(n: unknown): unknown {
   for (const [k, v] of Object.entries(n)) {
     if (k === 'id' || k === 'meta') continue;
     const m = CHOICE.exec(k);
-    out[m ? `${m[1]}[x]` : k] = m && TIME.has(m[2]) ? { start: v } : prep(v);
+    const moment = m?.[2] === 'Period' && (v as R).start !== undefined && (v as R).start === (v as R).end;
+    out[m ? `${m[1]}[x]` : k] = m && TIME.has(m[2]) ? { start: v } : moment ? { start: (v as R).start } : prep(v);
   }
   return out;
 }
