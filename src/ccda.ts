@@ -266,6 +266,10 @@ const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SEC
 // processGoalObservation, which keeps only these value types and no child observation.
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
+// A family history observation is one condition of its FamilyMemberHistory: its coded value, with these related observations
+// (age at onset, caused death); a negated one is none (medplum#11243).
+const FAMILY_DETAILS = [OID.OID_AGE_OBSERVATION, OID.OID_FAMILY_HISTORY_DEATH_OBSERVATION];
+const negated = (o: CcdaObservation) => o['@_negationInd'] === 'true';
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
 export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
@@ -345,9 +349,17 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       if (type && !VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))) add(name, root0(o.templateId), 1, `${type} value not converted`);
       for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
     };
+    const family = (o: CcdaObservation) => {
+      if (negated(o) || !Object.keys(o.value ?? {}).some((k) => k !== '@_xsi:type')) return add(name, root0(o.templateId), 1, 'family history observation not converted');
+      const unread = (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []).filter((c) => negated(c) || !hasTemplate(c, ...FAMILY_DETAILS));
+      add(name, root0(o.templateId), unread.length, 'family history detail not converted');
+    };
     for (const e of entries) {
       for (const o of e.observation ?? []) walk(o, false);
-      for (const org of e.organizer ?? []) for (const c of org.component ?? []) for (const o of c.observation ?? []) walk(o, true);
+      for (const org of e.organizer ?? []) {
+        const read = hasTemplate(org, OID.OID_FAMILY_HISTORY_ORGANIZER) ? family : (o: CcdaObservation) => walk(o, true);
+        for (const c of org.component ?? []) for (const o of c.observation ?? []) read(o);
+      }
     }
   });
   // Identity: the document id keys the Composition (the library gives it none), never converter-made content.

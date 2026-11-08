@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
-import type { CareTeam, Composition, Condition, Encounter, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -151,7 +151,7 @@ const accounted = (xml: string, out: ReturnType<typeof convertCcdaLocal>) => {
   expect(comp.section?.map((s) => s.title)).toEqual(sectionTitles(xml));
   for (const s of comp.section ?? []) {
     const body = xml.split(`<title>${s.title}</title>`)[1].split('</section>')[0];
-    const entries = (body.match(/<entry>/g) ?? []).length + (body.match(/<supply\b/g) ?? []).length; // a medication's supply is a record too
+    const entries = (body.match(/<entry[\s>]/g) ?? []).length + (body.match(/<supply\b/g) ?? []).length; // a medication's supply is a record too
     expect((s.entry?.length ?? 0) + out.notImported.filter((n) => n.section === s.title && ENTRY_LEVEL.includes(n.reason)).reduce((a, n) => a + n.entries, 0)).toBe(entries);
   }
 };
@@ -292,13 +292,31 @@ test('goals and plan of care: an observation value the goal path cannot read, an
   ]);
 });
 
+test('family history: a relative\'s condition is a FamilyMemberHistory, never the patient\'s own Observation; what it cannot hold is named', () => {
+  const out = convertCcdaLocal(EPIC);
+  const [fh] = out.resources.filter((r) => r.resourceType === 'FamilyMemberHistory') as FamilyMemberHistory[];
+  expect(fh).toMatchObject({
+    identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.778100', value: 'EX-FH-1' }],
+    relationship: { coding: [{ code: 'FTH' }] },
+    sex: { coding: [{ system: 'http://hl7.org/fhir/administrative-gender', code: 'male' }] },
+    condition: [{ code: { coding: [{ system: 'http://snomed.info/sct', code: '38341003' }] }, onsetAge: { value: 60, code: 'a' } }],
+  });
+  expect(out.resources.some((r) => r.resourceType === 'Observation' && /445518008|64572001/.test(JSON.stringify(r)))).toBe(false);
+  // A negated condition (FHIR has none) and a related observation other than age at onset or death are named.
+  const xml = EPIC.replace('<observation classCode="OBS" moodCode="EVN">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>', '<observation classCode="OBS" moodCode="EVN" negationInd="true">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>');
+  expect(convertCcdaLocal(xml).notImported).toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.46', entries: 1, reason: 'family history observation not converted' }]);
+  const note = '<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/><value xsi:type="ST">x</value></observation></entryRelationship>';
+  expect(convertCcdaLocal(EPIC.replace('<value xsi:type="PQ" value="60" unit="a"/>\n                    </observation>\n                  </entryRelationship>', `<value xsi:type="PQ" value="60" unit="a"/>\n                    </observation>\n                  </entryRelationship>${note}`)).notImported)
+    .toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.46', entries: 1, reason: 'family history detail not converted' }]);
+});
+
 test('every section of the Epic-style fixture is imported', () => {
   const out = convertCcdaLocal(EPIC);
   const comp = out.resources.find((r) => r.resourceType === 'Composition') as Composition;
   const byRef = new Map(out.resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
   const made = Object.fromEntries((comp.section ?? []).map((s) => [s.title, [...new Set((s.entry ?? []).map((e) => byRef.get(e.reference ?? '')?.resourceType))]]));
   expect(made).toEqual({
-    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
+    'Problem List': ['Condition'], Encounters: ['Encounter'], 'Family History': ['FamilyMemberHistory'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
     Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
@@ -366,6 +384,7 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const visitDx = async () => (await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.category?.[0]?.coding?.[0]?.code === 'encounter-diagnosis');
     const [enc] = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
     expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
+    expect(await client.searchResources('FamilyMemberHistory', { patient: `Patient/${pid}` })).toHaveLength(1);
     const [coverage] = await client.searchResources('Coverage', {});
     expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });

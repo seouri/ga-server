@@ -1,7 +1,7 @@
 [
  {
   "resourceType": "Composition",
-  "id": "483efa86-178e-0e98-f589-2bdf293b823c",
+  "id": "5dd8d80b-ee91-05cb-d326-df1d4e5d4d7c",
   "identifier": {
    "use": "official",
    "value": "1.2.840.114350.1.13.999.2.7.8.688883.900001"
@@ -82,6 +82,23 @@
       {
        "code": "30954-2",
        "display": "Relevant diagnostic tests and/or laboratory data",
+       "system": "http://loinc.org"
+      }
+     ]
+    },
+    "mode": "snapshot"
+   },
+   {
+    "title": "Family History",
+    "text": {
+     "status": "generated",
+     "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Family History</div>"
+    },
+    "code": {
+     "coding": [
+      {
+       "code": "10157-6",
+       "display": "History of family member diseases",
        "system": "http://loinc.org"
       }
      ]
@@ -975,6 +992,55 @@
     }
    ]
   },
+  "patient": {
+   "reference": "Patient/39c74caa-8ba3-1726-64fc-f22ae907a589"
+  }
+ },
+ {
+  "resourceType": "FamilyMemberHistory",
+  "id": "50bfbdc9-9e33-467d-be3b-a1d36a93bb29",
+  "identifier": [
+   {
+    "system": "urn:oid:1.2.840.114350.1.13.999.2.7.2.778100",
+    "value": "EX-FH-1"
+   }
+  ],
+  "status": "completed",
+  "relationship": {
+   "coding": [
+    {
+     "code": "FTH",
+     "display": "father",
+     "system": "urn:oid:2.16.840.1.113883.5.111"
+    }
+   ]
+  },
+  "sex": {
+   "coding": [
+    {
+     "code": "M",
+     "system": "urn:oid:2.16.840.1.113883.5.1"
+    }
+   ]
+  },
+  "condition": [
+   {
+    "code": {
+     "coding": [
+      {
+       "code": "38341003",
+       "display": "Hypertension",
+       "system": "http://snomed.info/sct"
+      }
+     ]
+    },
+    "onsetAge": {
+     "value": 60,
+     "system": "http://unitsofmeasure.org",
+     "code": "a"
+    }
+   }
+  ],
   "patient": {
    "reference": "Patient/39c74caa-8ba3-1726-64fc-f22ae907a589"
   }

@@ -85,6 +85,7 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Location', path: '(record)', count: 1 },
     { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
     { type: 'Immunization', path: 'route.coding', count: 1 },
+    { type: 'FamilyMemberHistory', path: 'sex.coding', count: 1 }, // v3 M, now FHIR male: same meaning, another spelling
   ]);
   expect(r.unaccounted).toEqual([]);
 });

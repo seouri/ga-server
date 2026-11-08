@@ -251,6 +251,48 @@
           </entry>
         </section>
       </component>
+      <!-- Family history -->
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.15"/>
+          <templateId root="2.16.840.1.113883.10.20.22.2.15" extension="2015-08-01"/>
+          <code code="10157-6" codeSystem="2.16.840.1.113883.6.1" displayName="History of family member diseases"/>
+          <title>Family History</title>
+          <text>Father: Hypertension, onset at age 60.</text>
+          <entry typeCode="DRIV">
+            <organizer moodCode="EVN" classCode="CLUSTER">
+              <templateId root="2.16.840.1.113883.10.20.22.4.45"/>
+              <templateId root="2.16.840.1.113883.10.20.22.4.45" extension="2015-08-01"/>
+              <id root="1.2.840.114350.1.13.999.2.7.2.778100" extension="EX-FH-1"/>
+              <statusCode code="completed"/>
+              <subject>
+                <relatedSubject classCode="PRS">
+                  <code code="FTH" codeSystem="2.16.840.1.113883.5.111" displayName="father"/>
+                  <subject><administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/></subject>
+                </relatedSubject>
+              </subject>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>
+                  <templateId root="2.16.840.1.113883.10.20.22.4.46" extension="2015-08-01"/>
+                  <id root="1.2.840.114350.1.13.999.2.7.2.778101" extension="EX-FH-1-1"/>
+                  <code code="64572001" codeSystem="2.16.840.1.113883.6.96" displayName="Disease"/>
+                  <statusCode code="completed"/>
+                  <value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/>
+                  <entryRelationship typeCode="SUBJ" inversionInd="true">
+                    <observation classCode="OBS" moodCode="EVN">
+                      <templateId root="2.16.840.1.113883.10.20.22.4.31"/>
+                      <code code="445518008" codeSystem="2.16.840.1.113883.6.96" displayName="Age at onset of clinical finding"/>
+                      <statusCode code="completed"/>
+                      <value xsi:type="PQ" value="60" unit="a"/>
+                    </observation>
+                  </entryRelationship>
+                </observation>
+              </component>
+            </organizer>
+          </entry>
+        </section>
+      </component>
       <!-- Vital signs -->
       <component>
         <section>

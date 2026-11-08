@@ -23,6 +23,8 @@ import type {
   Encounter,
   EncounterDiagnosis,
   Extension,
+  FamilyMemberHistory,
+  FamilyMemberHistoryCondition,
   Goal,
   GoalTarget,
   HumanName,
@@ -51,11 +53,14 @@ import type {
 } from '@medplum/fhirtypes';
 import { mapCcdaToFhirDate, mapCcdaToFhirDateTime } from './datetime.ts';
 import {
+  OID_AGE_OBSERVATION,
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL,
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2,
   OID_ALLERGIES_SECTION_ENTRIES_REQUIRED,
   OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
   OID_CARE_TEAMS_SECTION,
+  OID_FAMILY_HISTORY_DEATH_OBSERVATION,
+  OID_FAMILY_HISTORY_ORGANIZER,
   OID_ENCOUNTER_DIAGNOSIS,
   OID_ENCOUNTER_DIAGNOSIS_V2,
   OID_GOAL_OBSERVATION,
@@ -89,6 +94,7 @@ import { sanitizeNullFlavors } from './sanitize.ts';
 import {
   ACT_CODE_SYSTEM,
   ADDRESS_USE_MAPPER,
+  ADMINISTRATIVE_GENDER_CODE_SYSTEM,
   ALLERGY_CLINICAL_CODE_SYSTEM,
   ALLERGY_SEVERITY_MAPPER,
   ALLERGY_STATUS_MAPPER,
@@ -1426,6 +1432,10 @@ class CcdaToFhirConverter {
     if (getTemplateIds(section).includes(OID_CARE_TEAMS_SECTION)) {
       return this.processCareTeamOrganizer(organizer);
     }
+    // Route by the organizer's own templates: it can have several, such as a vendor template and a C-CDA one
+    if (getTemplateIds(organizer).includes(OID_FAMILY_HISTORY_ORGANIZER)) {
+      return this.processFamilyHistoryOrganizer(organizer);
+    }
     return this.processVitalsOrganizer(organizer);
   }
 
@@ -1459,6 +1469,67 @@ class CcdaToFhirConverter {
       }
     }
     return result;
+  }
+
+  private processFamilyHistoryOrganizer(organizer: CcdaOrganizer): FamilyMemberHistory {
+    const relatedSubject = organizer.subject?.relatedSubject;
+    const sex = this.mapGenderCode(relatedSubject?.subject?.administrativeGenderCode?.['@_code']);
+
+    const conditions: FamilyMemberHistoryCondition[] = [];
+    for (const component of organizer.component ?? EMPTY) {
+      for (const observation of component.observation ?? EMPTY) {
+        const condition = this.processFamilyHistoryObservation(observation);
+        if (condition) {
+          conditions.push(condition);
+        }
+      }
+    }
+
+    return {
+      resourceType: 'FamilyMemberHistory',
+      id: this.mapId(organizer.id),
+      identifier: this.mapIdentifiers(organizer.id),
+      status: 'completed',
+      patient: createReference(this.patient as Patient),
+      // The relationship is required in FHIR, so a relationship the document does not state is unknown
+      relationship: this.mapCode(relatedSubject?.code) ?? {
+        extension: [
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason',
+            valueCode: 'unknown',
+          },
+        ],
+      },
+      sex: sex ? { coding: [{ system: ADMINISTRATIVE_GENDER_CODE_SYSTEM, code: sex }] } : undefined,
+      condition: conditions.length > 0 ? conditions : undefined,
+    };
+  }
+
+  private processFamilyHistoryObservation(observation: CcdaObservation): FamilyMemberHistoryCondition | undefined {
+    // FHIR has no negated condition of a family member, so a negated observation would state the opposite
+    if (observation['@_negationInd'] === 'true') {
+      return undefined;
+    }
+
+    const code = this.mapCode(observation.value as CcdaCode);
+    if (!code) {
+      return undefined;
+    }
+
+    const related =
+      observation.entryRelationship
+        ?.flatMap((relationship) => relationship.observation ?? EMPTY)
+        .filter((relatedObservation) => relatedObservation['@_negationInd'] !== 'true') ?? [];
+    const ageObservation = related.find((o) => o.templateId?.some((t) => t['@_root'] === OID_AGE_OBSERVATION));
+    const causedDeath = related.some((o) =>
+      o.templateId?.some((t) => t['@_root'] === OID_FAMILY_HISTORY_DEATH_OBSERVATION)
+    );
+
+    return {
+      code,
+      onsetAge: this.mapQuantity(ageObservation?.value as CcdaQuantity | undefined),
+      ...(causedDeath && { contributedToDeath: true }),
+    };
   }
 
   private processVitalsOrganizer(organizer: CcdaOrganizer): Observation {
