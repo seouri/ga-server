@@ -184,6 +184,12 @@ test('an old coding with no system is held by a new coding adding a system to th
   expect(pairLosses([pt({ code: 'A' })], [pt({ ...sys, code: 'A' })])).toEqual([{ type: 'Patient', path: 'maritalStatus.coding', count: 1 }]);
 });
 
+test('an identifier value is compared without surrounding whitespace; another value is a loss', () => {
+  const doc = (value: string) => ({ resourceType: 'Practitioner', identifier: [{ system: 'urn:oid:2.25.3', value }], gender: 'other' });
+  expect(pairLosses([doc('  42')], [doc('42')])).toEqual([]);
+  expect(pairLosses([doc('  42')], [doc('4 2')])).toEqual([{ type: 'Practitioner', path: '(record)', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))
