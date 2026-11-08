@@ -163,6 +163,33 @@
                   </manufacturedMaterial>
                 </manufacturedProduct>
               </consumable>
+              <!-- Medication Supply Order (the prescription): the Microsoft path makes it a MedicationRequest -->
+              <entryRelationship typeCode="REFR">
+                <supply classCode="SPLY" moodCode="INT">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.17"/>
+                  <templateId root="2.16.840.1.113883.10.20.22.4.17" extension="2014-06-09"/>
+                  <id root="1.2.840.114350.1.13.999.2.7.2.798268.1" extension="EX-ORDER-1"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime xsi:type="IVL_TS"><low value="20230115"/><high value="20240115"/></effectiveTime>
+                  <repeatNumber value="4"/>
+                  <quantity value="90"/>
+                  <product>
+                    <manufacturedProduct classCode="MANU">
+                      <templateId root="2.16.840.1.113883.10.20.22.4.23"/>
+                      <manufacturedMaterial>
+                        <code code="314076" codeSystem="2.16.840.1.113883.6.88" displayName="lisinopril 10 MG Oral Tablet"><originalText><reference value="#med1"/></originalText></code>
+                      </manufacturedMaterial>
+                    </manufacturedProduct>
+                  </product>
+                  <author>
+                    <time value="20230115"/>
+                    <assignedAuthor>
+                      <id root="2.16.840.1.113883.4.6" extension="0000000001"/>
+                      <assignedPerson><name><given>Example</given><family>Prescriber</family></name></assignedPerson>
+                    </assignedAuthor>
+                  </author>
+                </supply>
+              </entryRelationship>
             </substanceAdministration>
           </entry>
         </section>

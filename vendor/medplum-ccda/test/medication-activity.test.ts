@@ -1,4 +1,4 @@
-import type { MedicationRequest, MedicationStatement } from '@medplum/fhirtypes';
+import type { Composition, MedicationDispense, MedicationRequest, MedicationStatement, Practitioner } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { convertSections, resourcesOf } from './convert-sections.ts';
 
@@ -53,4 +53,50 @@ test('an order (moodCode INT) is a MedicationRequest', () => {
   const bundle = convertSections(medications('INT'));
   expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(0);
   expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')[0]).toMatchObject({ status: 'active', intent: 'order', authoredOn: '2023-01-10' });
+});
+
+// Medication Supply Order (22.4.17, INT) and Medication Dispense (22.4.18, EVN) inside a Medication Activity.
+const supply = (moodCode: string, template: string, id: string, product = '') => `<entryRelationship typeCode="REFR">
+  <supply classCode="SPLY" moodCode="${moodCode}"><templateId root="${template}" extension="2014-06-09"/>
+    <id root="2.16.840.1.113883.19.5" extension="${id}"/><statusCode code="completed"/>
+    <effectiveTime xsi:type="IVL_TS"><low value="20230110"/><high value="20240110"/></effectiveTime>
+    <repeatNumber value="4"/><quantity value="90" unit="{tbl}"/>${product}
+    <author><time value="20230110"/><assignedAuthor><id root="2.16.840.1.113883.4.6" extension="1234567890"/>
+      <assignedPerson><name><given>Example</given><family>Prescriber</family></name></assignedPerson></assignedAuthor></author>
+  </supply></entryRelationship>`;
+
+test('a supply order of a medication is a MedicationRequest with its own id, prescriber, quantity and refills', () => {
+  const bundle = convertSections(medications('EVN', supply('INT', '2.16.840.1.113883.10.20.22.4.17', 'ORDER-1')));
+  expect(resourcesOf<MedicationStatement>(bundle, 'MedicationStatement')).toHaveLength(1);
+  const [order] = resourcesOf<MedicationRequest>(bundle, 'MedicationRequest');
+  expect(order).toMatchObject({
+    identifier: [{ system: 'urn:oid:2.16.840.1.113883.19.5', value: 'ORDER-1' }],
+    status: 'completed',
+    intent: 'order',
+    authoredOn: '2023-01-10',
+    // No product of its own: the medication it belongs to.
+    medicationCodeableConcept: { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '314076' }] },
+    dispenseRequest: { validityPeriod: { start: '2023-01-10', end: '2024-01-10' }, numberOfRepeatsAllowed: 3, quantity: { value: 90, unit: '{tbl}' } },
+  });
+  const prescriber = resourcesOf<Practitioner>(bundle, 'Practitioner').find((p) => `Practitioner/${p.id}` === order.requester?.reference);
+  expect(prescriber?.name?.[0].family).toBe('Prescriber');
+  // Listed in its section like the medication itself.
+  const comp = resourcesOf<Composition>(bundle, 'Composition')[0];
+  expect(comp.section?.[0].entry?.map((e) => e.reference?.split('/')[0])).toEqual(['MedicationStatement', 'MedicationRequest']);
+});
+
+test('a dispense of a medication is a MedicationDispense; a supply with its own product names that product', () => {
+  const product = `<product><manufacturedProduct classCode="MANU"><manufacturedMaterial>
+    <code code="197361" codeSystem="2.16.840.1.113883.6.88" displayName="amlodipine 5 MG Oral Tablet"/></manufacturedMaterial></manufacturedProduct></product>`;
+  const bundle = convertSections(medications('INT', supply('EVN', '2.16.840.1.113883.10.20.22.4.18', 'FILL-1', product)));
+  const [dispense] = resourcesOf<MedicationDispense>(bundle, 'MedicationDispense');
+  expect(dispense).toMatchObject({
+    identifier: [{ system: 'urn:oid:2.16.840.1.113883.19.5', value: 'FILL-1' }],
+    status: 'completed',
+    medicationCodeableConcept: { coding: [{ code: '197361' }] },
+    quantity: { value: 90, unit: '{tbl}' },
+    whenHandedOver: '2023-01-10',
+  });
+  expect(dispense.subject?.reference).toMatch(/^Patient\//);
+  expect(resourcesOf<MedicationRequest>(bundle, 'MedicationRequest')).toHaveLength(1); // the INT medication itself
 });

@@ -1,7 +1,7 @@
 [
  {
   "resourceType": "Composition",
-  "id": "4a264930-0831-ed1a-2786-60c66b8cdc63",
+  "id": "bdbc2d45-cd9a-07bd-ae52-86cf9c453cd7",
   "identifier": {
    "use": "official",
    "value": "1.2.840.114350.1.13.999.2.7.8.688883.900001"
@@ -401,7 +401,7 @@
  },
  {
   "resourceType": "MedicationStatement",
-  "id": "76096a7e-46b2-8bf2-4cf2-02ddb2faad35",
+  "id": "840e9d8a-5a4b-799a-ab94-31e443832c47",
   "identifier": [
    {
     "system": "urn:oid:1.2.840.114350.1.13.999.2.7.2.798268",
@@ -432,6 +432,50 @@
    ],
    "text": "examplepril 10 mg tablet"
   }
+ },
+ {
+  "resourceType": "MedicationRequest",
+  "id": "4977b597-d5d0-6385-4270-f292fe638cd8",
+  "identifier": [
+   {
+    "system": "urn:oid:1.2.840.114350.1.13.999.2.7.2.798268.1",
+    "value": "EX-ORDER-1"
+   }
+  ],
+  "intent": "order",
+  "status": "completed",
+  "subject": {
+   "reference": "Patient/39c74caa-8ba3-1726-64fc-f22ae907a589"
+  },
+  "medicationReference": {
+   "reference": "Medication/23cfeebc-78c3-7c00-7d74-51cee79e5312"
+  },
+  "requester": {
+   "reference": "Practitioner/e6413ecd-061b-dee8-334e-a280d3ff9f48"
+  }
+ },
+ {
+  "resourceType": "Practitioner",
+  "id": "e6413ecd-061b-dee8-334e-a280d3ff9f48",
+  "meta": {
+   "profile": [
+    "http://hl7.org/fhir/us/core/StructureDefinition/us-core-practitioner"
+   ]
+  },
+  "identifier": [
+   {
+    "system": "http://hl7.org/fhir/sid/us-npi",
+    "value": "0000000001"
+   }
+  ],
+  "name": [
+   {
+    "family": "Prescriber",
+    "given": [
+     "Example"
+    ]
+   }
+  ]
  },
  {
   "resourceType": "Condition",

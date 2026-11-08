@@ -101,6 +101,15 @@ function sourceInfo(xml: string) {
     }
   };
   collect(root);
+  // A consumable's or supply product's drug: the narrative name its originalText points at (else displayName) and RxNorm.
+  const drugInfo = (product: unknown): MedInfo => {
+    const mc = (((product as X | undefined)?.manufacturedProduct as X)?.manufacturedMaterial as X | undefined)?.code as X | undefined;
+    const ref = attr((mc?.originalText as X)?.reference, 'value')?.replace(/^#/, '');
+    return {
+      name: (ref && narrative.get(ref)) || attr(mc, 'displayName') || undefined,
+      rxnorm: attr(mc, 'codeSystem') === RXNORM_OID ? attr(mc, 'code') : undefined,
+    };
+  };
   const walk = (o: X, act: string | undefined, inProblems: boolean) => {
     for (const [k, v] of Object.entries(o)) {
       if (k.startsWith('@_')) continue;
@@ -110,16 +119,16 @@ function sourceInfo(xml: string) {
         const code = attr(n.statusCode, 'code');
         const problems = k === 'section' ? arr(n.templateId as X | X[]).some((t) => PROBLEM_SECTION.test(attr(t, 'root') ?? '')) : inProblems;
         if (k === 'substanceAdministration') {
-          const mat = ((n.consumable as X)?.manufacturedProduct as X)?.manufacturedMaterial as X | undefined;
-          const mc = mat?.code as X | undefined;
-          const ref = attr((mc?.originalText as X)?.reference, 'value')?.replace(/^#/, '');
-          const info: MedInfo = {
-            name: (ref && narrative.get(ref)) || attr(mc, 'displayName') || undefined,
-            rxnorm: attr(mc, 'codeSystem') === RXNORM_OID ? attr(mc, 'code') : undefined,
-          };
+          const info = drugInfo(n.consumable);
           for (const key of cdaKeys(n)) {
             if (code && !med.has(key)) med.set(key, code);
             if ((info.name || info.rxnorm) && !drug.has(key)) drug.set(key, info);
+          }
+          // Its supply orders and dispenses: their own product, else this drug (the Microsoft path shares its Medication).
+          for (const s of arr(n.entryRelationship as X | X[] | undefined).flatMap((er) => arr(er.supply as X | X[] | undefined))) {
+            const own = drugInfo(s.product);
+            const sinfo = own.rxnorm && own.rxnorm !== info.rxnorm ? own : { name: info.name ?? own.name, rxnorm: info.rxnorm };
+            for (const key of cdaKeys(s)) if ((sinfo.name || sinfo.rxnorm) && !drug.has(key)) drug.set(key, sinfo);
           }
         }
         if (k === 'observation') {
@@ -260,7 +269,9 @@ const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
 export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
-export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length;
+// A medication's supply orders and dispenses (entryRelationship/supply) each become a record of their own.
+const supplies = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => e.substanceAdministration ?? []).flatMap((sa) => sa.entryRelationship ?? []).flatMap((er) => er.supply ?? []).length;
+export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length + supplies(s);
 
 // Converts in process with the vendored @medplum/ccda. Accounting: every section is on the Composition (its narrative); every
 // entry with no record, visit diagnosis the converter drops, and observation value it cannot read is in notImported, with a reason.
@@ -285,7 +296,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
     // Concern acts: one record per SUBJ observation (none: the act produced no record).
     const concerns = hasTemplate(s, ...CONCERN) ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length) : [];
-    const expected = statements.length + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
+    const expected = statements.length + supplies(s) + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
     add(name, root0(s.templateId), expected - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
     // The library keeps the payer, covered party and subscriber id; a guarantor and the policy holder's own details (name, address) have no Coverage field.
     for (const p of policies.flat()) {

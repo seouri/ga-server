@@ -60,6 +60,7 @@ const ARRAY_PATHS = [
   'entryRelationship.observation',
   'entryRelationship.substanceAdministration',
   'entryRelationship.act',
+  'entryRelationship.supply',
 
   'organizer.component',
 
@@ -78,6 +79,7 @@ const ARRAY_PATHS = [
   'observation.referenceRange',
 
   'consumable.manufacturedProduct',
+  'product.manufacturedProduct',
 
   'manufacturedProduct.manufacturedMaterial',
   'manufacturedProduct.manufacturerOrganization',

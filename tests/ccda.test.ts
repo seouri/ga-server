@@ -149,7 +149,8 @@ const accounted = (xml: string, out: ReturnType<typeof convertCcdaLocal>) => {
   const comp = out.resources.find((r) => r.resourceType === 'Composition') as Composition;
   expect(comp.section?.map((s) => s.title)).toEqual(sectionTitles(xml));
   for (const s of comp.section ?? []) {
-    const entries = (xml.split(`<title>${s.title}</title>`)[1].split('</section>')[0].match(/<entry>/g) ?? []).length;
+    const body = xml.split(`<title>${s.title}</title>`)[1].split('</section>')[0];
+    const entries = (body.match(/<entry>/g) ?? []).length + (body.match(/<supply\b/g) ?? []).length; // a medication's supply is a record too
     expect((s.entry?.length ?? 0) + out.notImported.filter((n) => n.section === s.title && ENTRY_LEVEL.includes(n.reason)).reduce((a, n) => a + n.entries, 0)).toBe(entries);
   }
 };
@@ -292,7 +293,7 @@ test('every section of the Epic-style fixture is imported', () => {
   const byRef = new Map(out.resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
   const made = Object.fromEntries((comp.section ?? []).map((s) => [s.title, [...new Set((s.entry ?? []).map((e) => byRef.get(e.reference ?? '')?.resourceType))]]));
   expect(made).toEqual({
-    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationStatement'], Results: ['Observation'], 'Vital Signs': ['Observation'],
+    'Problem List': ['Condition'], Encounters: ['Encounter'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['Observation'], 'Vital Signs': ['Observation'],
     Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
     'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
@@ -396,7 +397,7 @@ test('ccdaConverter picks medplum when the flag is set or the record has no C-CD
 
 test('a taking entry stays a MedicationStatement with its source id and name', () => {
   const meds = convertCcdaLocal(EPIC).resources.filter((r) => /^Medication/.test(r.resourceType));
-  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationStatement']);
+  expect(meds.map((r) => r.resourceType)).toEqual(['MedicationStatement', 'MedicationRequest']); // the request: its supply order
   expect(meds[0]).toMatchObject({
     identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.798268', value: 'EX-MED-1' }],
     status: 'active',
@@ -412,4 +413,22 @@ test('an order is a MedicationRequest with its source id and status', () => {
   expect(meds[0]).toMatchObject({ identifier: [{ system: 'urn:oid:2.25.5001', value: 'syn-med-1' }], status: 'active', intent: 'order' });
   const stopped = convertCcdaLocal(SYNTHETIC.replace('<statusCode code="active"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>', '<statusCode code="aborted"/>\n              <effectiveTime xsi:type="IVL_TS"><low value="20230101"/>'));
   expect(stopped.resources.find((r) => r.resourceType === 'MedicationRequest')).toMatchObject({ status: 'stopped' });
+});
+
+test('a supply order inside a medication (the Microsoft path\'s extra orders) is a MedicationRequest named like its medication', () => {
+  const { resources, notImported } = convertCcdaLocal(EPIC);
+  const order = resources.find((r) => r.resourceType === 'MedicationRequest');
+  expect(order).toMatchObject({
+    identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.798268.1', value: 'EX-ORDER-1' }],
+    status: 'completed',
+    intent: 'order',
+    medicationCodeableConcept: { text: 'examplepril 10 mg tablet', coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '314076' }] },
+    dispenseRequest: { numberOfRepeatsAllowed: 3, quantity: { value: 90 } },
+  });
+  expect(notImported.filter((n) => n.section === 'Medications')).toEqual([]);
+  // A supply the library does not read (an immunization's) is named, not silently skipped.
+  const vaccineSupply = EPIC.replace(/(<substanceAdministration classCode="SBADM" moodCode="EVN" negationInd="false">[\s\S]*?)(<\/substanceAdministration>)/,
+    '$1<entryRelationship typeCode="REFR"><supply classCode="SPLY" moodCode="INT"><id root="2.25.9" extension="vx-order"/></supply></entryRelationship>$2');
+  expect(vaccineSupply).not.toBe(EPIC);
+  expect(convertCcdaLocal(vaccineSupply).notImported).toContainEqual(expect.objectContaining({ section: 'Immunizations', entries: 1, reason: 'entry produced no record' }));
 });

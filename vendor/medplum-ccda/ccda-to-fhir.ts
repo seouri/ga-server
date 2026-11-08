@@ -30,6 +30,7 @@ import type {
   Immunization,
   ImmunizationPerformer,
   Medication,
+  MedicationDispense,
   MedicationRequest,
   MedicationStatement,
   Observation,
@@ -180,6 +181,16 @@ export function convertCcdaToFhir(ccda: Ccda, options?: CcdaToFhirOptions): Bund
 }
 
 // Medication Activity statusCode → MedicationStatement.status (MEDICATION_STATUS_MAPPER has MedicationRequest values, e.g. cancelled)
+// Medication Dispense statusCode → MedicationDispense.status
+const MEDICATION_DISPENSE_STATUSES: Record<string, MedicationDispense['status']> = {
+  active: 'in-progress',
+  completed: 'completed',
+  aborted: 'stopped',
+  cancelled: 'cancelled',
+  suspended: 'on-hold',
+  nullified: 'entered-in-error',
+};
+
 const MEDICATION_STATEMENT_STATUSES: Record<string, MedicationStatement['status']> = {
   active: 'active',
   completed: 'completed',
@@ -447,7 +458,9 @@ class CcdaToFhirConverter {
 
     for (const substanceAdmin of entry.substanceAdministration ?? EMPTY) {
       const resource = this.processSubstanceAdministration(section, substanceAdmin);
-      if (resource) {
+      if (Array.isArray(resource)) {
+        resources.push(...resource);
+      } else if (resource) {
         resources.push(resource);
       }
     }
@@ -784,7 +797,7 @@ class CcdaToFhirConverter {
   private processSubstanceAdministration(
     section: CcdaSection,
     substanceAdmin: CcdaSubstanceAdministration
-  ): Resource | undefined {
+  ): Resource | Resource[] | undefined {
     const templateIds = getTemplateIds(section);
     for (const templateId of templateIds) {
       switch (templateId) {
@@ -813,7 +826,7 @@ class CcdaToFhirConverter {
   private processMedicationSubstanceAdministration(
     substanceAdmin: CcdaSubstanceAdministration,
     intent: MedicationRequest['intent']
-  ): Resource | undefined {
+  ): Resource[] {
     const cdaId = this.mapId(substanceAdmin.id);
     const effectiveTime = substanceAdmin.effectiveTime?.[0];
     const medicationCode = substanceAdmin.consumable?.manufacturedProduct?.[0]?.manufacturedMaterial?.[0]?.code?.[0];
@@ -853,6 +866,7 @@ class CcdaToFhirConverter {
       };
     }
 
+    const supplies = this.processMedicationSupplies(substanceAdmin, medicationCode);
     const dosage: Dosage[] = [
       {
         text: typeof substanceAdmin.text === 'string' ? substanceAdmin.text : undefined,
@@ -882,7 +896,7 @@ class CcdaToFhirConverter {
     if (substanceAdmin['@_moodCode'] === 'EVN') {
       // EVN: the patient takes or took it (C-CDA on FHIR CF-MedActivityMood), a statement rather than an order
       const effectivePeriod = this.mapEffectiveTimeToPeriod(effectiveTime);
-      return {
+      const statement: MedicationStatement = {
         resourceType: 'MedicationStatement',
         ...shared,
         status: MEDICATION_STATEMENT_STATUSES[substanceAdmin.statusCode?.['@_code'] ?? ''] ?? 'unknown',
@@ -890,9 +904,10 @@ class CcdaToFhirConverter {
         dateAsserted: mapCcdaToFhirDateTime(substanceAdmin.author?.[0]?.time?.['@_value']),
         dosage,
       };
+      return [statement, ...supplies];
     }
 
-    return {
+    const request: MedicationRequest = {
       resourceType: 'MedicationRequest',
       ...shared,
       meta: {
@@ -912,6 +927,57 @@ class CcdaToFhirConverter {
         : undefined,
       dosageInstruction: dosage,
     };
+    return [request, ...supplies];
+  }
+
+  /**
+   * Medication Supply Orders (INT) and Medication Dispenses (EVN) recorded inside a Medication Activity.
+   * @param substanceAdmin - The Medication Activity.
+   * @param medicationCode - The Medication Activity's drug, used when a supply names no product of its own.
+   * @returns A MedicationRequest per supply order and a MedicationDispense per dispense.
+   */
+  private processMedicationSupplies(
+    substanceAdmin: CcdaSubstanceAdministration,
+    medicationCode: CcdaCode | undefined
+  ): (MedicationRequest | MedicationDispense)[] {
+    const result: (MedicationRequest | MedicationDispense)[] = [];
+    for (const supply of (substanceAdmin.entryRelationship ?? EMPTY).flatMap((rel) => rel.supply ?? EMPTY)) {
+      const code = supply.product?.manufacturedProduct?.[0]?.manufacturedMaterial?.[0]?.code?.[0] ?? medicationCode;
+      const medicationCodeableConcept = { ...this.mapCode(code), extension: this.mapTextReference(code?.originalText) };
+      const shared = {
+        id: this.mapId(supply.id),
+        identifier: this.mapIdentifiers(supply.id),
+        medicationCodeableConcept,
+        subject: createReference(this.patient as Patient),
+      };
+      if (supply['@_moodCode'] === 'EVN') {
+        result.push({
+          resourceType: 'MedicationDispense',
+          ...shared,
+          status: MEDICATION_DISPENSE_STATUSES[supply.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+          quantity: this.mapQuantity(supply.quantity),
+          whenHandedOver: this.mapEffectiveTimeToDateTime(supply.effectiveTime?.[0]),
+        });
+        continue;
+      }
+      // repeatNumber counts every allowed fill; FHIR counts refills after the first
+      const fills = Number.parseInt(supply.repeatNumber?.['@_value'] ?? '', 10);
+      result.push({
+        resourceType: 'MedicationRequest',
+        ...shared,
+        meta: { profile: [US_CORE_MEDICATION_REQUEST_URL] },
+        status: MEDICATION_STATUS_MAPPER.mapCcdaToFhirWithDefault(supply.statusCode?.['@_code'], 'active'),
+        intent: 'order',
+        authoredOn: mapCcdaToFhirDateTime(supply.author?.[0]?.time?.['@_value']),
+        requester: this.mapAuthorToReference(supply.author?.[0]),
+        dispenseRequest: {
+          validityPeriod: this.mapEffectiveTimeToPeriod(supply.effectiveTime?.[0]),
+          numberOfRepeatsAllowed: fills > 0 ? fills - 1 : undefined,
+          quantity: this.mapQuantity(supply.quantity),
+        },
+      });
+    }
+    return result;
   }
 
   private mapDoseAndRate(doseQuantity: CcdaQuantity | undefined): DosageDoseAndRate[] | undefined {

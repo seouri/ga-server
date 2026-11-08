@@ -365,6 +365,20 @@ export interface CcdaEntryRelationship {
   observation?: CcdaObservation[];
   act?: CcdaAct[];
   substanceAdministration?: CcdaSubstanceAdministration[];
+  supply?: CcdaSupply[];
+}
+
+export interface CcdaSupply {
+  '@_classCode'?: string;
+  '@_moodCode': string;
+  templateId?: CcdaTemplateId[];
+  id?: CcdaId[];
+  statusCode?: CcdaCode<'active' | 'completed' | 'aborted' | 'cancelled' | 'nullified' | 'obsolete'>;
+  effectiveTime?: CcdaEffectiveTime[];
+  repeatNumber?: { '@_value'?: string };
+  quantity?: CcdaQuantity;
+  product?: CcdaConsumable;
+  author?: CcdaAuthor[];
 }
 
 export interface CcdaList {
