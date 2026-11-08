@@ -50,8 +50,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise((ok) => server?.close(ok));
-  for (const a of await client.searchResources('AuditEvent', { _tag: `${REMOTE_TAG}|Claude Code`, date: `ge${start}`, _count: '100' }, { cache: 'no-cache' })) {
-    if (a.entity?.[0]?.what?.display === 'fhir_search') await client.deleteResource('AuditEvent', a.id!);
+  for (const a of await client.searchResources('AuditEvent', { _tag: `${REMOTE_TAG}|Claude Code`, date: `ge${start}`, _count: '1000' }, { cache: 'no-cache' })) {
+    await client.deleteResource('AuditEvent', a.id!); // every tool's log entry, not only fhir_search
   }
   for (const d of pid ? await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' }) : []) {
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
