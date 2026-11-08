@@ -138,7 +138,8 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
 // Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
 // the date importResources stored on the Patient, else (installs that predate it) a scan of the Epic-tagged records, only the fields currencyContext reads.
 export async function newestEpicImport(client: MedplumClient, patientId: string): Promise<number> {
-  const stored = Date.parse((await client.readResource('Patient', patientId, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
+  const patient = await client.readResource('Patient', patientId, { cache: 'no-cache' });
+  const stored = Date.parse(patient.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
   if (!Number.isNaN(stored)) return stored;
   let newest = -Infinity;
   const _tag = [...EPIC_TAGS].map((c) => `${TAG}|${c}`).join(',');
@@ -146,7 +147,13 @@ export async function newestEpicImport(client: MedplumClient, patientId: string)
     const q = { _compartment: `Patient/${patientId}`, _tag, _elements: 'extension,meta', _sort: '_lastUpdated', _count: '1000' };
     for await (const page of client.searchResourcePages(type, q, { cache: 'no-cache' })) newest = Math.max(newest, currencyContext(page, []).newestImport);
   }
+  // Seed it so the next call skips the scan.
+  if (Number.isFinite(newest)) await storeNewestImport(client, patient, newest);
   return newest;
+}
+
+export async function storeNewestImport(client: MedplumClient, p: Patient, value: number): Promise<void> {
+  await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(value).toISOString() }] });
 }
 
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {

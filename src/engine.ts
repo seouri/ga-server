@@ -5,7 +5,7 @@ import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.
 import { GaError } from './config.ts';
 import { APPLE, ARRIVED, hasTag, NEWEST_IMPORT, sorted, SRC_DATE, TAG, contentHash, contentKey, DATED, EPIC_OID, effective, LAST_SEEN, sameDay, SINGULAR_ID, stableIdentifier, stamp, type SourceInfo } from './identity.ts';
 import { collapsePatients, walkReferences } from './patient.ts';
-import { newestEpicImport } from './share/scope.ts';
+import { newestEpicImport, storeNewestImport } from './share/scope.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
 export type ImportReport = {
@@ -531,7 +531,7 @@ export async function importResources(
     const had = Date.parse(p.extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime ?? '');
     // No stored date yet: seeded from the scan of Epic records, else an older import would hide a newer one already stored.
     const value = Math.max(newest, Number.isNaN(had) ? await newestEpicImport(client, patientId) : had);
-    if (value !== had && Number.isFinite(value)) await client.updateResource<Patient>({ ...p, extension: [...(p.extension ?? []).filter((e) => e.url !== NEWEST_IMPORT), { url: NEWEST_IMPORT, valueDateTime: new Date(value).toISOString() }] });
+    if (value !== had && Number.isFinite(value)) await storeNewestImport(client, p, value);
   }
   return report;
 }
