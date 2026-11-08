@@ -211,8 +211,11 @@ function asDispense(o: Resource, n: Resource): Resource {
   const { resourceType: _t, intent: _i, status, dispenseRequest, authoredOn, requester, ...rest } = o as unknown as R & { status?: string; authoredOn?: string;
     dispenseRequest?: { quantity?: unknown; validityPeriod?: { start?: string } }; requester?: unknown };
   const { quantity, validityPeriod, ...more } = dispenseRequest ?? {};
+  // The start is the day handed over; anything else in the period (an end) has no dispense field and stays a compared leaf.
+  const { start: handed, ...period } = (validityPeriod ?? {}) as { start?: string };
+  if (Object.keys(period).length) (more as R).validityPeriod = period;
   return { resourceType: 'MedicationDispense', ...rest, status: status && (DISPENSE_STATUS[status] ?? status), quantity,
-    whenHandedOver: validityPeriod?.start ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }),
+    whenHandedOver: handed ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }),
     ...(requester ? { performer: [{ function: DATA_ENTERER, actor: requester }] } : {}) } as unknown as Resource;
 }
 

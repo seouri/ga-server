@@ -249,6 +249,9 @@ test('a Microsoft MedicationRequest made from a dispense pairs with the new Medi
   expect(pairLosses([msOrder('completed')], [dispense({ quantity: { value: 30 }, whenHandedOver: '2023-02-01' })]))
     .toEqual([{ type: 'MedicationRequest', path: 'quantity.value', count: 1 }, { type: 'MedicationRequest', path: 'whenHandedOver', count: 1 }]);
   expect(pairLosses([msOrder('completed')], [dispense({ identifier: id('other') })])).toEqual([{ type: 'MedicationRequest', path: '(record)', count: 1 }]);
+  // A validity end has no dispense field: compared as is, so it shows as a loss.
+  const ended = { ...msOrder('completed'), dispenseRequest: { quantity: { value: 90 }, validityPeriod: { start: '2023-01-10', end: '2024-01-10' } } };
+  expect(pairLosses([ended], [dispense()])).toEqual([{ type: 'MedicationRequest', path: 'dispenseRequest.validityPeriod.end', count: 1 }]);
   // Only a dispense: a new MedicationStatement with that id is not paired by this rule.
   expect(pairLosses([msOrder('completed')], [{ ...dispense(), resourceType: 'MedicationStatement', status: 'completed' }]))
     .toContainEqual({ type: 'MedicationRequest', path: 'resourceType', count: 1 });
