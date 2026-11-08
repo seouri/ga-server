@@ -4,6 +4,7 @@ import type { Resource } from '@medplum/fhirtypes';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cardiovascularRisk10yr } from '../cardiovascular-risk.ts';
+import { liverFibrosisRisk } from '../liver-fibrosis.ts';
 import { chatLoop, type Llm } from '../llm-chat.ts';
 export { BUDGET_USED, SORRY } from '../llm-chat.ts';
 import { currency, currencyContext, type Ctx } from '../current.ts';
@@ -104,6 +105,20 @@ const TOOLS = {
       required: ['age', 'sex', 'totalC', 'hdlC', 'sbp', 'bpTx', 'statin', 'diabetes', 'smoker', 'egfr'],
     },
   },
+  liver_fibrosis_risk: {
+    name: 'liver_fibrosis_risk',
+    description:
+      'Liver fibrosis risk from inputs you read from the records: FIB-4 (age, AST, ALT, platelets) and the NAFLD Fibrosis Score (also BMI, albumin, impaired fasting glucose or diabetes). Use this instead of computing them yourself. Returns values, bands, cut-offs, citations and notes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        age: { type: 'number' }, ast: { type: 'number', description: 'U/L' }, alt: { type: 'number', description: 'U/L' },
+        platelets: { type: 'number', description: '10^9/L' }, bmi: { type: 'number', description: 'kg/m2' },
+        albumin: { type: 'number', description: 'g/dL' }, ifgOrDiabetes: { type: 'boolean' },
+      },
+      required: ['age', 'ast', 'alt', 'platelets'],
+    },
+  },
 };
 
 // vaccine_gaps reads every Immunization and immunity lab: a narrower share would leak through "records used" or report false gaps.
@@ -146,6 +161,7 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; 
     }
     if (name === 'vaccine_gaps' && vaccines) return deps.vaccines ? await deps.vaccines() : 'not available';
     if (name === 'cardiovascular_risk_10yr') return cardiovascularRisk10yr(input as Parameters<typeof cardiovascularRisk10yr>[0]);
+    if (name === 'liver_fibrosis_risk') return liverFibrosisRisk(input as Parameters<typeof liverFibrosisRisk>[0]);
     return 'unknown tool';
   };
 
@@ -155,7 +171,7 @@ export async function ask(q: string, s: Scoped, share: Share, deps: { llm: Llm; 
     'Answer in plain text (no markdown).',
     `Patient: ${JSON.stringify(s.patient)}`,
   ].join('\n\n');
-  const tools = [TOOLS.search_records, TOOLS.read_record, ...(vaccines ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr].map((f) => ({ type: 'function', function: f }));
+  const tools = [TOOLS.search_records, TOOLS.read_record, ...(vaccines ? [TOOLS.vaccine_gaps] : []), TOOLS.cardiovascular_risk_10yr, TOOLS.liver_fibrosis_risk].map((f) => ({ type: 'function', function: f }));
   const messages: Any[] = [{ role: 'system', content: system }, { role: 'user', content: q }];
   return chatLoop(deps, messages, tools, run);
 }

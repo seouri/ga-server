@@ -438,7 +438,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       description:
         'Liver fibrosis risk from inputs you read from GA: FIB-4 (needs age, AST, ALT, platelets) and the NAFLD Fibrosis Score (also BMI, ' +
         'albumin and impaired fasting glucose or diabetes; null with a note when one is missing). Use this instead of computing them yourself. ' +
-        'Returns each value, its band (low/indeterminate/high), the cut-offs used (FIB-4 low cut-off 2.0 at age 65 or over), citations and notes.',
+        'Returns each value, its band (low/indeterminate/high), the cut-offs used (age 65 or over: low cut-offs FIB-4 2.0, NFS 0.12), citations and notes. Albumin in g/dL, platelets in 10^9/L (other units are refused).',
       inputSchema: {
         age: z.number().describe('years'), ast: z.number().describe('AST, U/L'), alt: z.number().describe('ALT, U/L'),
         platelets: z.number().describe('platelets, 10^9/L'), bmi: z.number().optional().describe('kg/m2'),

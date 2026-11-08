@@ -95,7 +95,15 @@ test('vaccine_gaps offered only for all, or immunizations+labs without a date ra
   expect(await names(share({ groups: ['immunizations', 'labs'], since: '2025-01-01' }))).not.toContain('vaccine_gaps');
   expect(await names(share({ groups: 'all', since: '2025-01-01' }))).not.toContain('vaccine_gaps');
   expect(await names(share({ groups: 'all', until: '2025-01-01' }))).not.toContain('vaccine_gaps');
-  expect(await names(share())).toEqual(['search_records', 'read_record', 'cardiovascular_risk_10yr']);
+  expect(await names(share())).toEqual(['search_records', 'read_record', 'cardiovascular_risk_10yr', 'liver_fibrosis_risk']);
+});
+
+test('liver_fibrosis_risk is a pure computation in Ask; bad input comes back as an error result', async () => {
+  const { llm, reqs } = fake([[{ name: 'liver_fibrosis_risk', input: { age: 50, ast: 26, alt: 100, platelets: 100 } }, { name: 'liver_fibrosis_risk', input: { age: 50, ast: 26, alt: 100, platelets: 150000 } }]]);
+  await ask('q', scoped([]), share(), { llm, model });
+  const [ok, bad] = results(reqs[1]) as [any, string];
+  expect(ok.fib4).toMatchObject({ value: 1.3, band: 'indeterminate' });
+  expect(bad).toMatch(/platelets .*10\^9\/L/);
 });
 
 test('vaccine_gaps without deps.vaccines is "not available"; not callable when not offered', async () => {
