@@ -43,7 +43,7 @@ Expected FHIR (today: the same, without `identifier`):
   "identifier": [{ "system": "urn:oid:2.16.840.1.113883.19.5", "value": "MED-1" }],
   "status": "active",
   "intent": "order",
-  "medicationCodeableConcept": { "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314076", "display": "lisinopril 10 MG Oral Tablet" }], "text": "lisinopril 10 MG Oral Tablet" }
+  "medicationCodeableConcept": { "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314076", "display": "lisinopril 10 MG Oral Tablet" }], "text": "lisinopril 10 MG Oral Tablet", "extension": [{ "url": "https://medplum.com/fhir/StructureDefinition/ccda-narrative-reference", "valueString": "#med1" }] }
 }
 ```
 

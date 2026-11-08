@@ -894,7 +894,7 @@ class CcdaToFhirConverter {
     };
 
     if (substanceAdmin['@_moodCode'] === 'EVN') {
-      // EVN: the patient takes or took it (C-CDA on FHIR CF-MedActivityMood), a statement rather than an order
+      // EVN: the patient takes or took it (an event, not an intent), a statement rather than an order
       const effectivePeriod = this.mapEffectiveTimeToPeriod(effectiveTime);
       const statement: MedicationStatement = {
         resourceType: 'MedicationStatement',

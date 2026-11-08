@@ -6,7 +6,7 @@ No existing issue or PR. medplum#10847 (draft 12) is about planned medications i
 
 A Medication Activity (`2.16.840.1.113883.10.20.22.4.16`) has `moodCode="EVN"` when it records a medication the patient takes or took, and `moodCode="INT"` when it records an intended or ordered one. `processMedicationSubstanceAdministration` ignores the mood and always returns a `MedicationRequest` with `intent: "order"`. So a patient's medication list reads as a list of prescriptions. The start of the period the patient was taking it lands in `dispenseRequest.validityPeriod`, and the dosage in `dosageInstruction`.
 
-C-CDA on FHIR's [`CF-MedActivityMood`](https://hl7.org/fhir/us/ccda/STU2/ConceptMap-CF-MedActivityMood.html) maps EVN to a MedicationStatement. Other converters do the same; the Microsoft FHIR-Converter, for example, makes MedicationStatement from the Medications section.
+In HL7 v3, `EVN` is an act that happened and `INT` one that is intended. A MedicationStatement records the first, and a MedicationRequest the second. C-CDA on FHIR has no resource-type rule for this: its [`CF-MedActivityMood`](https://hl7.org/fhir/us/ccda/STU2/ConceptMap-CF-MedActivityMood.html) maps mood only to `MedicationRequest.intent`, loosely (EVN → `plan`, INT → `order`), with the note that "CDA mood codes are more general than FHIR intent codes". A maintainer may prefer that route, keeping MedicationRequest and setting `intent: plan` for EVN. This PR proposes MedicationStatement, because a medication list entry in EVN mood is what the patient takes, and that is the FHIR resource for it. The Microsoft FHIR-Converter also makes MedicationStatement from the Medications section.
 
 Reproduction (synthetic):
 

@@ -432,3 +432,14 @@ test('a supply order inside a medication (the Microsoft path\'s extra orders) is
   expect(vaccineSupply).not.toBe(EPIC);
   expect(convertCcdaLocal(vaccineSupply).notImported).toContainEqual(expect.objectContaining({ section: 'Immunizations', entries: 1, reason: 'entry produced no record' }));
 });
+
+test('a supply order that reuses its medication\'s id is still stored next to the medication', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const xml = EPIC.replace('<id root="1.2.840.114350.1.13.999.2.7.2.798268.1" extension="EX-ORDER-1"/>', '<id root="1.2.840.114350.1.13.999.2.7.2.798268" extension="EX-MED-1"/>');
+    expect(xml).not.toBe(EPIC);
+    expect(await importPath(client, cfgFor(pid), writeDoc(xml), pid)).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
+    const stored = async (type: 'MedicationStatement' | 'MedicationRequest') => (await client.searchResources(type, { subject: `Patient/${pid}` })).length;
+    expect([await stored('MedicationStatement'), await stored('MedicationRequest')]).toEqual([1, 1]);
+  });
+});
