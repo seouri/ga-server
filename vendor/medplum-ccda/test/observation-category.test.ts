@@ -23,6 +23,11 @@ test('an assessment in Social History keeps its own category and gains its secti
   expect(codes(one(section(SOCIAL, SOCIAL_CODE, observation('<templateId root="2.16.840.1.113883.10.20.22.4.69"/>', 'S-2'))))).toEqual(['survey', 'social-history']);
 });
 
+test('an observation\'s own category wins over its section\'s (a vital sign listed under Results is vital-signs only)', () => {
+  const results = '<templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>';
+  expect(codes(one(section(results, '<code code="30954-2" codeSystem="2.16.840.1.113883.6.1"/>', observation('<templateId root="2.16.840.1.113883.10.20.22.4.27"/>', 'R-2'))))).toEqual(['vital-signs']);
+});
+
 test('an observation in Results or Vital Signs with a vendor template is laboratory or vital-signs', () => {
   const results = '<templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>';
   const vitals = '<templateId root="2.16.840.1.113883.10.20.22.2.4.1"/>';

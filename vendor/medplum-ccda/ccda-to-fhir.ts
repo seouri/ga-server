@@ -89,6 +89,8 @@ import {
   OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID_PROCEDURES_SECTION_ENTRIES_REQUIRED,
   OID_REASON_FOR_REFERRAL,
+  OID_SOCIAL_HISTORY_SECTION_ENTRIES_OPTIONAL,
+  OID_SOCIAL_HISTORY_SECTION_V2_ENTRIES_OPTIONAL,
   OID_RESULT_ORGANIZER,
   OID_RESULT_ORGANIZER_V2,
   OID_REASON_FOR_REFERRAL_V2,
@@ -188,6 +190,8 @@ export interface CcdaToFhirOptions {
  * @param options - Optional conversion options
  * @returns The converted FHIR resources
  */
+const SOCIAL_HISTORY_SECTIONS = [OID_SOCIAL_HISTORY_SECTION_ENTRIES_OPTIONAL, OID_SOCIAL_HISTORY_SECTION_V2_ENTRIES_OPTIONAL];
+
 // C-CDA act status and planned moodCode → ServiceRequest (referrals, planned observations)
 const SERVICE_REQUEST_STATUSES: Record<string, ServiceRequest['status']> = {
   active: 'active',
@@ -1838,8 +1842,13 @@ class CcdaToFhirConverter {
     templateIds: CcdaTemplateId[] | undefined,
     section: CcdaSection
   ): CodeableConcept[] | undefined {
-    // Its own templates' categories, then its section's: an observation may carry only a vendor template
-    const result = this.mapObservationTemplateIdToObservationCategory([...(templateIds ?? []), ...(section.templateId ?? [])]) ?? [];
+    // Its own templates' categories; its section's when they give none (an observation may carry only a vendor template), and
+    // always social-history in the Social History section (an assessment there is both)
+    const own = this.mapObservationTemplateIdToObservationCategory(templateIds) ?? [];
+    const sectionTemplates = (section.templateId ?? []).filter(
+      (t) => own.length === 0 || SOCIAL_HISTORY_SECTIONS.includes(t['@_root'])
+    );
+    const result = this.mapObservationTemplateIdToObservationCategory([...(templateIds ?? []), ...sectionTemplates]) ?? [];
     if (result.length === 0) {
       // Nothing classifies it (such as a Reason for Visit observation): its section's code says what it is
       const sectionCode = this.mapCode(section.code);
