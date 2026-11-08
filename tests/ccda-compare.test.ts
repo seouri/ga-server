@@ -78,7 +78,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'Patient', path: 'name.use', count: 1 },
     { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
-    { type: 'DiagnosticReport', path: 'effective[x].start', count: 1 },
     { type: 'DiagnosticReport', path: 'effective[x].end', count: 1 },
     { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
     { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
