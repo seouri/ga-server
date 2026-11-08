@@ -759,3 +759,21 @@ test('a C-CDA note whose Epic note id is an EHI note GA holds merges into it: on
     expect(notes.filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'))).toHaveLength(2);
   });
 });
+
+test('a result organizer\'s procedure and encounter components are imported, not named; another kind of component still is', () => {
+  const doc = (component: string) => `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <recordTarget><patientRole><patient/></patientRole></recordTarget><component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/><code code="30954-2" codeSystem="2.16.840.1.113883.6.1"/><title>Results</title><text>x</text>
+    <entry><organizer classCode="BATTERY" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.1"/><id root="2.16.840.1.113883.19.5" extension="P-1"/>
+      <code code="24323-8" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/>
+      <component><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.2"/><id root="2.16.840.1.113883.19.5" extension="R-1"/>
+        <code code="2345-7" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/><effectiveTime value="20240210"/><value xsi:type="PQ" value="1" unit="mg/dL"/></observation></component>
+      ${component}</organizer></entry></section></component></structuredBody></component></ClinicalDocument>`;
+  const proc = '<component><procedure classCode="PROC" moodCode="EVN"><code code="82078001" codeSystem="2.16.840.1.113883.6.96"/><effectiveTime value="20240210"/></procedure></component>';
+  const enc = '<component><encounter classCode="ENC" moodCode="EVN"><id root="2.16.840.1.113883.19.5" extension="V-1"/></encounter></component>';
+  const out = convertCcdaLocal(doc(proc + enc));
+  expect(out.notImported).toEqual([]);
+  expect(out.resources.map((r) => r.resourceType)).toEqual(expect.arrayContaining(['Procedure', 'Encounter']));
+  const act = '<component><act classCode="ACT" moodCode="EVN"><code code="x" codeSystem="2.25.1"/></act></component>';
+  expect(convertCcdaLocal(doc(act)).notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.1', entries: 1, reason: 'organizer component not converted' }]);
+});

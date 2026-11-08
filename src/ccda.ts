@@ -348,11 +348,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const encounters = new Set(made.filter((r) => r?.resourceType === 'Encounter').map((r) => `Encounter/${r?.id}`));
     const linked = resources.filter((r) => r.resourceType === 'Condition' && encounters.has((r as Condition).encounter?.reference ?? '')).length;
     add(name, OID.OID_ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
-    // Organizer components: the library reads only observations (care teams: their member acts, one participant per performer).
+    // Organizer components: the library reads observations (care teams: their member acts, one participant per performer; result
+    // organizers: also procedures, as Procedures reporting in the panel, and encounters, as the panel's visit).
     const careTeam = hasTemplate(s, OID.OID_CARE_TEAMS_SECTION);
     for (const org of entries.flatMap((e) => e.organizer ?? [])) {
-      const read = careTeam ? 'act' : 'observation';
-      const other = (org.component ?? []).reduce((n, c) => n + STATEMENTS.filter((k) => k !== read).reduce((m, k) => m + arr((c as X)[k]).length, 0), 0);
+      const read = careTeam ? ['act'] : hasTemplate(org, OID.OID_RESULT_ORGANIZER, OID.OID_RESULT_ORGANIZER_V2) ? ['observation', 'procedure', 'encounter'] : ['observation'];
+      const other = (org.component ?? []).reduce((n, c) => n + STATEMENTS.filter((k) => !read.includes(k)).reduce((m, k) => m + arr((c as X)[k]).length, 0), 0);
       add(name, root0(org.templateId), other, 'organizer component not converted');
       if (careTeam) add(name, root0(org.templateId), (org.component ?? []).flatMap((c) => c.act ?? []).filter((a) => !a.performer?.length).length, 'care team member without performer');
     }
