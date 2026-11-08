@@ -885,6 +885,8 @@ test('a C-CDA note never merges into an EHI note of another Epic org; an EHI not
     expect((await client.readResource('DocumentReference', untagged.id as string)).identifier).toHaveLength(1);
     await importPath(client, cfgFor(pid), writeDoc(xml('888')), pid); // same org
     expect((await client.readResource('DocumentReference', untagged.id as string)).identifier?.length).toBeGreaterThan(1);
+    const notes = (await client.searchResources('DocumentReference', { subject: `Patient/${pid}` })).filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'));
+    expect(notes).toHaveLength(2); // org 999's note and the linked one: no duplicate
   });
 });
 

@@ -263,7 +263,8 @@ const placeholderValue = (k: string, v: unknown) =>
   (!!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every((x) => x === 'extension') &&
     ((v as O).extension as Extension[] | undefined)?.every((e) => e.url === DATA_ABSENT) === true);
 // A Coding, CodeableConcept, Quantity or Reference is one value (its parts belong together); other objects (a period) merge field by field.
-const atomic = (v: O) => 'code' in v || 'system' in v || 'reference' in v || 'value' in v || 'coding' in v || 'text' in v;
+const codeable = (v: O) => ('coding' in v || 'text' in v) && Object.keys(v).every((x) => ['coding', 'text', 'id', 'extension'].includes(x));
+const atomic = (v: O) => 'code' in v || 'system' in v || 'reference' in v || 'value' in v || codeable(v);
 const DATE = /^\d{4}(-\d\d(-\d\d(T.+)?)?)?$/;
 // Of two dates where one contains the other (the same day, month or year), the more precise.
 const precise = (a: unknown, b: unknown) =>
