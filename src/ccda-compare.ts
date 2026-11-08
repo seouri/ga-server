@@ -1,5 +1,5 @@
 import type { MedplumClient } from '@medplum/core';
-import type { Composition, Identifier, Medication, Resource } from '@medplum/fhirtypes';
+import type { Composition, Identifier, Medication, PractitionerRole, Resource } from '@medplum/fhirtypes';
 import { CVX_URL, convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
@@ -71,8 +71,9 @@ function same(a: unknown, b: unknown, dated = false): boolean {
 }
 
 // A reference's expected new target: the new counterpart of the old target; null when that has none; undefined when unknown
-// (presence only). root: comparing the document Compositions (the root-id rule below).
-type Ref = ((oldRef: string) => string | null | undefined) & { root?: boolean };
+// (presence only). root: comparing the document Compositions (the root-id rule below). role: a new PractitionerRole reference ->
+// its practitioner (the library points at a role where the Microsoft path points at the practitioner).
+type Ref = ((oldRef: string) => string | null | undefined) & { root?: boolean; role?: (newRef: string) => string | undefined };
 
 // Element paths (array indices dropped) the old value holds that the new one lacks or holds with another meaning; one per lost leaf.
 // A Coding is one unit (system|code) and an Identifier one (its key); a reference must point at the new counterpart of its target.
@@ -102,7 +103,7 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
   for (const [k, v] of Object.entries(a)) {
     if (k === 'reference' && typeof v === 'string') {
       const want = ref(v);
-      if (typeof b?.reference !== 'string' || want === null || (want !== undefined && b.reference !== want)) out.push(at(k));
+      if (typeof b?.reference !== 'string' || want === null || (want !== undefined && b.reference !== want && ref.role?.(b.reference) !== want)) out.push(at(k));
     } else diff(v, b?.[k], at(k), k === 'display' && typeof a.code !== 'string' && typeof a.reference !== 'string' ? LABEL : k, ref, out);
   }
   return out;
@@ -297,15 +298,18 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
     losses.set(k, l);
   };
   const byRef = new Map(o.map((r) => [`${r.resourceType}/${r.id}`, r]));
-  const ref: Ref = (v) => {
+  // One reference equivalence: an old reference to a Practitioner holds when the new one is a PractitionerRole whose practitioner
+  // is that Practitioner's new counterpart (the library's shape for an assigned entity: role, practitioner, organization).
+  const roles = new Map(n.filter((r) => r.resourceType === 'PractitionerRole').map((r) => [`PractitionerRole/${r.id}`, (r as PractitionerRole).practitioner?.reference]));
+  const ref: Ref = Object.assign((v: string) => {
     const t = byRef.get(v);
     if (!t) return undefined;
     const m = match.get(t);
     return m ? `${m.resourceType}/${m.id}` : null;
-  };
+  }, { role: (v: string) => roles.get(v) });
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(asDispense(policyType(encounterClass(deviceModel(refusedVaccine(r, m, negated), m), m), m), m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());

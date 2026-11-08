@@ -123,6 +123,16 @@ test('a reference must point at the new counterpart of its old target', () => {
   expect(pairLosses([enc('Location/A'), loc('A', 'la')], [enc('Location/na'), loc('na', 'la')])).toEqual([]);
 });
 
+test('an old reference to a Practitioner holds through a new PractitionerRole of its counterpart; a role of another practitioner is a loss', () => {
+  const doc = (i: string, v: string) => ({ resourceType: 'Practitioner', id: i, identifier: id(v) });
+  const enc = (ref: string) => ({ resourceType: 'Encounter', identifier: id('e'), participant: [{ individual: { reference: ref } }] });
+  const role = (i: string, p: string) => ({ resourceType: 'PractitionerRole', id: i, practitioner: { reference: `Practitioner/${p}` } });
+  const old = [enc('Practitioner/A'), doc('A', 'pa'), doc('B', 'pb')];
+  expect(pairLosses(old, [enc('PractitionerRole/r'), role('r', 'na'), doc('na', 'pa'), doc('nb', 'pb')])).toEqual([]);
+  expect(pairLosses(old, [enc('PractitionerRole/r'), role('r', 'nb'), doc('na', 'pa'), doc('nb', 'pb')]))
+    .toEqual([{ type: 'Encounter', path: 'participant.individual.reference', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))
