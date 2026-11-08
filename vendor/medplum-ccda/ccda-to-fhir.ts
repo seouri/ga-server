@@ -175,7 +175,7 @@ import type {
   CcdaText,
   CcdaTimestampOrBoolean,
 } from './types.ts';
-import { convertToCompactXml } from './xml.ts';
+import { convertToCompactXml, NAME_TEXT_GAP } from './xml.ts';
 
 const PROBLEM_LIST_ITEM: Coding = {
   system: CONDITION_CATEGORY_CODE_SYSTEM,
@@ -522,7 +522,8 @@ class CcdaToFhirConverter {
       result.suffix = name.suffix.map(nodeToString)?.filter(Boolean) as string[];
     }
 
-    const text = (name as { '#text'?: string })['#text']?.trim();
+    // Loose text pieces (NAME_TEXT_GAP marks their ends) joined with single spaces
+    const text = (name as { '#text'?: string })['#text']?.split(NAME_TEXT_GAP).join(' ').replace(/\s+/g, ' ').trim();
     if (text) {
       result.text = text;
     }

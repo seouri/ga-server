@@ -111,8 +111,31 @@ export function convertXmlToCcda(xml: string): Ccda {
     stopNodes: ['*.title'],
   });
 
-  const parsedData = parser.parse(xml);
+  const parsedData = parser.parse(markNameText(xml));
   return parsedData.ClinicalDocument;
+}
+
+// The XML reader trims each text piece of mixed content and joins them with nothing ("Dr. <given>J</given> Smith" -> "Dr.Smith").
+// In a name with parts, each loose text piece is wrapped in NAME_TEXT_GAP so the gaps survive; readers turn them into spaces.
+export const NAME_TEXT_GAP = '\u001f';
+function markNameText(xml: string): string {
+  return xml.replace(/(<name\b(?:[^>]*[^/])?>)([\s\S]*?)(<\/name>)/g, (all, open: string, body: string, close: string) => {
+    if (!/<\w/.test(body)) {
+      return all; // text only (an organization's or place's name): unchanged
+    }
+    let depth = 0;
+    const out = body.replace(/<[^>]+>|[^<]+/g, (token) => {
+      if (token.startsWith('</')) {
+        depth--;
+      } else if (token.startsWith('<')) {
+        depth += token.endsWith('/>') || token.startsWith('<!') || token.startsWith('<?') ? 0 : 1;
+      } else if (depth === 0 && token.trim()) {
+        return `${NAME_TEXT_GAP}${token.trim()}${NAME_TEXT_GAP}`;
+      }
+      return token;
+    });
+    return open + out + close;
+  });
 }
 
 export function convertCcdaToXml(ccda: Ccda): string {

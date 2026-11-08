@@ -44,4 +44,7 @@ test('a person name with no parts (a nullFlavor) is no name; a name given as tex
   expect(doctor('<name use="L">Pat Doe</name>').name).toEqual([{ use: 'official', text: 'Pat Doe' }]);
   expect(doctor('<name><prefix>Dr.</prefix>Pat Doe<suffix>MD</suffix></name>').name).toEqual([{ prefix: ['Dr.'], suffix: ['MD'], text: 'Pat Doe' }]);
   expect(doctor('<name>Pat<family>Doe</family></name>').name).toEqual([{ family: 'Doe', text: 'Pat' }]);
+  // Loose text pieces on both sides of a part are joined with a space, whitespace collapsed.
+  expect(doctor('<name>Dr. <given>John</given>   Smith</name>').name).toEqual([{ given: ['John'], text: 'Dr. Smith' }]);
+  expect(doctor('<name use="L"><given>A</given>x<family>C</family>y</name>').name).toEqual([{ use: 'official', family: 'C', given: ['A'], text: 'x y' }]);
 });
