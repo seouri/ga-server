@@ -282,3 +282,13 @@ test('a period that is one moment (end = start) is covered by a dateTime of that
   expect(pairLosses([cov({ period: { start: '2024-01-01', end: '2024-01-01' } })], [cov({ period: { start: '2024-01-01' } })]))
     .toEqual([{ type: 'Coverage', path: 'period.end', count: 1 }]);
 });
+
+test('an unset choice key never hides a set one; the Microsoft path\'s raw CDA birth time (bornString) is the date the new path gives', () => {
+  const fh = (x: object) => ({ resourceType: 'FamilyMemberHistory', identifier: id('f'), ...x });
+  const age = { value: 60, system: 'http://unitsofmeasure.org', code: 'a' };
+  expect(pairLosses([fh({ condition: [{ onsetAge: age }] })], [fh({ condition: [{ onsetAge: age, onsetPeriod: undefined }] })])).toEqual([]);
+  expect(pairLosses([fh({ bornString: '19400315' })], [fh({ bornDate: '1940-03-15' })])).toEqual([]);
+  expect(pairLosses([fh({ bornString: '19400315' })], [fh({ bornDate: '1941-03-15' })])).toEqual([{ type: 'FamilyMemberHistory', path: 'born[x].start', count: 1 }]);
+  // Only digits that are a CDA date: other text stays text.
+  expect(pairLosses([fh({ bornString: 'about 1940' })], [fh({ bornDate: '1940' })])).toEqual([{ type: 'FamilyMemberHistory', path: 'born[x]', count: 1 }]);
+});

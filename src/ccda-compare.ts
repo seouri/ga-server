@@ -44,16 +44,19 @@ const CHOICE = new RegExp(`^(value|effective|onset|abatement|occurrence|performe
 const TIME = new Set(['Date', 'DateTime', 'Instant']);
 
 // The comparable form of a record: no id or meta; choice elements renamed `name[x]` (a dateTime as `name[x].start`, so it equals a
-// Period's start; a choice Period that is one moment, end = start, as its start: the Microsoft path writes a panel's low = high so).
+// Period's start; a choice Period that is one moment, end = start, as its start: the Microsoft path writes a panel's low = high so;
+// its bornString is the raw CDA birth time, YYYYMMDD, read as that date). Unset keys are skipped: one never hides a set choice.
+const CDA_DATE = /^(\d{4})(\d{2})?(\d{2})?$/;
 function prep(n: unknown): unknown {
   if (Array.isArray(n)) return n.map(prep);
   if (!n || typeof n !== 'object') return n;
   const out: R = {};
   for (const [k, v] of Object.entries(n)) {
-    if (k === 'id' || k === 'meta') continue;
+    if (k === 'id' || k === 'meta' || v === undefined) continue;
     const m = CHOICE.exec(k);
-    const moment = m?.[2] === 'Period' && (v as R).start !== undefined && (v as R).start === (v as R).end;
-    out[m ? `${m[1]}[x]` : k] = m && TIME.has(m[2]) ? { start: v } : moment ? { start: (v as R).start } : prep(v);
+    const moment = m?.[2] === 'Period' && !!v && (v as R).start !== undefined && (v as R).start === (v as R).end;
+    const born = k === 'bornString' && typeof v === 'string' ? CDA_DATE.exec(v) : null;
+    out[m ? `${m[1]}[x]` : k] = born ? { start: born.slice(1).filter(Boolean).join('-') } : m && TIME.has(m[2]) ? { start: v } : moment ? { start: (v as R).start } : prep(v);
   }
   return out;
 }
