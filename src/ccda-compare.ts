@@ -188,11 +188,11 @@ const placeholder = (r: Resource) => {
 
 // One path equivalence: the Microsoft path files a Coverage's policy type (the Policy Activity code, e.g. PPO) under
 // `relationship`; the new path under `type`, its FHIR field. The old `relationship` is compared as `type` only when the old
-// record has no `type` and the new `type` carries one of its codings (system|code); otherwise it stays a loss.
+// record has no `type` and the new `type` carries every one of its codings (system|code); otherwise it stays a loss.
 function policyType(o: Resource, n: Resource): Resource {
   const { relationship, ...rest } = o as unknown as R & { relationship?: { coding?: R[] } };
   const have = new Set(((n as unknown as { type?: { coding?: R[] } }).type?.coding ?? []).filter(isCoding).map(codingKey));
-  const moved = o.resourceType === 'Coverage' && rest.type === undefined && relationship?.coding?.some((c) => isCoding(c) && have.has(codingKey(c)));
+  const moved = o.resourceType === 'Coverage' && rest.type === undefined && !!relationship?.coding?.length && relationship.coding.every((c) => isCoding(c) && have.has(codingKey(c)));
   return moved ? ({ ...rest, type: relationship } as unknown as Resource) : o;
 }
 

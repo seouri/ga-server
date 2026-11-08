@@ -210,6 +210,10 @@ test('Coverage: the policy type the Microsoft path filed under relationship is c
   const old = { resourceType: 'Coverage', identifier: id('c'), relationship: { coding: [ppo] } };
   expect(pairLosses([old], [{ resourceType: 'Coverage', identifier: id('c'), type: { coding: [ppo] } }])).toEqual([]);
   expect(pairLosses([old], [{ resourceType: 'Coverage', identifier: id('c'), type: { coding: [hmo] } }])).toEqual([{ type: 'Coverage', path: 'relationship.coding', count: 1 }]);
+  // Every old relationship coding must be in the new type.
+  const x = { system: 'urn:oid:2.25.9', code: 'X' };
+  expect(pairLosses([{ ...old, relationship: { coding: [ppo, x] } }], [{ resourceType: 'Coverage', identifier: id('c'), type: { coding: [ppo] } }]))
+    .toEqual([{ type: 'Coverage', path: 'relationship.coding', count: 1 }]);
   // Only Coverage, only relationship -> type.
   const ob = { resourceType: 'Observation', identifier: id('o'), relationship: { coding: [ppo] } };
   expect(pairLosses([ob], [{ resourceType: 'Observation', identifier: id('o'), type: { coding: [ppo] } }])).toEqual([{ type: 'Observation', path: 'relationship.coding', count: 1 }]);
