@@ -175,6 +175,15 @@ test('a leading-dot PQ value the Microsoft path read without its dot is a correc
   expect(losses('0.25', 25, 0.25)).toEqual([{ type: 'Observation', path: 'value[x].value', count: 1 }]);
 });
 
+test('an old coding with no system is held by a new coding adding a system to the same code and display; another code or display is a loss', () => {
+  const pt = (coding: unknown) => ({ resourceType: 'Patient', identifier: id('p'), maritalStatus: { coding: [coding] } });
+  const sys = { system: 'urn:oid:2.25.9' };
+  expect(pairLosses([pt({ code: 'A', display: 'Alpha' })], [pt({ ...sys, code: 'A', display: 'Alpha' })])).toEqual([]);
+  expect(pairLosses([pt({ code: 'A', display: 'Alpha' })], [pt({ ...sys, code: 'B', display: 'Alpha' })])).toEqual([{ type: 'Patient', path: 'maritalStatus.coding', count: 1 }]);
+  expect(pairLosses([pt({ code: 'A', display: 'Alpha' })], [pt({ ...sys, code: 'A', display: 'Beta' })])).toEqual([{ type: 'Patient', path: 'maritalStatus.coding', count: 1 }]);
+  expect(pairLosses([pt({ code: 'A' })], [pt({ ...sys, code: 'A' })])).toEqual([{ type: 'Patient', path: 'maritalStatus.coding', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))

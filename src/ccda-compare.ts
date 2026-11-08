@@ -90,7 +90,10 @@ function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: 
   const a = textDisplay(o as R);
   const b = n && typeof n === 'object' && !Array.isArray(n) ? (n as R) : undefined;
   if (isCoding(a)) {
-    if (!b || !isCoding(b) || codingKey(a) !== codingKey(b)) out.push(path);
+    // An old coding with no system is held by a new one adding the system to the same code and display (the Microsoft path drops
+    // the system of a patient's race and ethnicity codes).
+    const sysless = !a.system && !!b?.system && a.code === b.code && a.display !== undefined && same(a.display, b.display);
+    if (!b || !isCoding(b) || (codingKey(a) !== codingKey(b) && !sysless)) out.push(path);
     else for (const k of ['display', 'extension']) diff(a[k], b[k], at(k), k, ref, out);
     return out;
   }
