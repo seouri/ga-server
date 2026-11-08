@@ -49,6 +49,19 @@ try {
     const { deleteOld, migrate } = await import('./migrate.ts');
     const accept = process.argv.includes('--accept');
     await (process.argv.includes('--delete-old') ? deleteOld({ accept }) : migrate({ accept }));
+  } else if (process.argv[2] === 'migrate-store' && /^( --file (?!--)\S+| --yes| --services-stopped)*$/.test(process.argv.slice(3).map((a) => ` ${a}`).join(''))) {
+    const { dockerServices, migrateStore } = await import('./migrate-store.ts');
+    const { dirname, join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { defaultConfigPath, storeServeOptions } = await import('./config.ts');
+    const args = process.argv.slice(3);
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..'); // the install: compose.yaml
+    const fileAt = args.indexOf('--file');
+    await migrateStore({
+      file: fileAt >= 0 ? args[fileAt + 1] : storeServeOptions().file, configFile: defaultConfigPath(),
+      reportFile: join(dirname(defaultConfigPath()), 'store', 'migrate-report.json'), yes: args.includes('--yes'),
+      servicesStopped: args.includes('--services-stopped'), services: dockerServices(root), cfg: loadConfig(),
+    });
   } else if (process.argv[2] === 'whats-new' && (process.argv.length === 3 || (process.argv[3] === '--since' && /^\d{4}-\d{2}-\d{2}$/.test(process.argv[4] ?? '') && process.argv.length === 5))) {
     const { whatsNew } = await import('./whats-new.ts');
     const { patientEndpoints } = await import('./smart/sync.ts');
@@ -76,6 +89,8 @@ try {
     }
   } else if (process.argv[2] === 'notify') {
     await (await import('./notify/cli.ts')).notifyCommand(process.argv.slice(3));
+  } else if (process.argv[2] === 'store' && process.argv[3] === 'serve' && process.argv.length === 4) {
+    await (await import('./store-serve.ts')).storeServe();
   } else if (process.argv[2] === 'gateway' && process.argv[3] === 'serve' && process.argv.length === 4) {
     await (await import('./gateway/server.ts')).serveGateway(); // loaded on demand: oidc-provider is heavy
   } else if (process.argv[2] === 'passkey' && process.argv[3] === 'link' && process.argv.length === 4) {
@@ -100,7 +115,7 @@ try {
     const [arg, , since] = process.argv.slice(3);
     console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

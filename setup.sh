@@ -33,10 +33,21 @@ if ! grep -q '^TZ=' .env 2>/dev/null; then
     echo "Could not tell this computer's time zone: add TZ=<zone, e.g. America/New_York> to .env"
   fi
 fi
-echo "==> docker compose up -d (waits until the FHIR server is healthy)"
-docker compose up -d --wait --wait-timeout 300
-echo "==> ga setup"
-node src/cli.ts setup
+# GA keeps its records in Medplum. GA's own SQLite store is not yet for use; a development install whose config says
+# "store": "sqlite" gets the sqlite compose profile (ga-store) instead.
+if [ -f .ga/config.json ] && grep -q '"store": *"sqlite"' .ga/config.json; then
+  echo "==> docker compose --profile sqlite up -d ga-store (waits until GA's store is ready)"
+  docker compose --profile sqlite up -d --wait --wait-timeout 120 ga-store
+  echo "==> ga setup"
+  GA_STORE=sqlite node src/cli.ts setup
+  echo "==> docker compose --profile sqlite up -d"
+  docker compose --profile sqlite up -d
+else
+  echo "==> docker compose up -d (waits until the FHIR server is healthy)"
+  docker compose up -d --wait --wait-timeout 300
+  echo "==> ga setup"
+  node src/cli.ts setup
+fi
 echo "==> npm link (puts 'ga' on your PATH)"
 npm link || echo "npm link failed; use 'node src/cli.ts' instead of 'ga'"
 

@@ -108,12 +108,41 @@ services:
       timeout: 5s
       retries: 5
 
+  # C-CDA to FHIR, only for importing a C-CDA folder: docker compose --profile ccda up -d fhir-converter
   fhir-converter:
     image: mcr.microsoft.com/healthcareapis/fhir-converter:1.0.550-preview
     platform: linux/amd64
+    profiles: ['ccda']
     restart: unless-stopped
     ports:
       - '127.0.0.1:8104:8080'
+
+  # GA's own store (not yet for use; Medplum is the default): the one process that opens .ga/store/ga.db, served to the others
+  # with the token in .ga/store/token. Off unless the sqlite profile is on (docker compose --profile sqlite up -d); GA uses it
+  # when .ga/config.json says "store": "sqlite". Same image, user and mounts as ga-sync; published on the host's loopback for the
+  # host CLI and the stdio MCP. store-serve.ts runs directly (not via cli.ts): about 60 MB less memory.
+  ga-store:
+    image: node:26.13.0-alpine
+    profiles: ['sqlite']
+    restart: unless-stopped
+    init: true
+    user: '${UID:-1000}:${GID:-1000}'
+    working_dir: /ga
+    ports:
+      - '127.0.0.1:8120:8120'
+    volumes:
+      - .:/ga:ro
+      - ./.ga:/ga/.ga
+    environment:
+      GA_CONFIG: /ga/.ga/config.json
+      GA_STORE_HOST: 0.0.0.0
+    command: ['node', '--max-old-space-size=192', 'src/store-serve.ts']
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8120/healthz'] # busybox wget: no second node process
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Daily SMART sync (ga sync --daemon): the repo's own code on the pinned Node image; repo read-only, .ga writable.
   # user: the host uid:gid so files under .ga stay yours (export UID/GID or put them in .env; macOS Docker Desktop maps ownership anyway).
@@ -125,6 +154,9 @@ services:
     depends_on:
       medplum-server:
         condition: service_healthy
+      ga-store:
+        condition: service_started # not healthy: an unused ga-store must never hold these back
+        required: false # off on a default install (sqlite profile)
     working_dir: /ga
     volumes:
       - .:/ga:ro
@@ -132,6 +164,7 @@ services:
     environment:
       GA_CONFIG: /ga/.ga/config.json
       GA_BASE_URL: 'http://medplum-server:8103/'
+      GA_STORE_URL: 'http://ga-store:8120/'
       TZ: ${TZ:-UTC} # the host's zone (setup.sh writes it to .env): local days for imports, Apple daily totals, share dates and "today"
     command: ['node', 'src/cli.ts', 'sync', '--daemon']
 
@@ -145,6 +178,9 @@ services:
     depends_on:
       medplum-server:
         condition: service_healthy
+      ga-store:
+        condition: service_started # not healthy: an unused ga-store must never hold these back
+        required: false # off on a default install (sqlite profile)
     working_dir: /ga
     ports:
       - '127.0.0.1:8110:8110'
@@ -156,6 +192,7 @@ services:
     environment:
       GA_CONFIG: /ga/.ga/config.json
       GA_BASE_URL: 'http://medplum-server:8103/'
+      GA_STORE_URL: 'http://ga-store:8120/'
       TZ: ${TZ:-UTC} # the host's zone (setup.sh writes it to .env): local days for imports, Apple daily totals, share dates and "today"
       GA_SHARE_HOST: 0.0.0.0
       GA_PUBLIC_URL: ${GA_PUBLIC_URL:-}
@@ -164,7 +201,8 @@ services:
       GA_LLM_MODEL: ${GA_LLM_MODEL:-}
     command: ['node', 'src/cli.ts', 'gateway', 'serve']
 
-  # Nightly backup (scripts/backup.sh): database dump, stored files and .ga to GA_BACKUP_DIR, newest 7 kept.
+  # Nightly backup (scripts/backup.sh): database, stored files and .ga to GA_BACKUP_DIR, newest 7 kept. Two services, one per
+  # store (ga-backup-store only with the sqlite profile); each skips a run when .ga/config.json names the other store.
   # Backups hold all health records: keep the directory on an encrypted disk. Same user as ga-sync so files stay yours.
   ga-backup:
     image: postgres:16
@@ -176,12 +214,32 @@ services:
         condition: service_healthy
     environment:
       PGPASSWORD: medplum # same as POSTGRES_PASSWORD above
+      BACKUP_STORE: medplum
     volumes:
       - ./scripts/backup.sh:/backup.sh:ro
       - ga-binary:/ga-binary:ro
       - ./.ga:/dot-ga:ro
       - ${GA_BACKUP_DIR:-./backups}:/backups
-    command: ['bash', '/backup.sh']
+    command: ['sh', '/backup.sh']
+
+  # SQLite store: an online copy of .ga/store/ga.db (VACUUM INTO) while ga-store keeps running. .ga is read-write here:
+  # a second connection to a live WAL database writes ga.db-shm.
+  ga-backup-store:
+    image: node:26.13.0-alpine
+    profiles: ['sqlite']
+    restart: unless-stopped
+    init: true
+    user: '${UID:-1000}:${GID:-1000}'
+    depends_on:
+      ga-store:
+        condition: service_started
+    environment:
+      BACKUP_STORE: sqlite
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./.ga:/dot-ga
+      - ${GA_BACKUP_DIR:-./backups}:/backups
+    command: ['sh', '/backup.sh']
 
 volumes:
   ga-postgres:

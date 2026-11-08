@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, DocumentReference, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { convertCcda, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
 const fileHash = createHash('sha256').update(readFileSync(FIXTURE)).digest('hex');
@@ -42,7 +42,14 @@ afterAll(async () => {
 });
 
 const all = async (): Promise<Resource[]> =>
-  ((await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' })).entry ?? []).map((e) => e.resource as Resource);
+  [await client.readResource('Patient', pid), ...(await compartmentOf(client, pid))];
+// The compartment plus the shared records it references (Practitioner, Organization, Location, Medication...), so a
+// re-import that re-versions or duplicates a shared record is caught.
+const withShared = async (): Promise<Resource[]> => {
+  const mine = await all();
+  const refs = new Set([...JSON.stringify(mine).matchAll(/"reference":"((?:Practitioner|PractitionerRole|Organization|Location|Medication|Device)\/[^"/]+)"/g)].map((m) => m[1]));
+  return [...mine, ...(await Promise.all([...refs].map((ref) => client.readReference({ reference: ref }) as Promise<Resource>)))];
+};
 const obs = (code: string) => client.searchResources('Observation', { subject: `Patient/${pid}`, code: `http://loinc.org|${code}` }, { cache: 'no-cache' });
 
 test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as subject', async () => {
@@ -62,16 +69,16 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(status).toEqual({ '55822004': 'active', '195967001': 'resolved' });
   // The converter's Patient collapsed onto the GA patient: no second Patient for the fake MRN.
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
-  expect((await all()).filter((r) => r.resourceType === 'Patient').map((r) => r.id)).toEqual([pid]);
 });
 
 test('importing the same ccda twice changes nothing', async () => {
   await importPath(client, cfg, FIXTURE, pid);
-  const before = (await all()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort();
+  const before = (await withShared()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort();
+  expect(before.some((k) => /^(Practitioner|Organization)\//.test(k))).toBe(true); // the fixture's author and custodian
   const report = await importPath(client, cfg, FIXTURE, pid);
   expect(report).toMatchObject({ created: 0, updated: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 });
   expect(report.skipped).toBeGreaterThan(0);
-  expect((await all()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort()).toEqual(before);
+  expect((await withShared()).map((r) => `${r.resourceType}/${r.id}/${r.meta?.versionId}`).sort()).toEqual(before);
 });
 
 test('ccda file stored once as DocumentReference', async () => {

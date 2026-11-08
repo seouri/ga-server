@@ -391,7 +391,7 @@ export async function deleteOld({ accept = false }: { accept?: boolean } = {}): 
   const total = groups.flat().length;
   let n = 0;
   await inChunks(old, groups.map((g) => g.map((url) => ({ request: { method: 'DELETE', url } }))), (k) => console.log(`deleted ${(n += k)}/${total}`));
-  await old.deleteResource('ClientApplication', oldCfg.clientId);
+  await old.deleteResource('ClientApplication', oldCfg.clientId as string);
   counts.ClientApplication = 1;
   console.log(Object.entries(counts).map(([k, v]) => `${k} ${v}`).join('\n'));
   console.log(`done. ${basename(p.backup)} no longer works and can be deleted.`);

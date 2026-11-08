@@ -11,7 +11,8 @@ import { safeName } from '../share/server.ts';
 import { readJson, writeJson } from './store.ts';
 import { sha256 as hash } from '../identity.ts';
 
-export const MAX_UPLOAD = 2 * 1024 ** 3;
+export { MAX_UPLOAD } from '../limits.ts';
+import { MAX_UPLOAD } from '../limits.ts';
 const LINK_MS = 15 * 60_000;
 const KEEP_MS = 24 * 3600_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;

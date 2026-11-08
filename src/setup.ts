@@ -1,19 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { getStatus, MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { AccessPolicy, ClientApplication, Patient, ProjectMembership } from '@medplum/fhirtypes';
-import { defaultConfigPath, GaError, type GaConfig, loadConfig, notRunning } from './config.ts';
-import { PATIENT_COMPARTMENT } from './share/scope.ts';
+import { defaultConfigPath, GaError, type GaConfig, getClient, isGaNotRunning, loadConfig, NOT_RUNNING, storeKind } from './config.ts';
+import { GA_STORE_TYPES } from './store-types.ts';
 
 const ADMIN = 'admin@example.com';
 const DEFAULT_PASSWORD = 'medplum_admin'; // Medplum's seeded admin password; setup rotates it away on first run
 
 // GA's own ordinary project: Medplum gives every login in the Super Admin project super-admin powers.
 const PROJECT = 'Guardian Angel'; // Medplum requires 4-72 characters
-// What the GA client may touch: the patient compartment plus the shared records the importers and sync write.
-// Everything else (ClientApplication, User, Login, Project, ProjectMembership, AccessPolicy, Bot...) is denied.
-const GA_TYPES = [...PATIENT_COMPARTMENT, 'Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device', 'Binary', 'Endpoint', 'ConceptMap'];
+// What the GA client may touch on Medplum: the types GA's own store keeps (the patient compartment plus the shared records
+// the importers and sync write). Everything else (ClientApplication, User, Login, Project, ProjectMembership, AccessPolicy,
+// Bot...) is denied.
+export const ACCESS_POLICY: AccessPolicy = { resourceType: 'AccessPolicy', name: 'ga-server-cli', resource: GA_STORE_TYPES.map((resourceType) => ({ resourceType })) };
 
 // Logs in as admin with the stored rotated password, else the seeded default; rotates the default away.
 // out: where the config is written (ga migrate writes config.next.json); projectName: tests use throwaway projects.
@@ -22,6 +23,13 @@ export async function setup(
   converterUrl = 'http://localhost:8104/',
   { out = defaultConfigPath(), projectName = PROJECT }: { out?: string; projectName?: string } = {},
 ): Promise<GaConfig> {
+  let written: GaConfig | undefined;
+  try {
+    written = JSON.parse(readFileSync(out, 'utf8')) as GaConfig; // as written: loadConfig's env overrides must not be saved
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new GaError(`cannot read ${out}: fix or move it before ga setup`); // never overwrite keys we could not read
+  }
+  if (storeKind(written) === 'sqlite') return setupStore(converterUrl, out, written);
   const path = defaultConfigPath();
   const tryLoad = (f: string) => {
     try {
@@ -45,7 +53,7 @@ export async function setup(
       password = p;
       break;
     } catch (e) {
-      if (notRunning(e)) throw new GaError('GA is not running: run docker compose up');
+      if (isGaNotRunning(e)) throw new GaError(NOT_RUNNING);
       if (!(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 400) throw e;
     }
   }
@@ -64,10 +72,7 @@ export async function setup(
   const projectId = medplum.getActiveLogin()?.project.reference?.split('/')[1];
   if (!projectId) throw new GaError('could not determine the GA project');
 
-  const policy = await medplum.upsertResource<AccessPolicy>(
-    { resourceType: 'AccessPolicy', name: 'ga-server-cli', resource: GA_TYPES.map((resourceType) => ({ resourceType })) },
-    { name: 'ga-server-cli' },
-  );
+  const policy = await medplum.upsertResource<AccessPolicy>({ ...ACCESS_POLICY }, { name: 'ga-server-cli' });
   const accessPolicy = { reference: `AccessPolicy/${policy.id}` };
   const client =
     (await medplum.searchOne('ClientApplication', { name: 'ga-server-cli' })) ??
@@ -79,10 +84,7 @@ export async function setup(
     await medplum.updateResource<ProjectMembership>({ ...membership, admin: false, accessPolicy });
   }
 
-  const patient = await medplum.createResourceIfNoneExist<Patient>(
-    { resourceType: 'Patient', identifier: [{ system: 'urn:ga-server:id:patient', value: 'self' }] },
-    'identifier=urn:ga-server:id:patient|self',
-  );
+  const patient = await selfPatient(medplum);
 
   const rotate = password === DEFAULT_PASSWORD;
   const cfg: GaConfig = {
@@ -95,9 +97,27 @@ export async function setup(
     adminPassword: rotate ? randomBytes(24).toString('base64url') : password,
   };
   // Saved before the change: if the change fails, the next run falls back to the default and rotates again.
+  writeConfig(out, cfg);
+  if (rotate) await medplum.post('auth/changepassword', { oldPassword: DEFAULT_PASSWORD, newPassword: cfg.adminPassword });
+  return cfg;
+}
+
+const selfPatient = (client: MedplumClient) => client.createResourceIfNoneExist<Patient>(
+  { resourceType: 'Patient', identifier: [{ system: 'urn:ga-server:id:patient', value: 'self' }] },
+  'identifier=urn:ga-server:id:patient|self',
+);
+
+function writeConfig(out: string, cfg: GaConfig): void {
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(cfg, null, 2), { mode: 0o600 });
   chmodSync(out, 0o600);
-  if (rotate) await medplum.post('auth/changepassword', { oldPassword: DEFAULT_PASSWORD, newPassword: cfg.adminPassword });
+}
+
+// GA's own store: no logins, so no project, client or admin password; only the self Patient and the config. Keys already in
+// the config (Medplum's, for a rollback; storeUrl) are kept.
+async function setupStore(converterUrl: string, out: string, stored: GaConfig | undefined): Promise<GaConfig> {
+  const patient = await selfPatient(await getClient({ ...(stored ?? ({} as GaConfig)), store: 'sqlite' }));
+  const cfg: GaConfig = { ...stored, patientId: patient.id as string, converterUrl, store: 'sqlite' };
+  writeConfig(out, cfg);
   return cfg;
 }

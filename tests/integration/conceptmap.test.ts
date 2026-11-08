@@ -6,7 +6,7 @@ import { loadMaps, lookup, MAP_URL, type MapEntry, upsertEntry } from '../../src
 import { agentMappings } from '../../src/concepts-cli.ts';
 import { CVX, ICD10CM, LOINC, RXNORM, SNOMED } from '../../src/concepts.ts';
 import { getClient } from '../../src/config.ts';
-import { emptyTestProject, testProject } from './helpers.ts';
+import { emptyTestProject, restoreConfig, testProject } from './helpers.ts';
 
 let client: MedplumClient;
 let pid: string; // the ga-test project's own patient, never the user's
@@ -19,7 +19,7 @@ beforeAll(async () => {
   client = await getClient(t.cfg);
 }, 240_000);
 afterAll(async () => {
-  delete process.env.GA_CONFIG;
+  restoreConfig();
   await emptyTestProject(client);
 });
 

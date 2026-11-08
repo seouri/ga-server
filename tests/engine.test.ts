@@ -1,9 +1,10 @@
 import { expect, test, vi } from 'vitest';
 import type { MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
-import type { MedplumClient } from '@medplum/core';
+import { MedplumClient } from '@medplum/core';
 import { badRequest, OperationOutcomeError, serverError, validationError } from '@medplum/core';
 import { decide, fillFrom, importResources, sameValue } from '../src/engine.ts';
 import { ARRIVED, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import { onStore } from './temp-store.ts';
 
 const src = (date: string, writer: SourceInfo['writer'] = 'importer'): SourceInfo => ({ kind: 'ccda', file: 'a.xml', date, writer });
 const ID = { system: 'urn:ga-server:id:ccda', value: 'm1' };
@@ -55,24 +56,37 @@ test('re-stamped Composition with singular identifier skips', () => {
   expect(decide(existing(comp, src('2024-01-01')), stamp({ ...comp, title: 'u' } as Resource, src('2024-02-01'), ID))).toBe('update');
 });
 
-test('a record last changed by someone other than GA conflicts; the source-conflict tag sticks', () => {
-  const GA = 'ClientApplication/ga';
-  const by = (author: string, tag?: string): Resource => {
+test('protection tags stick; meta.author no longer marks a person edit (GA writes are told apart by writer tags)', () => {
+  const by = (author?: string, tag?: string): Resource => {
     const ex = existing(ms('active'), src('2024-01-01'));
-    return { ...ex, meta: { ...ex.meta, author: { reference: author }, tag: [...(ex.meta?.tag ?? []), ...(tag ? [{ system: 'urn:ga-server:tag', code: tag }] : [])] } };
+    return { ...ex, meta: { ...ex.meta, ...(author && { author: { reference: author } }), tag: [...(ex.meta?.tag ?? []), ...(tag ? [{ system: 'urn:ga-server:tag', code: tag }] : [])] } };
   };
   const newer = stamp(ms('stopped'), src('2024-06-01'), ID);
-  expect(decide(by('Practitioner/person'), newer, GA)).toBe('conflict');
-  expect(decide(by(GA, 'source-conflict'), newer, GA)).toBe('conflict');
-  expect(decide(by(GA, 'person-edited'), newer, GA)).toBe('conflict');
-  expect(decide(by(GA), newer, GA)).toBe('update');
-  expect(decide(by('Practitioner/person'), stamp(ms('active'), src('2024-06-01'), ID), GA)).toBe('skip'); // nothing to write
+  expect(decide(by(undefined, 'source-conflict'), newer)).toBe('conflict');
+  expect(decide(by(undefined, 'person-edited'), newer)).toBe('conflict'); // tagged in the Medplum era: still protected
+  expect(decide(by('Practitioner/person'), newer)).toBe('update');
+  expect(decide(by(), newer)).toBe('update');
+});
+
+test('on the store: an agent-written record then a differing import is a source-conflict and the record is kept', async () => {
+  await onStore(async ({ client }) => {
+    const p = await client.createResource({ resourceType: 'Patient' });
+    const med = (status: MedicationStatement['status']) => ({ ...ms(status), id: 'm1', identifier: [{ system: 'urn:test:src', value: 'm1' }], subject: { reference: `Patient/${p.id}` } }) as Resource;
+    // The agent's write and the import share the source identifier, so the import finds the agent's record.
+    expect(await importResources(client, [med('active')], src('2024-01-01', 'agent'), p.id as string, 'h')).toMatchObject({ created: 1 });
+    for (let i = 0; i < 2; i++) expect(await importResources(client, [med('stopped')], src('2024-06-01'), p.id as string, 'h')).toMatchObject({ conflicts: 1, updated: 0 });
+    const all = await client.searchResources('MedicationStatement', {});
+    expect(all).toHaveLength(1);
+    const [kept] = all;
+    expect(kept.status).toBe('active');
+    expect(kept.meta?.tag?.filter((t) => t.code === 'source-conflict')).toHaveLength(1);
+    expect(kept.meta?.tag).toContainEqual({ system: 'urn:ga-server:tag', code: 'writer-agent' });
+  });
 });
 
 // Fake client: one failure injected at search or create.
 const fake = (where: 'search' | 'create', err: Error) =>
   ({
-    getProfile: () => undefined,
     searchResourcePages: async function* () {},
     readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
     updateResource: async (r: Resource) => r,
@@ -102,32 +116,6 @@ test('non-validation errors abort the import', async () => {
   ] as const) {
     await expect(importResources(fake(where, err), one, src('2024-01-01'), 'p', 'h')).rejects.toThrow();
   }
-});
-
-test('merging a source into a person-edited match keeps it protected with person-edited, not source-conflict', async () => {
-  const obs = (id?: string) => ({
-    resourceType: 'Observation', id, status: 'final', subject: { reference: 'Patient/p' },
-    code: { coding: [{ system: 'http://loinc.org', code: '2093-3' }] },
-    effectiveDateTime: '2024-01-01T08:00:00Z', valueQuantity: { value: 180, unit: 'mg/dL' },
-  }) as Resource;
-  // An imported record a person later edited; the incoming source is older, so decide() says skip and only the identifier is appended.
-  const edited = {
-    ...obs('srv-9'), meta: { author: { reference: 'Practitioner/person' } },
-    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2024-06-01' }],
-  } as Resource;
-  const writes: Resource[] = [];
-  const client = {
-    getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
-    searchResourcePages: async function* () {},
-    readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
-    searchOne: async () => undefined,
-    searchResources: async () => [edited],
-    updateResource: async (r: Resource) => (writes.push(r), r),
-  } as unknown as MedplumClient;
-  expect(await importResources(client, [obs('o1')], src('2024-01-01'), 'p', 'h')).toMatchObject({ merged: 1 });
-  const tags = writes.findLast((w) => w.resourceType === 'Observation')?.meta?.tag;
-  expect(tags).toContainEqual({ system: 'urn:ga-server:tag', code: 'person-edited' });
-  expect(tags).not.toContainEqual({ system: 'urn:ga-server:tag', code: 'source-conflict' });
 });
 
 const ehi: SourceInfo = { kind: 'ehi', file: '/x/ehi', date: '2026-11-04', writer: 'importer' };
@@ -225,7 +213,7 @@ test('each created record is stamped with its own arrival time', async () => {
   }
 });
 
-test('a person-edited portal medication still gets its last-seen advanced (body kept; source-conflict only when the source differs)', async () => {
+test('an agent-written portal medication still gets its last-seen advanced (body kept; source-conflict only when the source differs)', async () => {
   const SMART = { system: 'urn:ga-server:id:smart:h', value: 'MedicationRequest/1' };
   const EHI_ROW = { system: 'urn:ga-server:id:ehi:o', value: 'ORDER_MED|1' };
   const mr = (status: string, extra: object = {}) => ({
@@ -235,18 +223,17 @@ test('a person-edited portal medication still gets its last-seen advanced (body 
     ({ kind: 'smart', file: 'https://h/fhir', date, writer: 'importer', seenAt: '2026-11-02T00:00:00Z', fillOnly: () => fill });
   const edited = (ids: object[] = [SMART]) => ({
     ...mr('active'), id: 'srv-1', identifier: ids,
-    meta: { author: { reference: 'Practitioner/person' }, tag: [{ system: 'urn:ga-server:tag', code: 'writer-importer' }] },
+    meta: { tag: [{ system: 'urn:ga-server:tag', code: 'writer-agent' }] },
     extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-11-01T00:00:00Z' }, { url: 'urn:ga-server:ext:last-seen', valueDateTime: '2026-11-01T00:00:00Z' }],
     note: [{ text: 'person note' }],
   }) as Resource;
   for (const [what, ex, incoming, source, counted, tag] of [
-    ['unchanged', edited(), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-01T00:00:00Z'), { skipped: 1 }, 'person-edited'],
+    ['unchanged', edited(), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-01T00:00:00Z'), { skipped: 1 }, undefined],
     ['changed: conflict', edited(), mr('stopped'), smart('2026-11-02T00:00:00Z'), { conflicts: 1 }, 'source-conflict'],
-    ['fill-only', edited([SMART, EHI_ROW]), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-02T00:00:00Z', true), { skipped: 1 }, 'person-edited'],
+    ['fill-only', edited([SMART, EHI_ROW]), mr('active', { note: [{ text: 'person note' }] }), smart('2026-11-02T00:00:00Z', true), { skipped: 1 }, undefined],
   ] as const) {
     const writes: Resource[] = [];
     const client = {
-      getProfile: () => ({ resourceType: 'ClientApplication', id: 'ga' }),
       searchResourcePages: async function* () {},
       readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
       searchOne: async () => ex,
@@ -259,7 +246,7 @@ test('a person-edited portal medication still gets its last-seen advanced (body 
     expect(w.status, what).toBe('active');
     expect(w.note, what).toEqual([{ text: 'person note' }]);
     expect(w.extension?.find((e) => e.url === 'urn:ga-server:ext:last-seen')?.valueDateTime, what).toBe('2026-11-02T00:00:00Z');
-    expect(w.meta?.tag?.filter((t) => ['person-edited', 'source-conflict'].includes(t.code ?? '')), what).toEqual([{ system: 'urn:ga-server:tag', code: tag }]);
+    expect(w.meta?.tag?.filter((t) => ['person-edited', 'source-conflict'].includes(t.code ?? '')), what).toEqual(tag ? [{ system: 'urn:ga-server:tag', code: tag }] : []);
   }
 });
 
@@ -272,7 +259,6 @@ test('same-day checks compare instants: one draw written in two offsets merges; 
   const run = async (stored: Resource, incoming = lab('o1', '2024-03-01T19:30:00-05:00')) => {
     const queries: string[] = [];
     const client = {
-      getProfile: () => undefined,
       searchResourcePages: async function* () {},
       readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
       searchOne: async () => undefined,

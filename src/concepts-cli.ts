@@ -85,15 +85,12 @@ export async function* scan(client: MedplumClient, patientId: string, types: str
 export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string; review?: boolean } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
   let maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
-  // A write onto a record a person last changed would make GA its author and drop the person-edit protection (engine decide/protect): leave those.
-  const me = client.getProfile();
-  const mine = (r: Resource) => !r.meta?.author?.reference || !me || r.meta.author.reference === `${me.resourceType}/${me.id}`;
   if (!opts.source) {
     // Terms the stored source codes teach their map first, by the same rules as an import's batch (add-only, ambiguous terms skipped).
     const l = learner(maps);
     for await (const page of scan(client, patientId, TYPES)) {
       for (const r of page) {
-        const info = mine(r) ? await infoOf(r) : undefined;
+        const info = await infoOf(r);
         if (info) l.add(r, info);
       }
     }
@@ -101,7 +98,7 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
     for (const [source, entries] of learned) await upsertEntries(client, source, entries);
     if (learned.size) maps = await loadMaps(client, true);
   }
-  // Versioned: a record changed since it was read (an import, a person) gets 412; it is re-read and re-coded once, else left.
+  // Versioned: a record changed since it was read (an import) gets 412; it is re-read and re-coded once, else left.
   const recode = async (r: Resource, info: SourceInfo, retry = true): Promise<boolean> => {
     const { resource } = codeRecord(r, info, maps);
     if (isDeepStrictEqual(resource, r)) return false; // codeRecord changes nothing else, so equal means already coded
@@ -112,7 +109,7 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
       if (!(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 412) throw e;
       if (!retry) return false;
       const fresh = await client.readResource(r.resourceType, r.id as string, { cache: 'no-cache' });
-      return mine(fresh) && recode(fresh, info, false);
+      return recode(fresh, info, false);
     }
   };
   const kind = opts.source?.split(':')[0];
@@ -122,7 +119,7 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
     for (const r of page) {
       n.scanned++;
       if (opts.source && termKey(r) !== opts.key) continue; // before infoOf: no source file is read for other terms
-      const info = mine(r) ? await infoOf(r, kind) : undefined;
+      const info = await infoOf(r, kind);
       if (!info) continue;
       if (opts.source && keyOf(r, info) !== opts.source) continue;
       n.matched++;
@@ -145,7 +142,7 @@ export async function reviewList(client: MedplumClient, patientId: string, statu
   if (type && !TYPES.includes(type)) throw new GaError(`type must be one of ${TYPES.join(', ')}`);
   const maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
-  const rows: (Unmapped & { dates: Set<string> })[] = [];
+  const rows: (Unmapped & { dates: Set<string>; spellings: Map<string, number> })[] = [];
   for await (const page of scan(client, patientId, type ? [type] : TYPES, { _tag: `${TAG}|concept-${status}` })) {
     for (const r of page) {
       const info = await infoOf(r);
@@ -153,13 +150,22 @@ export async function reviewList(client: MedplumClient, patientId: string, statu
       const one: Unmapped[] = [];
       countUnmapped(one, r, info);
       const hit = rows.find((x) => x.source === one[0].source && x.type === one[0].type && x.key === one[0].key);
-      const row = hit ?? rows[rows.push({ ...one[0], count: 0, dates: new Set() }) - 1];
+      const row = hit ?? rows[rows.push({ ...one[0], count: 0, dates: new Set(), spellings: new Map() }) - 1];
       row.count++;
+      const sp = JSON.stringify([one[0].name, one[0].unit ?? null]);
+      row.spellings.set(sp, (row.spellings.get(sp) ?? 0) + 1);
       const d = dateOf(r);
       if (d) row.dates.add(d);
     }
   }
-  return rows.sort((a, b) => b.count - a.count).map(({ dates, ...u }) => ({ ...u, examples: [...dates].sort().reverse().slice(0, 3) }));
+  // Ties by source, type and term, and the name/unit shown by the most frequent spelling then the smallest: the _id batches of
+  // scan come back in storage order, so nothing may depend on which record came first.
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const by = (r: Unmapped) => `${r.source}\u0000${r.type}\u0000${r.key}`;
+  return rows.sort((a, b) => b.count - a.count || cmp(by(a), by(b))).map(({ dates, spellings, name: _n, unit: _u, ...u }) => {
+    const [name, unit] = JSON.parse([...spellings].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]))[0][0]) as [string, string | null];
+    return { ...u, name, ...(unit !== null && { unit }), examples: [...dates].sort().reverse().slice(0, 3) };
+  });
 }
 
 export type AgentMapping = { source: string; type: string; term: string; system?: string; code?: string; display?: string; equivalence: string; confident: boolean; when?: string };

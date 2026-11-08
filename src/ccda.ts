@@ -3,18 +3,27 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
-import { type GaConfig, GaError } from './config.ts';
+import { type GaConfig, GaError, isGaNotRunning } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport } from './engine.ts';
 import { withImportLock } from './lock.ts';
 import { storeDocument } from './document.ts';
 
+export const CONVERTER_DOWN = 'the C-CDA converter is not running: start it with docker compose --profile ccda up -d fhir-converter';
+
 export async function convertCcda(xml: string, converterUrl: string): Promise<Resource[]> {
-  const res = await fetch(`${converterUrl}convertToFhir?api-version=2024-05-01-preview`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ InputDataFormat: 'Ccda', RootTemplateName: 'CCD', InputDataString: xml }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${converterUrl}convertToFhir?api-version=2024-05-01-preview`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ InputDataFormat: 'Ccda', RootTemplateName: 'CCD', InputDataString: xml }),
+    });
+  } catch (e) {
+    // On demand (compose profile ccda): a refused connection is not "GA is not running".
+    if (isGaNotRunning(e)) throw new GaError(CONVERTER_DOWN);
+    throw e;
+  }
   // Status only: the converter's error body can echo document content.
   if (!res.ok) throw new GaError(`converter failed: HTTP ${res.status}`);
   const { result } = (await res.json()) as { result: Bundle };

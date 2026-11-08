@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Condition, DocumentReference, Extension, Resource } from '@medplum/fhirtypes';
+import type { Condition, DocumentReference, Extension, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { LAST_SEEN } from '../../src/identity.ts';
@@ -13,7 +13,7 @@ import type { SourceRec } from '../../src/smart/store.ts';
 import { isStale, readStatus, syncAll, syncSource } from '../../src/smart/sync.ts';
 import { serveFixtures, startMock } from '../smart/mock-server.ts';
 import type { MockSmart } from '../smart/mock-server.ts';
-import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 const P = 'synthetic-patient-1';
 const clientId = 'synthetic-client';
@@ -38,10 +38,7 @@ const newPatient = async (): Promise<string> => {
   pids.push(id);
   return id;
 };
-const compartment = async (pid: string): Promise<Resource[]> =>
-  ((await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' })).entry ?? [])
-    .filter((e) => e.search?.mode === 'match' && e.resource?.resourceType !== 'Patient')
-    .map((e) => e.resource as Resource);
+const compartment = (pid: string): Promise<Resource[]> => compartmentOf(client, pid);
 const smartIds = (r: Resource, key: string) =>
   ((r as { identifier?: { system?: string; value?: string }[] }).identifier ?? []).filter((i) => i.system === `urn:ga-server:id:smart:${key}`);
 const ext = (r: { extension?: Extension[] }, url: string) => r.extension?.find((e) => e.url === url);

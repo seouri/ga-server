@@ -1,17 +1,17 @@
 // ga share / shares / revoke / share export end to end on a test patient, plus the audit log and Binary download against real Medplum.
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { defaultConfigPath, getClient, loadConfig } from '../../src/config.ts';
+import { getClient, loadConfig } from '../../src/config.ts';
 import { logAccess, readLog } from '../../src/share/audit.ts';
 import { binaryFetcher } from '../../src/share/cli.ts';
 import type { Share } from '../../src/share/store.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { childConfig, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
 let dir: string;
@@ -40,9 +40,8 @@ beforeAll(async () => {
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   dir = mkdtempSync(join(tmpdir(), 'ga-share-cli-int-'));
-  // Medplum connection fields only, and the test patient: never the real patient id.
-  const { baseUrl, clientId, clientSecret, converterUrl } = JSON.parse(readFileSync(defaultConfigPath(), 'utf8'));
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ baseUrl, clientId, clientSecret, patientId: pid, converterUrl }), { mode: 0o600 });
+  // The store connection only, and the test patient: never the real patient id.
+  childConfig(dir, pid);
   await client.createResource<Observation>({
     resourceType: 'Observation', status: 'final', subject: { reference: `Patient/${pid}` }, code: { text: 'test lab' },
     category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }],

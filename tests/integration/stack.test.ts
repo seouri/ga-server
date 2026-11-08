@@ -2,31 +2,34 @@ import type { AuditEvent, DocumentReference, Resource, ResourceType } from '@med
 import { expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { setup } from '../../src/setup.ts';
-import { cleanupTestPatient, createTestPatient, emptyTestProject, retryLimited, testProject } from './helpers.ts';
+import { cleanupTestPatient, createTestPatient, emptyTestProject, restoreConfig, retryLimited, SQLITE, testProject } from './helpers.ts';
 
 // Runs ga setup against the long-lived ga-test project (temp GA_CONFIG), never the user's own; emptied before and after.
 test('setup is idempotent, and the GA client reads clinical records but no Medplum admin records', { timeout: 240_000 }, async () => {
-  const realPatient = loadConfig().patientId;
+  const realPatient = SQLITE ? '' : loadConfig().patientId;
   const { baseUrl, cfg: a } = await testProject();
   const empty = async () => emptyTestProject(await getClient(a));
   try {
     await empty(); // an earlier run that stopped half-way
-    const b = await retryLimited(() => setup(baseUrl, undefined, { projectName: 'ga-test' }));
+    const b = await retryLimited(() => setup(baseUrl, a.converterUrl, { projectName: 'ga-test' }));
     expect([b.projectId, b.patientId, b.clientId]).toEqual([a.projectId, a.patientId, a.clientId]);
     expect(loadConfig().projectId).toBe(a.projectId);
     const client = await getClient(loadConfig());
     expect((await client.readResource('Patient', a.patientId)).id).toBe(a.patientId);
-    const me = (await client.get('auth/me')) as { project: { id: string }; membership: { admin?: boolean } };
-    expect(me.project.id).toBe(a.projectId);
-    expect(me.membership.admin ?? false).toBe(false);
+    // Medplum only (the store has no login, project or admin records): the client is an ordinary project member.
+    if (!SQLITE) {
+      const me = (await client.get('auth/me')) as { project: { id: string }; membership: { admin?: boolean } };
+      expect(me.project.id).toBe(a.projectId);
+      expect(me.membership.admin ?? false).toBe(false);
 
-    for (const t of ['ClientApplication', 'User', 'Login', 'Project', 'ProjectMembership', 'AccessPolicy', 'Bot', 'JsonWebKey', 'Subscription', 'UserConfiguration']) {
-      await expect(client.search(t as ResourceType, {}, { cache: 'no-cache' }), t).rejects.toThrow(/Forbidden/);
+      for (const t of ['ClientApplication', 'User', 'Login', 'Project', 'ProjectMembership', 'AccessPolicy', 'Bot', 'JsonWebKey', 'Subscription', 'UserConfiguration']) {
+        await expect(client.search(t as ResourceType, {}, { cache: 'no-cache' }), t).rejects.toThrow(/Forbidden/);
     }
-    await expect(client.readResource('ClientApplication', a.clientId)).rejects.toThrow();
+    await expect(client.readResource('ClientApplication', a.clientId as string)).rejects.toThrow();
     await expect(client.readResource('Project', a.projectId as string)).rejects.toThrow();
     // The user's record lives in another project: invisible from here.
     await expect(client.readResource('Patient', realPatient)).rejects.toThrow(/Not found/);
+    }
 
     const subject = { reference: `Patient/${a.patientId}` };
     await client.validateResource({ resourceType: 'Observation', status: 'final', code: { text: 'x' }, subject });
@@ -41,7 +44,7 @@ test('setup is idempotent, and the GA client reads clinical records but no Medpl
     expect((await client.search('Observation', { _compartment: `Patient/${a.patientId}`, _summary: 'count' }, { cache: 'no-cache' })).total).toBe(1);
   } finally {
     await empty();
-    delete process.env.GA_CONFIG;
+    restoreConfig();
   }
 });
 

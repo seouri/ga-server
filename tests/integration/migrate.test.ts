@@ -19,11 +19,12 @@ import { setup } from '../../src/setup.ts';
 import { logAccess } from '../../src/share/audit.ts';
 import { listShares, type Share } from '../../src/share/store.ts';
 import { writeAtomic } from '../../src/smart/store.ts';
-import { emptyTestProject, retryLimited, throwawayConfig } from './helpers.ts';
+import { emptyTestProject, restoreConfig, retryLimited, SQLITE, throwawayConfig } from './helpers.ts';
 
 const FIX = join(import.meta.dirname, '..', 'fixtures');
 
-test('ga migrate re-imports into a new project, verifies and switches; --delete-old removes the old copy', { timeout: 600_000 }, async () => {
+// Medplum only: ga migrate moves an install between Medplum projects; the store has none.
+test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and switches; --delete-old removes the old copy', { timeout: 600_000 }, async () => {
   const { dir, baseUrl, session } = await throwawayConfig();
   const clients: GaConfig[] = []; // each project's GA client empties it afterwards (the old one is gone after --delete-old)
   try {
@@ -97,7 +98,7 @@ test('ga migrate re-imports into a new project, verifies and switches; --delete-
     expect((await session.search('Practitioner', { _project: made.projectId as string, _tag: 'urn:ga-server:tag|src-ccda', _summary: 'count' }, { cache: 'no-cache' })).total).toBe(0);
     expect((await nc.search('Observation', { _compartment: `Patient/${now.patientId}`, _summary: 'count' }, { cache: 'no-cache' })).total).toBe(obs?.new);
   } finally {
-    delete process.env.GA_CONFIG;
+    restoreConfig();
     for (const c of clients) await getClient(c).then(emptyTestProject).catch((e: Error) => console.warn(`ga-test project not emptied: ${e.message}`)); // the old client is gone after --delete-old
   }
 });

@@ -1,0 +1,540 @@
+// FHIR search for the SQLite store. Each resource is indexed by evaluating its type's official SearchParameters (FHIRPath,
+// as Medplum's server indexes them) into rows; a search is SQL over those rows.
+//
+// Tables (created by SEARCH_SCHEMA):
+// - idx: one row per indexed value. token: sys/val (val lowercased); string: val = lowercased (starts-with/contains),
+//   sys = as written (:exact); uri, reference: val; date: lo/hi = UTC ISO range; number: lo/hi; quantity: lo = hi = value,
+//   sys = system, val = code or unit. CodeableConcept.text / Coding.display are token rows with sys = TEXT, val lowercased.
+// - idx_text: the distinct lowercased TEXT values per (type, code), so :text (substring) scans distinct strings, not every row.
+// - sortkeys: one row per resource for _id, _lastUpdated and each date param of its type (MISSING when it has none):
+//   lo = ascending key (earliest start), hi = descending key (latest start). Indexed by (type, code, key), so a sort is an
+//   index walk or a primary-key join, never an aggregate per row.
+//
+// Plan: each filter is an `exists` probe on a candidate rid; a positive filter can also produce its rid set. The search either
+// drives from the smallest set (counted up to searchTuning.driveMax) or, when every set is large and the first sort key is in sortkeys,
+// walks that sort index and stops after the page. The page's JSON is read last, by rid.
+import {
+  FhirFilterComparison, FhirFilterConnective, FhirFilterNegation, OperationOutcomeError, Operator, convertToSearchableDates,
+  convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
+  convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
+  parseFilterParameter, parseSearchRequest, splitSearchOnComma, toTypedValue, tryGetDataType,
+  type Filter, type FhirFilterExpression, type SearchRequest,
+} from '@medplum/core';
+import type { Bundle, Resource, SearchParameter } from '@medplum/fhirtypes';
+import type { StatementSync } from 'node:sqlite';
+
+export const SEARCH_SCHEMA = `
+  create table if not exists idx(rid integer not null, type text not null, code text not null, sys text, val, lo, hi);
+  create index if not exists idx_v on idx(type, code, val, sys, rid) where val is not null;
+  create index if not exists idx_l on idx(type, code, lo, hi, rid) where lo is not null;
+  create index if not exists idx_r on idx(rid, code, val, sys, lo, hi);
+  create table if not exists idx_text(type text not null, code text not null, val text not null, primary key(type, code, val)) without rowid;
+  create table if not exists sortkeys(rid integer not null, type text not null, code text not null, lo not null, hi not null, primary key(rid, code)) without rowid;
+  create index if not exists sortkeys_lo on sortkeys(type, code, lo);
+  create index if not exists sortkeys_hi on sortkeys(type, code, hi);`;
+
+const TEXT = '\u0001text';
+// Sorts after every number and text value: a missing sort value comes last ascending and first descending (Postgres NULLs, as Medplum).
+const MISSING = new Uint8Array([0xff]);
+const MAX_COUNT = 1000;
+// Plan thresholds (tests lower them to run every plan on small data). driveMax: a filter matching fewer rows drives the
+// search; otherwise a sorted search walks its sort index. walkPerRow: a page of n rows from a smaller set first walks up to
+// walkPerRow * n rows of its sort index (cheap when matches are dense).
+export const searchTuning = { driveMax: 5000, walkPerRow: 50 };
+
+type Prep = (sql: string) => StatementSync;
+type Arg = string | number | null | Uint8Array;
+type Row = [code: string, sys: string | null, val: string | null, lo: string | number | null, hi: string | number | null];
+
+// A 400 the store rethrows as its StoreError (search.ts must not import store.ts).
+export class SearchError extends OperationOutcomeError {
+  readonly text: string;
+  constructor(text: string) {
+    super({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'invalid', details: { text } }] });
+    this.text = text;
+  }
+}
+const badRequest = (text: string): Error => new SearchError(text);
+
+const utc = (s?: string): string | null => {
+  if (!s) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? s : d.toISOString();
+};
+// The UTC range of a date with year, month or day precision (convertToSearchableDates ends every month after 31 days).
+function dayRange(v: unknown): { start: string; end: string } | undefined {
+  const m = typeof v === 'string' ? /^(\d{4})(?:-(\d\d)(?:-(\d\d))?)?$/.exec(v) : null;
+  if (!m) return undefined;
+  const [y, mo, d] = [Number(m[1]), m[2] ? Number(m[2]) - 1 : undefined, m[3] ? Number(m[3]) : undefined];
+  const start = Date.UTC(y, mo ?? 0, d ?? 1);
+  const end = d !== undefined ? Date.UTC(y, mo!, d + 1) : mo !== undefined ? Date.UTC(y, mo + 1, 1) : Date.UTC(y + 1, 0, 1);
+  return { start: new Date(start).toISOString(), end: new Date(end - 1).toISOString() };
+}
+const lower = (s: string | undefined | null): string | null => (s == null ? null : s.toLowerCase());
+const lit = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+const qs = (n: number): string => Array(n).fill('?').join(', ');
+
+// ---------- indexing ----------
+
+function rows(r: Resource): Row[] {
+  const out: Row[] = [];
+  const tv = [toTypedValue(r)];
+  for (const p of Object.values(getSearchParameters(r.resourceType) ?? {})) {
+    // _id and _lastUpdated live in sortkeys.
+    if (!p.expression || p.type === 'composite' || p.type === 'special' || p.code === '_id' || p.code === '_lastUpdated') continue;
+    let v;
+    try { v = evalFhirPathTyped(getParsedExpressionForResourceType(r.resourceType, p.expression), tv); } catch { continue; }
+    if (!v.length) continue;
+    const code = p.code;
+    switch (p.type) {
+      case 'token':
+        // Codes as written (Medplum matches tokens case-sensitively); texts lowercased for :text.
+        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT ? lower(t.value) : t.value ?? null, null, null]);
+        break;
+      case 'string': for (const s of convertToSearchableStrings(v)) out.push([code, s, s.toLowerCase(), null, null]); break;
+      case 'uri': for (const s of convertToSearchableUris(v)) out.push([code, null, s, null, null]); break;
+      case 'reference': for (const s of convertToSearchableReferences(v)) out.push([code, null, s, null, null]); break;
+      // Medplum's server treats a Period with no end as ending at its start (its in-memory matcher treats it as open-ended).
+      case 'date':
+        for (const x of v) {
+          const day = dayRange(x.value);
+          for (const d of day ? [day] : convertToSearchableDates([x])) out.push([code, null, null, utc(d.start) ?? '0000', utc(d.end) ?? utc(d.start) ?? '9999']);
+        }
+        break;
+      case 'number': for (const [a, b] of convertToSearchableNumbers(v)) if (a != null || b != null) out.push([code, null, null, a ?? b!, b ?? a!]); break;
+      case 'quantity':
+        for (const q of convertToSearchableQuantities(v)) if (q.value != null) out.push([code, q.system ?? null, q.code ?? q.unit ?? null, q.value, q.value]);
+        break;
+    }
+  }
+  const seen = new Set<string>();
+  return out.filter((x) => { const k = JSON.stringify(x); return !seen.has(k) && !!seen.add(k); });
+}
+
+// Replaces the search rows of `rid` (r undefined: deleted). Runs inside the write's transaction.
+export function writeIndex(prep: Prep, rid: number, r: Resource | undefined): void {
+  prep('delete from idx where rid = ?').run(rid);
+  prep('delete from sortkeys where rid = ?').run(rid);
+  if (!r) return;
+  const type = r.resourceType;
+  const ins = prep('insert into idx values (?, ?, ?, ?, ?, ?, ?)');
+  const text = prep('insert or ignore into idx_text values (?, ?, ?)');
+  const dates = new Map<string, [string, string]>();
+  for (const [code, sys, val, lo, hi] of rows(r)) {
+    ins.run(rid, type, code, sys, val, lo, hi);
+    // shortcut: idx_text keeps texts of deleted or changed resources (they then match no idx row); prune if it grows large.
+    if (sys === TEXT && val) text.run(type, code, val);
+    if (typeof lo === 'string' && val === null) {
+      const k = dates.get(code);
+      dates.set(code, k ? [k[0] < lo ? k[0] : lo, k[1] > lo ? k[1] : lo] : [lo, lo]);
+    }
+  }
+  const sk = prep('insert into sortkeys values (?, ?, ?, ?, ?)');
+  sk.run(rid, type, '_id', r.id!, r.id!);
+  const lu = utc(r.meta?.lastUpdated) ?? MISSING; // as range searches compare it (put keeps a migrated value as given)
+  sk.run(rid, type, '_lastUpdated', lu, lu);
+  for (const p of Object.values(getSearchParameters(type) ?? {})) {
+    if (p.type !== 'date' || p.code === '_lastUpdated') continue;
+    const k = dates.get(p.code);
+    sk.run(rid, type, p.code, k?.[0] ?? MISSING, k?.[1] ?? MISSING);
+  }
+}
+
+// ---------- filters ----------
+
+const param = (type: string, code: string): SearchParameter | undefined => getSearchParameters(type)?.[code];
+
+// A filter as SQL over a candidate row `a` (any row with a `rid` column): `sql` probes one rid; `set`, when the filter is a
+// positive match on one parameter, selects every matching rid (a candidate driver).
+type Cond = { sql: string; args: Arg[]; set?: { sql: string; args: Arg[] }; ref?: boolean; multi?: boolean };
+
+// Every rid of `type`, as a row source with a `rid` column.
+const allOf = (a: string): string => `sortkeys ${a} where ${a}.type = ? and ${a}.code = '_id'`;
+let aliasN = 0;
+const alias = (): string => `t${aliasN++}`;
+
+function cond(type: string, f: Filter, a: string): Cond {
+  if (f.code === '_filter') {
+    let e: FhirFilterExpression;
+    try { e = parseFilterParameter(f.value); } catch (err) { throw badRequest(`Invalid _filter: ${err instanceof Error ? err.message : String(err)}`); }
+    return filterExpr(type, e, a);
+  }
+  if (f.code.startsWith('_has:')) return hasCond(type, f, a);
+  if (f.code.includes('.')) return chainCond(type, f, a);
+  const [code, mod] = f.code.split(':');
+  if (mod) throw badRequest(`Unsupported search modifier: ${f.code}`);
+  const p = param(type, code);
+  if (!p) throw badRequest(`Unknown search parameter: ${code} (${type})`);
+  if (p.type === 'composite' || p.type === 'special') throw badRequest(`Unsupported search parameter type ${p.type}: ${code}`);
+  const op = f.operator;
+  if (op === Operator.MISSING || op === Operator.PRESENT) {
+    const present = (op === Operator.MISSING) === (f.value === 'false');
+    if (code === '_id' || code === '_lastUpdated') return { sql: present ? '1' : '0', args: [] };
+    return { sql: `${present ? '' : 'not '}exists (select 1 from idx i where i.rid = ${a}.rid and i.code = ?)`, args: [code] };
+  }
+  const allowed: Record<string, readonly string[]> = {
+    token: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.TEXT],
+    string: [Operator.EQUALS, Operator.EXACT, Operator.CONTAINS, Operator.NOT, Operator.NOT_EQUALS],
+    uri: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS],
+    reference: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS],
+    date: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'sa', 'eb', 'ap'],
+    number: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'ap'],
+    quantity: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'ap'],
+  };
+  if (!allowed[p.type]?.includes(op)) throw badRequest(`Unsupported search modifier or prefix :${op} on ${code} (${p.type})`);
+  const vals = splitSearchOnComma(f.value);
+  // :not on tokens, strings, uris and references means "no matching value" (FHIR); ne on ranges is a prefix.
+  const neg = op === Operator.NOT || (op === Operator.NOT_EQUALS && p.type !== 'date' && p.type !== 'number' && p.type !== 'quantity');
+
+  if (code === '_id') {
+    const set = { sql: `select x.rid from resources x where x.type = ? and x.id in (${qs(vals.length)})`, args: [type, ...vals] };
+    return { sql: `${neg ? 'not ' : ''}${a}.rid in (${set.sql})`, args: set.args, set: neg ? undefined : set };
+  }
+  const ors: string[] = [], va: Arg[] = [];
+  const range = (v: string, lo: string, hi: string) => { const [c, ca] = dateCond(op, v, lo, hi); ors.push(c); va.push(...ca); };
+  if (code === '_lastUpdated') {
+    for (const v of vals) range(v, 's.lo', 's.hi');
+    const where = `s.code = '_lastUpdated' and (${ors.join(' or ')})`;
+    return {
+      sql: `exists (select 1 from sortkeys s where s.rid = ${a}.rid and ${where})`, args: va,
+      set: { sql: `select s.rid from sortkeys s where s.type = ? and ${where}`, args: [type, ...va] },
+    };
+  }
+  for (const v of vals) {
+    switch (p.type) {
+      case 'token': {
+        if (op === Operator.TEXT) {
+          // Substring of the distinct texts of this (type, code), then their rows by index.
+          ors.push(`i.sys = ? and i.val in (select x.val from idx_text x where x.type = ? and x.code = ? and x.val like ? escape '\\')`);
+          va.push(TEXT, type, code, `%${likeEscape(v.toLowerCase())}%`);
+          break;
+        }
+        const bar = v.indexOf('|');
+        if (bar < 0) { ors.push('i.val = ? and (i.sys is null or i.sys <> ?)'); va.push(v, TEXT); break; }
+        const s = v.slice(0, bar), val = v.slice(bar + 1);
+        if (!s) { ors.push('i.val = ? and i.sys is null'); va.push(val); }
+        else if (!val) { ors.push('i.sys = ? and i.val is not null'); va.push(s); }
+        else { ors.push('i.val = ? and i.sys = ?'); va.push(val, s); }
+        break;
+      }
+      case 'string': {
+        const l = v.toLowerCase();
+        if (op === Operator.EXACT) { ors.push('i.val = ? and i.sys = ?'); va.push(l, v); }
+        else if (op === Operator.CONTAINS) { ors.push(`i.val like ? escape '\\'`); va.push(`%${likeEscape(l)}%`); }
+        else { ors.push('i.val >= ? and i.val < ?'); va.push(l, `${l}￿`); } // starts-with as an index range
+        break;
+      }
+      case 'uri': ors.push('i.val = ?'); va.push(v); break;
+      case 'reference':
+        if (v.includes('/')) { ors.push('i.val = ?'); va.push(v); }
+        else if ((p.target?.length ?? 0) === 1) { ors.push('i.val = ?'); va.push(`${p.target![0]}/${v}`); }
+        else { ors.push(`i.val like ? escape '\\'`); va.push(`%/${likeEscape(v)}`); }
+        break;
+      case 'date': range(v, 'i.lo', 'i.hi'); break;
+      case 'number': case 'quantity': {
+        const [num, sys, unit] = v.split('|');
+        const n = Number(num);
+        if (num === '' || Number.isNaN(n)) throw badRequest(`Invalid number: ${v}`);
+        const cmp: Record<string, string> = { eq: 'i.lo = ?', ne: 'i.lo <> ?', gt: 'i.lo > ?', lt: 'i.lo < ?', ge: 'i.lo >= ?', le: 'i.lo <= ?', ap: 'i.lo between ? * 0.9 and ? * 1.1' };
+        let c = cmp[op];
+        va.push(n);
+        if (op === 'ap') va.push(n);
+        if (sys) { c += ' and i.sys = ?'; va.push(sys); }
+        if (unit) { c += ' and i.val = ?'; va.push(unit); }
+        ors.push(c);
+        break;
+      }
+    }
+  }
+  const where = `i.code = ? and (${ors.map((o) => `(${o})`).join(' or ')})`;
+  const probe = `exists (select 1 from idx i where i.rid = ${a}.rid and ${where})`;
+  if (neg) return { sql: `not ${probe}`, args: [code, ...va] };
+  return { sql: probe, args: [code, ...va], set: { sql: `select i.rid from idx i where i.type = ? and ${where}`, args: [type, code, ...va] },
+    ref: p.type === 'reference', multi: vals.length > 1 || op === Operator.TEXT };
+}
+
+const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+// Date prefixes over a [lo, hi] range (a Period with no end is a point at its start): eq means the search day contains the
+// value (FHIR; Medplum), ap that they overlap. A search value is a full date or a dateTime: Medplum refuses 2024 and 2024-05.
+function dateCond(op: string, v: string, lo: string, hi: string): [string, string[]] {
+  const fp = /^\d{4}-\d\d-\d\d$/.test(v) ? dayRange(v) : /^\d{4}-\d\d-\d\dT/.test(v) ? convertToSearchableDates([{ type: 'dateTime', value: v }])[0] : undefined;
+  const s = utc(fp?.start), e = utc(fp?.end ?? fp?.start);
+  if (!s || !e || Number.isNaN(Date.parse(s))) throw badRequest(`Invalid date value: ${v}`); // Medplum's text
+  const sql: Record<string, [string, string[]]> = {
+    eq: [`${lo} >= ? and ${hi} <= ?`, [s, e]], ap: [`${lo} <= ? and ${hi} >= ?`, [e, s]], ne: [`not (${lo} >= ? and ${hi} <= ?)`, [s, e]],
+    lt: [`${lo} < ?`, [s]], gt: [`${hi} > ?`, [e]], le: [`${lo} <= ?`, [e]], ge: [`${hi} >= ?`, [s]], sa: [`${lo} > ?`, [e]], eb: [`${hi} < ?`, [s]],
+  };
+  const [c, ca] = sql[op] ?? sql.eq;
+  return [`(${c})`, ca];
+}
+
+// Rids of `type` matching a filter, as a subquery.
+function matching(type: string, f: Filter): { sql: string; args: Arg[] } {
+  const t = alias();
+  const c = cond(type, f, t);
+  return c.set ?? { sql: `select ${t}.rid from ${allOf(t)} and ${c.sql}`, args: [type, ...c.args] };
+}
+
+// _has:Type:refParam:param=value: resources referenced (by refParam) from a Type matching param=value.
+function hasCond(type: string, f: Filter, a: string): Cond {
+  const [, t, ref, ...rest] = f.code.split(':');
+  if (!t || !ref || !rest.length) throw badRequest(`Invalid _has: ${f.code}`);
+  if (param(t, ref)?.type !== 'reference') throw badRequest(`Unknown search parameter: ${ref} (${t})`);
+  if (rest[0] === '_has') throw badRequest(`Unsupported _has deeper than one level: ${f.code}`);
+  const inner = matching(t, { code: rest.join(':'), operator: f.operator, value: f.value });
+  return {
+    sql: `${a}.rid in (select x.rid from resources x where x.type = ? and x.id in (select substr(h.val, ?) from idx h where h.type = ? and h.code = ? and h.val >= ? and h.val < ? and h.rid in (${inner.sql})))`,
+    args: [type, type.length + 2, t, ref, `${type}/`, `${type}/￿`, ...inner.args],
+  };
+}
+
+// One-level chain: refParam[:Type].param=value. Without a type, every target type that has `param`.
+function chainCond(type: string, f: Filter, a: string): Cond {
+  const parts = f.code.split('.');
+  if (parts.length > 2) throw badRequest(`Unsupported chain deeper than one level: ${f.code}`);
+  const [head, tail] = parts;
+  const [code, tt] = head.split(':');
+  const p = param(type, code);
+  if (p?.type !== 'reference') throw badRequest(`Unsupported chain on ${code} (${type}): not a reference parameter`);
+  const targets = (tt ? [tt] : p.target ?? []).filter((t) => param(t, tail.split(':')[0]));
+  if (!targets.length) throw badRequest(`Unsupported chain: no target of ${code} has parameter ${tail}`);
+  const args: Arg[] = [type, code];
+  const refs = targets.map((t) => {
+    // The parser leaves a chained value unparsed (no prefix): parse it as the target's own parameter, as Medplum does.
+    let own: Filter | undefined;
+    if (f.operator === Operator.EQUALS) {
+      try { own = parseSearchRequest(`${t}?${new URLSearchParams([[tail, f.value]])}`).filters?.[0]; } catch (e) { throw badRequest(e instanceof Error ? e.message : String(e)); }
+    }
+    const inner = matching(t, own ?? { code: tail, operator: f.operator, value: f.value });
+    args.push(`${t}/`, ...inner.args);
+    return `select ? || x.id from resources x where x.rid in (${inner.sql})`;
+  });
+  return { sql: `${a}.rid in (select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (${refs.join(' union all ')}))`, args };
+}
+
+function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
+  if (e instanceof FhirFilterConnective) {
+    const l = filterExpr(type, e.left, a), r = filterExpr(type, e.right, a);
+    return { sql: `(${l.sql} ${e.keyword === 'or' ? 'or' : 'and'} ${r.sql})`, args: [...l.args, ...r.args] };
+  }
+  if (e instanceof FhirFilterNegation) { const c = filterExpr(type, e.child, a); return { sql: `not (${c.sql})`, args: c.args }; }
+  const c = e as FhirFilterComparison;
+  const p = param(type, c.path);
+  // _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
+  let op: Operator = c.operator;
+  if (op === Operator.EXACT && p?.type !== 'string') op = Operator.EQUALS;
+  else if (op === Operator.STARTS_WITH && p?.type === 'string') op = Operator.EQUALS;
+  const { sql, args } = cond(type, { code: c.path, operator: op, value: c.value }, a);
+  return { sql, args };
+}
+
+// ---------- results ----------
+
+// _elements: the listed top-level fields plus id, meta and the type's required fields; tagged SUBSETTED (as Medplum).
+function elements(r: Resource, fields: string[]): Resource {
+  const required = Object.entries(tryGetDataType(r.resourceType)?.elements ?? {}).filter(([, e]) => e.min > 0).map(([k]) => k.replace('[x]', ''));
+  const keep = new Set(['resourceType', 'id', 'meta', ...required, ...fields.map((f) => f.split('.')[0])]);
+  const out = Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k) || [...keep].some((f) => k.startsWith(f) && /^[A-Z]/.test(k.slice(f.length))))) as Resource;
+  out.meta = { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' }] };
+  return out;
+}
+
+// A sort key over the candidate row `d`: `code` set when it is a sortkeys column (indexed), else an expression.
+type SortKey = { expr: string; desc: boolean; code?: string };
+
+function sortKey(type: string, code: string, desc: boolean, i: number): SortKey {
+  const p = code === '_id' || code === '_lastUpdated' ? undefined : param(type, code);
+  if (p?.type === 'date' || !p && (code === '_id' || code === '_lastUpdated')) return { expr: `s${i}.${desc ? 'hi' : 'lo'}`, desc, code };
+  if (!p) throw badRequest(`Unknown sort parameter: ${code} (${type})`);
+  if (p.type === 'composite' || p.type === 'special') throw badRequest(`Unsupported sort parameter type ${p.type}: ${code}`);
+  // shortcut: non-date sort keys are aggregated from index rows per candidate (fast sorts: dates, _id, _lastUpdated; see README Next phase);
+  // add them to sortkeys if a use sorts large results by them.
+  const col = p.type === 'number' || p.type === 'quantity' ? 'lo' : 'val';
+  return { expr: `coalesce((select ${desc ? 'max' : 'min'}(i.${col}) from idx i where i.rid = d.rid and i.code = ${lit(code)} and (i.sys is null or i.sys <> ${lit(TEXT)})), x'ff')`, desc };
+}
+
+const encodeCursor = (keys: Arg[]): string => Buffer.from(JSON.stringify(keys.map((k) => (k instanceof Uint8Array ? null : k)))).toString('base64url');
+function decodeCursor(c: string, n: number): Arg[] {
+  let v: unknown;
+  try { v = JSON.parse(Buffer.from(c, 'base64url').toString('utf8')); } catch { v = undefined; }
+  if (!Array.isArray(v) || v.length !== n || !v.every((x) => x === null || typeof x === 'string' || typeof x === 'number')) throw badRequest('Invalid _cursor');
+  return v.map((x) => (x === null ? MISSING : x));
+}
+
+// a comes strictly before b in a key's order (MISSING sorts after every value).
+function before(a: Arg, b: Arg, desc: boolean): boolean {
+  const am = a instanceof Uint8Array, bm = b instanceof Uint8Array;
+  if (am || bm) return desc ? am && !bm : !am && bm;
+  return desc ? a! > b! : a! < b!;
+}
+
+// Request parameters that do not change a result (the server accepts them on every route too).
+export const IGNORED = new Set(['_format', '_pretty']);
+
+// Checks parseSearchRequest leaves out: _type only fits a system-level search; _count/_offset must be numbers; a reference
+// type modifier (subject:Group=a) is the reference Group/a (parseSearchRequest drops the modifier, which would match Patient/a).
+function normalize(type: string, query: [string, string][]): [string, string][] {
+  return query.map(([k, v]) => {
+    if (k === '_type') throw badRequest('_type is not supported on a type-level search');
+    if ((k === '_count' || k === '_offset') && !/^\d+$/.test(v)) throw badRequest(`Invalid ${k}: ${v}`);
+    const m = /^([a-z][\w-]*):([A-Z][A-Za-z]+)$/.exec(k);
+    const p = m && getSearchParameters(type)?.[m[1]];
+    if (!m || p?.type !== 'reference') return [k, v];
+    const target = m[2];
+    if (!p.target?.includes(target as never)) throw badRequest(`${target} is not a target of ${type}.${m[1]}`);
+    return [m[1], splitSearchOnComma(v).map((x) => {
+      if (!x.includes('/')) return `${target}/${x}`;
+      if (!x.startsWith(`${target}/`)) throw badRequest(`${k}=${x}: not a ${target} reference`);
+      return x;
+    }).join(',')];
+  });
+}
+
+// A searchset whose entries hold each resource's stored JSON text, spliced in by searchJson().
+type RawEntry = { fullUrl: string; mode: 'match' | 'include'; json: string };
+type RawBundle = { total?: number; entry?: RawEntry[]; link?: Bundle['link'] };
+
+export function searchJson(prep: Prep, type: string, query: [string, string][], base: string): string {
+  const raw = searchRaw(prep, type, query, base);
+  const entry = raw.entry?.map((e) => `{"fullUrl":${JSON.stringify(e.fullUrl)},"search":{"mode":"${e.mode}"},"resource":${e.json}}`).join(',');
+  return `{"resourceType":"Bundle","type":"searchset"${raw.total !== undefined ? `,"total":${raw.total}` : ''}${entry !== undefined ? `,"entry":[${entry}]` : ''}${raw.link ? `,"link":${JSON.stringify(raw.link)}` : ''}}`;
+}
+
+function searchRaw(prep: Prep, type: string, query: [string, string][], base: string): RawBundle {
+  aliasN = 0; // same query, same SQL text (statement cache)
+  if (!getSearchParameters(type)) throw badRequest(`Unknown search parameter: resource type ${type} is not stored`);
+  const summary = query.find(([k]) => k === '_summary')?.[1];
+  if (summary && summary !== 'count' && summary !== 'false') throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
+  let req: SearchRequest;
+  try {
+    req = parseSearchRequest(`${type}?${new URLSearchParams(normalize(type, query).filter(([k]) => !IGNORED.has(k)))}`);
+  } catch (e) {
+    throw badRequest(e instanceof Error ? e.message : String(e));
+  }
+  const conds = (req.filters ?? []).map((f) => cond(type, f, 'd'));
+  const count = Math.min(req.count ?? 20, MAX_COUNT); // _summary=count: parseSearchRequest reads params in order, as Medplum
+  const keys = (req.sortRules ?? []).map((s, i) => sortKey(type, s.code, !!s.descending, i));
+  keys.push({ expr: 'd.rid', desc: false });
+
+  // Distinct rids of each candidate set, counted up to the smallest so far (at most driveMax); the smallest drives.
+  // References count last: in a one-patient store, subject/patient/_compartment match nearly everything.
+  // Probes run smallest first, negations last.
+  const sizes = new Map<Cond, number>();
+  const { driveMax, walkPerRow } = searchTuning;
+  let cap = driveMax;
+  // A one-value match lists each rid about once (index order); OR lists and texts (text and display) need distinct.
+  const rank = (c: Cond) => (c.multi ? 0 : c.ref ? 2 : 1);
+  for (const c of [...conds].sort((x, y) => rank(x) - rank(y))) {
+    const n = c.set
+      ? (prep(`select count(*) n from (select ${c.multi ? 'distinct ' : ''}rid from (${c.set.sql}) limit ?)`).get(...c.set.args, cap) as { n: number }).n
+      : c.sql.startsWith('not ') ? Infinity : driveMax;
+    sizes.set(c, c.set && n >= cap ? cap + 0.5 : n); // reached the cap: no smaller than the current smallest
+    if (c.set && n < cap) cap = n;
+  }
+  conds.sort((x, y) => sizes.get(x)! - sizes.get(y)!);
+  const driver = conds.find((c) => c.set);
+  const size = driver ? sizes.get(driver)! : Infinity;
+  const probesFor = (driven: boolean) => conds.filter((c) => !driven || c !== driver);
+  const bundle: RawBundle = {};
+  if (req.total === 'accurate' || req.total === 'estimate') {
+    const src = driver ? `(${driver.set!.sql.replace(/^select /, 'select distinct ')}) d where 1` : `sortkeys d where d.type = ? and d.code = '_id'`;
+    const probes = probesFor(!!driver);
+    bundle.total = (prep(`select count(*) n from ${src}${probes.map((c) => ` and ${c.sql}`).join('')}`)
+      .get(...(driver ? driver.set!.args : [type]), ...probes.flatMap((c) => c.args)) as { n: number }).n;
+  }
+  if (count === 0) return bundle;
+
+  const offset = req.cursor ? 0 : req.offset ?? 0;
+  const cursor = req.cursor ? decodeCursor(req.cursor, keys.length) : undefined;
+  // mode walk: `d` is the first sort key's sortkeys row, walked in order (the whole index, or its first `budget` rows);
+  // mode driver: `d` is the driver set (or every resource of the type), sorted after the probes.
+  const run = (walk: boolean, budget?: number): Record<string, Arg>[] => {
+    const ks = keys.map((k, i) => (walk && i === 0 ? { ...k, expr: k.expr.replace('s0.', 'd.') } : k));
+    const col = keys[0].desc ? 'hi' : 'lo';
+    const [src, on, srcArgs]: [string, string, Arg[]] = walk
+      ? budget
+        ? [`(select * from sortkeys where type = ? and code = ? order by ${col}${keys[0].desc ? ' desc' : ''} limit ${budget}) d`, '1', [type, keys[0].code!]]
+        : ['sortkeys d', 'd.type = ? and d.code = ?', [type, keys[0].code!]]
+      : driver ? [`(${driver.set!.sql.replace(/^select /, 'select distinct ')}) d`, '1', driver.set!.args] : ['sortkeys d', "d.type = ? and d.code = '_id'", [type]];
+    const joins = ks.map((k, i) => (k.code && !(walk && i === 0) ? ` join sortkeys s${i} on s${i}.rid = d.rid and s${i}.code = ${lit(k.code)}` : '')).join('');
+    const probes = probesFor(!walk);
+    const args: Arg[] = [...srcArgs, ...probes.flatMap((c) => c.args)];
+    let after = '';
+    if (cursor) {
+      // Rows after the cursor in (key1, ..., rid) order, each key in its own direction; the redundant bound on the first key
+      // lets the walk seek to the cursor instead of stepping over earlier rows.
+      args.push(cursor[0]);
+      after = ` and ${ks[0].expr} ${ks[0].desc ? '<=' : '>='} ? and (${ks.map((k, i) => {
+        const eq = ks.slice(0, i).map((e, j) => { args.push(cursor[j]); return `${e.expr} = ?`; });
+        args.push(cursor[i]);
+        return `(${[...eq, `${k.expr} ${k.desc ? '<' : '>'} ?`].join(' and ')})`;
+      }).join(' or ')})`;
+    }
+    const sql = `select ${ks.map((k, i) => `${k.expr} k${i}`).join(', ')} from ${src}${joins} where ${on}${probes.map((c) => ` and ${c.sql}`).join('')}${after}
+      order by ${ks.map((k) => `${k.expr}${k.desc ? ' desc' : ''}`).join(', ')} limit ? offset ?`;
+    return prep(sql).all(...args, count + 1, offset) as Record<string, Arg>[];
+  };
+  let found: Record<string, Arg>[] | undefined;
+  if (keys[0].code && size >= driveMax) found = run(true);
+  else if (keys[0].code && walkPerRow * (count + 1 + offset) < size) {
+    // A small page from a large set: walk the first rows of the sort index and keep the result only if it is provably the
+    // page (full, and its last key comes before the last walked key, so no tied row was cut off); else use the driver.
+    const budget = walkPerRow * (count + 1 + offset);
+    const got = run(true, budget);
+    const edge = prep(`select ${keys[0].desc ? 'hi' : 'lo'} k from sortkeys where type = ? and code = ? order by k${keys[0].desc ? ' desc' : ''} limit 1 offset ${budget - 1}`)
+      .get(type, keys[0].code) as { k: Arg } | undefined;
+    if (!edge || (got.length > count && before(got[got.length - 1].k0, edge.k, keys[0].desc))) found = got;
+  }
+  found ??= run(false);
+  const more = found.length > count;
+  const page = found.slice(0, count);
+  const last = `k${keys.length - 1}`;
+  const rids = page.map((x) => x[last] as number);
+  const byRid = new Map<number, { id: string; json: string }>();
+  for (const x of rids.length ? prep(`select rid, id, json from resources where rid in (${qs(rids.length)})`).all(...rids) as { rid: number; id: string; json: string }[] : []) byRid.set(x.rid, x);
+  const matches = rids.map((rid) => byRid.get(rid)!);
+
+  const entry: RawEntry[] = matches.map((m) => ({
+    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match', json: req.fields ? JSON.stringify(elements(JSON.parse(m.json) as Resource, req.fields)) : m.json,
+  }));
+  const have = new Set(matches.map((m) => `${type}/${m.id}`));
+  const include = (list: { type: string; id: string; json: string }[]) => {
+    for (const x of list) {
+      const ref = `${x.type}/${x.id}`;
+      if (have.has(ref)) continue;
+      have.add(ref);
+      entry.push({ fullUrl: `${base}fhir/R4/${ref}`, mode: 'include', json: x.json });
+    }
+  };
+  for (const inc of req.include ?? []) {
+    if (inc.modifier === 'iterate') throw badRequest('Unsupported _include:iterate');
+    if (param(type, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _include parameter: ${inc.resourceType}:${inc.searchParam}`);
+    if (!rids.length) continue;
+    const refs = prep(`select distinct val from idx where rid in (${qs(rids.length)}) and code = ? order by rowid`).all(...rids, inc.searchParam) as { val: string }[];
+    for (const { val } of refs) {
+      const [t, id, extra] = val.split('/');
+      if (!t || !id || extra !== undefined || (inc.targetType && inc.targetType !== t)) continue;
+      include(prep('select type, id, json from resources where type = ? and id = ?').all(t, id) as { type: string; id: string; json: string }[]);
+    }
+  }
+  for (const inc of req.revInclude ?? []) {
+    if (inc.modifier === 'iterate') throw badRequest('Unsupported _revinclude:iterate');
+    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _revinclude parameter: ${inc.resourceType}:${inc.searchParam}`);
+    if (!matches.length) continue;
+    include(prep(`select r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(matches.length)})) order by r.rid`)
+      .all(inc.resourceType, inc.searchParam, ...matches.map((m) => `${type}/${m.id}`)) as { type: string; id: string; json: string }[]);
+  }
+  bundle.entry = entry;
+
+  bundle.link = [{ relation: 'self', url: `${base}fhir/R4/${type}?${new URLSearchParams(query)}` }];
+  if (more) {
+    // Medplum's next links carry _elements as _fields.
+    const next = new URLSearchParams(query.filter(([k]) => k !== '_offset' && k !== '_cursor').map(([k, v]) => [k === '_elements' ? '_fields' : k, v]));
+    next.set('_count', String(count));
+    const lastRow = page[page.length - 1];
+    next.set('_cursor', encodeCursor(keys.map((_, i) => lastRow[`k${i}`])));
+    bundle.link.push({ relation: 'next', url: `${base}fhir/R4/${type}?${next}` });
+  }
+  return bundle;
+}

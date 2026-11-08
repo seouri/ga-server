@@ -56,7 +56,7 @@ const isValidationFailure = (e: unknown): e is OperationOutcomeError => {
   return getStatus(e.outcome) === 400 && issues.length > 0 && issues.every((i) => VALIDATION.includes(i.code) && !!i.expression?.length);
 };
 
-// Sticky protection: source-conflict (a newer source differed) or person-edited (GA wrote only bookkeeping onto a person's edit, becoming its author).
+// Sticky protection: source-conflict (a newer source differed), or person-edited (set in the Medplum era on a record a person had edited; no longer set).
 const shielded = (r: Resource) => hasTag(r, 'source-conflict') || hasTag(r, 'person-edited');
 const srcDate = (r: R) => r.extension?.find((e) => e.url === SRC_DATE)?.valueDateTime;
 const idKey = (i: Identifier) => `${i.system}|${i.value}`;
@@ -165,8 +165,8 @@ export async function linkCandidates(
   return { found: [...found.values()], free };
 }
 
-// author: GA's own writer reference (ClientApplication/<id>); a record last changed by anyone else is a person's edit.
-export function decide(existingRes: Resource | undefined, incomingRes: Resource, author?: string): Decision {
+// Who wrote a record comes from GA's writer tags (writer-importer, writer-agent): the store has no logins, so no meta.author.
+export function decide(existingRes: Resource | undefined, incomingRes: Resource): Decision {
   if (!existingRes) return 'create';
   const existing = existingRes as R;
   const incoming = incomingRes as R;
@@ -177,13 +177,12 @@ export function decide(existingRes: Resource | undefined, incomingRes: Resource,
   const subset = idList(incoming).every((i) => have.has(idKey(i)));
   // Unchanged content skips, except that a newer source re-confirms an importer-owned medication, problem or allergy: the currency rule
   // reads its source date, and a stale one would call an item still on the latest list "unconfirmed".
-  const lastBy = existing.meta?.author?.reference;
-  const importerOwned = hasTag(existing, 'writer-importer') && !shielded(existing) && !(author && lastBy && lastBy !== author);
+  const importerOwned = hasTag(existing, 'writer-importer') && !shielded(existing);
   // Portal-synced records are confirmed by last-seen instead (advanced separately), so only file imports need the refresh.
   const dated = DATED.has(incoming.resourceType) && !existing.extension?.some((e) => e.url === LAST_SEEN);
   if (subset && canon(body(existing)) === canon(body(incoming))) return id && importerOwned && dated ? 'update' : 'skip';
-  // Only a write that would actually happen is a conflict. The protection tags stick: writing them made GA the author.
-  if ((author && lastBy && lastBy !== author) || shielded(existing)) return 'conflict';
+  // Only a write that would actually happen is a conflict. The protection tags stick.
+  if (shielded(existing)) return 'conflict';
   return hasTag(existing, 'writer-agent') && hasTag(incoming, 'writer-importer') ? 'conflict' : 'update';
 }
 
@@ -262,17 +261,8 @@ export async function importResources(
   const arrived = (): Extension => ({ url: ARRIVED, valueInstant: new Date().toISOString() });
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed); // throws before any write
-  const me = client.getProfile();
-  const author = me ? `${me.resourceType}/${me.id}` : undefined;
-  const byOther = (r: Resource): boolean => {
-    const lastBy = r.meta?.author?.reference;
-    return !!(author && lastBy && lastBy !== author);
-  };
-  // A GA write onto a record a person last changed makes GA its author: keep it protected with the sticky person-edited tag
-  // (not source-conflict: nothing differs yet; a later differing source turns it into a conflict through decide()).
-  const protect = (r: Resource): Resource => (byOther(r) && !shielded(r) ? withTag(r, 'person-edited') : r);
-  // A person (or the agent) last shaped this record: smart fill-only writes leave it alone (last-seen still advances).
-  const personEdited = (r: Resource): boolean => byOther(r) || shielded(r) || hasTag(r, 'writer-agent');
+  // The agent wrote this record (or it is protected): smart fill-only writes leave it alone (last-seen still advances).
+  const agentOrShielded = (r: Resource): boolean => shielded(r) || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
   const keep = async (r: R, changed: boolean): Promise<void> => {
     const { extension: ext = [], ...rest } = r;
@@ -280,7 +270,7 @@ export async function importResources(
     if (!changed && !seen) return;
     const mark = { url: LAST_SEEN, valueDateTime: source.seenAt };
     const extension = !seen ? ext : ext.some((e) => e.url === LAST_SEEN) ? ext.map((e) => (e.url === LAST_SEEN ? mark : e)) : [...ext, mark];
-    await client.updateResource(protect({ ...rest, ...(extension.length && { extension }) } as Resource));
+    await client.updateResource({ ...rest, ...(extension.length && { extension }) } as Resource);
     if (seen) report.seen = (report.seen ?? 0) + 1;
   };
 
@@ -396,10 +386,10 @@ export async function importResources(
         ).then((ms) => ms.filter((m) => sameDay(when, effective(m) ?? '') && stripConcept(m).code?.coding?.some((c) => key.startsWith(`${c.system ?? ''}|${c.code}|`)))) // never on a GA-added code
       : [];
     // A kept record (skipped, linked, filled) re-coded by this import's maps, so an entry learned in this batch reaches it too.
-    // Not a person's record, and never by a map other than its own: a record another GA source already coded keeps that coding,
+    // Not an agent-written or protected record, and never by a map other than its own: a record another GA source already coded keeps that coding,
     // and a coded record is never stripped to unmapped. Returns ex itself when nothing would change.
     const recode = (ex: R): R => {
-      if (personEdited(ex)) return ex;
+      if (agentOrShielded(ex)) return ex;
       const hasGa = gaCodings(ex).length > 0;
       const others = idList(ex).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== ident.system);
       if (hasGa && others) return ex;
@@ -408,7 +398,7 @@ export async function importResources(
     };
     // Only top-level fields the record lacks (any choice variant counts as present), plus the incoming identifiers.
     const fillOnto = async (ex: R): Promise<R> => {
-      if (personEdited(ex)) {
+      if (agentOrShielded(ex)) {
         if (carries(ex)) await keep(ex, false);
         report.skipped++;
         return ex;
@@ -441,7 +431,7 @@ export async function importResources(
       if (existing) {
         target = existing;
         const filled = fillFrom(existing, coded, source);
-        const d = decide(existing, filled, author);
+        const d = decide(existing, filled);
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
         const inc = new Set(idList(incoming).map(idKey));
@@ -478,7 +468,7 @@ export async function importResources(
         if (same) {
           target = same;
           const filled = fillFrom(same, coded, source);
-          const d = decide(same, filled, author);
+          const d = decide(same, filled);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
           const otherOntoApple = !fromApple && isApple(same) && !hasNonApple(same); // hospital body beats an Apple-only one
@@ -496,7 +486,7 @@ export async function importResources(
             withTag({ ...coded, extension: [...(coded.extension ?? []), arrived(), ...matches.map(dupExt)] } as Resource, 'possible-duplicate'),
           );
           for (const m of matches) {
-            const tag = protect(hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate'));
+            const tag = hasTag(m, 'possible-duplicate') ? m : withTag(m, 'possible-duplicate');
             await client.updateResource({ ...tag, extension: [...(m.extension ?? []), dupExt(target)] } as Resource);
           }
           report.possibleDuplicates++;

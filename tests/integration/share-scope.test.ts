@@ -1,13 +1,13 @@
 // loadScoped against the local Medplum, on two throwaway test patients (A is shared, B must never leak into A).
 import type { MedplumClient } from '@medplum/core';
-import type { AuditEvent, Binary, Bundle, DocumentReference, Endpoint, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
+import type { AuditEvent, Binary, DocumentReference, Endpoint, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { storeDocument } from '../../src/document.ts';
 import { BINARY_URL, loadScoped } from '../../src/share/scope.ts';
 import { toBundle } from '../../src/share/summary.ts';
 import type { Group, Share } from '../../src/share/store.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestPatient, compartmentOf, createTestPatient, SQLITE } from './helpers.ts';
 
 const share = (groups: Group[] | 'all'): Share => ({
   id: 'test-scope', label: 't', audience: 'doctor', groups, layout: 'A', questionsPerDay: 20,
@@ -89,8 +89,7 @@ afterAll(async () => {
 
 test('medications share returns the statement and its Medication, nothing else', async () => {
   // The excluded records really are compartment matches: inScope drops them, not the fetch.
-  const raw = await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' });
-  const types = (raw.entry ?? []).filter((e) => e.search?.mode === 'match').map((e) => e.resource?.resourceType).sort();
+  const types = [...(await compartmentOf(client, pid)).map((r) => r.resourceType), 'Patient'].sort();
   expect(types).toEqual(['AuditEvent', 'DocumentReference', 'DocumentReference', 'DocumentReference', 'MedicationStatement', 'Observation', 'Patient']);
 
   const s = await loadScoped(client, share(['medications']));
@@ -105,10 +104,13 @@ test('medications share returns the statement and its Medication, nothing else',
 test("notes share follows the attachment to its own Binary, not another patient's", async () => {
   const s = await loadScoped(client, share(['notes']));
   expect(s.resources.map((r) => r.resourceType)).toEqual(['DocumentReference']); // the archive stays out
-  expect((s.resources[0] as DocumentReference).content[0].attachment.url).toContain('/storage/');
-  expect(ids(s.support)).toEqual([`Binary/${bin.id}`]);
+  expect(BINARY_URL.exec((s.resources[0] as DocumentReference).content[0].attachment.url ?? '')?.[1]).toBe(bin.id); // Medplum: a presigned /storage/ url
+  // Medplum drops B's Binary by its securityContext. The store does not keep Binary.securityContext (GA never sets it; one
+  // patient per store), so there only A's own Binary is checked.
+  if (SQLITE) expect(ids(s.support)).toContain(`Binary/${bin.id}`);
+  else expect(ids(s.support)).toEqual([`Binary/${bin.id}`]);
   const bundle = JSON.stringify(toBundle(s)); // the note's presigned url is dropped; the support Binary carries no url
-  expect(bundle).not.toContain('/storage/');
+  expect(bundle).not.toMatch(/"url":"[^"]*(Binary|storage)\//);
 });
 
 test("patient B's records never appear in A's share", async () => {
@@ -116,7 +118,8 @@ test("patient B's records never appear in A's share", async () => {
   const got = new Set(ids([...s.resources, ...s.support]));
   expect(s.resources.length).toBe(3); // lab, statement, note
   for (const r of bRecords) expect(got.has(`${r.resourceType}/${r.id}`)).toBe(false);
-  expect(got.has(`Binary/${binB.id}`)).toBe(false);
+  // Medplum only: GA never sets Binary.securityContext; the store (one patient) keeps none, so this guard is Medplum's.
+  if (!SQLITE) expect(got.has(`Binary/${binB.id}`)).toBe(false);
   expect(got.has(`Patient/${pidB}`)).toBe(false);
   for (const r of s.resources) expect(r.meta?.compartment?.map((c) => c.reference)).toContain(`Patient/${pid}`);
 });

@@ -98,16 +98,6 @@ test('C-CDA records are keyed by the custodian read from the stored source file;
   await client.deleteResource('Binary', bin.id as string);
 });
 
-test('a record last changed by someone else is left alone', async () => {
-  const k = `good-${randomUUID()}`;
-  await agentGlucose(`smart:${k}`, '2345-7');
-  const r = await client.createResource(withSrc(lab('Glucose', '2024-05-01'), ['smart'], 'https://example.org/fhir', [`urn:ga-server:id:smart:${k}`]));
-  expect(r.meta?.author?.reference).toBeTruthy();
-  const other = new Proxy(client, { get: (t, p) => (p === 'getProfile' ? () => ({ resourceType: 'ClientApplication', id: 'someone-else' }) : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)) });
-  expect((await applyAll(other, pid, { source: `smart:${k}`, key: 'glucose|mg/dl' })).changed).toBe(0);
-  expect((await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl' })).changed).toBe(1);
-});
-
 test('a record with several source tags takes the one whose key has a map, else is skipped', async () => {
   const k = `good-${randomUUID()}`;
   await agentGlucose(`smart:${k}`, '2345-7');

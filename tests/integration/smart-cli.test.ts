@@ -1,17 +1,17 @@
 // ga connect / sync / status / disconnect end to end: the CLI against the synthetic mock and the local Medplum, on a test patient.
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Resource } from '@medplum/fhirtypes';
+import type { Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { defaultConfigPath, getClient, loadConfig } from '../../src/config.ts';
+import { getClient, loadConfig } from '../../src/config.ts';
 import { sourceKey } from '../../src/smart/auth.ts';
 import { ensureKeys, readSources } from '../../src/smart/store.ts';
 import { serveFixtures, startMock } from '../smart/mock-server.ts';
 import type { MockSmart } from '../smart/mock-server.ts';
-import { cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { childConfig, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
 let dir: string;
@@ -30,10 +30,7 @@ const cli = (...args: string[]): Promise<{ code: number; stdout: string; stderr:
       (e, stdout, stderr) => resolve({ code: e ? ((e as { code?: number }).code ?? 1) : 0, stdout, stderr }),
     ),
   );
-const compartment = async (): Promise<Resource[]> =>
-  ((await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' })).entry ?? [])
-    .filter((e) => e.search?.mode === 'match' && e.resource?.resourceType !== 'Patient')
-    .map((e) => e.resource as Resource);
+const compartment = (): Promise<Resource[]> => compartmentOf(client, pid);
 const endpoint = async () =>
   (await client.searchResources('Endpoint', { identifier: `urn:ga-server:id:smart-source|${key}` }, { cache: 'no-cache' })).find(
     (e) => e.extension?.some((x) => x.valueReference?.reference === `Patient/${pid}`),
@@ -44,9 +41,8 @@ beforeAll(async () => {
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   dir = mkdtempSync(join(tmpdir(), 'ga-smart-cli-int-'));
-  // Medplum connection fields only, and the test patient (also passed as GA_PATIENT_ID): never the real patient id.
-  const { baseUrl, clientId, clientSecret, converterUrl } = JSON.parse(readFileSync(defaultConfigPath(), 'utf8'));
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ baseUrl, clientId, clientSecret, patientId: pid, converterUrl }), { mode: 0o600 });
+  // The store connection only, and the test patient (also passed as GA_PATIENT_ID): never the real patient id.
+  childConfig(dir, pid);
   const { publicJwks } = await ensureKeys(join(dir, 'smart'));
   m = await startMock({ clientId: 'synthetic-client', jwks: publicJwks });
   serveFixtures(m);

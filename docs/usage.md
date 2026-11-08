@@ -61,7 +61,7 @@ The server tells Claude that GA is your health record, so plain questions work. 
 > Import ~/Downloads/HealthSummary_<date> into GA.
 ```
 
-Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`). The MCP tools can't import C-CDA themselves.
+Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`), after starting the converter ([Import](#import)). The MCP tools can't import C-CDA themselves.
 
 **Review and tidy**
 
@@ -92,8 +92,10 @@ Codex, Hermes or any MCP client: register a stdio MCP server with command `node 
 
 ## Import
 
+C-CDA needs Microsoft's converter, which runs only when asked: start it with `docker compose --profile ccda up -d fhir-converter` (`ga import` of a C-CDA folder prints this command when it is not running), and stop it afterwards with `docker compose stop fhir-converter` if you like.
+
 ```sh
-ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op
+ga import <folder>             # C-CDA export (folder of XML files; needs the converter, above); re-importing is a no-op
 ga import /path/to/ehi-folder --tz America/New_York  # Epic EHI export; --tz = zone of the export's local times
 ga import /path/to/apple_health_export  # unzipped Apple Health export folder (unzip export.zip first)
 
@@ -110,6 +112,6 @@ An Apple Health export brings per-reading vitals, daily summaries (heart rate, s
 
 - `possible-duplicate`: the same test on the same day, at the same moment with a different value, at another time with the same number (two sources' times for one result), or with no time of day on one side. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.
 - `source-conflict`: a newer import differs from a record a person or agent changed; GA kept the existing record and never overwrites it. Same search with `source-conflict`.
-- `person-edited`: a person changed this record and GA later wrote only its own bookkeeping onto it (a portal sync's last-seen, a second source's identifier). Nothing differs; the tag keeps the edit protected, and a later source that does differ adds `source-conflict`.
+- `person-edited`: set by older GA versions on a record a person had changed in the Medplum app. GA no longer sets it (records are told apart by GA's writer tags), but it keeps protecting such a record: a later source that differs adds `source-conflict`.
 - A PDF/image is imported once; importing the same file again is refused.
 - Stale medications: a medication dropped from a newer list is not marked stopped. A portal-synced medication is current only if its `last-seen` matches its source's latest sync; otherwise, an `active` medication whose source date is older than the newest C-CDA or EHI import, or than the newest sync of a portal with medications enabled, is unconfirmed. A portal that syncs only labs never makes a medication, problem or allergy unconfirmed.

@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Condition, MedicationStatement, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Condition, MedicationStatement, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { CONCEPT_SRC } from '../../src/concept-apply.ts';
 import { loadMaps, lookup, mapUrl, sourceKey, upsertEntry } from '../../src/conceptmap.ts';
 import { importResources } from '../../src/engine.ts';
 import { APPLE, ARRIVED, arrivedAt, LAST_SEEN, type SourceInfo, stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
 let pid: string;
@@ -52,9 +52,7 @@ const med = (id: string, status: MedicationStatement['status']): MedicationState
   subject: me(),
 });
 const all = async (): Promise<Resource[]> =>
-  ((await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' })).entry ?? [])
-    .map((e) => e.resource as Resource)
-    .filter((r) => r.resourceType !== 'Patient');
+  compartmentOf(client, pid);
 
 test('reimport is a no-op', async () => {
   const mrn = uid('mrn');
@@ -668,26 +666,6 @@ test('a conflict wins over fill-only: no fill, no smart identifier, no last-seen
   expect(systems(found)).not.toContain(SMART_SYS);
   expect(found.issued).toBeUndefined();
   expect(found.extension?.some((e) => e.url === LAST_SEEN)).toBe(false);
-});
-
-test('a person-edited record gets neither a fill nor a last-seen stamp from an older-dated smart copy', async () => {
-  const pl = { system: PROBLEM_OID, value: uid('pl') };
-  await importResources(client, [ehiProblem(pl)], ehiSrc('2026-06-01'), pid, 'h');
-  const [before] = await byId('Condition', pl.system, pl.value);
-  // Someone other than GA's own client last wrote it: the engine sees a different author than the record's.
-  const spy = vi.spyOn(client, 'getProfile').mockReturnValue({ resourceType: 'Practitioner', id: 'someone-else' });
-  try {
-    const s = smartSrc('2026-11-05T00:00:00Z', { fillOnly: () => true, dateOf: () => '2026-01-01T00:00:00Z', seenAt: '2026-11-05T00:00:00Z' });
-    expect(await importResources(client, [smartProblem(pl, 'resolved')], s, pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, conflicts: 0, skipped: 1, seen: 0 });
-  } finally {
-    spy.mockRestore();
-  }
-  const [found] = await byId('Condition', pl.system, pl.value);
-  expect(found.meta?.versionId).toBe(before.meta?.versionId);
-  expect(found.onsetDateTime).toBeUndefined();
-  expect(systems(found)).not.toContain(SMART_SYS);
-  expect(found.extension?.some((e) => e.url === LAST_SEEN)).toBe(false);
-  expect(tagged(found, 'source-conflict')).toBe(false);
 });
 
 test('a fill-only smart copy of an Apple-only reading takes over the body (hospital beats Apple)', async () => {

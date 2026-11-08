@@ -99,6 +99,19 @@ test('a valid token runs the tools for the client app', async () => {
   expect((await fetch(`${base}/mcp`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(405);
 });
 
+// The store (ga-store, 127.0.0.1:8120) is never reachable through the one public service.
+test('the gateway never proxies the FHIR store', async () => {
+  for (const pub of [PUBLIC, null]) {
+    await start(pub);
+    for (const path of ['/fhir/R4/Patient', '/fhir/R4/', '/fhir', '/healthz']) {
+      const r = await fetch(`${base}${path}`, { headers: { authorization: 'Bearer x' } });
+      expect(r.status, path).toBe(404);
+      expect(await r.text()).not.toContain('resourceType');
+    }
+    await new Promise((ok) => server.close(ok));
+  }
+});
+
 test('bad bearer tokens get 401 and run nothing', async () => {
   await start();
   await expect401(await initialize());

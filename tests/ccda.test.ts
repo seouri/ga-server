@@ -120,3 +120,8 @@ test('custodian: own element only, namespace prefix and entities handled, never 
   // A malformed numeric entity falls back to no custodian (the folder name keys the source), never a throw.
   expect(custodian(doc('<custodian><representedCustodianOrganization><name>A &#99999999;</name></representedCustodianOrganization></custodian>'))).toBeUndefined();
 });
+
+test('convertCcda with the converter not running names the command that starts it', async () => {
+  const { convertCcda } = await import('../src/ccda.ts');
+  await expect(convertCcda('<ClinicalDocument/>', 'http://127.0.0.1:9/')).rejects.toThrow('docker compose --profile ccda up -d fhir-converter');
+});

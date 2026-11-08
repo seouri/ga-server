@@ -101,7 +101,8 @@ export function recordRows(s: Scoped): Row[] {
   return [...groups].map(([group, items]) => ({ group, items: items.sort(newestFirst) }));
 }
 
-// Medplum answers attachment urls with presigned storage URLs (or Binary refs): useless outside, and a bearer link while valid.
+// Attachment urls are useless outside: Medplum answers presigned storage URLs (a bearer link while valid), GA's store the
+// relative Binary/<id> it was written with (stripped the same way; tests/share-export.test.ts covers both).
 const dropStorageUrls = (r: Resource): Resource =>
   r.resourceType !== 'DocumentReference' || !r.content ? r : { ...r, content: r.content.map((c) => {
     if (!c.attachment?.url || !BINARY_URL.test(c.attachment.url)) return c;

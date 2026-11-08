@@ -54,7 +54,7 @@ node src/cli.ts concepts apply               # code stored records and re-apply 
 
 Run it after upgrading GA. It is safe to run again: a second run changes nothing.
 
-The learned maps live in the FHIR server, so they are in the nightly backup and come back with a restore. Records you edited by hand are left alone.
+The learned maps live in the FHIR server, so they are in the nightly backup and come back with a restore.
 
 ## For agents
 
