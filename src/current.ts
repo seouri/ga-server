@@ -63,7 +63,8 @@ export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: st
   }
   const d = extDate(r, SRC_DATE);
   const cutoff = Math.max(ctx.newestImport, ctx.portal.get(kind(r.resourceType)) ?? -Infinity);
-  return d !== undefined && d < cutoff
+  // Calendar days: a list exported hours before the import on the same day is not older.
+  return d !== undefined && Number.isFinite(cutoff) && day(d) < day(cutoff)
     ? { currency: 'unconfirmed', reason: `last listed ${day(d)}, before the newest hospital record (${day(cutoff)}); it may have been stopped` }
     : { currency: 'current', reason: 'no newer hospital record leaves it out' };
 }

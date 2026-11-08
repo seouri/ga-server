@@ -40,6 +40,11 @@ test('no last-seen: source-date vs newest import', () => {
   expect(currency(med({ date: T1 }), ctx)).toBe('current');
   expect(currency(med({ date: T0 }), ctx)).toBe('unconfirmed');
 });
+test('same calendar day is not older; the day before is', () => {
+  const c = currencyContext([med({ date: '2026-11-04T18:00:00Z', tag: 'src-ehi' })], []);
+  expect(currency(med({ date: '2026-11-04T03:00:00Z' }), c)).toBe('current');
+  expect(currency(med({ date: '2026-11-03T23:59:00Z' }), c)).toBe('unconfirmed');
+});
 test('newest import also counts tagged resources', () => {
   const c = currencyContext([med({ date: '2026-12-01T00:00:00Z', tag: 'src-ehi' })], [ep('a', T1)]);
   expect(currency(med({ date: T1 }), c)).toBe('unconfirmed');

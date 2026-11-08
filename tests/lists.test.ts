@@ -31,3 +31,21 @@ test('problems: problem list only; allergies: unstated status kept, refuted drop
   expect(listRows(all, ctx, 'problems').map((r) => r.name)).toEqual(['Asthma']);
   expect(listRows(all, ctx, 'allergies')).toEqual([{ name: 'Penicillin', status: 'not stated', reason: expect.stringMatching(/possibly active/), id: 'al' }]);
 });
+
+test('one row per item across sources; best currency wins, inactive never hides active', () => {
+  const stamp = (d: string) => ({ extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }] });
+  const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '617310' }], text: 'atorvastatin 40 mg tablet' };
+  const ehi = { resourceType: 'MedicationRequest', id: 'r', status: 'active', medicationCodeableConcept: rx, meta: { source: '/x/ehi', tag: [{ system: 'urn:ga-server:tag', code: 'src-ehi' }] }, ...stamp('2026-11-04T18:00:00Z') };
+  const ccda = { resourceType: 'MedicationStatement', id: 's', status: 'active', medicationCodeableConcept: { text: 'Atorvastatin 40 MG Tablet' }, meta: { source: '/x/ccda.xml' }, ...stamp('2026-11-04T03:00:00Z') };
+  const stopped = { resourceType: 'MedicationStatement', id: 'z', status: 'stopped', medicationCodeableConcept: { text: 'atorvastatin 40 mg tablet' }, meta: { source: '/x/old.pdf' } };
+  const other = { resourceType: 'MedicationStatement', id: 'o', status: 'active', medicationCodeableConcept: { text: 'Lisinopril' }, ...stamp('2026-11-04T03:00:00Z') };
+  const rs = [ccda, ehi, stopped, other] as Resource[];
+  const c = currencyContext(rs, []);
+  const rows = listRows(rs, c, 'medications', 'all');
+  expect(rows.map((r) => r.name?.toLowerCase())).toEqual(['atorvastatin 40 mg tablet', 'lisinopril']);
+  expect(rows[0]).toMatchObject({ currency: 'current', source: 'ccda.xml; ehi; old.pdf', ids: ['s', 'r', 'z'], id: 's' });
+  const cond = (id: string, src: string) => ({ resourceType: 'Condition', id, clinicalStatus: { coding: [{ code: 'active' }] }, category: [{ coding: [{ code: 'problem-list-item' }] }], code: { text: 'Asthma' }, meta: { source: src } });
+  const p = listRows([cond('1', '/a/one'), cond('2', '/a/two')] as Resource[], c, 'problems');
+  expect(p).toHaveLength(1);
+  expect(p[0]).toMatchObject({ source: 'one; two', ids: ['1', '2'] });
+});

@@ -1,14 +1,16 @@
 // current_medications, current_problems, allergies: active records with the currency rule (src/current.ts) already applied.
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Endpoint, Resource } from '@medplum/fhirtypes';
+import type { CodeableConcept, Endpoint, Resource } from '@medplum/fhirtypes';
+import { trusted } from './concept-apply.ts';
+import { RXNORM } from './concepts.ts';
 import { currencyContext, explain, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
 import { collect, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
-type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string };
+type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string; ids?: string[] };
 
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
@@ -17,10 +19,27 @@ const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].i
 
 export const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
+
+// The drug's concept: its own, else the referenced Medication's code, else the reference's display. meds: Medication by `Medication/<id>`.
+export const medCode = (r: Resource, meds: Map<string, Resource>): { cc?: CodeableConcept; owner: Resource } => {
+  const x = r as Record<string, any>;
+  const ref = x.medicationReference as { reference?: string; display?: string } | undefined;
+  const m = ref?.reference ? meds.get(ref.reference) : undefined;
+  if (x.medicationCodeableConcept) return { cc: x.medicationCodeableConcept, owner: r };
+  if ((m as Record<string, any> | undefined)?.code) return { cc: (m as Record<string, any>).code, owner: m! };
+  return { cc: ref?.display ? { text: ref.display } : undefined, owner: r };
+};
+// Both keys of a drug (its RxNorm code and its name), so an uncoded copy of a coded drug is the same drug.
+export const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
+  const rx = (owner ? trusted(owner, cc?.coding) : cc?.coding ?? []).find((c) => c.system === RXNORM)?.code;
+  const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
+  return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
+};
+
 // all: every fetched resource (all four covered types, any status, plus included Medications); the context needs them all.
 export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all'): ListRow[] {
   const meds = medMap(all);
-  const rows = all.flatMap((res): ListRow[] => {
+  const items = all.flatMap((res): { row: ListRow; keys: string[]; code?: string }[] => {
     const r = res as Any;
     if (!TYPES[kind].includes(r.resourceType)) return [];
     if (kind === 'problems' && !r.category?.some((c: Any) => c.coding?.some((x: Any) => x.code === 'problem-list-item'))) return [];
@@ -44,8 +63,28 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,
     };
-    return [row];
+    const cc = kind === 'medications' ? medCode(res, meds).cc : r.code;
+    const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
+    const dupKeys = kind === 'medications' ? medKeys(cc, res) : name ? [`name:${name}`] : [];
+    const coding = kind === 'medications' ? undefined : r.code?.coding?.find((x: Any) => x.system && x.code);
+    return [{ row, keys: dupKeys, code: coding && `${coding.system}|${coding.code}` }];
   });
+  // One row per item across sources: same RxNorm or name (problems, allergies: and no differing standard codes). The best currency wins.
+  const groups: { best: ListRow; keys: Set<string>; code?: string; sources: Set<string>; ids: string[] }[] = [];
+  for (const { row, keys, code } of items) {
+    const g = keys.length ? groups.find((g) => keys.some((k) => g.keys.has(k)) && !(code && g.code && code !== g.code)) : undefined;
+    if (!g) { groups.push({ best: row, keys: new Set(keys), code, sources: new Set(row.source ? [row.source] : []), ids: row.id ? [row.id] : [] }); continue; }
+    keys.forEach((k) => g.keys.add(k));
+    g.code ??= code;
+    if (row.source) g.sources.add(row.source);
+    if (row.id) g.ids.push(row.id);
+    if (rank(row) < rank(g.best)) g.best = row;
+  }
+  const rows = groups.map((g): ListRow => ({
+    ...g.best,
+    ...(g.sources.size ? { source: [...g.sources].sort().join('; ') } : {}),
+    ...(g.ids.length > 1 ? { ids: g.ids } : {}),
+  }));
   // Current first, then unconfirmed, unstated, inactive; newest first within each.
   return rows.sort((a, b) => rank(a) - rank(b) || (b.since ?? '').localeCompare(a.since ?? ''));
 }

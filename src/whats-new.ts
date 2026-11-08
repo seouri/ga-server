@@ -3,13 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
-import { trusted } from './concept-apply.ts';
-import { RXNORM } from './concepts.ts';
 import { defaultConfigPath } from './config.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { fit, groupLabs, highLow, labRow, loadObservations, searchAll } from './labs.ts';
-import { concept, listRows, loadLists, medMap } from './lists.ts';
+import { concept, listRows, loadLists, medCode, medKeys, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
 import { messageText, noteText, snippet } from './notes.ts';
@@ -117,21 +115,6 @@ export function labItems(arrived: Observation[], allLabs: Observation[], asOf: s
   }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 }
 
-// The drug's concept: its own, else the referenced Medication's code, else the reference's display. meds: Medication by `Medication/<id>`.
-const medCode = (r: Resource, meds: Map<string, Resource>): { cc?: CodeableConcept; owner: Resource } => {
-  const x = r as Record<string, any>;
-  const ref = x.medicationReference as { reference?: string; display?: string } | undefined;
-  const m = ref?.reference ? meds.get(ref.reference) : undefined;
-  if (x.medicationCodeableConcept) return { cc: x.medicationCodeableConcept, owner: r };
-  if ((m as Record<string, any> | undefined)?.code) return { cc: (m as Record<string, any>).code, owner: m! };
-  return { cc: ref?.display ? { text: ref.display } : undefined, owner: r };
-};
-// Both keys of a drug (its RxNorm code and its name), so an uncoded copy of a coded drug is the same drug.
-const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
-  const rx = (owner ? trusted(owner, cc?.coding) : cc?.coding ?? []).find((c) => c.system === RXNORM)?.code;
-  const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
-  return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
-};
 const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);
 
 // all: every medication record (any source) plus the Medication resources they reference.
