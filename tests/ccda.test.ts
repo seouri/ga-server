@@ -341,6 +341,15 @@ test('an INT value is a unitless quantity, as on the Microsoft path, so GA\'s re
   expect(sdoh?.category?.map((c) => c.coding?.[0].code)).toEqual(['survey', 'social-history']);
 });
 
+test('an observation with a value but no code is imported (its code data-absent); one with neither is named', () => {
+  const child = (value: string) => `<entryRelationship typeCode="COMP"><observation classCode="OBS" moodCode="EVN"><code nullFlavor="UNK"/><statusCode code="completed"/>${value}</observation></entryRelationship>`;
+  const xml = (value: string) => EPIC.replace('<value xsi:type="ST">Not currently</value>', `<value xsi:type="ST">Not currently</value>${child(value)}`);
+  const kept = convertCcdaLocal(xml('<value xsi:type="ST">Lives alone</value>'));
+  expect(kept.notImported).toEqual([]);
+  expect(kept.resources.some((r) => r.resourceType === 'Observation' && (r as Observation).valueString === 'Lives alone')).toBe(true);
+  expect(convertCcdaLocal(xml('')).notImported).toEqual([{ section: 'Social History', entries: 1, reason: 'observation without a code' }]);
+});
+
 test('every section of the Epic-style fixture is imported', () => {
   const out = convertCcdaLocal(EPIC);
   const comp = out.resources.find((r) => r.resourceType === 'Composition') as Composition;

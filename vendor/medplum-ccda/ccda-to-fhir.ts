@@ -1714,8 +1714,15 @@ class CcdaToFhirConverter {
   }
 
   private processVitalsObservation(observation: CcdaObservation, section: CcdaSection): Observation | undefined {
-    // Skip observations without a valid code (e.g., nullFlavor="NA")
-    const code = this.mapCode(observation.code);
+    // Skip observations with neither a valid code (e.g., nullFlavor="NA") nor a value; a value without a code is still a result,
+    // and FHIR requires a code, so it is data-absent
+    const value = observation.value as Record<string, unknown> | undefined;
+    const valued = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText'].some((k) => value?.[k] !== undefined);
+    const code =
+      this.mapCode(observation.code) ??
+      (valued
+        ? { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] }
+        : undefined);
     if (!code) {
       return undefined;
     }

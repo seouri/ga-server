@@ -277,6 +277,8 @@ const PLANNED_MOODS = new Set(['INT', 'PRP', 'RQO', 'ARQ']);
 // (age at onset, caused death); a negated one is none (medplum#11243).
 const FAMILY_DETAILS = [OID.OID_AGE_OBSERVATION, OID.OID_FAMILY_HISTORY_DEATH_OBSERVATION];
 const negated = (o: CcdaObservation) => o['@_negationInd'] === 'true';
+// What makes an observation value say something (processVitalsObservation keeps an uncoded observation that has one).
+const VALUED = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText'];
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
 export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
@@ -354,7 +356,8 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
         add(name, root0(o.templateId), (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []).length, 'observation in goal not converted');
         return;
       }
-      if (!o.code) {
+      // No code and no value: the library makes no record (a value alone is kept, its code data-absent).
+      if (!o.code && !VALUED.some((k) => (o.value as X | undefined)?.[k] !== undefined)) {
         if (nested) add(name, root0(o.templateId), 1, 'observation without a code');
         return;
       }
