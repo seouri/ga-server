@@ -49,7 +49,7 @@ const BY_TYPE: Record<string, Group> = {
 };
 const DATE_PATHS = [
   'effectiveDateTime', 'effectivePeriod.start', 'issued', 'occurrenceDateTime', 'performedDateTime', 'performedPeriod.start',
-  'period.start', 'date', 'authoredOn', 'sent', 'authored', 'recordedDate', 'onsetDateTime', 'dateAsserted',
+  'period.start', 'date', 'authoredOn', 'sent', 'authored', 'recordedDate', 'onsetDateTime', 'dateAsserted', 'dispenseRequest.validityPeriod.start',
 ];
 // Only these are followed from in-scope records, one hop; they are never searchable on their own.
 const SUPPORT_REF = /^(Medication|Practitioner|PractitionerRole|Organization|Location|Binary)\/([A-Za-z0-9\-.]{1,64})(?:\/|$)/;
