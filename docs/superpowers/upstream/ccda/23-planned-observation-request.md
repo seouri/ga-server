@@ -46,7 +46,7 @@ Expected FHIR (today: a Goal "Unknown goal"):
 ## PR: fix(ccda): map planned observations to ServiceRequest
 
 - `processObservation`: in the Plan of Treatment section, an observation without a goal template whose moodCode is `INT`, `PRP`, `RQO` or `ARQ` goes to the new `processPlannedObservation`. Goal templates, `GOL` observations and the Goals section stay Goals.
-- `processPlannedObservation`: id and identifier; status from statusCode and intent from moodCode (INT → plan, PRP → proposal, RQO/ARQ → order), the maps the Reason for Referral builder already uses, moved to module constants; code; subject; `occurrenceDateTime` or `occurrencePeriod` from the effectiveTime (`mapObservationEffectiveTime`); authoredOn and requester from the first author; the observation's text, or the narrative it references, as a note.
+- `processPlannedObservation`: id and identifier; status from statusCode and intent from moodCode (INT → plan, PRP → proposal, RQO/ARQ → order), the maps the Reason for Referral builder already uses, moved to module constants; `doNotPerform: true` when the observation is negated (`negationInd="true"`: a plan not to do it); code; subject; `occurrenceDateTime` or `occurrencePeriod` from the effectiveTime (`mapObservationEffectiveTime`); authoredOn and requester from the first author; the observation's text, or the narrative it references, as a note.
 - Tests (`planned-observation.test.ts`): an RQO Planned Observation gives that ServiceRequest and no Goal; INT, PRP and ARQ give plan, proposal and order; a GOL observation in the same section stays a Goal.
 
 Not mapped: a value on a planned observation (unusual) and its child observations; GA names these in its own accounting.

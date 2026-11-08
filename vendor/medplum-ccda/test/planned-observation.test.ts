@@ -34,6 +34,12 @@ test('its intent follows moodCode: INT plan, PRP proposal, ARQ order', () => {
   expect([intent('INT'), intent('PRP'), intent('ARQ')]).toEqual(['plan', 'proposal', 'order']);
 });
 
+test('a negated planned observation is a request not to do it (doNotPerform)', () => {
+  const negated = planned('RQO').replace('moodCode="RQO">', 'moodCode="RQO" negationInd="true">');
+  expect(resourcesOf<ServiceRequest>(convertSections(plan(negated)), 'ServiceRequest')[0].doNotPerform).toBe(true);
+  expect(resourcesOf<ServiceRequest>(convertSections(plan(planned('RQO'))), 'ServiceRequest')[0].doNotPerform).toBeUndefined();
+});
+
 test('a goal (GOL, or the Goal Observation template) stays a Goal, with no empty target or category', () => {
   const goal = (extra: string) => `<observation classCode="OBS" moodCode="GOL">
     <templateId root="2.16.840.1.113883.10.20.22.4.121"/><id root="2.16.840.1.113883.19.5" extension="GOAL-1"/>

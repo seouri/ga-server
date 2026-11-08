@@ -1656,6 +1656,8 @@ class CcdaToFhirConverter {
       identifier: this.mapIdentifiers(observation.id),
       status: SERVICE_REQUEST_STATUSES[observation.statusCode?.['@_code'] ?? ''] ?? 'unknown',
       intent: SERVICE_REQUEST_INTENTS[observation['@_moodCode']] ?? 'order',
+      // A negated planned observation is a plan not to do it
+      doNotPerform: observation['@_negationInd'] === 'true' ? true : undefined,
       code: this.mapCode(observation.code),
       subject: createReference(this.patient as Patient),
       occurrenceDateTime: when.effectiveDateTime,
