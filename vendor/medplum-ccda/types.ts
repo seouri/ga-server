@@ -447,6 +447,9 @@ export interface CcdaRelatedSubject {
 
 export interface CcdaSubjectPerson {
   administrativeGenderCode?: CcdaCode;
+  birthTime?: CcdaTimeStamp;
+  'sdtc:deceasedInd'?: { '@_value'?: string };
+  'sdtc:deceasedTime'?: CcdaTimeStamp;
 }
 
 export interface CcdaCustodian {

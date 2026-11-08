@@ -279,7 +279,7 @@
               <subject>
                 <relatedSubject classCode="PRS">
                   <code code="FTH" codeSystem="2.16.840.1.113883.5.111" displayName="father"/>
-                  <subject><administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/></subject>
+                  <subject><administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/><birthTime value="19400315"/><sdtc:deceasedInd value="true"/><sdtc:deceasedTime value="20100601"/></subject>
                 </relatedSubject>
               </subject>
               <component>

@@ -1516,7 +1516,11 @@ class CcdaToFhirConverter {
 
   private processFamilyHistoryOrganizer(organizer: CcdaOrganizer): FamilyMemberHistory {
     const relatedSubject = organizer.subject?.relatedSubject;
-    const sex = this.mapGenderCode(relatedSubject?.subject?.administrativeGenderCode?.['@_code']);
+    const person = relatedSubject?.subject;
+    const sex = this.mapGenderCode(person?.administrativeGenderCode?.['@_code']);
+    // GA: the relative's birth and death (sdtc:deceasedInd, with sdtc:deceasedTime when given)
+    const deceased = person?.['sdtc:deceasedInd']?.['@_value'];
+    const deceasedDate = mapCcdaToFhirDate(person?.['sdtc:deceasedTime']?.['@_value']);
 
     const conditions: FamilyMemberHistoryCondition[] = [];
     for (const component of organizer.component ?? EMPTY) {
@@ -1544,6 +1548,9 @@ class CcdaToFhirConverter {
         ],
       },
       sex: sex ? { coding: [{ system: ADMINISTRATIVE_GENDER_CODE_SYSTEM, code: sex }] } : undefined,
+      bornDate: mapCcdaToFhirDate(person?.birthTime?.['@_value']),
+      deceasedDate: deceased !== 'false' ? deceasedDate : undefined,
+      deceasedBoolean: deceasedDate && deceased !== 'false' ? undefined : deceased === 'true' ? true : deceased === 'false' ? false : undefined,
       condition: conditions.length > 0 ? conditions : undefined,
     };
   }
@@ -1568,9 +1575,14 @@ class CcdaToFhirConverter {
       o.templateId?.some((t) => t['@_root'] === OID_FAMILY_HISTORY_DEATH_OBSERVATION)
     );
 
+    // GA: without an age at onset, the observation's own time is the onset (FHIR allows one onset)
+    const onsetAge = this.mapQuantity(ageObservation?.value as CcdaQuantity | undefined);
+    const time = observation.effectiveTime?.[0];
+    const onsetPeriod = time?.['@_value'] ? { start: mapCcdaToFhirDateTime(time['@_value']) } : this.mapEffectiveTimeToPeriod(time);
     return {
       code,
-      onsetAge: this.mapQuantity(ageObservation?.value as CcdaQuantity | undefined),
+      onsetAge,
+      onsetPeriod: !onsetAge && (onsetPeriod?.start || onsetPeriod?.end) ? onsetPeriod : undefined,
       ...(causedDeath && { contributedToDeath: true }),
     };
   }

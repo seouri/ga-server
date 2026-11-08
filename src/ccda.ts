@@ -367,8 +367,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     };
     const family = (o: CcdaObservation) => {
       if (negated(o) || !Object.keys(o.value ?? {}).some((k) => k !== '@_xsi:type')) return add(name, root0(o.templateId), 1, 'family history observation not converted');
-      const unread = (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []).filter((c) => negated(c) || !hasTemplate(c, ...FAMILY_DETAILS));
+      const related = (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []);
+      const unread = related.filter((c) => negated(c) || !hasTemplate(c, ...FAMILY_DETAILS));
       add(name, root0(o.templateId), unread.length, 'family history detail not converted');
+      // FHIR has one onset: an age at onset wins over the observation's own time.
+      const aged = related.some((c) => !negated(c) && hasTemplate(c, OID.OID_AGE_OBSERVATION));
+      add(name, root0(o.templateId), aged && o.effectiveTime?.[0] ? 1 : 0, 'family history onset date not converted');
     };
     for (const e of entries) {
       for (const o of e.observation ?? []) walk(o, false);

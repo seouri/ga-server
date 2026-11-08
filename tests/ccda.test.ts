@@ -313,7 +313,13 @@ test('family history: a relative\'s condition is a FamilyMemberHistory, never th
     relationship: { coding: [{ code: 'FTH' }] },
     sex: { coding: [{ system: 'http://hl7.org/fhir/administrative-gender', code: 'male' }] },
     condition: [{ code: { coding: [{ system: 'http://snomed.info/sct', code: '38341003' }] }, onsetAge: { value: 60, code: 'a' } }],
+    bornDate: '1940-03-15', // the Microsoft path's bornString
+    deceasedDate: '2010-06-01',
   });
+  // An age at onset and the observation's own time: FHIR has one onset, the age; the time is named.
+  const timed = EPIC.replace('<value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/>\n                  <entryRelationship',
+    '<effectiveTime value="20000101"/><value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96" displayName="Hypertension"/>\n                  <entryRelationship');
+  expect(convertCcdaLocal(timed).notImported).toEqual([{ section: 'Family History', templateId: '2.16.840.1.113883.10.20.22.4.46', entries: 1, reason: 'family history onset date not converted' }]);
   expect(out.resources.some((r) => r.resourceType === 'Observation' && /445518008|64572001/.test(JSON.stringify(r)))).toBe(false);
   // A negated condition (FHIR has none) and a related observation other than age at onset or death are named.
   const xml = EPIC.replace('<observation classCode="OBS" moodCode="EVN">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>', '<observation classCode="OBS" moodCode="EVN" negationInd="true">\n                  <templateId root="2.16.840.1.113883.10.20.22.4.46"/>');

@@ -185,6 +185,41 @@ describe('family history', () => {
   });
 });
 
+// GA additions (PATCHES row 19): the relative's birth and death, and a condition's own time.
+describe('family member details', () => {
+  const organizer = (subjectXml: string, observationXml: string) => `<entry typeCode="DRIV">
+    <organizer moodCode="EVN" classCode="CLUSTER">
+      <templateId root="2.16.840.1.113883.10.20.22.4.45" extension="2015-08-01"/>
+      <id root="2.16.840.1.113883.19.5" extension="FH-2"/>
+      <statusCode code="completed"/>
+      <subject><relatedSubject classCode="PRS">${father}<subject>${subjectXml}</subject></relatedSubject></subject>
+      ${observationXml}
+    </organizer>
+  </entry>`;
+  const history = (entries: string) => resourcesOfType<FamilyMemberHistory>(convertSection(FAMILY_HISTORY_SECTION, entries), 'FamilyMemberHistory')[0];
+
+  test('takes the birth date, and the death (with its date when given)', () => {
+    const dead = history(organizer('<birthTime value="19400315"/><sdtc:deceasedInd xmlns:sdtc="urn:hl7-org:sdtc" value="true"/><sdtc:deceasedTime xmlns:sdtc="urn:hl7-org:sdtc" value="20100601"/>', familyHistoryObservation(hypertension)));
+    expect(dead).toMatchObject({ bornDate: '1940-03-15', deceasedDate: '2010-06-01' });
+    expect(history(organizer('<sdtc:deceasedInd xmlns:sdtc="urn:hl7-org:sdtc" value="true"/>', familyHistoryObservation(hypertension))).deceasedBoolean).toBe(true);
+    expect(history(organizer('<sdtc:deceasedInd xmlns:sdtc="urn:hl7-org:sdtc" value="false"/>', familyHistoryObservation(hypertension))).deceasedBoolean).toBe(false);
+    const alive = history(organizer('<administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/>', familyHistoryObservation(hypertension)));
+    expect(alive.bornDate).toBeUndefined();
+    expect(alive.deceasedBoolean).toBeUndefined();
+  });
+
+  test('a condition without an age at onset takes its own time as onsetPeriod', () => {
+    const timed = familyHistoryObservation(`<effectiveTime><low value="20000101"/></effectiveTime>${hypertension}`);
+    expect(history(organizer('', timed)).condition?.[0].onsetPeriod).toEqual({ start: '2000-01-01' });
+    const point = familyHistoryObservation(`<effectiveTime value="20050101"/>${hypertension}`);
+    expect(history(organizer('', point)).condition?.[0].onsetPeriod).toEqual({ start: '2005-01-01' });
+    // FHIR allows one onset: the age at onset wins.
+    const both = familyHistoryObservation(`<effectiveTime value="20050101"/>${hypertension}`, ageAtOnset(60));
+    expect(history(organizer('', both)).condition?.[0]).toMatchObject({ onsetAge: { value: 60 } });
+    expect(history(organizer('', both)).condition?.[0].onsetPeriod).toBeUndefined();
+  });
+});
+
 describe('organizer templates', () => {
   function organizer(templateIdsXml: string): string {
     return `<entry typeCode="DRIV">
