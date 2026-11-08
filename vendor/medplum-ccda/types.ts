@@ -379,6 +379,7 @@ export interface CcdaSupply {
   quantity?: CcdaQuantity;
   product?: CcdaConsumable;
   author?: CcdaAuthor[];
+  performer?: CcdaPerformer[];
 }
 
 export interface CcdaList {

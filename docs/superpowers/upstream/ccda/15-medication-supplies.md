@@ -91,7 +91,11 @@ The same supply with `moodCode="EVN"` (`22.4.18`):
   "medicationCodeableConcept": { "...": "as above" },
   "subject": { "reference": "Patient/<id>" },
   "quantity": { "value": 90, "unit": "{tbl}", "system": "http://unitsofmeasure.org", "code": "{tbl}" },
-  "whenHandedOver": "2023-01-10"
+  "whenHandedOver": "2023-01-10",
+  "performer": [{
+    "function": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function", "code": "dataenterer" }] },
+    "actor": { "reference": "Practitioner/<the author>" }
+  }]
 }
 ```
 
@@ -103,12 +107,13 @@ The same supply with `moodCode="EVN"` (`22.4.18`):
     - status: active → in-progress, completed → completed, aborted → stopped, cancelled → cancelled, suspended → on-hold, nullified → entered-in-error, any other → unknown.
     - `quantity`.
     - `whenHandedOver` from effectiveTime.
+    - `performer`: the author as a performer with `function` `http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function|dataenterer`, the person who entered the dispense data. R4 MedicationDispense has no recorder, and the author is neither the requester nor the dispenser. Each C-CDA `performer` (the dispensing party) is a performer of its own, with no function.
   - **Any other mood → `MedicationRequest`:**
     - intent `order`; inside a Plan of Treatment medication, that medication's intent (draft 12), so a planned prescription is not read as an authorized order.
     - status via `MEDICATION_STATUS_MAPPER`.
     - `authoredOn` and `requester` from the author.
     - `dispenseRequest`: `validityPeriod`, `quantity`, and `numberOfRepeatsAllowed` = `repeatNumber` − 1. C-CDA counts every allowed fill; FHIR counts the refills after the first.
 - **Return values.** `processMedicationSubstanceAdministration` returns `[statement or request, ...supplies]`. `processSubstanceAdministration` may return an array, as `processAct` already can, and `processEntry` spreads it. The supplies are listed in the section's Composition entries.
-- **Parsing.** `types.ts` gains `CcdaSupply` and `CcdaEntryRelationship.supply`. `xml.ts` parses `entryRelationship.supply` and `product.manufacturedProduct` as arrays.
-- **Not converted.** A dispense's `performer` (the pharmacy) and a supply order's `instructions` are left for a follow-up.
-- **Test.** `medication-activity.test.ts`: a supply order, and a dispense with its own product.
+- **Parsing.** `types.ts` gains `CcdaSupply` and `CcdaEntryRelationship.supply`. `xml.ts` parses `entryRelationship.supply`, `product.manufacturedProduct` and `supply.performer` as arrays.
+- **Not converted.** A supply order's `instructions`, left for a follow-up.
+- **Test.** `medication-activity.test.ts`: a supply order; a dispense with its own product; a dispense's author (dataenterer) and performer (dispenser).

@@ -31,6 +31,7 @@ import type {
   ImmunizationPerformer,
   Medication,
   MedicationDispense,
+  MedicationDispensePerformer,
   MedicationRequest,
   MedicationStatement,
   Observation,
@@ -143,6 +144,7 @@ import type {
   CcdaReferenceRange,
   CcdaSection,
   CcdaSubstanceAdministration,
+  CcdaSupply,
   CcdaTelecom,
   CcdaTemplateId,
   CcdaText,
@@ -181,6 +183,8 @@ export function convertCcdaToFhir(ccda: Ccda, options?: CcdaToFhirOptions): Bund
 }
 
 // Medication Activity statusCode → MedicationStatement.status (MEDICATION_STATUS_MAPPER has MedicationRequest values, e.g. cancelled)
+const MEDICATION_DISPENSE_PERFORMER_FUNCTION = 'http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function';
+
 // Medication Dispense statusCode → MedicationDispense.status
 const MEDICATION_DISPENSE_STATUSES: Record<string, MedicationDispense['status']> = {
   active: 'in-progress',
@@ -938,6 +942,27 @@ class CcdaToFhirConverter {
   }
 
   /**
+   * Who entered a dispense (its author: R4 has no recorder, so a performer with function dataenterer, never a requester)
+   * and who dispensed it (its performers, with no function).
+   * @param supply - The Medication Dispense.
+   * @returns The MedicationDispense performers, or undefined when there are none.
+   */
+  private mapDispensePerformers(supply: CcdaSupply): MedicationDispensePerformer[] | undefined {
+    const performers: MedicationDispensePerformer[] = [];
+    const author = this.mapAuthorToReference(supply.author?.[0]);
+    if (author) {
+      performers.push({ function: { coding: [{ system: MEDICATION_DISPENSE_PERFORMER_FUNCTION, code: 'dataenterer' }] }, actor: author });
+    }
+    for (const performer of supply.performer ?? EMPTY) {
+      const actor = this.mapAssignedEntityToReference(performer.assignedEntity);
+      if (actor) {
+        performers.push({ actor });
+      }
+    }
+    return performers.length > 0 ? performers : undefined;
+  }
+
+  /**
    * Medication Supply Orders (INT) and Medication Dispenses (EVN) recorded inside a Medication Activity.
    * @param substanceAdmin - The Medication Activity.
    * @param medicationCode - The Medication Activity's drug, used when a supply names no product of its own.
@@ -966,6 +991,7 @@ class CcdaToFhirConverter {
           status: MEDICATION_DISPENSE_STATUSES[supply.statusCode?.['@_code'] ?? ''] ?? 'unknown',
           quantity: this.mapQuantity(supply.quantity),
           whenHandedOver: this.mapEffectiveTimeToDateTime(supply.effectiveTime?.[0]),
+          performer: this.mapDispensePerformers(supply),
         });
         continue;
       }

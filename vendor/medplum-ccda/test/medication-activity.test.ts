@@ -110,3 +110,18 @@ test('a supply order inside a planned medication carries the plan\'s intent, not
   const requests = resourcesOf<MedicationRequest>(convertSections(plan), 'MedicationRequest');
   expect(requests.map((r) => [r.identifier?.[0].value, r.intent])).toEqual([['MED-1', 'plan'], ['ORDER-2', 'plan']]);
 });
+
+test('a dispense keeps who entered it (author, function dataenterer) and who dispensed it (performer)', () => {
+  const pharmacy = `<performer typeCode="PRF"><assignedEntity><id root="2.16.840.1.113883.19.5" extension="PHARM-1"/>
+    <representedOrganization><name>Example Pharmacy</name></representedOrganization></assignedEntity></performer>`;
+  const fill = supply('EVN', '2.16.840.1.113883.10.20.22.4.18', 'FILL-2').replace('<author>', `${pharmacy}<author>`);
+  const bundle = convertSections(medications('EVN', fill));
+  const [dispense] = resourcesOf<MedicationDispense>(bundle, 'MedicationDispense');
+  const [enterer, dispenser] = dispense.performer ?? [];
+  expect(enterer.function?.coding).toEqual([{ system: 'http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function', code: 'dataenterer' }]);
+  const author = resourcesOf<Practitioner>(bundle, 'Practitioner').find((p) => `Practitioner/${p.id}` === enterer.actor.reference);
+  expect(author?.name?.[0].family).toBe('Prescriber');
+  expect(dispenser.function).toBeUndefined();
+  expect(dispenser.actor.reference).toMatch(/^PractitionerRole\//);
+  expect(dispense.performer).toHaveLength(2);
+});
