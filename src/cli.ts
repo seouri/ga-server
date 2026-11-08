@@ -83,7 +83,7 @@ try {
     if (process.argv[5]) writeFileSync(process.argv[5], `${JSON.stringify(r, null, 2)}\n`);
     const sum = (n: { count?: number; entries?: number }[]) => n.reduce((a, x) => a + (x.count ?? x.entries ?? 0), 0);
     const explained = r.losses.filter((l) => l.explained);
-    console.log(`documents ${r.documents}${r.failed ? ` (${r.failed} failed to convert)` : ''}; losses ${sum(r.losses) - sum(explained)} at ${r.losses.length - explained.length} type/paths, explained ${sum(explained)}; gains ${Object.values(r.gains).reduce((a, b) => a + b, 0)}; unaccounted ${sum(r.unaccounted)}; not imported (named) ${sum(r.notImported)}`);
+    console.log(`documents ${r.documents}${r.failed ? ` (${r.failed} failed to convert)` : ''}, skipped ${r.skipped}; losses ${sum(r.losses) - sum(explained)} at ${r.losses.length - explained.length} type/paths, explained ${sum(explained)}; gains ${Object.values(r.gains).reduce((a, b) => a + b, 0)}; unaccounted ${sum(r.unaccounted)}; not imported (named) ${sum(r.notImported)}`);
   } else if (process.argv[2] === 'mcp') {
     await runMcp(loadConfig());
     // keep running: stdio transport holds the process open

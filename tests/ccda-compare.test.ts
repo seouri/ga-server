@@ -2,63 +2,66 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
-import { expect, test } from 'vitest';
-import { convertCcdaLocal, repair } from '../src/ccda.ts';
+import { afterEach, expect, test, vi } from 'vitest';
+import { convertCcdaLocal, convertCcdaMs } from '../src/ccda.ts';
 import { ccdaCompare, compareCcda, matchEntries } from '../src/ccda-compare.ts';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 const SYNTHETIC = readFileSync(join(FIXTURES, 'ccda-synthetic.xml'), 'utf8');
 const EPIC = readFileSync(join(FIXTURES, 'ccda-epic-style.xml'), 'utf8');
-
-// Hand-built Microsoft converter output (its shapes: CDA entry id in identifier[0], urn:oid systems, Medication by reference,
-// DiagnosticReport per organizer), run through GA's repair as convertCcdaMs does.
+// Real Microsoft converter output (convertCcdaMs, GA's repair included) for the two fixtures: invented data.
+const ms = (f: string): Resource[] => JSON.parse(readFileSync(join(FIXTURES, `${f}.ms.json`), 'utf8'));
+const MS_SYNTHETIC = () => ms('ccda-synthetic');
+const MS_EPIC = () => ms('ccda-epic-style');
+const run = (xml: string, old: Resource[], neu?: Resource[]) => {
+  const local = convertCcdaLocal(xml);
+  return compareCcda(xml, old, neu ?? local.resources, local.notImported);
+};
+// A pair of single records (no document context needed beyond the XML's sections).
+const pairLosses = (old: unknown[], neu: unknown[]) => compareCcda(SYNTHETIC, old as Resource[], neu as Resource[], []).losses;
+const id = (v: string) => [{ system: 'urn:oid:2.25.1', value: v }];
 const subject = { reference: 'Patient/ms-p' };
-const lab = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] };
-const MS_SYNTHETIC = (): Resource[] => repair([
-  { resourceType: 'Patient', id: 'ms-p', identifier: [{ system: 'urn:oid:2.25.2222', value: 'FAKE-MRN-0001' }], name: [{ family: 'Synthetic', given: ['Test'] }], gender: 'female', birthDate: '1970-01-01' },
-  { resourceType: 'Composition', id: 'ms-c', identifier: { system: 'urn:oid:2.25.1111', value: 'synthetic-doc-1' }, status: 'final', type: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.1', code: '34133-9' }] }, date: '2024-03-15', title: 'Synthetic Health Summary', author: [{ reference: 'Practitioner/ms-a' }] },
-  { resourceType: 'Practitioner', id: 'ms-a', identifier: [{ system: 'urn:oid:2.25.3333', value: 'fake-author' }] },
-  { resourceType: 'MedicationStatement', id: 'ms-ms', identifier: [{ system: 'urn:oid:2.25.5001', value: 'syn-med-1' }], status: 'active', medicationReference: { reference: 'Medication/ms-m' }, effectivePeriod: { start: '2023-01-01' }, subject },
-  { resourceType: 'Medication', id: 'ms-m', code: { coding: [{ system: 'http://hl7.org/fhir/sid/ndc', code: '0000-0000' }] } },
-  { resourceType: 'Condition', id: 'ms-c1', identifier: [{ system: 'urn:oid:2.25.6002', value: 'syn-problem-1' }], code: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.96', code: '55822004', display: 'Hyperlipidemia' }] }, onsetDateTime: '2022-06-01', subject },
-  { resourceType: 'DiagnosticReport', id: 'ms-dr', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.798268', value: '9000001' }], status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '57698-3' }] }, effectivePeriod: { start: '2024-03-01' }, result: [{ reference: 'Observation/ms-ldl' }], subject },
-  { resourceType: 'Observation', id: 'ms-ldl', identifier: [{ system: 'urn:oid:2.25.7002', value: 'syn-ldl-1' }], status: 'final', category: [lab], code: { coding: [{ system: 'http://loinc.org', code: '13457-7', display: 'LDL' }] }, valueQuantity: { value: 111, unit: 'mg/dL' }, effectiveDateTime: '2024-03-01', interpretation: [{ coding: [{ system: 'urn:oid:2.16.840.1.113883.5.83', code: 'H' }] }], subject },
-  { resourceType: 'Observation', id: 'ms-sbp', identifier: [{ system: 'urn:oid:2.25.8002', value: 'syn-sbp-1' }], status: 'final', code: { coding: [{ system: 'http://loinc.org', code: '8480-6' }] }, valueQuantity: { value: 123, unit: 'mm[Hg]' }, effectiveDateTime: '2024-03-01', subject },
-  // A Microsoft lab placeholder: no value, no code beyond text.
-  { resourceType: 'Observation', id: 'ms-empty', status: 'final', category: [lab], code: { text: 'Lipid panel' }, subject },
-], SYNTHETIC);
 
 test('a field present in the old record and missing in the new is a loss with its element path', () => {
-  const local = convertCcdaLocal(SYNTHETIC);
-  const r = compareCcda(SYNTHETIC, MS_SYNTHETIC(), local.resources, local.notImported);
-  expect(r.losses).toContainEqual({ type: 'Observation', path: 'interpretation.coding', count: 1 });
-  // Same meaning in another spelling is no loss: LOINC/SNOMED by OID or URI, value 111 mg/dL, effective date.
-  expect(r.losses.filter((l) => l.type === 'Observation').map((l) => l.path)).not.toContain('value[x].value');
-  expect(r.losses.filter((l) => l.type === 'Condition')).toEqual([]);
-  // Taking (MedicationStatement) matched by drug to the id-less MedicationRequest: the type change and the NDC are losses.
-  expect(r.losses).toContainEqual({ type: 'MedicationStatement', path: 'resourceType', count: 1 });
-  expect(r.losses).toContainEqual({ type: 'MedicationStatement', path: 'medication[x].coding', count: 1 });
+  const r = run(SYNTHETIC, MS_SYNTHETIC());
+  // Against the real converter: the type change (taking -> ordered, Task 6), the medication's source id and start, the organizer
+  // as report (Task 7), the Composition's subject and section mode. LOINC/SNOMED/RxNorm, values, dates and the document id agree.
+  expect(r.losses).toEqual([
+    { type: 'Composition', path: 'section.mode', count: 1 },
+    { type: 'Composition', path: 'subject.reference', count: 1 },
+    { type: 'MedicationStatement', path: 'resourceType', count: 1 },
+    { type: 'MedicationStatement', path: 'identifier', count: 1 },
+    { type: 'MedicationStatement', path: 'effective[x].start', count: 1 },
+    { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
+    { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
+  ]);
+  // A field only the old record holds.
+  const old = MS_SYNTHETIC().map((x) => (JSON.stringify(x).includes('syn-ldl-1') ? { ...x, interpretation: [{ coding: [{ system: 'urn:oid:2.16.840.1.113883.5.83', code: 'H' }] }] } : x));
+  expect(run(SYNTHETIC, old).losses).toContainEqual({ type: 'Observation', path: 'interpretation.coding', count: 1 });
   // Never values: no identifier, name, code or quantity reaches the report.
-  expect(JSON.stringify(r)).not.toMatch(/FAKE-MRN|syn-|atorvastatin|Hyperlipidemia|mg\/dL|0000-0000|55822004/);
+  expect(JSON.stringify(r)).not.toMatch(/FAKE-MRN|syn-|atorvastatin|Hyperlipidemia|mg\/dL|55822004|617310/);
 });
 
 test('an empty old placeholder (no value, no code beyond text) is explained, not a loss', () => {
-  const local = convertCcdaLocal(SYNTHETIC);
-  const withValue: Resource = { resourceType: 'Observation', id: 'ms-sh', status: 'final', code: { text: 'Alcohol use' }, valueString: 'never', subject } as Resource;
-  const r = compareCcda(SYNTHETIC, [...MS_SYNTHETIC(), withValue], local.resources, local.notImported);
-  const records = r.losses.filter((l) => l.type === 'Observation' && l.path === '(record)');
+  const empty = { resourceType: 'Observation', id: 'e', status: 'final', category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }], code: { text: 'Lipid panel' }, subject };
+  const noted = { ...empty, id: 'n', note: [{ text: 'critical' }], interpretation: [{ coding: [{ system: 'urn:oid:2.16.840.1.113883.5.83', code: 'HH' }] }], referenceRange: [{ text: '3.5-5.1' }] };
+  const valued = { ...empty, id: 'v', valueString: 'never' };
+  const records = run(SYNTHETIC, [...MS_SYNTHETIC(), empty, noted, valued] as Resource[]).losses.filter((l) => l.path === '(record)');
   expect(records).toEqual([
     { type: 'Observation', path: '(record)', count: 1, explained: 'no value and no code beyond text' },
-    { type: 'Observation', path: '(record)', count: 1 }, // a Microsoft-only record with a value stays a loss
+    { type: 'Observation', path: '(record)', count: 2 }, // a note, interpretation, range or value is information
+  ]);
+  // A matched placeholder's lost fields are losses, never explained.
+  expect(pairLosses([{ ...noted, identifier: id('a') }], [{ ...empty, identifier: id('a') }])).toEqual([
+    { type: 'Observation', path: 'note.text', count: 1 },
+    { type: 'Observation', path: 'interpretation.coding', count: 1 },
+    { type: 'Observation', path: 'referenceRange.text', count: 1 },
   ]);
 });
 
 test('an entry only the new path produces is a gain', () => {
-  const local = convertCcdaLocal(SYNTHETIC);
-  const r = compareCcda(SYNTHETIC, MS_SYNTHETIC(), local.resources, local.notImported);
-  // The vital signs organizer (the Microsoft fixture has none), the smoking status, the second problem; the patient, author and
-  // organisation are matched, and the panel matches the Microsoft DiagnosticReport.
-  expect(r.gains).toEqual({ Observation: 2, Condition: 1, Organization: 1 });
+  const r = run(SYNTHETIC, MS_SYNTHETIC());
+  expect(r.gains).toEqual({ Observation: 1 }); // the vital signs organizer
   expect(r.unaccounted).toEqual([]);
 });
 
@@ -70,43 +73,101 @@ test('an entry neither imported nor named is unaccounted', () => {
   ]);
 });
 
-test('matchEntries pairs by source entry id first, then id-less by class and code, one to one', () => {
-  const ob = (id: string | undefined, code: string): Resource => ({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code }] }, ...(id && { identifier: [{ system: 'urn:oid:1.2', value: id }] }) }) as Resource;
+test('the Epic-style fixture against the real Microsoft output: every loss by path, all accounted', () => {
+  const r = run(EPIC, MS_EPIC());
+  // Shrinks as Tasks 4-8 land.
+  expect(r.losses).toEqual([
+    { type: 'Composition', path: 'section.mode', count: 1 },
+    { type: 'Composition', path: 'subject.reference', count: 1 },
+    { type: 'Patient', path: 'name.use', count: 1 },
+    { type: 'AllergyIntolerance', path: 'identifier', count: 1 },
+    { type: 'MedicationStatement', path: 'resourceType', count: 1 },
+    { type: 'MedicationStatement', path: 'identifier', count: 1 },
+    { type: 'MedicationStatement', path: 'effective[x].start', count: 1 },
+    { type: 'MedicationStatement', path: 'medication[x].text', count: 1 }, // name from the narrative (Task 6)
+    { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
+    { type: 'DiagnosticReport', path: 'effective[x].start', count: 1 },
+    { type: 'DiagnosticReport', path: 'effective[x].end', count: 1 },
+    { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
+    { type: 'Observation', path: 'value[x].value', count: 1 }, // REAL value (Task 7)
+    { type: 'Encounter', path: 'class', count: 1 }, // CPT 99213 filed under v3-ActCode (Task 8)
+    { type: 'Encounter', path: 'location.location.reference', count: 1 },
+    { type: 'Location', path: '(record)', count: 1 },
+    { type: 'Condition', path: '(record)', count: 1 }, // visit diagnosis (Task 5)
+    { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
+    { type: 'Immunization', path: 'route.coding', count: 1 },
+    { type: 'Coverage', path: '(record)', count: 1 }, // payers (Task 4)
+  ]);
+  expect(r.unaccounted).toEqual([]);
+});
+
+test('matchEntries: the document Compositions pair; by source id (the copy it loses least to); id-less by class and code, one to one', () => {
+  const ob = (i: string | undefined, code: string, x: object = {}): Resource => ({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://loinc.org', code }] }, ...(i && { identifier: id(i) }), ...x }) as Resource;
   const [a, b, c] = [ob('a', '1'), ob(undefined, '2'), ob(undefined, '2')];
   const [na, nb, nOther] = [ob('a', '9'), ob(undefined, '2'), ob('z', '2')];
   const m = matchEntries([a, b, c], [nOther, na, nb]);
   expect(m.get(a)).toBe(na); // by id, even with another code
-  expect(m.get(b)).toBe(nb); // id-less: same class and code, a record with its own id is never taken
+  expect(m.get(b)).toBe(nb); // id-less: same class and code; a record with its own id is never taken
   expect(m.get(c)).toBeUndefined(); // one to one
+  // The real converter's Composition identifier has no system: the one Composition of each side pairs anyway.
+  const [msComp] = MS_SYNTHETIC().filter((r) => r.resourceType === 'Composition');
+  const [newComp] = convertCcdaLocal(SYNTHETIC).resources.filter((r) => r.resourceType === 'Composition');
+  expect(matchEntries([msComp], [newComp]).get(msComp)).toBe(newComp);
+  // Repeated practitioner copies: the one holding the old record's fields.
+  const pr = (x: object) => ({ resourceType: 'Practitioner', identifier: id('p'), ...x }) as Resource;
+  const full = pr({ name: [{ family: 'F' }], telecom: [{ system: 'phone', value: '1' }] });
+  expect(matchEntries([full], [pr({ name: [{ family: 'F' }] }), full]).get(full)).toBe(full);
 });
 
-// Epic-style: the spike's known losses, each at its element path.
-const MS_EPIC = (): Resource[] => repair([
-  { resourceType: 'Encounter', id: 'e1', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.3.698084.8', value: 'EX-ENC-1' }], status: 'finished', class: { system: 'urn:oid:1.2.840.114350.1.72.1.7.7.10.696784.13260', code: '5' }, location: [{ location: { reference: 'Location/l1' } }], subject } as Resource,
-  { resourceType: 'Location', id: 'l1', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.686980', value: 'EX-DEPT-1' }], name: 'Clinic' },
-  { resourceType: 'Condition', id: 'vdx', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.768076.2', value: 'EX-VISITDX-1' }], code: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.90', code: 'J06.9' }] }, subject },
-  { resourceType: 'Immunization', id: 'i1', identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.768179', value: 'EX-IMM-1' }], status: 'completed', vaccineCode: { coding: [{ system: 'urn:oid:2.16.840.1.113883.12.292', code: '140' }] }, route: { coding: [{ system: 'urn:oid:2.16.840.1.113883.3.26.1.1', code: 'C28161' }] }, patient: subject } as Resource,
-], EPIC);
-
-test('the Epic-style fixture against the Microsoft path shows the spike losses by path, all accounted', () => {
-  const local = convertCcdaLocal(EPIC);
-  const r = compareCcda(EPIC, MS_EPIC(), local.resources, local.notImported);
-  expect(r.losses).toEqual(expect.arrayContaining([
-    { type: 'Encounter', path: 'location.location.reference', count: 1 },
-    { type: 'Condition', path: '(record)', count: 1 }, // visit diagnosis (Task 5)
-    { type: 'Immunization', path: 'route.coding', count: 1 },
-    { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
-    { type: 'Location', path: '(record)', count: 1 },
-  ]));
-  expect(r.unaccounted).toEqual([]);
+test('a Medication holding more than its code stays a record of its own', () => {
+  const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '1' }] };
+  const losses = pairLosses(
+    [{ resourceType: 'MedicationStatement', id: 's', identifier: id('m'), status: 'active', medicationReference: { reference: 'Medication/m' }, subject },
+      { resourceType: 'Medication', id: 'm', code: rx, form: { coding: [{ system: 'http://snomed.info/sct', code: '385055001' }] }, batch: { lotNumber: 'L1' } }],
+    [{ resourceType: 'MedicationStatement', identifier: id('m'), status: 'active', medicationCodeableConcept: rx, subject }],
+  );
+  expect(losses).toContainEqual({ type: 'Medication', path: '(record)', count: 1 });
 });
 
-test('compare never writes', async () => {
-  const docs = [
-    { resourceType: 'DocumentReference', id: 'd1', content: [{ attachment: { contentType: 'application/xml', url: 'Binary/b1' } }] },
-    { resourceType: 'DocumentReference', id: 'd2', content: [{ attachment: { contentType: 'application/xml', url: 'Binary/b2' } }] },
-  ];
-  const files: Record<string, string> = { 'Binary/b1': SYNTHETIC, 'Binary/b2': '<?xml version="1.0"?><SubmitObjectsRequest/>' };
+test('array elements pair one to one: swapped components, regrouped ranges, a dropped duplicate, codings with extensions', () => {
+  const comp = (s: number, d: number) => [{ code: { coding: [{ system: 'http://loinc.org', code: '8480-6' }] }, valueQuantity: { value: s } }, { code: { coding: [{ system: 'http://loinc.org', code: '8462-4' }] }, valueQuantity: { value: d } }];
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('bp'), component: comp(120, 80) }], [{ resourceType: 'Observation', identifier: id('bp'), component: comp(80, 120) }]))
+    .toEqual([{ type: 'Observation', path: 'component.value[x].value', count: 1 }]);
+  expect(pairLosses(
+    [{ resourceType: 'Observation', identifier: id('r'), referenceRange: [{ low: { value: 1 }, high: { value: 5 } }, { low: { value: 2 }, high: { value: 9 }, text: 'child' }] }],
+    [{ resourceType: 'Observation', identifier: id('r'), referenceRange: [{ low: { value: 2 }, high: { value: 5 } }, { low: { value: 1 }, high: { value: 9 }, text: 'child' }] }],
+  )).toEqual([{ type: 'Observation', path: 'referenceRange.low.value', count: 1 }]);
+  expect(pairLosses([{ resourceType: 'Condition', identifier: id('c'), note: [{ text: 'same' }, { text: 'same' }] }], [{ resourceType: 'Condition', identifier: id('c'), note: [{ text: 'same' }] }]))
+    .toEqual([{ type: 'Condition', path: 'note.text', count: 1 }]);
+  const cc = (a: string, b: string) => ({ coding: [{ system: 'http://loinc.org', code: a, extension: [{ url: 'u', valueString: 'q' }] }, { system: 'http://snomed.info/sct', code: b, extension: [{ url: 'u', valueString: 'q' }] }] });
+  expect(pairLosses([{ resourceType: 'Condition', identifier: id('c'), code: cc('1', '2') }], [{ resourceType: 'Condition', identifier: id('c'), code: cc('2', '1') }]))
+    .toEqual([{ type: 'Condition', path: 'code.coding', count: 1 }]);
+});
+
+test('a reference must point at the new counterpart of its old target', () => {
+  const loc = (i: string, v: string) => ({ resourceType: 'Location', id: i, identifier: id(v) });
+  const enc = (ref: string) => ({ resourceType: 'Encounter', identifier: id('e'), location: [{ location: { reference: ref } }] });
+  expect(pairLosses([enc('Location/A'), loc('A', 'la'), loc('B', 'lb')], [enc('Location/nb'), loc('na', 'la'), loc('nb', 'lb')]))
+    .toEqual([{ type: 'Encounter', path: 'location.location.reference', count: 1 }]);
+  expect(pairLosses([enc('Location/A'), loc('A', 'la')], [enc('Location/na'), loc('na', 'la')])).toEqual([]);
+});
+
+test('numbers and strings compare as written', () => {
+  const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
+  expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))
+    .toEqual([{ type: 'Patient', path: 'address.postalCode', count: 1 }, { type: 'Patient', path: 'address.line', count: 1 }]);
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('z'), valueInteger: 0 }], [{ resourceType: 'Observation', identifier: id('z'), valueString: ' ' }]))
+    .toEqual([{ type: 'Observation', path: 'value[x]', count: 1 }]);
+  expect(pairLosses([{ resourceType: 'Observation', identifier: id('z'), valueQuantity: { value: 10 } }], [{ resourceType: 'Observation', identifier: id('z'), valueQuantity: { value: 10.0 } }])).toEqual([]);
+});
+
+afterEach(() => vi.unstubAllGlobals());
+test('a converter answer that is not JSON fails with its status only', async () => {
+  vi.stubGlobal('fetch', async () => new Response('<html>patient SECRET</html>', { status: 200 }));
+  await expect(convertCcdaMs(SYNTHETIC, 'http://converter/')).rejects.toThrow(/^converter failed: HTTP 200, unexpected response$/);
+});
+
+const reader = (docs: object[], files: Record<string, string>) => {
   const reads = {
     async *searchResourcePages(type: string, q: Record<string, string>) {
       expect([type, q.identifier, q.subject]).toEqual(['DocumentReference', 'urn:ga-server:id:file|', 'Patient/p1']);
@@ -115,21 +176,22 @@ test('compare never writes', async () => {
     download: async (url: string) => new Blob([files[url]]),
   };
   // Every other client method (create, update, delete, patch, upload, ...) throws.
-  const client = new Proxy(reads, {
-    get: (t, k) => (k in t ? t[k as keyof typeof t] : () => { throw new Error(`write attempted: ${String(k)}`); }),
-  }) as unknown as MedplumClient;
+  return new Proxy(reads, { get: (t, k) => (k in t ? t[k as keyof typeof t] : () => { throw new Error(`write attempted: ${String(k)}`); }) }) as unknown as MedplumClient;
+};
+const doc = (url?: string) => ({ resourceType: 'DocumentReference', content: [{ attachment: { contentType: 'application/xml', ...(url && { url }) } }] });
+
+test('compare never writes', async () => {
+  const client = reader([doc('Binary/b1'), doc('Binary/b2'), doc()], { 'Binary/b1': SYNTHETIC, 'Binary/b2': '<?xml version="1.0"?><SubmitObjectsRequest/>' });
   const report = await ccdaCompare(client, 'p1', 'http://converter/', async (xml) => (xml === SYNTHETIC ? MS_SYNTHETIC() : []));
-  expect(report).toMatchObject({ documents: 1, failed: 0, gains: { Observation: 2 }, unaccounted: [] });
-  expect(report.losses).toContainEqual({ type: 'Observation', path: 'interpretation.coding', count: 1 });
+  expect(report).toMatchObject({ documents: 1, skipped: 2, failed: 0, gains: { Observation: 1 }, unaccounted: [] });
+  expect(report.losses).toContainEqual({ type: 'DiagnosticReport', path: 'result.reference', count: 1 });
 });
 
 test('a document the new path cannot convert is counted and fails the gate', async () => {
   // An observation without a templateId still crashes the library (deferred library fix).
   const crash = SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.4.78" extension="2014-06-09"/>', '');
   expect(() => convertCcdaLocal(crash)).toThrow();
-  const client = { async *searchResourcePages() { yield [{ resourceType: 'DocumentReference', content: [{ attachment: { url: 'Binary/b1' } }] }]; }, download: async () => new Blob([crash]) } as unknown as MedplumClient;
-  const report = await ccdaCompare(client, 'p1', 'http://converter/', async () => MS_SYNTHETIC());
-  expect(report).toMatchObject({ documents: 1, failed: 1 });
-  expect(report.losses).toContainEqual({ type: 'Observation', path: '(record)', count: 2 });
-  expect(report.unaccounted.length).toBeGreaterThan(0);
+  const report = await ccdaCompare(reader([doc('Binary/b1')], { 'Binary/b1': crash }), 'p1', 'http://converter/', async () => MS_SYNTHETIC());
+  expect(report).toMatchObject({ documents: 1, failed: 1, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] });
+  expect(report.losses).toContainEqual({ type: 'Observation', path: '(record)', count: 3 });
 });
