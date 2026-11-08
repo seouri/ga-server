@@ -4,7 +4,7 @@ No existing issue or PR. Builds on draft 9 (`processConditionAct` returns one Co
 
 ## Issue: @medplum/ccda: visit diagnoses (Encounter Diagnosis act, 2.16.840.1.113883.10.20.22.4.80) are dropped
 
-`processEncounter` reads only `entryRelationship[@typeCode='RSON']/observation` as diagnoses. C-CDA records a visit's diagnoses as an Encounter Diagnosis act (`22.4.80`, V2 `22.4.80.2`) wrapping one or more Problem Observations (`22.4.4`). The IG links that act with `typeCode="REFR"`, and Epic uses `typeCode="SUBJ"`. Either way the act is skipped, so every visit diagnosis in an Epic document is lost. In one real Epic export that was 106 of 138 Conditions.
+`processEncounter` reads only `entryRelationship[@typeCode='RSON']/observation` as diagnoses. C-CDA records a visit's diagnoses as an Encounter Diagnosis act (`22.4.80`, V2 `22.4.80.2`) wrapping one or more Problem Observations (`22.4.4`). The IG links that act with `typeCode="REFR"`, and Epic uses `typeCode="SUBJ"`. Either way the act is skipped, so every visit diagnosis in an Epic document is lost.
 
 Reproduction (synthetic):
 

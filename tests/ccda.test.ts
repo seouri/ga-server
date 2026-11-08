@@ -347,11 +347,16 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
     expect(first.created).toBeGreaterThan(0);
     expect(first.notImported?.map((n) => n.section)).toEqual(['Results']); // REAL value (Task 7)
-    const dx = (await client.searchResources('Condition', { subject: `Patient/${pid}` })).find((c) => c.category?.[0]?.coding?.[0]?.code === 'encounter-diagnosis');
-    expect(dx?.encounter?.reference).toMatch(/^Encounter\//);
+    const visitDx = async () => (await client.searchResources('Condition', { subject: `Patient/${pid}` })).filter((c) => c.category?.[0]?.coding?.[0]?.code === 'encounter-diagnosis');
+    const [enc] = await client.searchResources('Encounter', { subject: `Patient/${pid}` });
+    expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
     const [coverage] = await client.searchResources('Coverage', {});
     expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
+    // A newer summary repeating the visit: still one visit diagnosis, pointing at the one stored Encounter.
+    await importPath(client, cfg, writeDoc(EPIC.replace('EPICSTYLE-DOC-1', 'EPICSTYLE-DOC-2')), pid);
+    expect(await client.searchResources('Encounter', { subject: `Patient/${pid}` })).toHaveLength(1);
+    expect((await visitDx()).map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`]);
     // Known gap: the library gives a CareTeam no subject, so it sits outside the patient compartment (not yet assigned to a fix task).
     const [team] = await client.searchResources('CareTeam', {});
     expect(team.subject).toBeUndefined();
