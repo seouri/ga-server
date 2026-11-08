@@ -34,6 +34,21 @@ No new issue: comment on #10671 with the reproduction below if the maintainers a
 - Actual: throws `Unhandled substance administration templateId: 2.16.840.1.113883.10.20.22.2.1`; with `ignoreUnsupportedSections: true` no medication.
 - Expected: one `MedicationRequest` (RxNorm 310793), as when `...2.1.1` is listed first. Same for an entries-optional-only Medications section, and for a Problems section whose routed template is not first.
 
+Expected FHIR (the medication, abridged):
+
+```json
+{
+  "resourceType": "MedicationRequest",
+  "status": "active",
+  "intent": "order",
+  "medicationCodeableConcept": {
+    "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "310793", "display": "Examplamide 10 MG Oral Tablet" }],
+    "text": "Examplamide 10 MG Oral Tablet"
+  },
+  "subject": { "reference": "Patient/..." }
+}
+```
+
 ## PR: fix(ccda): route section entries by any of the section's templateIds (fixes #10671)
 
 - `getTemplateIds(node)` returns a node's templateId roots in document order. `processAct` and `processSubstanceAdministration` try each root against their switch; `processOrganizer` and `processObservation` test membership. The unhandled-template error still names the first root.

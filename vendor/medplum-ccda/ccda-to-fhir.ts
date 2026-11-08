@@ -601,7 +601,8 @@ class CcdaToFhirConverter {
       title: 'CARE PLAN',
       category: act.code ? [this.mapCode(act.code) as CodeableConcept] : undefined,
       subject: createReference(this.patient as Patient),
-      description: nodeToString(act.text),
+      description: nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference),
+      extension: this.mapTextReference(act.text),
     };
 
     return result;

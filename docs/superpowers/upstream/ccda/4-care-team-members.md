@@ -30,6 +30,19 @@ Reproduction (synthetic): a Care Team Organizer (`2.16.840.1.113883.10.20.22.4.5
 - Actual: one participant for that component (ATTPHYS).
 - Expected: two participants, roles ATTPHYS and RNDPHYS, each with its PractitionerRole member and the act's period.
 
+Expected FHIR (that component's participants):
+
+```json
+"participant": [
+  { "role": [{ "coding": [{ "system": "urn:oid:2.16.840.1.113883.5.88", "code": "ATTPHYS" }] }],
+    "member": { "reference": "PractitionerRole/..." }, "period": { "start": "2020-01-01" } },
+  { "role": [{ "coding": [{ "system": "urn:oid:2.16.840.1.113883.5.88", "code": "RNDPHYS" }] }],
+    "member": { "reference": "PractitionerRole/..." }, "period": { "start": "2020-01-01" } }
+]
+```
+
+(The library leaves this OID unmapped; no text, since the source has no displayName.)
+
 ## PR: fix(ccda): map every care team member and performer to CareTeam.participant
 
 - `processCareTeamMember` becomes `processCareTeamMembers`, returning one participant per performer of each member act. Participant fields are unchanged.

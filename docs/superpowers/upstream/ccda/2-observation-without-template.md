@@ -27,6 +27,20 @@ Reproduction (synthetic):
 - Actual: TypeError, no Bundle.
 - Expected: one Observation (LOINC 72166-2, value SNOMED 266919005), as with a templateId.
 
+Expected FHIR (abridged):
+
+```json
+{
+  "resourceType": "Observation",
+  "identifier": [{ "system": "urn:oid:2.16.840.1.113883.19.5", "value": "OBS-1" }],
+  "status": "final",
+  "code": { "coding": [{ "system": "http://loinc.org", "code": "72166-2" }] },
+  "subject": { "reference": "Patient/..." },
+  "valueCodeableConcept": { "coding": [{ "system": "http://snomed.info/sct", "code": "266919005", "display": "Never smoker" }], "text": "Never smoker" },
+  "effectiveDateTime": "2024-02-10"
+}
+```
+
 ## PR: fix(ccda): convert observations without a templateId
 
 - `processObservation` tests the goal templates with `getTemplateIds(observation)` (from the #10671 fix), so a goal is also recognised when its goal template is not listed first.

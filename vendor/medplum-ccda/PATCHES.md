@@ -12,10 +12,11 @@ Source: https://github.com/medplum/medplum/tree/v5.2.15/packages/ccda (Apache-2.
 | 5 | `ccda-to-fhir.ts`, `oids.ts` | a Note Activity (`22.4.202`) in any section, and every act in the Notes (`22.2.65`), Instructions (`22.2.45`, V2) and IHE History of Present Illness (`1.3.6.1.4.1.19376.1.5.3.1.3.4`, new `OID_HISTORY_OF_PRESENT_ILLNESS_SECTION`) sections, becomes a `DocumentReference`: text/plain attachment (the act text or the narrative it references, via row 3), type = act code, category = section code, context.period from effectiveTime, author, source ids. Test `test/note-sections.test.ts` | these entries were skipped (Notes: "not yet implemented"; the others unsupported); notes are what GA's `notes_search` reads | new issue (none open); draft `docs/superpowers/upstream/ccda/5-note-sections.md`; needs medplum#11242 |
 | 6 | `ccda-to-fhir.ts` | acts in the IHE Reason for Referral section (and V2) become a `ServiceRequest`: status and intent from statusCode/moodCode, category SNOMED 3457005 "Patient referral", code, occurrence, requester (author), performers, narrative text as `note`, source ids. Test `test/referral-section.test.ts` | referrals were skipped ("not yet implemented") | new issue (none open); draft `docs/superpowers/upstream/ccda/6-referral-section.md`; needs medplum#11242 for the text |
 | 7 | `ccda-to-fhir.ts`, `types.ts`, `xml.ts` | Payers section (and V2): each Policy Activity of a Coverage Activity becomes a `Coverage`: identifier (policy id, then covered party member id), status `active` (C-CDA has none), type (policy code), beneficiary, subscriberId (policy holder id), relationship and period (covered party), payor (payer performer org id and name; data-absent `unknown` when none), order (sequenceNumber). `processAct` may return several resources. `act.participant` parsed as an array; `CcdaParticipant.time`. Test `test/payers-section.test.ts` | payers were skipped ("not yet implemented"); the Microsoft path made Coverage. Guarantor and the policy holder's own name/address have no Coverage field: GA names them in notImported | new issue (none open); draft `docs/superpowers/upstream/ccda/7-payers-coverage.md` |
+| 8 | `ccda-to-fhir.ts` | a Plan of Treatment act's CarePlan `description` is the act's own text or the narrative it references (via row 3), with the narrative-reference extension. Test `test/care-plan-text.test.ts` | `nodeToString(act.text)` was empty for a `<reference>`, so the plan text lived only on the (never shared) Composition | new issue (none open); draft `docs/superpowers/upstream/ccda/8-care-plan-text.md`; needs medplum#11242 |
 
 Upstream already used `import type` for type-only imports; no other syntax needed rewriting.
 
-## Section → resource (with rows 1-7)
+## Section → resource (with rows 1-8)
 
 Every section's narrative is also on the Composition (`section.text`). Anything a section holds that no row turns into a record is named in GA's `notImported` (src/ccda.ts).
 
@@ -28,7 +29,7 @@ Every section's narrative is also on the Composition (`section.text`). Anything 
 | Results, Vital Signs, Social History, Functional Status (22.2.14), Reason for Visit (22.2.12), any other observation section | Observation (organizer: panel Observation with `hasMember`) | the library's "vitals" path |
 | Encounters (22.2.22, .22.1) | Encounter (+ Condition per RSON observation) | Epic visit diagnoses (22.4.80): Task 5 |
 | Procedures (22.2.7.1) | Procedure | |
-| Plan of Treatment (22.2.10) | CarePlan (acts), Goal (observations), MedicationRequest (substanceAdministrations); narrative on the Composition | |
+| Plan of Treatment (22.2.10) | CarePlan (acts, with their narrative text as `description`), Goal (observations), MedicationRequest (substanceAdministrations); section narrative on the Composition | row 8 |
 | Goals (22.2.60) | Goal | |
 | Care Teams (22.2.500) | CareTeam, one participant per member performer (row 4) | |
 | Instructions (22.2.45, V2) | DocumentReference (text/plain) | row 5 |
