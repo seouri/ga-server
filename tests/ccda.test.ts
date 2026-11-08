@@ -192,8 +192,8 @@ test('a concern act with more than one problem or allergy observation: one recor
   ]);
 });
 
-test('an organizer component that is not an observation is named', () => {
-  const proc = '<component><procedure classCode="PROC" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/></procedure></component>';
+test('a result organizer component the library does not read (an act) is named', () => {
+  const proc = '<component><act classCode="ACT" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/></act></component>';
   const out = convertCcdaLocal(SYNTHETIC.replace('</component>\n            </organizer>', `</component>${proc}\n            </organizer>`));
   expect(out.notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.1', entries: 1, reason: 'organizer component not converted' }]);
 });
