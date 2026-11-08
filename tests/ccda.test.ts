@@ -173,9 +173,9 @@ test('an organizer component that is not an observation is named', () => {
   expect(out.notImported).toEqual([{ section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.1', entries: 1, reason: 'organizer component not converted' }]);
 });
 
-test('a section without a templateId is named and the rest of the document still converts', () => {
+test('a section without a templateId: its entries the library cannot route are named and the rest of the document still converts', () => {
   const out = convertCcdaLocal(SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.2.5.1" extension="2015-08-01"/>', ''));
-  expect(out.notImported).toEqual([{ section: 'Problems', entries: 2, reason: 'section without template' }]);
+  expect(out.notImported).toEqual([{ section: 'Problems', entries: 2, reason: 'section not supported by the converter' }]);
   expect(out.resources.filter((r) => r.resourceType === 'Observation').length).toBeGreaterThan(0);
 });
 

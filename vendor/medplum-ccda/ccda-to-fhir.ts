@@ -54,7 +54,10 @@ import {
   OID_IMMUNIZATIONS_SECTION_ENTRIES_OPTIONAL,
   OID_IMMUNIZATIONS_SECTION_ENTRIES_REQUIRED,
   OID_MEDICATION_FREE_TEXT_SIG,
+  OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL,
+  OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL_V2,
   OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED,
+  OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED_V2,
   OID_NOTES_SECTION,
   OID_PAYERS_SECTION,
   OID_PLAN_OF_CARE_SECTION,
@@ -427,39 +430,40 @@ class CcdaToFhirConverter {
   }
 
   private processAct(section: CcdaSection, act: CcdaAct): Resource | undefined {
-    const templateId = section.templateId[0]['@_root'];
-    switch (templateId) {
-      case OID_ALLERGIES_SECTION_ENTRIES_REQUIRED:
-      case OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL:
-      case OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2:
-      case OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2:
-        return this.processAllergyIntoleranceAct(act);
-      case OID_PROBLEMS_SECTION_ENTRIES_REQUIRED:
-      case OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL:
-      case OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED:
-      case OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL:
-        return this.processConditionAct(act);
-      case OID_PLAN_OF_CARE_SECTION:
-        return this.processCarePlanAct(act);
-      case OID_HEALTH_CONCERNS_SECTION:
-        return this.processConditionAct(act);
-      case OID_PROCEDURES_SECTION_ENTRIES_REQUIRED:
-        return this.processProcedureAct(act);
-      case OID_REASON_FOR_REFERRAL:
-        // This is part of USCDI v3, which is optional, and not yet implemented
-        return undefined;
-      case OID_NOTES_SECTION:
-        // This is part of USCDI v3, which is optional, and not yet implemented
-        return undefined;
-      case OID_PAYERS_SECTION:
-        // This is part of USCDI v3, which is optional, and not yet implemented
-        return undefined;
-      default:
-        if (this.options?.ignoreUnsupportedSections) {
+    const templateIds = getTemplateIds(section);
+    for (const templateId of templateIds) {
+      switch (templateId) {
+        case OID_ALLERGIES_SECTION_ENTRIES_REQUIRED:
+        case OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL:
+        case OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2:
+        case OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2:
+          return this.processAllergyIntoleranceAct(act);
+        case OID_PROBLEMS_SECTION_ENTRIES_REQUIRED:
+        case OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL:
+        case OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED:
+        case OID_PROBLEMS_SECTION_V2_ENTRIES_OPTIONAL:
+          return this.processConditionAct(act);
+        case OID_PLAN_OF_CARE_SECTION:
+          return this.processCarePlanAct(act);
+        case OID_HEALTH_CONCERNS_SECTION:
+          return this.processConditionAct(act);
+        case OID_PROCEDURES_SECTION_ENTRIES_REQUIRED:
+          return this.processProcedureAct(act);
+        case OID_REASON_FOR_REFERRAL:
+          // This is part of USCDI v3, which is optional, and not yet implemented
           return undefined;
-        }
-        throw new Error('Unhandled act templateId: ' + templateId);
+        case OID_NOTES_SECTION:
+          // This is part of USCDI v3, which is optional, and not yet implemented
+          return undefined;
+        case OID_PAYERS_SECTION:
+          // This is part of USCDI v3, which is optional, and not yet implemented
+          return undefined;
+      }
     }
+    if (this.options?.ignoreUnsupportedSections) {
+      return undefined;
+    }
+    throw new Error('Unhandled act templateId: ' + templateIds[0]);
   }
 
   private processAllergyIntoleranceAct(act: CcdaAct): Resource | undefined {
@@ -601,20 +605,24 @@ class CcdaToFhirConverter {
     section: CcdaSection,
     substanceAdmin: CcdaSubstanceAdministration
   ): Resource | undefined {
-    const templateId = section.templateId[0]['@_root'];
-    switch (templateId) {
-      case OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED:
-      case OID_PLAN_OF_CARE_SECTION:
-        return this.processMedicationSubstanceAdministration(substanceAdmin);
-      case OID_IMMUNIZATIONS_SECTION_ENTRIES_OPTIONAL:
-      case OID_IMMUNIZATIONS_SECTION_ENTRIES_REQUIRED:
-        return this.processImmunizationSubstanceAdministration(substanceAdmin);
-      default:
-        if (this.options?.ignoreUnsupportedSections) {
-          return undefined;
-        }
-        throw new Error('Unhandled substance administration templateId: ' + templateId);
+    const templateIds = getTemplateIds(section);
+    for (const templateId of templateIds) {
+      switch (templateId) {
+        case OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED:
+        case OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL:
+        case OID_MEDICATIONS_SECTION_ENTRIES_REQUIRED_V2:
+        case OID_MEDICATIONS_SECTION_ENTRIES_OPTIONAL_V2:
+        case OID_PLAN_OF_CARE_SECTION:
+          return this.processMedicationSubstanceAdministration(substanceAdmin);
+        case OID_IMMUNIZATIONS_SECTION_ENTRIES_OPTIONAL:
+        case OID_IMMUNIZATIONS_SECTION_ENTRIES_REQUIRED:
+          return this.processImmunizationSubstanceAdministration(substanceAdmin);
+      }
     }
+    if (this.options?.ignoreUnsupportedSections) {
+      return undefined;
+    }
+    throw new Error('Unhandled substance administration templateId: ' + templateIds[0]);
   }
 
   private processMedicationSubstanceAdministration(substanceAdmin: CcdaSubstanceAdministration): Resource | undefined {
@@ -1063,8 +1071,7 @@ class CcdaToFhirConverter {
   }
 
   private processOrganizer(section: CcdaSection, organizer: CcdaOrganizer): Resource {
-    const templateId = section.templateId[0]['@_root'];
-    if (templateId === OID_CARE_TEAMS_SECTION) {
+    if (getTemplateIds(section).includes(OID_CARE_TEAMS_SECTION)) {
       return this.processCareTeamOrganizer(organizer);
     }
     return this.processVitalsOrganizer(organizer);
@@ -1153,15 +1160,13 @@ class CcdaToFhirConverter {
       return this.processGoalObservation(observation);
     }
 
-    const sectionTemplateId = section.templateId[0]['@_root'];
-    switch (sectionTemplateId) {
-      case OID_PLAN_OF_CARE_SECTION:
-      case OID_GOALS_SECTION:
-        return this.processGoalObservation(observation);
-      default:
-        // Treat this as a normal observation by default
-        return this.processVitalsObservation(observation);
+    const sectionTemplateIds = getTemplateIds(section);
+    if (sectionTemplateIds.includes(OID_PLAN_OF_CARE_SECTION) || sectionTemplateIds.includes(OID_GOALS_SECTION)) {
+      return this.processGoalObservation(observation);
     }
+
+    // Treat this as a normal observation by default
+    return this.processVitalsObservation(observation);
   }
 
   private processGoalObservation(observation: CcdaObservation): Goal {
@@ -1506,6 +1511,16 @@ class CcdaToFhirConverter {
       },
     ];
   }
+}
+
+/**
+ * Returns the roots of a node's templateIds, in document order.
+ * A section may list several templates in any order (Epic lists the entries-optional one first), so match any of them.
+ * @param node - The C-CDA node (section, entry, observation, ...).
+ * @returns The templateId roots, or an empty array.
+ */
+function getTemplateIds(node: { templateId?: CcdaTemplateId[] }): string[] {
+  return node.templateId?.map((templateId) => templateId['@_root']) ?? [];
 }
 
 function nodeToString(node: CcdaText | string | undefined): string | undefined {

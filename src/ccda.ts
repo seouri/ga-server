@@ -253,7 +253,7 @@ const CONCERN = new Map<string, string>([
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
-const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, root: string) => !!n.templateId?.some((t) => t['@_root'] === root);
+const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
 export const sectionName = (s: CcdaSection) => textOf(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
 export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length;
 
@@ -262,21 +262,6 @@ export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) =>
 export function convertCcdaLocal(xml: string): { resources: Resource[]; notImported: NotImported[] } {
   const ccda = sanitizeNullFlavors(convertXmlToCcda(xml)); // what the library reads: the same sections, in its order
   const sections = (ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
-  // Epic lists a section's entries-optional root (e.g. Medications ...2.1) before its entries-required one (...2.1.1) and the library
-  // dispatches on the first: put the required one first. shortcut: removed when the library matches any templateId (Task 4).
-  // A section without a templateId makes the library throw on most entries (section.templateId[0]): its entries stay out of the
-  // conversion and are named; its narrative is still on the Composition.
-  const untemplated = new Map<CcdaSection, number>();
-  for (const s of sections) {
-    if (!s.templateId?.length) {
-      untemplated.set(s, statementCount(s));
-      s.entry = [];
-      continue;
-    }
-    const t = s.templateId;
-    const i = t.findIndex((x) => t.some((y) => x['@_root'] === `${y['@_root']}.1`));
-    if (i > 0) t.unshift(...t.splice(i, 1));
-  }
   // Unsupported sections are not silently skipped: they are accounted below.
   const resources = (convertCcdaToFhir(ccda, { ignoreUnsupportedSections: true }).entry ?? []).map((e) => e.resource as Resource);
   const byRef = new Map(resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
@@ -289,7 +274,6 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const name = sectionName(s);
     const made = (comp?.section?.[i]?.entry ?? []).map((e) => byRef.get(e.reference ?? ''));
     const entries = s.entry ?? [];
-    add(name, undefined, untemplated.get(s) ?? 0, 'section without template');
     const statements = entries.flatMap((e) => STATEMENTS.flatMap((k) => (e as Record<string, unknown[] | undefined>)[k] ?? []));
     add(name, root0(s.templateId), statements.length - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
     // Sections inside a section: the library reads neither their entries nor their narrative.
@@ -307,22 +291,22 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const linked = made.reduce((n, r) => n + (r?.resourceType === 'Encounter' ? ((r as Encounter).diagnosis?.length ?? 0) : 0), 0);
     add(name, ENCOUNTER_DIAGNOSIS, dx - linked, 'encounter diagnosis not converted');
     // Concern acts: only the first SUBJ observation becomes a record.
-    const kind = CONCERN.get(root0(s.templateId) ?? '');
+    const kind = s.templateId?.map((t) => CONCERN.get(t['@_root'])).find(Boolean);
     for (const act of kind ? entries.flatMap((e) => e.act ?? []) : []) {
       const subj = (act.entryRelationship ?? []).filter((er) => er['@_typeCode'] === 'SUBJ').flatMap((er) => er.observation ?? []).length;
       add(name, root0(act.templateId), subj - 1, `additional ${kind} in concern not converted`);
     }
     // Organizer components: the library reads only observations (care teams: their member acts).
-    if (root0(s.templateId) !== OID.OID_CARE_TEAMS_SECTION) {
+    if (!hasTemplate(s, OID.OID_CARE_TEAMS_SECTION)) {
       for (const org of entries.flatMap((e) => e.organizer ?? [])) {
         const other = (org.component ?? []).reduce((n, c) => n + STATEMENTS.filter((k) => k !== 'observation').reduce((m, k) => m + arr((c as X)[k]).length, 0), 0);
         add(name, root0(org.templateId), other, 'organizer component not converted');
       }
     }
     // Observations the library reads as results (its "vitals" path), with their children: a missing code drops the record, an unread value type the value.
-    if (NOT_VITALS.has(root0(s.templateId) ?? '')) return;
+    if (hasTemplate(s, ...NOT_VITALS)) return;
     const walk = (o: CcdaObservation, nested: boolean) => {
-      if (!nested && GOAL_TEMPLATES.includes(root0(o.templateId) ?? '')) {
+      if (!nested && hasTemplate(o, ...GOAL_TEMPLATES)) {
         const type = o.value?.['@_xsi:type'];
         if (type && !GOAL_VALUE_TYPES.has(type)) add(name, root0(o.templateId), 1, `${type} value not converted`);
         return;
