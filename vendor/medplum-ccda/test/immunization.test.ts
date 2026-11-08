@@ -17,3 +17,9 @@ const immunization = (inner = '') => resourcesOf<Immunization>(convertSections(`
 test('a CVX vaccine code is in the FHIR CVX system http://hl7.org/fhir/sid/cvx', () => {
   expect(immunization().vaccineCode.coding?.[0]).toMatchObject({ system: 'http://hl7.org/fhir/sid/cvx', code: '140' });
 });
+
+test('an immunization keeps its route', () => {
+  const route = '<routeCode code="C28161" codeSystem="2.16.840.1.113883.3.26.1.1" displayName="Intramuscular"/>';
+  expect(immunization(route).route?.coding?.[0]).toMatchObject({ code: 'C28161', display: 'Intramuscular' });
+  expect(immunization().route).toBeUndefined();
+});

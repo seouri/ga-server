@@ -1074,6 +1074,7 @@ class CcdaToFhirConverter {
       patient: createReference(this.patient as Patient),
       occurrenceDateTime: mapCcdaToFhirDateTime(substanceAdmin.effectiveTime?.[0]?.['@_value']),
       lotNumber: consumable.manufacturedProduct?.[0]?.manufacturedMaterial?.[0]?.lotNumberText?.[0],
+      route: this.mapCode(substanceAdmin.routeCode),
     };
 
     if (substanceAdmin.performer) {
