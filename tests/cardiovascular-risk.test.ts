@@ -39,6 +39,9 @@ const full: [CardiovascularRiskInput, string, number[], number[] | null][] = [
   [{ ...base, age: 58, sex: 'male', sbp: 150, bpTx: true, totalC: 210, hdlC: 40, smoker: true, egfr: 55, bmi: 24, uacr: 45 }, 'uacr', [0.197, 0.125, 0.095], [0.485, 0.33, 0.294]],
   [{ ...base, age: 40, sex: 'female', sbp: 105, totalC: 180, hdlC: 65, smoker: true, egfr: 110, bmi: 35, hba1c: 5.8, uacr: 12 }, 'full', [0.01, 0.006, 0.007], [0.071, 0.038, 0.062]],
   [{ ...base, age: 66, sex: 'male', sbp: 162, bpTx: true, totalC: 250, hdlC: 38, statin: true, diabetes: true, egfr: 48, bmi: 31, hba1c: 8.1, uacr: 300 }, 'full', [0.456, 0.323, 0.289], null],
+  [{ ...base, age: 48, sex: 'male', sbp: 132, totalC: 240, hdlC: 42, smoker: true, egfr: 100, bmi: 29, hba1c: 6.1 }, 'hba1c', [0.062, 0.044, 0.02], [0.284, 0.2, 0.133]],
+  [{ ...base, age: 55, sex: 'male', sbp: 100, totalC: 170, hdlC: 60, statin: true, diabetes: true, egfr: 70, bmi: 26, hba1c: 6.8, uacr: 25 }, 'full', [0.063, 0.036, 0.046], [0.269, 0.151, 0.215]],
+  [{ ...base, age: 36, sex: 'female', sbp: 112, totalC: 195, hdlC: 52, egfr: 120, bmi: 38 }, 'base', [0.005, 0.003, 0.002], [0.036, 0.023, 0.021]],
   // hba1c 16 is outside 4.5-15: preventr drops it and runs the UACR model.
   [{ ...base, age: 52, sex: 'female', sbp: 128, totalC: 215, hdlC: 58, egfr: 80, bmi: 22, hba1c: 16, uacr: 8 }, 'uacr', [0.024, 0.016, 0.009], [0.168, 0.102, 0.079]],
 ];
