@@ -6,7 +6,7 @@ This page says how GA computes its risk scores, screening and vaccine status and
 
 GA is a personal health record, not a medical device. Nothing here is medical advice.
 
-The AI agent never computes a score itself. GA's instructions to agents (AGENTS.md and the MCP server instructions) say to gather the inputs from the record, call the tool (`cardiovascular_risk_10yr`, `liver_fibrosis_risk`, `health_maintenance`, `vaccine_gaps`, `whats_new`) and relay what it returns. Screening and vaccine items carry their guideline citation, and `liver_fibrosis_risk` returns its references. `cardiovascular_risk_10yr` returns the PREVENT model used and notes, but no citation text; the references are below.
+The AI agent never computes a score itself. GA's instructions to agents (AGENTS.md and the MCP server instructions) say to gather the inputs from the record, call the tool (`cardiovascular_risk_10yr`, `liver_fibrosis_risk`, `health_maintenance`, `vaccine_gaps`, `whats_new`) and relay what it returns. Screening and vaccine items carry their guideline citation, and `liver_fibrosis_risk` returns its references. `cardiovascular_risk_10yr` returns the PREVENT model used, notes and a `citations` list (PREVENT, PCE, preventr; same text as references 1, 3 and 4 below).
 
 ## Cardiovascular risk: PREVENT and Pooled Cohort Equations
 
@@ -50,6 +50,7 @@ Social deprivation index is not supported; the full model runs with SDI coded as
   | eGFR | 15-140 | not used |
   | BMI (when given) | 18.5-39.9 | not used |
 
+- PCE and the SBP range: some published PCE calculators accept SBP up to 200 mmHg, but preventr's `pce_model` checks the same shared 90-180 range as PREVENT (only age differs: 40-79 for PCE). GA matches preventr; a wider PCE range was not confirmed from the 2013 guideline text, so it was not adopted.
 - A BMI outside 18.5-39.9 nulls every PREVENT result, including ASCVD and total CVD, which do not use BMI. This follows preventr.
 - An HbA1c outside 4.5-15 % or a UACR outside 0.1-25,000 mg/g is dropped with a note, and the model is chosen from what is left (preventr does the same).
 - **Heart failure** needs BMI. Without it, both heart failure results are `null` with a note; ASCVD and total CVD are unchanged.

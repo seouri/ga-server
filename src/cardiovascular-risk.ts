@@ -24,6 +24,7 @@ export type CardiovascularRiskResult = {
   preventAscvd: number | null; preventTotalCvd: number | null; pce: number | null; notes: string[];
   preventHeartFailure: number | null; preventAscvd30yr: number | null; preventTotalCvd30yr: number | null; preventHeartFailure30yr: number | null;
   preventModel: PreventModel | null;
+  citations: string[];
 };
 
 type Sex = 'male' | 'female';
@@ -175,6 +176,12 @@ function pce(x: CardiovascularRiskInput): number {
     : 1 - 0.9144 ** Math.exp(12.344 * la + 11.853 * lt - 2.664 * la * lt - 7.99 * lh + 1.769 * la * lh + (x.bpTx ? 1.797 : 1.764) * ls + 7.837 * s - 1.795 * la * s + 0.658 * d - 61.1816);
 }
 
+const CITATIONS = [
+  'Khan SS, Matsushita K, Sang Y, et al. Development and validation of the American Heart Association\'s PREVENT equations. Circulation. 2024;149(6):430-449. doi:10.1161/CIRCULATIONAHA.123.067626',
+  'Goff DC, Lloyd-Jones DM, Bennett G, et al. 2013 ACC/AHA guideline on the assessment of cardiovascular risk: a report of the American College of Cardiology/American Heart Association Task Force on Practice Guidelines. Circulation. 2014;129(25 Suppl 2):S49-S73. doi:10.1161/01.cir.0000437741.48606.98',
+  'Mayer M. preventr: an implementation of the PREVENT and Pooled Cohort Equations. R package version 0.12.2, MIT license. https://cran.r-project.org/package=preventr',
+];
+
 // Validity ranges as enforced by preventr; out-of-range inputs give null with a note instead of an extrapolation.
 export function cardiovascularRisk10yr(x: CardiovascularRiskInput): CardiovascularRiskResult {
   const notes: string[] = [];
@@ -205,5 +212,6 @@ export function cardiovascularRisk10yr(x: CardiovascularRiskInput): Cardiovascul
     preventTotalCvd30yr: ok30 ? risk(30, 'totalCvd') : null,
     preventHeartFailure30yr: ok30 && hfOk ? risk(30, 'hf') : null,
     preventModel: preventOk ? model : null,
+    citations: CITATIONS,
   };
 }

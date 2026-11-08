@@ -75,3 +75,16 @@ test('BMI outside 18.5-39.9 nulls every PREVENT result, as preventr does', () =>
   expect(r.pce).not.toBeNull();
   expect(r.notes.join(' ')).toMatch(/BMI 45 outside 18.5-39.9/);
 });
+
+test('returns the PREVENT, PCE and preventr citations', () => {
+  const r = cardiovascularRisk10yr(full[0][0]);
+  expect(r.citations).toHaveLength(3);
+  expect(r.citations[0]).toContain('10.1161/CIRCULATIONAHA.123.067626');
+  expect(r.citations[1]).toContain('10.1161/01.cir.0000437741.48606.98');
+  expect(r.citations[2]).toContain('preventr');
+});
+
+test('PCE uses the same SBP range as PREVENT, as preventr does (its pce_model checks the shared 90-180 range)', () => {
+  const r = cardiovascularRisk10yr({ ...full[0][0], sbp: 190 });
+  expect(r).toMatchObject({ preventAscvd: null, pce: null });
+});
