@@ -70,5 +70,20 @@ test('a facility the entry already locates the visit at is not added twice', () 
   </section></component>`)));
   const [encounter] = resourcesOf<Encounter>(bundle, 'Encounter');
   expect(encounter.location).toHaveLength(1);
-  expect(resourcesOf<Location>(bundle, 'Location')).toHaveLength(1);
+  const locations = resourcesOf<Location>(bundle, 'Location');
+  expect(locations).toHaveLength(1);
+  // The header's facility details survive the merge into the entry's Location of the same id.
+  expect(locations[0]).toMatchObject({ identifier: [{ value: 'F1' }], name: 'Test Clinic', address: { city: 'Town' } });
+  expect(encounter.location?.[0].location.reference).toBe(`Location/${locations[0].id}`);
+});
+
+test('a header participant the entry Encounter already has (same type and person) is not added twice', () => {
+  const bundle = convertCcdaToFhir(convertXmlToCcda(doc(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>x</text>
+    <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+      <id root="2.16.840.1.113883.19.5.3" extension="V1"/><code code="99213" codeSystem="2.16.840.1.113883.6.12"/></encounter></entry>
+  </section></component>`).replace('</encompassingEncounter>',
+    '<encounterParticipant typeCode="ATND"><assignedEntity><id root="2.16.840.1.113883.4.6" extension="NPI-1"/></assignedEntity></encounterParticipant></encompassingEncounter>')));
+  const [encounter] = resourcesOf<Encounter>(bundle, 'Encounter');
+  expect(encounter.participant).toHaveLength(1);
 });

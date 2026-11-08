@@ -29,3 +29,9 @@ Expected: `Composition.encounter` pointing at an Encounter with identifier `V1`,
 When an Encounters-section entry has the encompassing encounter's id, that Encounter gains the header's period (when it has
 none), every header participant, and the facility as a Location unless one of its locations already has the facility's id.
 Nothing the header states is dropped. Tests in `encompassing-encounter.test.ts`.
+
+## Amendment (PATCHES row 48)
+
+The header facility's Location is always created and merged by identifier with an entry Location of the same id (so its name
+and address are kept); only a duplicate `Encounter.location` entry is skipped. Header participants the Encounter already has
+(same type and person) are not repeated.

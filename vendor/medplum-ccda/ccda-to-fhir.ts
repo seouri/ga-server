@@ -24,6 +24,7 @@ import type {
   Dosage,
   DosageDoseAndRate,
   Encounter,
+  EncounterParticipant,
   EncounterDiagnosis,
   Extension,
   FamilyMemberHistory,
@@ -1622,20 +1623,26 @@ class CcdaToFhirConverter {
       type: encompassing.code ? [this.mapCode(encompassing.code) as CodeableConcept] : undefined,
       subject: this.patient ? createReference(this.patient) : undefined,
     };
-    // An entry's Encounter of the same id gains what the header adds: its period when it has none, every header participant,
-    // and the facility unless one of its locations already has that facility's id.
+    // An entry's Encounter of the same id gains what the header adds: its period when it has none, each header participant it
+    // does not already have (same type and individual), and the facility. The facility's Location is always kept (row 33 merges
+    // it into a Location of the same id, which gains its name and address); only a second location entry for it is skipped.
     encounter.period ??= period;
-    if (participants.length) {
-      encounter.participant = [...(encounter.participant ?? EMPTY), ...participants];
+    const same = (a: EncounterParticipant, b: EncounterParticipant): boolean =>
+      JSON.stringify(a.type) === JSON.stringify(b.type) &&
+      this.sameEntity(a.individual?.reference, b.individual?.reference);
+    for (const p of participants) {
+      if (!(encounter.participant ?? EMPTY).some((q) => same(p, q))) {
+        encounter.participant = [...(encounter.participant ?? EMPTY), p];
+      }
     }
     if (location) {
+      this.resources.push(location);
       const facilityKeys = new Set((location.identifier ?? EMPTY).filter((i) => i.value).map(key));
       const known = (encounter.location ?? EMPTY).some((l) => {
         const target = this.resources.find((r) => `${r.resourceType}/${r.id}` === l.location.reference) as Location | undefined;
         return !!target?.identifier?.some((i) => facilityKeys.has(key(i)));
       });
       if (!known) {
-        this.resources.push(location);
         encounter.location = [...(encounter.location ?? EMPTY), { location: createReference(location) }];
       }
     }
@@ -1643,6 +1650,29 @@ class CcdaToFhirConverter {
       this.resources.push(encounter);
     }
     return createReference(encounter);
+  }
+
+  /**
+   * Whether two references name the same person: the same reference, or PractitionerRoles whose practitioners share an identifier.
+   * @param a - A reference.
+   * @param b - Another reference.
+   * @returns True when they are the same entity.
+   */
+  private sameEntity(a: string | undefined, b: string | undefined): boolean {
+    if (!a || !b) {
+      return false;
+    }
+    if (a === b) {
+      return true;
+    }
+    const find = (ref: string): Resource | undefined => this.resources.find((r) => `${r.resourceType}/${r.id}` === ref);
+    const ids = (ref: string): string[] => {
+      const role = find(ref) as PractitionerRole | undefined;
+      const who = role?.resourceType === 'PractitionerRole' ? (find(role.practitioner?.reference ?? '') as Practitioner | undefined) : (role as Practitioner | undefined);
+      return (who?.identifier ?? EMPTY).filter((i) => i.value).map((i) => `${i.system ?? ''}|${i.value}`);
+    };
+    const theirs = new Set(ids(b));
+    return ids(a).some((k) => theirs.has(k));
   }
 
   /**
