@@ -901,10 +901,7 @@ class CcdaToFhirConverter {
           !getTemplateIds(performer).includes(OID_GUARANTOR_PERFORMER) &&
           performer.assignedEntity?.code?.['@_code'] !== 'GUAR'
       )
-      .map((performer) => ({
-        identifier: this.mapIdentifiers(performer.assignedEntity?.id)?.[0],
-        display: performer.assignedEntity?.representedOrganization?.name?.[0],
-      }));
+      .map((performer) => this.mapPayerToReference(performer.assignedEntity));
     const coveredParty = policy.participant?.find((participant) => participant['@_typeCode'] === 'COV');
     const policyHolder = policy.participant?.find((participant) => participant['@_typeCode'] === 'HLD');
     const order = Number.parseInt(sequenceNumber?.['@_value'] ?? '', 10);
@@ -926,6 +923,26 @@ class CcdaToFhirConverter {
           : [{ extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] }],
       order: order > 0 ? order : undefined,
     };
+  }
+
+  /**
+   * A payer (Payer Performer) is an Organization: its id, and the name, address and telecom of its representedOrganization
+   * (the assigned entity's own address and telecom when the organization has none).
+   * @param entity - The payer's assigned entity.
+   * @returns The Coverage payor reference.
+   */
+  private mapPayerToReference(entity: CcdaAssignedEntity | undefined): Reference<Organization> {
+    const org = entity?.representedOrganization;
+    const organization: Organization = {
+      resourceType: 'Organization',
+      id: this.mapId(entity?.id),
+      identifier: this.mapIdentifiers(entity?.id),
+      name: org?.name?.[0],
+      address: this.mapAddresses(org?.addr?.length ? org.addr : entity?.addr),
+      telecom: this.mapTelecom(org?.telecom?.length ? org.telecom : entity?.telecom),
+    };
+    this.resources.push(organization);
+    return { ...createReference(organization), ...(organization.name && { display: organization.name }) };
   }
 
   private processSubstanceAdministration(
