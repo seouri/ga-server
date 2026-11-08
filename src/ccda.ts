@@ -271,6 +271,8 @@ const CONCERN = [OID.OID_PROBLEMS_SECTION_ENTRIES_REQUIRED, OID.OID_PROBLEMS_SEC
 // processGoalObservation, which keeps only these value types and no child observation.
 const GOAL_TEMPLATES = [OID.OID_GOALS_SECTION, OID.OID_GOAL_OBSERVATION];
 const GOAL_VALUE_TYPES = new Set(['CD', 'ST']);
+// A plan-of-care observation in these moods (not a goal template) is a planned test: a ServiceRequest with no value or child observation.
+const PLANNED_MOODS = new Set(['INT', 'PRP', 'RQO', 'ARQ']);
 // A family history observation is one condition of its FamilyMemberHistory: its coded value, with these related observations
 // (age at onset, caused death); a negated one is none (medplum#11243).
 const FAMILY_DETAILS = [OID.OID_AGE_OBSERVATION, OID.OID_FAMILY_HISTORY_DEATH_OBSERVATION];
@@ -340,6 +342,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     // Observations the library reads as results (its "vitals" path), with their children: a missing code drops the record, an unread value type the value.
     const goals = hasTemplate(s, OID.OID_PLAN_OF_CARE_SECTION, OID.OID_GOALS_SECTION);
     const walk = (o: CcdaObservation, nested: boolean) => {
+      if (!nested && !hasTemplate(o, ...GOAL_TEMPLATES) && hasTemplate(s, OID.OID_PLAN_OF_CARE_SECTION) && PLANNED_MOODS.has(o['@_moodCode'])) {
+        const type = o.value?.['@_xsi:type'];
+        if (o.value) add(name, root0(o.templateId), 1, `${type ?? 'untyped'} value not converted`);
+        add(name, root0(o.templateId), (o.entryRelationship ?? []).flatMap((er) => er.observation ?? []).length, 'observation in planned request not converted');
+        return;
+      }
       if (!nested && (goals || hasTemplate(o, ...GOAL_TEMPLATES))) {
         const type = o.value?.['@_xsi:type'];
         if (type && !GOAL_VALUE_TYPES.has(type)) add(name, root0(o.templateId), 1, `${type} value not converted`);

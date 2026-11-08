@@ -188,6 +188,21 @@ export interface CcdaToFhirOptions {
  * @param options - Optional conversion options
  * @returns The converted FHIR resources
  */
+// C-CDA act status and planned moodCode → ServiceRequest (referrals, planned observations)
+const SERVICE_REQUEST_STATUSES: Record<string, ServiceRequest['status']> = {
+  active: 'active',
+  completed: 'completed',
+  aborted: 'revoked',
+  cancelled: 'revoked',
+  suspended: 'on-hold',
+};
+const SERVICE_REQUEST_INTENTS: Record<string, ServiceRequest['intent']> = {
+  INT: 'plan',
+  PRP: 'proposal',
+  RQO: 'order',
+  ARQ: 'order',
+};
+
 export function convertCcdaToFhir(ccda: Ccda, options?: CcdaToFhirOptions): Bundle {
   return new CcdaToFhirConverter(sanitizeNullFlavors(ccda), options).convert();
 }
@@ -734,21 +749,13 @@ class CcdaToFhirConverter {
   }
 
   private processReferralAct(act: CcdaAct): ServiceRequest {
-    const statuses: Record<string, ServiceRequest['status']> = {
-      active: 'active',
-      completed: 'completed',
-      aborted: 'revoked',
-      cancelled: 'revoked',
-      suspended: 'on-hold',
-    };
-    const intents: Record<string, ServiceRequest['intent']> = { INT: 'plan', PRP: 'proposal', RQO: 'order', ARQ: 'order' };
     const text = nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference);
     return {
       resourceType: 'ServiceRequest',
       id: this.mapId(act.id),
       identifier: this.mapIdentifiers(act.id),
-      status: statuses[act.statusCode?.['@_code'] ?? ''] ?? 'unknown',
-      intent: intents[act['@_moodCode']] ?? 'order',
+      status: SERVICE_REQUEST_STATUSES[act.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+      intent: SERVICE_REQUEST_INTENTS[act['@_moodCode']] ?? 'order',
       category: [{ coding: [{ system: SNOMED, code: '3457005', display: 'Patient referral' }] }],
       code: this.mapCode(act.code),
       subject: createReference(this.patient as Patient),
@@ -1612,12 +1619,36 @@ class CcdaToFhirConverter {
     }
 
     const sectionTemplateIds = getTemplateIds(section);
+    if (sectionTemplateIds.includes(OID_PLAN_OF_CARE_SECTION) && SERVICE_REQUEST_INTENTS[observation['@_moodCode']]) {
+      // A planned observation (a test to be done) is a request, not a goal
+      return this.processPlannedObservation(observation);
+    }
     if (sectionTemplateIds.includes(OID_PLAN_OF_CARE_SECTION) || sectionTemplateIds.includes(OID_GOALS_SECTION)) {
       return this.processGoalObservation(observation);
     }
 
     // Treat this as a normal observation by default
     return this.processVitalsObservation(observation, section);
+  }
+
+  private processPlannedObservation(observation: CcdaObservation): ServiceRequest {
+    const text = nodeToString(observation.text) || this.resolveNarrativeReference(observation.text?.reference);
+    const when = this.mapObservationEffectiveTime(observation.effectiveTime?.[0]);
+    return {
+      resourceType: 'ServiceRequest',
+      id: this.mapId(observation.id),
+      identifier: this.mapIdentifiers(observation.id),
+      status: SERVICE_REQUEST_STATUSES[observation.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+      intent: SERVICE_REQUEST_INTENTS[observation['@_moodCode']] ?? 'order',
+      code: this.mapCode(observation.code),
+      subject: createReference(this.patient as Patient),
+      occurrenceDateTime: when.effectiveDateTime,
+      occurrencePeriod: when.effectivePeriod,
+      authoredOn: mapCcdaToFhirDateTime(observation.author?.[0]?.time?.['@_value']),
+      requester: this.mapAuthorToReference(observation.author?.[0]),
+      note: text ? [{ text }] : undefined,
+      extension: this.mapTextReference(observation.text),
+    };
   }
 
   private processGoalObservation(observation: CcdaObservation): Goal {

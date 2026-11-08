@@ -285,11 +285,18 @@ test('payers: one Coverage per policy; a guarantor and the policy holder\'s own 
   expect(none.notImported).toContainEqual({ section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' });
 });
 
-test('goals and plan of care: an observation value the goal path cannot read, and child observations of a goal, are named', () => {
+test('goals and plan of care: an observation value the goal or request path cannot read, and child observations, are named', () => {
   const planned = EPIC.replace('<code code="24323-8" codeSystem="2.16.840.1.113883.6.1" displayName="Comprehensive metabolic panel"/>\n              <statusCode code="active"/>',
     '<code code="24323-8" codeSystem="2.16.840.1.113883.6.1" displayName="Comprehensive metabolic panel"/>\n              <statusCode code="active"/><value xsi:type="PQ" value="5" unit="kg"/>'
     + '<entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN"><code code="1" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/></observation></entryRelationship>');
+  // The fixture's planned CMP (moodCode RQO) is a ServiceRequest: it holds no value or child observation.
   expect(convertCcdaLocal(planned).notImported.filter((n) => n.section === 'Plan of Treatment')).toEqual([
+    { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'PQ value not converted' },
+    { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'observation in planned request not converted' },
+  ]);
+  // The same observation as a goal (moodCode GOL) is a Goal: it reads only coded or text values and no child observation.
+  const goal = planned.replace('<observation classCode="OBS" moodCode="RQO">', '<observation classCode="OBS" moodCode="GOL">');
+  expect(convertCcdaLocal(goal).notImported.filter((n) => n.section === 'Plan of Treatment')).toEqual([
     { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'PQ value not converted' },
     { section: 'Plan of Treatment', templateId: '2.16.840.1.113883.10.20.22.4.44', entries: 1, reason: 'observation in goal not converted' },
   ]);
@@ -342,7 +349,7 @@ test('every section of the Epic-style fixture is imported', () => {
     'Problem List': ['Condition'], Encounters: ['Encounter'], 'Family History': ['FamilyMemberHistory'], Medications: ['MedicationStatement', 'MedicationRequest'], Results: ['DiagnosticReport'], 'Vital Signs': ['Observation'],
     Immunizations: ['Immunization'], Allergies: ['AllergyIntolerance'], 'Social History': ['Observation'], 'Functional Status': ['Observation'],
     'Patient Instructions': ['DocumentReference'], 'History of Present Illness': ['DocumentReference'], 'Reason for Referral': ['ServiceRequest'],
-    'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'Goal'], 'Care Team': ['CareTeam'],
+    'Reason for Visit': ['Observation'], Insurance: ['Coverage'], 'Plan of Treatment': ['CarePlan', 'ServiceRequest'], 'Care Team': ['CareTeam'],
   });
   expect(out.notImported).toEqual([]);
 });
