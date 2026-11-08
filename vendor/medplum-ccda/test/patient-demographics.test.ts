@@ -31,3 +31,13 @@ test('the US Core race and ethnicity extensions carry their required text sub-ex
   // A code that names nothing gives no text.
   expect(patientOf('<raceCode code="2106-3" codeSystem="2.16.840.1.113883.6.238"/>').extension?.[0].extension).toHaveLength(1);
 });
+
+test('a person name with no parts (a nullFlavor) is no name; a name given as text only is its text', () => {
+  const xml = (name: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3"><recordTarget><patientRole><patient/></patientRole></recordTarget>
+    <legalAuthenticator><assignedEntity><id root="2.16.840.1.113883.19.5" extension="A"/><assignedPerson>${name}</assignedPerson></assignedEntity></legalAuthenticator>
+    <component><structuredBody/></component></ClinicalDocument>`;
+  const doctor = (name: string) => (convertCcdaToFhir(convertXmlToCcda(xml(name))).entry ?? []).map((e) => e.resource).find((r) => r?.resourceType === 'Practitioner') as { name?: unknown };
+  expect(doctor('<name nullFlavor="UNK"/>').name).toBeUndefined();
+  expect(doctor('<name>Pat Doe, MD</name>').name).toEqual([{ text: 'Pat Doe, MD' }]);
+  expect(doctor('<name><given>Pat</given><family>Doe</family></name>').name).toEqual([{ family: 'Doe', given: ['Pat'] }]);
+});
