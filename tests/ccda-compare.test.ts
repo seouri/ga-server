@@ -94,9 +94,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Location', path: '(record)', count: 1 },
     { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
     { type: 'Immunization', path: 'route.coding', count: 1 },
-    // The Microsoft converter files the policy type (PPO) under Coverage.relationship; the new path has it as Coverage.type (its
-    // field) and maps relationship from the covered party (absent here). Needs a controller ruling: explain, or keep as a loss.
-    { type: 'Coverage', path: 'relationship.coding', count: 1 },
   ]);
   expect(r.unaccounted).toEqual([]);
 });
@@ -205,6 +202,17 @@ test('a display is compared as text when it is the only content, by presence bes
   expect(pairLosses([imm('Dr Alice')], [imm('Dr Bob')])).toEqual([{ type: 'Immunization', path: 'performer.actor.display', count: 1 }]);
   const ob = (d: string) => ({ resourceType: 'Observation', identifier: id('o'), code: { coding: [{ system: 'http://loinc.org', code: '13457-7', display: d }] } });
   expect(pairLosses([ob('LDL')], [ob('LDL cholesterol')])).toEqual([]); // same code: the label may differ
+});
+
+test('Coverage: the policy type the Microsoft path filed under relationship is covered by the same coding under type, nothing else', () => {
+  const ppo = { system: 'urn:oid:2.16.840.1.113883.5.4', code: 'PPO', display: 'Preferred provider organization policy' };
+  const hmo = { ...ppo, code: 'HMO' };
+  const old = { resourceType: 'Coverage', identifier: id('c'), relationship: { coding: [ppo] } };
+  expect(pairLosses([old], [{ resourceType: 'Coverage', identifier: id('c'), type: { coding: [ppo] } }])).toEqual([]);
+  expect(pairLosses([old], [{ resourceType: 'Coverage', identifier: id('c'), type: { coding: [hmo] } }])).toEqual([{ type: 'Coverage', path: 'relationship.coding', count: 1 }]);
+  // Only Coverage, only relationship -> type.
+  const ob = { resourceType: 'Observation', identifier: id('o'), relationship: { coding: [ppo] } };
+  expect(pairLosses([ob], [{ resourceType: 'Observation', identifier: id('o'), type: { coding: [ppo] } }])).toEqual([{ type: 'Observation', path: 'relationship.coding', count: 1 }]);
 });
 
 test('placeholder, root-id, status and date rules stay narrow', () => {

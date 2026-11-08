@@ -186,6 +186,16 @@ const placeholder = (r: Resource) => {
   return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string) && Object.keys((p.code as R | undefined) ?? {}).every((k) => k === 'text');
 };
 
+// One path equivalence: the Microsoft path files a Coverage's policy type (the Policy Activity code, e.g. PPO) under
+// `relationship`; the new path under `type`, its FHIR field. The old `relationship` is compared as `type` only when the old
+// record has no `type` and the new `type` carries one of its codings (system|code); otherwise it stays a loss.
+function policyType(o: Resource, n: Resource): Resource {
+  const { relationship, ...rest } = o as unknown as R & { relationship?: { coding?: R[] } };
+  const have = new Set(((n as unknown as { type?: { coding?: R[] } }).type?.coding ?? []).filter(isCoding).map(codingKey));
+  const moved = o.resourceType === 'Coverage' && rest.type === undefined && relationship?.coding?.some((c) => isCoding(c) && have.has(codingKey(c)));
+  return moved ? ({ ...rest, type: relationship } as unknown as Resource) : o;
+}
+
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
 const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
 
@@ -208,7 +218,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   };
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', placeholder(r) ? PLACEHOLDER : undefined);
-    else for (const p of new Set(diff(prep(r), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
+    else for (const p of new Set(diff(prep(policyType(r, m)), prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true }) : ref, []))) add(r.resourceType, p);
   }
   // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
   const matched = new Set(match.values());
