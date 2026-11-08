@@ -845,6 +845,7 @@ class CcdaToFhirConverter {
     return {
       resourceType: 'MedicationRequest',
       id: cdaId,
+      identifier: this.mapIdentifiers(substanceAdmin.id),
       contained: medication ? [medication] : undefined,
       meta: {
         profile: [US_CORE_MEDICATION_REQUEST_URL],

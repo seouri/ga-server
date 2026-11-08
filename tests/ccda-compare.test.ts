@@ -24,13 +24,12 @@ const subject = { reference: 'Patient/ms-p' };
 
 test('a field present in the old record and missing in the new is a loss with its element path', () => {
   const r = run(SYNTHETIC, MS_SYNTHETIC());
-  // Against the real converter: the type change (taking -> ordered, Task 6), the medication's source id and start, the organizer
+  // Against the real converter: the type change (taking -> ordered, Task 6), the medication's start, the organizer
   // as report (Task 7), the Composition's subject and section mode. LOINC/SNOMED/RxNorm, values, dates and the document id agree.
   expect(r.losses).toEqual([
     { type: 'Composition', path: 'section.mode', count: 1 },
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'MedicationStatement', path: 'resourceType', count: 1 },
-    { type: 'MedicationStatement', path: 'identifier', count: 1 },
     { type: 'MedicationStatement', path: 'effective[x].start', count: 1 },
     { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
     { type: 'DiagnosticReport', path: 'result.reference', count: 1 },
@@ -81,7 +80,6 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Composition', path: 'subject.reference', count: 1 },
     { type: 'Patient', path: 'name.use', count: 1 },
     { type: 'MedicationStatement', path: 'resourceType', count: 1 },
-    { type: 'MedicationStatement', path: 'identifier', count: 1 },
     { type: 'MedicationStatement', path: 'effective[x].start', count: 1 },
     { type: 'MedicationStatement', path: 'medication[x].text', count: 1 }, // name from the narrative (Task 6)
     { type: 'DiagnosticReport', path: 'resourceType', count: 1 },
