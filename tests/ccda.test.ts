@@ -203,7 +203,6 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   expect(out.notImported).toEqual([
     { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
     { section: 'Results', templateId: '2.16.840.1.113883.10.20.22.4.2', entries: 1, reason: 'REAL value not converted' },
-    { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' },
   ]);
   const types = out.resources.map((r) => r.resourceType);
   expect(types).toContain('MedicationRequest'); // Epic lists Medications' entries-optional root first: no throw
@@ -231,6 +230,24 @@ test('care team: every member and performer is a participant; a member without p
     { section: 'Care Team', templateId: '2.16.840.1.113883.10.20.22.4.500', entries: 1, reason: 'care team member without performer' },
     { section: 'Care Team', templateId: '2.16.840.1.113883.10.20.22.4.500', entries: 1, reason: 'organizer component not converted' },
   ]));
+});
+
+test('payers: one Coverage per policy; a guarantor and the policy holder\'s own details are named', () => {
+  const extra = '<performer typeCode="PRF"><templateId root="2.16.840.1.113883.10.20.22.4.88"/><assignedEntity><id nullFlavor="NI"/><code code="GUAR" codeSystem="2.16.840.1.113883.5.111"/></assignedEntity></performer>'
+    + '<participant typeCode="HLD"><participantRole><id root="2.25.1" extension="S-1"/><playingEntity><name><given>Holder</given></name></playingEntity></participantRole></participant>';
+  const second = '<entryRelationship typeCode="COMP"><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.61"/><id root="2.25.2" extension="EX-POLICY-2"/><code code="HMO" codeSystem="2.16.840.1.113883.5.4"/><statusCode code="completed"/></act></entryRelationship>';
+  const xml = EPIC.replace('<code code="PPO" codeSystem="2.16.840.1.113883.5.4" displayName="Preferred provider organization policy"/>\n                  <statusCode code="completed"/>',
+    `<code code="PPO" codeSystem="2.16.840.1.113883.5.4" displayName="Preferred provider organization policy"/>\n                  <statusCode code="completed"/>${extra}`)
+    .replace('</entryRelationship>\n            </act>\n          </entry>\n        </section>\n      </component>\n      <!-- Plan', `</entryRelationship>${second}\n            </act>\n          </entry>\n        </section>\n      </component>\n      <!-- Plan`);
+  const out = convertCcdaLocal(xml);
+  expect(out.resources.filter((r) => r.resourceType === 'Coverage')).toHaveLength(2);
+  expect(out.notImported.filter((n) => n.section === 'Insurance')).toEqual([
+    { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.4.61', entries: 1, reason: 'guarantor not converted' },
+    { section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.4.61', entries: 1, reason: 'policy holder details not converted' },
+  ]);
+  // A coverage act without a policy produced no record.
+  const none = convertCcdaLocal(EPIC.replace(/<entryRelationship typeCode="COMP">\s*<act classCode="ACT" moodCode="EVN">\s*<templateId root="2.16.840.1.113883.10.20.22.4.61"\/>[\s\S]*?<\/entryRelationship>/, ''));
+  expect(none.notImported).toContainEqual({ section: 'Insurance', templateId: '2.16.840.1.113883.10.20.22.2.18', entries: 1, reason: 'section not supported by the converter' });
 });
 
 const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
@@ -273,7 +290,9 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     const first = await importPath(client, cfg, file, pid);
     expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
     expect(first.created).toBeGreaterThan(0);
-    expect(first.notImported?.map((n) => n.section)).toContain('Insurance');
+    expect(first.notImported?.map((n) => n.section)).toEqual(['Encounters', 'Results']); // visit diagnosis (Task 5), REAL value (Task 7)
+    const [coverage] = await client.searchResources('Coverage', {});
+    expect(coverage.beneficiary.reference).toBe(`Patient/${pid}`);
     expect(await importPath(client, cfg, file, pid)).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
     // Known gap: the library gives a CareTeam no subject, so it sits outside the patient compartment (not yet assigned to a fix task).
     const [team] = await client.searchResources('CareTeam', {});

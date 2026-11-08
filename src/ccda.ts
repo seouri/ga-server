@@ -275,7 +275,17 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const made = (comp?.section?.[i]?.entry ?? []).map((e) => byRef.get(e.reference ?? ''));
     const entries = s.entry ?? [];
     const statements = entries.flatMap((e) => STATEMENTS.flatMap((k) => (e as Record<string, unknown[] | undefined>)[k] ?? []));
-    add(name, root0(s.templateId), statements.length - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
+    // Payers: one Coverage per policy activity of a coverage act (none: the act produced no record).
+    const payers = hasTemplate(s, OID.OID_PAYERS_SECTION, OID.OID_PAYERS_SECTION_V2);
+    const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
+    const expected = statements.length + policies.reduce((n, p) => n + Math.max(0, p.length - 1), 0);
+    add(name, root0(s.templateId), expected - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
+    // The library keeps the payer, covered party and subscriber id; a guarantor and the policy holder's own details (name, address) have no Coverage field.
+    for (const p of policies.flat()) {
+      add(name, root0(p.templateId), (p.performer ?? []).filter((f) => hasTemplate(f, OID.OID_GUARANTOR_PERFORMER) || f.assignedEntity?.code?.['@_code'] === 'GUAR').length, 'guarantor not converted');
+      const holder = (p.participant ?? []).find((x) => x['@_typeCode'] === 'HLD')?.participantRole;
+      add(name, root0(p.templateId), holder?.playingEntity || holder?.addr?.length ? 1 : 0, 'policy holder details not converted');
+    }
     // Sections inside a section: the library reads neither their entries nor their narrative.
     const nested = (n: CcdaSection): void => {
       for (const c of arr((n as { component?: X | X[] }).component)) {

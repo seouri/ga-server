@@ -16,6 +16,7 @@ import type {
   CompositionSection,
   Condition,
   ContactPoint,
+  Coverage,
   DocumentReference,
   DosageDoseAndRate,
   Encounter,
@@ -51,6 +52,7 @@ import {
   OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
   OID_CARE_TEAMS_SECTION,
   OID_GOAL_OBSERVATION,
+  OID_GUARANTOR_PERFORMER,
   OID_GOALS_SECTION,
   OID_HEALTH_CONCERNS_SECTION,
   OID_HISTORY_OF_PRESENT_ILLNESS_SECTION,
@@ -66,6 +68,7 @@ import {
   OID_NOTE_ACTIVITY,
   OID_NOTES_SECTION,
   OID_PAYERS_SECTION,
+  OID_PAYERS_SECTION_V2,
   OID_PLAN_OF_CARE_SECTION,
   OID_PROBLEMS_SECTION_ENTRIES_OPTIONAL,
   OID_PROBLEMS_SECTION_ENTRIES_REQUIRED,
@@ -119,6 +122,7 @@ import type {
   CcdaEncounter,
   CcdaEntry,
   CcdaId,
+  CcdaInteger,
   CcdaName,
   CcdaObservation,
   CcdaOrganizer,
@@ -407,7 +411,9 @@ class CcdaToFhirConverter {
   private processEntry(section: CcdaSection, entry: CcdaEntry, resources: Resource[]): void {
     for (const act of entry.act ?? EMPTY) {
       const resource = this.processAct(section, act);
-      if (resource) {
+      if (Array.isArray(resource)) {
+        resources.push(...resource);
+      } else if (resource) {
         resources.push(resource);
       }
     }
@@ -439,7 +445,7 @@ class CcdaToFhirConverter {
     }
   }
 
-  private processAct(section: CcdaSection, act: CcdaAct): Resource | undefined {
+  private processAct(section: CcdaSection, act: CcdaAct): Resource | Resource[] | undefined {
     if (getTemplateIds(act).includes(OID_NOTE_ACTIVITY)) {
       // A Note Activity may appear in any section
       return this.processNoteAct(section, act);
@@ -473,8 +479,8 @@ class CcdaToFhirConverter {
         case OID_HISTORY_OF_PRESENT_ILLNESS_SECTION:
           return this.processNoteAct(section, act);
         case OID_PAYERS_SECTION:
-          // This is part of USCDI v3, which is optional, and not yet implemented
-          return undefined;
+        case OID_PAYERS_SECTION_V2:
+          return this.processCoverageAct(act);
       }
     }
     if (this.options?.ignoreUnsupportedSections) {
@@ -675,6 +681,51 @@ class CcdaToFhirConverter {
         .filter(Boolean) as Reference<PractitionerRole>[],
       note: text ? [{ text }] : undefined,
       extension: this.mapTextReference(act.text),
+    };
+  }
+
+  private processCoverageAct(act: CcdaAct): Coverage[] {
+    // One Coverage per Policy Activity of the Coverage Activity
+    const result: Coverage[] = [];
+    for (const relationship of act.entryRelationship ?? EMPTY) {
+      for (const policy of relationship.act ?? EMPTY) {
+        result.push(this.processPolicyActivity(policy, relationship.sequenceNumber));
+      }
+    }
+    return result;
+  }
+
+  private processPolicyActivity(policy: CcdaAct, sequenceNumber: CcdaInteger | undefined): Coverage {
+    const payors = (policy.performer ?? EMPTY)
+      .filter(
+        (performer) =>
+          !getTemplateIds(performer).includes(OID_GUARANTOR_PERFORMER) &&
+          performer.assignedEntity?.code?.['@_code'] !== 'GUAR'
+      )
+      .map((performer) => ({
+        identifier: this.mapIdentifiers(performer.assignedEntity?.id)?.[0],
+        display: performer.assignedEntity?.representedOrganization?.name?.[0],
+      }));
+    const coveredParty = policy.participant?.find((participant) => participant['@_typeCode'] === 'COV');
+    const policyHolder = policy.participant?.find((participant) => participant['@_typeCode'] === 'HLD');
+    const order = Number.parseInt(sequenceNumber?.['@_value'] ?? '', 10);
+
+    return {
+      resourceType: 'Coverage',
+      id: this.mapId(policy.id),
+      identifier: this.concatArrays(this.mapIdentifiers(policy.id), this.mapIdentifiers(coveredParty?.participantRole?.id)),
+      // C-CDA has no coverage status: a Policy Activity's statusCode is always "completed"
+      status: 'active',
+      type: this.mapCode(policy.code),
+      beneficiary: createReference(this.patient as Patient),
+      subscriberId: policyHolder?.participantRole?.id?.[0]?.['@_extension'],
+      relationship: this.mapCode(coveredParty?.participantRole?.code),
+      period: this.mapEffectiveTimeToPeriod(coveredParty?.time),
+      payor:
+        payors.length > 0
+          ? payors
+          : [{ extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] }],
+      order: order > 0 ? order : undefined,
     };
   }
 

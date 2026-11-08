@@ -70,6 +70,7 @@ const ARRAY_PATHS = [
   // Act paths
   'act.entryRelationship',
   'act.performer',
+  'act.participant',
 
   // Observation paths
   'observation.participant',

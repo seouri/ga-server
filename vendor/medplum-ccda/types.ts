@@ -235,6 +235,7 @@ export interface CcdaParticipant {
   '@_classCode'?: string;
   '@_typeCode'?: string;
   templateId?: CcdaTemplateId[];
+  time?: CcdaEffectiveTime;
   participantRole?: CcdaParticipantRole;
   associatedEntity?: CcdaAssignedAuthor;
 }

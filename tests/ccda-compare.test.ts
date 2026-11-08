@@ -96,7 +96,9 @@ test('the Epic-style fixture against the real Microsoft output: every loss by pa
     { type: 'Condition', path: '(record)', count: 1 }, // visit diagnosis (Task 5)
     { type: 'Immunization', path: 'vaccineCode.coding', count: 1 }, // http://nucc.org/cvx is not GA's CVX (Task 8)
     { type: 'Immunization', path: 'route.coding', count: 1 },
-    { type: 'Coverage', path: '(record)', count: 1 }, // payers (Task 4)
+    // The Microsoft converter files the policy type (PPO) under Coverage.relationship; the new path has it as Coverage.type (its
+    // field) and maps relationship from the covered party (absent here). Needs a controller ruling: explain, or keep as a loss.
+    { type: 'Coverage', path: 'relationship.coding', count: 1 },
   ]);
   expect(r.unaccounted).toEqual([]);
 });
