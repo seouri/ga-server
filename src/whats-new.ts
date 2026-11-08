@@ -7,7 +7,7 @@ import { defaultConfigPath } from './config.ts';
 import { isPlanned } from './current.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { fit, groupLabs, highLow, labRow, loadObservations, searchAll } from './labs.ts';
+import { fit, groupLabs, highLow, isPanel, labRow, loadObservations, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medCode, medKeys, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
@@ -23,7 +23,10 @@ export function kindOf(r: Resource): Kind {
   switch (r.resourceType) {
     case 'Observation':
       if (hasTag(r, 'src-apple-health')) return 'Apple Health readings';
-      return r.category?.some((c) => c.coding?.some((x) => x.code === 'vital-signs')) ? 'vital signs' : 'lab results';
+      if (isPanel(r)) return 'other'; // its members are the readings
+      if (hasCategory(r, 'vital-signs')) return 'vital signs';
+      // Uncategorised (older PDF imports) and AI-read results count as labs; social history, assessments and the like do not.
+      return !r.category?.length || hasCategory(r, 'laboratory') || hasTag(r, 'extracted-by-llm') ? 'lab results' : 'other';
     case 'MedicationStatement': case 'MedicationRequest': return 'medications';
     case 'Condition': return 'problems';
     case 'AllergyIntolerance': return 'allergies';

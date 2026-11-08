@@ -17,6 +17,9 @@ test('kindOf covers each branch', () => {
   expect(kindOf(obs({ category: [{ coding: [{ code: 'laboratory' }] }] }))).toBe('lab results');
   expect(kindOf(obs({ meta: tag('extracted-by-llm') }))).toBe('lab results');
   expect(kindOf(obs())).toBe('lab results');
+  // Social history, an assessment, a reason for visit, and a panel that only groups its readings are not lab results.
+  for (const code of ['social-history', 'survey', '29299-5']) expect(kindOf(obs({ category: [{ coding: [{ code }] }] }))).toBe('other');
+  expect(kindOf(obs({ category: [{ coding: [{ code: 'vital-signs' }] }], hasMember: [{ reference: 'Observation/a' }] }))).toBe('other');
   const t = (resourceType: string) => kindOf({ resourceType } as Resource);
   expect([t('MedicationStatement'), t('MedicationRequest'), t('Condition'), t('AllergyIntolerance'), t('Immunization'), t('Procedure'), t('Encounter'), t('DocumentReference'), t('Communication'), t('FamilyMemberHistory')])
     .toEqual(['medications', 'medications', 'problems', 'allergies', 'vaccines', 'procedures', 'visits', 'notes and messages', 'notes and messages', 'other']);
