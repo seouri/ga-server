@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Period } from '@medplum/fhirtypes';
-import type { CcdaEffectiveTime } from './types';
+import type { CcdaEffectiveTime } from './types.ts';
 
 /*
  * C-CDA date/time formats:

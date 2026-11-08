@@ -66,8 +66,8 @@ import {
   OID_VITAL_SIGNS_ORGANIZER_V2,
   OID_WOUND_MEASURMENTS_OBSERVATION,
   OID_WOUND_OBSERVATION,
-} from './oids';
-import type { CcdaCode, CcdaValue } from './types';
+} from './oids.ts';
+import type { CcdaCode, CcdaValue } from './types.ts';
 
 export interface EnumEntry<TFhirValue extends string = string, TCcdaValue extends string = string> {
   fhirValue: TFhirValue;

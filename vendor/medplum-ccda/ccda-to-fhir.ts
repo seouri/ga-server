@@ -41,7 +41,7 @@ import type {
   RelatedPerson,
   Resource,
 } from '@medplum/fhirtypes';
-import { mapCcdaToFhirDate, mapCcdaToFhirDateTime } from './datetime';
+import { mapCcdaToFhirDate, mapCcdaToFhirDateTime } from './datetime.ts';
 import {
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL,
   OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL_V2,
@@ -64,8 +64,8 @@ import {
   OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED,
   OID_PROCEDURES_SECTION_ENTRIES_REQUIRED,
   OID_REASON_FOR_REFERRAL,
-} from './oids';
-import { sanitizeNullFlavors } from './sanitize';
+} from './oids.ts';
+import { sanitizeNullFlavors } from './sanitize.ts';
 import {
   ACT_CODE_SYSTEM,
   ADDRESS_USE_MAPPER,
@@ -95,7 +95,7 @@ import {
   US_CORE_ETHNICITY_URL,
   US_CORE_MEDICATION_REQUEST_URL,
   US_CORE_RACE_URL,
-} from './systems';
+} from './systems.ts';
 import type {
   Ccda,
   CcdaAct,
@@ -124,8 +124,8 @@ import type {
   CcdaTelecom,
   CcdaTemplateId,
   CcdaText,
-} from './types';
-import { convertToCompactXml } from './xml';
+} from './types.ts';
+import { convertToCompactXml } from './xml.ts';
 
 export interface CcdaToFhirOptions {
   ignoreUnsupportedSections?: boolean;

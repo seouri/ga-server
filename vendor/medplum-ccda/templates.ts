@@ -25,7 +25,7 @@ import {
   OID_SOCIAL_HISTORY_SECTION_ENTRIES_OPTIONAL,
   OID_US_REALM_CDA_HEADER,
   OID_VITAL_SIGNS_SECTION_ENTRIES_REQUIRED,
-} from './oids';
+} from './oids.ts';
 import {
   LOINC_ALLERGIES_SECTION,
   LOINC_ASSESSMENTS_SECTION,
@@ -47,8 +47,8 @@ import {
   LOINC_RESULTS_SECTION,
   LOINC_SOCIAL_HISTORY_SECTION,
   LOINC_VITAL_SIGNS_SECTION,
-} from './systems';
-import type { CcdaTemplateId } from './types';
+} from './systems.ts';
+import type { CcdaTemplateId } from './types.ts';
 
 export const CCDA_TEMPLATE_IDS = [
   {

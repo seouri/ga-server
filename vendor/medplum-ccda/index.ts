@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-export * from './ccda-to-fhir';
-export * from './datetime';
-export * from './fhir-to-ccda/convert';
-export * from './systems';
-export * from './templates';
-export type * from './types';
-export * from './xml';
+export * from './ccda-to-fhir.ts';
+export * from './datetime.ts';
+export * from './systems.ts';
+export * from './templates.ts';
+export type * from './types.ts';
+export * from './xml.ts';
