@@ -8,6 +8,7 @@ import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
 import { isPlanned } from '../src/current.ts';
+import { labRow } from '../src/labs.ts';
 
 test('ccdaDate parses effectiveTime', () => {
   const doc = (v: string) => `<ClinicalDocument><code/><effectiveTime value="${v}"/><component><effectiveTime value="19990101"/></component></ClinicalDocument>`;
@@ -322,6 +323,14 @@ test('social history, functional status and reason for visit each keep their own
   expect(cats('EX-RFV-1')).toEqual(['29299-5']); // nothing classifies it: its section's code (Reason for visit)
   expect(obs('EX-ALCOHOL-1')?.effectiveDateTime).toBe('2024-02-10'); // <low> only (medplum#11244)
   expect(obs('EX-TOBACCO-1')?.effectivePeriod).toEqual({ start: '2000-01-01', end: '2010-01-01' });
+});
+
+test('an INT value is a unitless quantity, as on the Microsoft path, so GA\'s readers show it', () => {
+  const sdoh = convertCcdaLocal(EPIC).resources.find((r): r is Observation => r.resourceType === 'Observation' && JSON.stringify(r.identifier).includes('EX-SDOH-1'));
+  expect(sdoh).toMatchObject({ valueQuantity: { value: 3 } });
+  expect(sdoh?.valueInteger).toBeUndefined();
+  expect(labRow(sdoh as Observation).value).toBe('3');
+  expect(sdoh?.category?.map((c) => c.coding?.[0].code)).toEqual(['survey', 'social-history']);
 });
 
 test('every section of the Epic-style fixture is imported', () => {

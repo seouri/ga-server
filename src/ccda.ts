@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
@@ -187,6 +187,11 @@ export function repair(rs: Resource[], xml: string): Resource[] {
       return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
     }
     if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
+    // GA's readers (lab rows, content keys, duplicate checks) read a number from valueQuantity: an INT value goes there, unitless, as on the Microsoft path.
+    if (r.resourceType === 'Observation' && (r as Observation).valueInteger !== undefined) {
+      const { valueInteger, ...o } = r as Observation;
+      return { ...o, valueQuantity: { value: valueInteger } } as Observation;
+    }
     if (r.resourceType === 'Condition') {
       // A Condition linked to its encounter is a visit diagnosis, also when its observation id repeats a problem-list one.
       const inList = (r as Condition).encounter ? false : lookup(problemList, r);

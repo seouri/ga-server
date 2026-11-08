@@ -459,6 +459,16 @@
               <value xsi:type="ST">Not currently</value>
             </observation>
           </entry>
+          <entry>
+            <observation classCode="OBS" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.69"/>
+              <id root="1.2.840.114350.1.13.999.2.7.2.778013" extension="EX-SDOH-1"/>
+              <code code="93025-5" codeSystem="2.16.840.1.113883.6.1" displayName="Social determinants screening total score"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20240210"/>
+              <value xsi:type="INT" value="3"/>
+            </observation>
+          </entry>
         </section>
       </component>
       <!-- Functional status -->
