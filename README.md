@@ -32,9 +32,9 @@ Then bring in your records and ask, in plain words:
 - **One record from every source:** Epic patient portals (MyChart, synced daily), Epic and C-CDA exports, Apple Health, and lab PDFs or photos, with duplicates caught and the same test under different names counted as one ([one test, one name](docs/concepts.md)).
 - **Answers with citations:** labs and trends, current medications and problems, vitals, notes and messages, each value with its date and source.
 - **What's new:** what arrived since you last looked, from out-of-range labs to new medications with their FDA label.
-- **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates.
+- **What's due:** screenings and vaccines against USPSTF and CDC guidelines, with the reasons, shown next to your doctor's own plan; follow-ups your doctor wrote in a note or message; a "By the way" reminder in chat and a calendar feed of due dates ([methods](docs/clinical-methods.md)).
 - **GA texts you:** new out-of-range results as they arrive and what's due at a time you pick, by iMessage; reply to ask or to say done ([setup](docs/notifications.md)).
-- **Decision support:** cardiovascular risk (PREVENT 10- and 30-year, heart failure; Pooled Cohort Equations), liver fibrosis (FIB-4, NAFLD Fibrosis Score) and charts such as your lipid trend.
+- **Decision support:** cardiovascular risk (PREVENT 10- and 30-year, heart failure; Pooled Cohort Equations), liver fibrosis (FIB-4, NAFLD Fibrosis Score) and charts such as your lipid trend ([how GA computes them](docs/clinical-methods.md)).
 - **Sharing:** private, expiring links for a doctor or family, approved by you.
 - **Your choice of AI:** Claude Code, or claude.ai, ChatGPT, Gemini and Grok over the internet ([setup](docs/chat-apps.md)).
 
@@ -72,6 +72,7 @@ Everything runs on your computer. It talks only to your own hospitals (to fetch 
 | [Sharing](docs/sharing.md) | Private links for doctors and family: summary, PDF and FHIR downloads, questions |
 | [Running GA](docs/operations.md) | Where data lives, **backup and restore**, uninstall, admin app |
 | [Adding a skill](docs/skills.md) | Writing your own `/` command against GA |
+| [Clinical methods](docs/clinical-methods.md) | How GA computes risk scores, screenings and vaccine status, with references |
 | [AGENTS.md](AGENTS.md) | What an agent needs to know to read and write GA correctly |
 
 ## Status and limits
