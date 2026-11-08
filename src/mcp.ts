@@ -213,8 +213,10 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
     (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
       register(name, config, async (...a: unknown[]) => {
-        // Parallel; a failed log still fails the call.
-        const [, r] = await Promise.all([remote.log(name), cb(...a)]);
+        // Read-only tools log in parallel (a failed log still fails the call); anything else logs first, so a write never happens unlogged.
+        let r: any;
+        if ((config as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true) [, r] = await Promise.all([remote.log(name), cb(...a)]);
+        else { await remote.log(name); r = await cb(...a); }
         for (const c of r.content ?? [])
           if (c.type === 'text' && c.text.length > CAP) c.text = `${c.text.slice(0, CAP)}[truncated: narrow the search, e.g. _count, _elements or a date range]`;
         return r;

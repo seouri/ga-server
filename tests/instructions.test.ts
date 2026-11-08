@@ -64,6 +64,24 @@ describe('remote output cap and logging', () => {
     const r = (await d.callTool({ name: 'fhir_read', arguments: { resourceType: 'Observation', id: 'o' } })) as { isError?: boolean };
     expect(r.isError).toBe(true);
   });
+  it('a write tool whose log fails does not run; a read-only tool still logs', async () => {
+    let ran = 0;
+    const logs: string[] = [];
+    const client = { searchResources: async () => [], search: async () => ({ resourceType: 'Bundle' }), createResource: async () => { ran++; return {}; } } as unknown as MedplumClient;
+    const mk = async (log: (n: string) => Promise<void>) => {
+      const server = buildMcpServer({ client, cfg: {} as never, patientId: 'p', remote: { publicUrl: 'u', clientName: 'c', log } });
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      const c = new Client({ name: 't', version: '0' });
+      await Promise.all([server.connect(a), c.connect(b)]);
+      return c;
+    };
+    const down = await mk(async () => { throw new Error('log down'); });
+    const w = (await down.callTool({ name: 'postpone', arguments: { topic: 'colorectal' } })) as { isError?: boolean };
+    expect(w.isError).toBe(true);
+    expect(ran).toBe(0);
+    await (await mk(async (n) => void logs.push(n))).callTool({ name: 'fhir_search', arguments: { resourceType: 'Observation' } });
+    expect(logs).toEqual(['fhir_search']);
+  });
   it('stdio is untouched', async () => {
     expect((await search(await connect(false))).content[0].text.length).toBeGreaterThan(200_000);
   });
