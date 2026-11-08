@@ -8,6 +8,7 @@ const ARRAY_PATHS = [
   'ClinicalDocument.participant',
   'ClinicalDocument.recordTarget',
   'ClinicalDocument.authenticator',
+  'encompassingEncounter.encounterParticipant',
 
   // Always arrays
   '.id',

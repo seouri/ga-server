@@ -13,6 +13,7 @@ export interface Ccda {
   informationRecipient?: CcdaInformationRecipient;
   participant?: CcdaParticipant[];
   documentationOf?: CcdaDocumentationOf;
+  componentOf?: { encompassingEncounter?: CcdaEncompassingEncounter };
   legalAuthenticator?: CcdaAuthenticator;
   authenticator?: CcdaAuthenticator[];
   title?: string;
@@ -458,6 +459,15 @@ export interface CcdaSubjectPerson {
   birthTime?: CcdaTimeStamp;
   'sdtc:deceasedInd'?: { '@_value'?: string };
   'sdtc:deceasedTime'?: CcdaTimeStamp;
+}
+
+export interface CcdaEncompassingEncounter {
+  id?: CcdaId[];
+  code?: CcdaCode;
+  effectiveTime?: CcdaEffectiveTime[];
+  responsibleParty?: { assignedEntity?: CcdaAssignedEntity };
+  encounterParticipant?: { '@_typeCode'?: string; assignedEntity?: CcdaAssignedEntity }[];
+  location?: { healthCareFacility?: { id?: CcdaId[]; code?: CcdaCode; location?: { name?: string[]; addr?: CcdaAddr[] } } };
 }
 
 export interface CcdaAuthenticator {

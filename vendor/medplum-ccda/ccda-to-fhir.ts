@@ -146,6 +146,7 @@ import type {
   CcdaCustodian,
   CcdaDocumentationOf,
   CcdaEffectiveTime,
+  CcdaEncompassingEncounter,
   CcdaEncounter,
   CcdaEntry,
   CcdaId,
@@ -574,6 +575,7 @@ class CcdaToFhirConverter {
         ? this.ccda.author.map((author) => this.mapDocumentAuthorToReference(author))
         : [{ display: 'Medplum' }],
       attester: this.mapAuthenticatorsToAttesters(),
+      encounter: this.mapEncompassingEncounter(this.ccda.componentOf?.encompassingEncounter),
       custodian: this.mapCustodianToReference(this.ccda.custodian),
       event: this.mapDocumentationOfToEvent(this.ccda.documentationOf),
       date: mapCcdaToFhirDateTime(this.ccda.effectiveTime?.[0]?.['@_value']) ?? new Date().toISOString(),
@@ -1537,6 +1539,66 @@ class CcdaToFhirConverter {
     this.resources.push(practitionerRole);
 
     return createReference(practitionerRole);
+  }
+
+  /**
+   * The encounter the document belongs to (componentOf/encompassingEncounter): the Encounter an entry already made for the same
+   * id, else a new one (class, type, period, its facility as the Location, its participants and responsible party).
+   * @param encompassing - The encompassingEncounter.
+   * @returns The Composition encounter, or undefined when the document names none.
+   */
+  private mapEncompassingEncounter(encompassing: CcdaEncompassingEncounter | undefined): Reference<Encounter> | undefined {
+    if (!encompassing) {
+      return undefined;
+    }
+    const identifier = this.mapIdentifiers(encompassing.id);
+    const key = (i: Identifier): string => `${i.system ?? ''}|${i.value ?? ''}`;
+    const keys = new Set((identifier ?? EMPTY).filter((i) => i.value).map(key));
+    const existing = this.resources.find(
+      (r): r is Encounter => r.resourceType === 'Encounter' && !!r.identifier?.some((i) => keys.has(key(i)))
+    );
+    if (existing) {
+      return createReference(existing);
+    }
+    const facility = encompassing.location?.healthCareFacility;
+    const location: Location | undefined = facility
+      ? {
+          resourceType: 'Location',
+          id: this.mapId(facility.id),
+          identifier: this.mapIdentifiers(facility.id),
+          name: nodeToString(facility.location?.name?.[0] as string | undefined),
+          type: facility.code ? [this.mapCode(facility.code) as CodeableConcept] : undefined,
+          address: this.mapAddresses(facility.location?.addr)?.[0],
+        }
+      : undefined;
+    const participants = [
+      ...(encompassing.responsibleParty?.assignedEntity
+        ? [{ typeCode: 'RESP', entity: encompassing.responsibleParty.assignedEntity }]
+        : []),
+      ...(encompassing.encounterParticipant ?? EMPTY).map((p) => ({ typeCode: p['@_typeCode'], entity: p.assignedEntity })),
+    ].filter((p) => p.entity);
+    const encounter: Encounter = {
+      resourceType: 'Encounter',
+      id: this.mapId(encompassing.id),
+      identifier,
+      status: 'unknown', // the header states none
+      class: this.mapEncounterClass(encompassing.code),
+      type: encompassing.code ? [this.mapCode(encompassing.code) as CodeableConcept] : undefined,
+      subject: this.patient ? createReference(this.patient) : undefined,
+      period: this.mapEffectiveTimeToPeriod(encompassing.effectiveTime?.[0]),
+      participant: participants.length
+        ? participants.map((p) => ({
+            ...(p.typeCode && { type: [{ coding: [{ system: PARTICIPATION_CODE_SYSTEM, code: p.typeCode }] }] }),
+            individual: this.mapAssignedEntityToReference(p.entity),
+          }))
+        : undefined,
+      location: location ? [{ location: createReference(location) }] : undefined,
+    };
+    if (location) {
+      this.resources.push(location);
+    }
+    this.resources.push(encounter);
+    return createReference(encounter);
   }
 
   /**
