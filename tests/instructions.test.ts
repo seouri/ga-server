@@ -51,6 +51,19 @@ describe('remote output cap and logging', () => {
       for (const n of ['whats_new', 'health_maintenance', 'postpone', 'record_followup']) expect(names).toContain(n);
     }
   });
+  it('logs every call, and a failing log fails the call', async () => {
+    const logs: string[] = [];
+    const c = await connect(true, logs);
+    await search(c);
+    await c.callTool({ name: 'fhir_read', arguments: { resourceType: 'Observation', id: 'o' } });
+    expect(logs).toEqual(['fhir_search', 'fhir_read']);
+    const server = buildMcpServer({ client: {} as MedplumClient, cfg: {} as never, patientId: 'p', remote: { publicUrl: 'u', clientName: 'c', log: async () => { throw new Error('log down'); } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const d = new Client({ name: 't', version: '0' });
+    await Promise.all([server.connect(a), d.connect(b)]);
+    const r = (await d.callTool({ name: 'fhir_read', arguments: { resourceType: 'Observation', id: 'o' } })) as { isError?: boolean };
+    expect(r.isError).toBe(true);
+  });
   it('stdio is untouched', async () => {
     expect((await search(await connect(false))).content[0].text.length).toBeGreaterThan(200_000);
   });
@@ -72,6 +85,16 @@ describe('admin types are refused', () => {
       expect(r.isError).toBe(true);
       expect(r.content[0].text).toContain('not available');
     }
+  });
+  it('fhir_read ids: parallel, missing ones as {id, error}; id alone keeps its shape', async () => {
+    const client = { searchResources: async () => [], readResource: async (_t: string, id: string) => { if (id === 'gone') throw new Error('Not found'); return { resourceType: 'Observation', id }; } } as unknown as MedplumClient;
+    const server = buildMcpServer({ client, cfg: {} as never, patientId: 'p' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 't', version: '0' });
+    await Promise.all([server.connect(a), c.connect(b)]);
+    const read = async (args: Record<string, unknown>) => JSON.parse(((await c.callTool({ name: 'fhir_read', arguments: { resourceType: 'Observation', ...args } })) as { content: { text: string }[] }).content[0].text);
+    expect(await read({ id: 'o1' })).toEqual({ resourceType: 'Observation', id: 'o1' });
+    expect(await read({ ids: ['o1', 'gone', 'o2'] })).toEqual({ resources: [{ resourceType: 'Observation', id: 'o1' }, { id: 'gone', error: 'Not found' }, { resourceType: 'Observation', id: 'o2' }] });
   });
   it('drops included admin entries; Observation still works', async () => {
     const r = await call(await mk({ resourceType: 'Observation', id: 'o' }), 'fhir_search', { resourceType: 'Observation' });

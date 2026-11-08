@@ -185,34 +185,46 @@ export const keyLabs = (trends: LabTrend[]): LabTrend[] => concepts().filter((c)
 export async function labResults(
   client: MedplumClient,
   patientId: string,
-  { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
+  { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string | string[]; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
 ): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
-  // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
-  const q = new URLSearchParams([
-    ['subject', `Patient/${patientId}`],
-    ['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`],
-    ['_tag:not', `${TAG}|src-apple-health`],
-    ['_sort', '-date,_id'],
-    ['_count', '100'],
-  ]);
-  // A lab concept's name ("ldl") finds its member codes (GA-added too) plus the literal name (results not yet coded):
-  // filtered here, Medplum can't OR code and code:text.
-  const c = name ? conceptNamed(name) : undefined;
-  const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
-  if (name && !key) q.append('code:text', name);
-  dateRange(q, 'date', since, until);
   // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
   const isLab = (o: Observation) => (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
-  const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(name)));
-  if (summary || key) {
-    // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
+  // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
+  const query = (n?: string) => {
+    const q = new URLSearchParams([
+      ['subject', `Patient/${patientId}`],
+      ['_filter', `category eq laboratory or _tag eq ${TAG}|extracted-by-llm`],
+      ['_tag:not', `${TAG}|src-apple-health`],
+      ['_sort', '-date,_id'],
+      ['_count', '100'],
+    ]);
+    // A lab concept's name ("ldl") finds its member codes (GA-added too) plus the literal name (results not yet coded):
+    // filtered here, Medplum can't OR code and code:text.
+    const c = n ? conceptNamed(n) : undefined;
+    const key = c?.kind === 'lab' ? new Set(codesFor(c.name).map((x) => `${x.system}|${x.code}`)) : undefined;
+    if (n && !key) q.append('code:text', n);
+    dateRange(q, 'date', since, until);
+    const named = (o: Observation) => !key || !!o.code?.coding?.some((x) => key.has(`${x.system}|${x.code}`)) || [o.code?.text, ...(o.code?.coding ?? []).map((c) => c.display)].some((t) => norm(t).includes(norm(n)));
+    return { q, key, named };
+  };
+  // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
+  const scan = async (n?: string) => {
+    const { q, named } = query(n);
     q.set('_sort', '_lastUpdated');
     q.set('_count', '1000');
-    const obs = (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
+    return (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
+  };
+  const finish = (obs: Observation[]) =>
     // keyOnly (health_summary): key labs picked before fit, so other tests can't push them out.
-    if (summary) return fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit);
-    return fit(obs.map((o) => labRow(o)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
+    summary ? fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit)
+      : fit(obs.map((o) => labRow(o)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
+  if (Array.isArray(name)) {
+    // Each name searched in parallel, one record once (the same result can match two names).
+    const found = (await Promise.all(name.map(scan))).flat();
+    return finish([...new Map(found.map((o, i) => [o.id ?? `#${i}`, o])).values()]);
   }
+  const { q, key } = query(name);
+  if (summary || key) return finish(await scan(name));
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
   // Medplum sorts undated results first on -date; a latest-value question wants them last.
   // shortcut: only within the fetched pages, fine unless a patient has over a page of undated labs.

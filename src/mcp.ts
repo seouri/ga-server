@@ -213,8 +213,8 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) => unknown;
     (server as { registerTool: unknown }).registerTool = (name: string, config: unknown, cb: (...a: unknown[]) => Promise<any>) =>
       register(name, config, async (...a: unknown[]) => {
-        await remote.log(name);
-        const r = await cb(...a);
+        // Parallel; a failed log still fails the call.
+        const [, r] = await Promise.all([remote.log(name), cb(...a)]);
         for (const c of r.content ?? [])
           if (c.type === 'text' && c.text.length > CAP) c.text = `${c.text.slice(0, CAP)}[truncated: narrow the search, e.g. _count, _elements or a date range]`;
         return r;
@@ -252,12 +252,22 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
   );
   server.registerTool(
     'fhir_read',
-    { description: "Read one resource from the user's personal health record (GA).", inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string() }, annotations: { readOnlyHint: true } },
-    async ({ resourceType, id }) => {
+    {
+      description: "Read one resource from the user's personal health record (GA) by id, or several of one type with ids (1-20; they are read in parallel and answered as {resources: [...]}, a missing one as {id, error}).",
+      inputSchema: { resourceType: z.string().regex(TYPE_RE), id: z.string().optional(), ids: z.array(z.string()).min(1).max(20).optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ resourceType, id, ids }) => {
       const no = refuseAdmin(resourceType);
       if (no) return no;
       try {
-        return warned(readable(await client.readResource(resourceType as 'Observation', id, { cache: 'no-cache' })) as object);
+        const one = async (i: string) => readable(await client.readResource(resourceType as 'Observation', i, { cache: 'no-cache' })) as object;
+        if (!ids) {
+          if (!id) return fail(new GaError('give id or ids'));
+          return warned(await one(id));
+        }
+        const resources = await Promise.all(ids.map((i) => one(i).catch((e) => ({ id: i, error: e instanceof Error ? e.message : String(e) }))));
+        return warned({ resources });
       } catch (e) {
         return fail(e);
       }
@@ -314,7 +324,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
       description:
         "The user's lab and test results from GA (blood tests, urine tests, A1c, cholesterol...): use this for any question about lab results " +
         '(the latest value, a trend, a year\'s results) instead of fhir_search. Finds labs from every source, including PDFs imported without a category; ' +
-        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "crp"); a concept name (A1c, Glucose, LDL, HDL, Total cholesterol, Triglycerides, Creatinine, eGFR, ALT, AST, Hemoglobin, Platelets, Potassium, Sodium, TSH) or a common synonym ("hba1c", "ldl cholesterol", "thyrotropin") finds every result coded as that test whatever its name (e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"), plus results not yet coded whose name contains it, which may be a different test (e.g. "LDL-P"); since/until: YYYY-MM-DD, inclusive. ' +
+        'excludes Apple Health and vital signs. name: part of the test name, case-insensitive (e.g. "crp"), or a list of up to 10 names searched in parallel and merged (e.g. ["ldl", "hdl"]); a concept name (A1c, Glucose, LDL, HDL, Total cholesterol, Triglycerides, Creatinine, eGFR, ALT, AST, Hemoglobin, Platelets, Potassium, Sodium, TSH) or a common synonym ("hba1c", "ldl cholesterol", "thyrotropin") finds every result coded as that test whatever its name (e.g. "ldl" finds "LOW DENSITY LIPOPROTEIN CHOL"), plus results not yet coded whose name contains it, which may be a different test (e.g. "LDL-P"); since/until: YYYY-MM-DD, inclusive. ' +
         'Newest first; one row per result: date, name, value (with unit), range, interpretation, source file, flags, id (for fhir_read). ' +
         'Flag "read from a document by AI": tell the user to check the value against the original document. "possible-duplicate": the same test twice; mention both. ' +
         '"possibly <test> (suggested mapping)": GA only guessed this result is that test; say so. ' +
@@ -322,7 +332,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
         'over every matching result: test (the concept, only for results coded as it), name, loinc, unit, latest {date, value, flag high/low/..., method}, previous {date, value, method} (method: the coded variant, e.g. eGFR race-free or race-based, LDL calculated or direct), change (latest − previous, same unit), ' +
         'count, outOfRange (results flagged high or low), first (date), source and flags of the latest.',
       inputSchema: {
-        name: z.string().min(1).optional(),
+        name: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(10)]).optional(),
         ...dates,
         limit: z.number().int().min(1).max(1000).default(200),
         summary: z.boolean().default(false),
