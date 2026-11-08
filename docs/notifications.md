@@ -18,7 +18,7 @@ Texts are short lists: a generic first line ("GA: 2 new results"), then at most 
 - `not now`, or `remind me after March`: GA holds the item back.
 - Any question ("what's due?", "what was my last LDL?"): GA answers from your record.
 
-If a reply could mean more than one item, GA asks which.
+If a reply could mean more than one item, GA asks which. Reactions (a heart or thumbs-up on a GA text) are ignored.
 
 ## What texts can and cannot do
 
@@ -38,7 +38,9 @@ GA_LLM_API_KEY=...
 GA_LLM_MODEL=...
 ```
 
-Without a provider, alerts and the daily digest still work; replies say GA can't answer yet.
+For OpenAI, leave `GA_LLM_BASE_URL` empty. The model must support tool calls in the Chat Completions API: `gpt-5.5` works; some newer reasoning models refuse tools there and every reply fails. After changing `.env`, run `docker compose up -d ga-gateway` (`restart` does not reread `.env`).
+
+Without a provider, alerts and the daily digest still work; replies say GA can't answer yet. When replies say "GA couldn't answer just now", `ga notify status` shows the reason (for example `reply failed: LLM API error: 404 model_not_found`).
 
 ## Privacy
 
