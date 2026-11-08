@@ -202,6 +202,16 @@ test('an old record with no identifier pairs with a keyed new one of its type by
   expect(pairLosses([org('Payer A', id('x'))], [org('Payer A', id('a'))])).toEqual([{ type: 'Organization', path: '(record)', count: 1 }]);
 });
 
+test('an old qualification code is covered by the specialty of a new role of the same practitioner; another code or practitioner is a loss', () => {
+  const nucc = (code: string) => ({ coding: [{ system: 'http://nucc.org/provider-taxonomy', code }] });
+  const old = [{ resourceType: 'Practitioner', id: 'o', identifier: id('p'), qualification: [{ code: nucc('207R00000X') }] }];
+  const neu = (code: string, who = 'n') => [{ resourceType: 'Practitioner', id: 'n', identifier: id('p') },
+    { resourceType: 'PractitionerRole', id: 'r', practitioner: { reference: `Practitioner/${who}` }, specialty: [nucc(code)] }];
+  expect(pairLosses(old, neu('207R00000X'))).toEqual([]);
+  expect(pairLosses(old, neu('208D00000X'))).toEqual([{ type: 'Practitioner', path: 'qualification.code.coding', count: 1 }]);
+  expect(pairLosses(old, neu('207R00000X', 'other'))).toEqual([{ type: 'Practitioner', path: 'qualification.code.coding', count: 1 }]);
+});
+
 test('numbers and strings compare as written', () => {
   const pt = (x: object) => ({ resourceType: 'Patient', identifier: id('p'), ...x });
   expect(pairLosses([pt({ address: [{ postalCode: '01234', line: ['10'] }] })], [pt({ address: [{ postalCode: '1234', line: ['10.0'] }] })]))

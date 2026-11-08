@@ -345,6 +345,19 @@ function leadingDot(o: Resource, n: Resource, dots: string[]): Resource {
   return { ...o, valueQuantity: { ...a, value: b?.value } } as Resource;
 }
 
+// One path equivalence: an assigned entity's code (a provider taxonomy) is a Practitioner qualification on the Microsoft path and
+// the specialty of the new path's PractitionerRole of that practitioner. An old qualification holding only a code is dropped when
+// every one of its codings is in the specialty of a new role pointing at the counterpart; otherwise it stays a compared leaf.
+function roleSpecialty(o: Resource, m: Resource, neu: Resource[]): Resource {
+  const quals = (o as { qualification?: { code?: { coding?: R[] } }[] }).qualification;
+  if (o.resourceType !== 'Practitioner' || !quals) return o;
+  const have = new Set(neu.filter((r) => r.resourceType === 'PractitionerRole' && (r as PractitionerRole).practitioner?.reference === `Practitioner/${m.id}`)
+    .flatMap((r) => (r as PractitionerRole).specialty ?? []).flatMap((c) => (c.coding ?? []) as R[]).filter(isCoding).map(codingKey));
+  const left = quals.filter((q) => !(Object.keys(q).every((k) => k === 'code') && q.code?.coding?.length && q.code.coding.every((c) => isCoding(c) && have.has(codingKey(c)))));
+  const { qualification: _, ...rest } = o as unknown as R;
+  return (left.length ? { ...rest, qualification: left } : rest) as unknown as Resource;
+}
+
 // Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
 const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
 
@@ -378,7 +391,7 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   for (const [r, m] of match) {
     if (!m) add(r.resourceType, '(record)', explain(r));
     else {
-      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(leadingDot(refusedVaccine(r, m, negated), m, dots), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
+      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(roleSpecialty(leadingDot(refusedVaccine(r, m, negated), m, dots), m, n), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
       for (const p of new Set(diff(old, prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
     }
   }
