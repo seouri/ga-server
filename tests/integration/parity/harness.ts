@@ -79,11 +79,14 @@ export async function paritySides(): Promise<{ sides: [Side, Side]; close(): Pro
   return {
     sides: [medplum, side('store', store.base, () => store.token)],
     async close() {
-      for (const ref of created.reverse()) {
-        const g = await medplum.call('DELETE', ref);
-        if (g.status >= 400 && g.status !== 404 && g.status !== 410) throw new Error(`cleanup ${ref}: ${g.status}`);
+      try {
+        for (const ref of [...created].reverse()) {
+          const g = await medplum.call('DELETE', ref);
+          if (g.status >= 400 && g.status !== 404 && g.status !== 410) throw new Error(`cleanup ${ref}: ${g.status}`);
+        }
+      } finally {
+        await store.close();
       }
-      await store.close();
     },
   };
 }
