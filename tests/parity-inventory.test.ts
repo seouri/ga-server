@@ -46,3 +46,7 @@ test('no row appears twice', () => {
   const keys = rows.map((r) => `${r.title} [${r.file}]`);
   expect(keys.filter((k, i) => keys.indexOf(k) !== i)).toEqual([]);
 });
+
+test('no row is left "not yet ported"', () => {
+  expect(rows.filter((r) => /not yet ported/i.test(r.note)).map((r) => `${r.title} [${r.file}]`)).toEqual([]);
+});

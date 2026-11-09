@@ -44,7 +44,7 @@ From `store.ts`, for in-process use (one `Store` per file, in the owning process
 - `search(type, query, base)` / `searchJson(...)`: a searchset Bundle (object or JSON text); `type` an array of types: a system-level search across them.
 - `put(resource, { history? })`: import keeping the given id, versionId and lastUpdated (for migrations).
 - Binaries: `putBinaryStream(contentType, data, id?, replace?)`, `openBinary(id)`, `deleteBinary(id)`.
-- `StoreError` (an `OperationOutcomeError` with an HTTP `status`), `INDEX_VERSION` (the on-disk index format) and `IndexFormatError` (thrown by the constructor for a file in another format: rebuild it from its source).
+- `StoreError` (an `OperationOutcomeError` with an HTTP `status`), `INDEX_VERSION` (the on-disk index format) and `IndexFormatError` (thrown by the constructor for a file in another format: rebuild it from its source; the format is 4 since the search parameters were extended, so a file from an earlier version must be rebuilt).
 
 From `definitions.ts`: `loadDefinitions(types?)` (indexes the FHIR definitions for `types`, default every R4 resource type; called by `Store`), `storedTypes()`, `PATIENT_COMPARTMENT_PARAMS`. The definitions go into `@medplum/core`'s global index, so a process holds **one type set**: loading again with the same set is a no-op, with another set it throws. Every `Store` in a process uses the same `types`.
 
@@ -98,13 +98,11 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 
 ## Next phase: full FHIR spec support
 
-Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
+Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it. Plan 2 (terminology) and plan 3 (GraphQL) are next; plan 4 owns the rest:
 
-- Special search parameters; on tokens the modifiers `:above`, `:below`, `:in`, `:not-in` (terminology).
-- Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
-- `_filter` operators `ew` and `po` (Medplum 5.2.14's parser refuses both: `Invalid operator: ew`), `ss`, `sb`, `in` and `ni` (terminology, as the token modifiers above).
-- `_contained`, `_text`, `_content`, and `_include=*` (Medplum 5.2.14 refuses it too; plan 4 decides).
-- GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
+- Plan 2, terminology: on tokens the modifiers `:above`, `:below`, `:in`, `:not-in`; `_filter` operators `ss`, `sb`, `in`, `ni`; `$expand`, `$lookup`, `$validate-code`.
+- Plan 3: GraphQL.
+- Plan 4 decides: `_text`, `_content`, `_contained`, special search parameters, `_include=*` (Medplum 5.2.14 refuses it too), `_filter` operators `ew` and `po` (Medplum's parser refuses both: `Invalid operator: ew`), Binary as FHIR JSON and its history, date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature), and every other operation besides `$validate` and `Patient/$everything` (`$export`, `$graph`, `$match`, `Appointment/$book`, ... : the inventory in `tests/integration/parity/INVENTORY.md` lists them).
 - FHIR R4 only (the definitions ship R4); one patient-compartment definition (Patient).
 
 Supported but slow on large results: `_sort` by a parameter that is not a date, `_id` or `_lastUpdated` aggregates index rows per candidate instead of walking a sort index.

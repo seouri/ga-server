@@ -78,10 +78,11 @@ Which process owns the file; worker thread vs async driver vs better-sqlite3 for
 
 The store behaves like Medplum for what a FHIR client does with records. These are **not supported yet**; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
 
-- `_summary=true`, `_summary=data`, `_summary=text` (`_summary=count` works; `_summary=false` is accepted and changes nothing, as on Medplum).
-- Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
-- `_contained`, `_text`, `_content`, `_include:iterate`, `_revinclude:iterate` and `_include=*`.
-- GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
+- Terminology (plan 2): the token modifiers `:above`, `:below`, `:in`, `:not-in`; `_filter` `ss`, `sb`, `in`, `ni`; `$expand`, `$lookup`, `$validate-code`.
+- GraphQL (plan 3).
+- Plan 4 decides: `_text`, `_content`, `_contained`, special search parameters, `_include=*`, `_filter` `ew` and `po`, Binary as FHIR JSON and history, date values below day precision and comma lists of dates, and every other operation besides `$validate` and `Patient/$everything`.
+
+Done in store-parity plan 1 (checked against Medplum 5.2.14 by `tests/integration/parity`; deliberate differences in `src/store/README.md`): `_summary` (`true`, `data`, `text`, `count`, `false`), composite search parameters, the modifiers `:of-type`, `:identifier` and uri `:above`/`:below`, `_include`/`_revinclude` with `:iterate` and canonical references, chains and `_has` to Medplum's depth, `_compartment`, `_filter`, system-level search with `_type`, and the `meta` search parameters.
 
 Added in the Medplum-compatibility round (checked against Medplum by `tests/integration/store-compat.test.ts`, except `metadata` and type/system history, which Medplum does not offer: unit tests only):
 
