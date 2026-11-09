@@ -234,12 +234,11 @@ export function sameValue(a: Observation, b: Observation): boolean {
   return a.valueString !== undefined && a.valueString === b.valueString;
 }
 
-// Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
 // Copies of one record from the in-process converter: a visit (one Encounter per visit id), or an id-less record keyed by its
 // content (references aside, so a second copy may link elsewhere: a collection procedure reporting in two panels). The stored
 // record and the incoming copy merge field by field, whatever their dates: a field only one holds is kept, arrays are unioned (equal elements once), and where both hold a
-// single value the newer source wins. A later document that says less never wipes what a fuller one added. Bookkeeping
-// (identifiers, meta, source-date extensions) is unionUpdate's.
+// single value the newer source wins. A later document that says less never wipes what a fuller one added. Identifiers are
+// unionUpdate's; meta and GA's bookkeeping extensions are picked below.
 // keepExisting: the stored record is another source's (EHI, portal) that a C-CDA copy links to: its values win every leaf.
 export function mergeCopies(existing: R, incoming: R, keepExisting = false): R {
   const newer = !keepExisting && (!srcDate(existing) || !srcDate(incoming) || Date.parse(srcDate(incoming) as string) > Date.parse(srcDate(existing) as string));
@@ -259,7 +258,7 @@ export function mergeCopies(existing: R, incoming: R, keepExisting = false): R {
 }
 
 // A converter placeholder (status unknown, a data-absent value) never wins over a real value.
-const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
+export const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
 const placeholderValue = (k: string, v: unknown) =>
   (k === 'status' && v === 'unknown') ||
   (!!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every((x) => x === 'extension') &&
@@ -295,6 +294,7 @@ function mergeValue(a: unknown, b: unknown, newer: boolean, k: string): unknown 
   return newer ? b : a;
 }
 
+// Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
 async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promise<Resource> {
   const incoming = carryConcept(existing, coded);
   const ids = idList(existing);

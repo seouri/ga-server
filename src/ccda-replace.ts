@@ -26,11 +26,11 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isGone, isNotFound, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Resource } from '@medplum/fhirtypes';
-import { ccdaDate, convertCcdaLocal, custodian, isCcda } from './ccda.ts';
+import { ccdaDate, convertCcdaLocal, custodian, isCcda, LOCAL_TAG } from './ccda.ts';
 import { compareCcda, matchEntries } from './ccda-compare.ts';
 import { stripConcept } from './concept-apply.ts';
 import { defaultConfigPath, GaError, type GaConfig, setCcdaConverter, storeKind } from './config.ts';
-import { batchKeys, choiceBase, COMPARTMENT, DUP_OF, importResources } from './engine.ts';
+import { batchKeys, choiceBase, COMPARTMENT, DATA_ABSENT, DUP_OF, importResources } from './engine.ts';
 import { ARRIVED, arrivedAt, hasTag, LAST_SEEN, sha256, SINGULAR_ID, SRC_DATE, TAG, type SourceInfo } from './identity.ts';
 import { withImportLock } from './lock.ts';
 import { walkReferences } from './patient.ts';
@@ -61,8 +61,6 @@ const MARK = 'ccda-replace';
 // On a record the strip took the C-CDA identifiers off, until the new path links it again (the write removes it): one still
 // carrying it after the write would leave a copy beside it, so the run stops, on every rerun too.
 const STRIPPED = 'ccda-stripped';
-const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
-const LOCAL_TAG = 'ccda-medplum'; // src/ccda.ts: a new-path Composition
 const PROTECT = ['source-conflict', 'person-edited', 'writer-agent'];
 const refOf = (r: Resource) => `${r.resourceType}/${r.id}`;
 const idsOf = (r: R): Identifier[] => [r.identifier ?? []].flat();

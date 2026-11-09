@@ -242,7 +242,7 @@ export function ccdaFiles(path: string): string[] {
 }
 
 // Marks the Composition of each in-process conversion, so its records never count as Microsoft-era ones (ccdaConverter).
-const LOCAL_TAG = 'ccda-medplum';
+export const LOCAL_TAG = 'ccda-medplum';
 
 // In process unless the record holds C-CDA records the Microsoft converter wrote: those keep their path until `ga ccda replace`
 // (a mix would duplicate them). Each C-CDA import writes one Composition, so one search per import decides.
