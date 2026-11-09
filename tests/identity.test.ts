@@ -138,4 +138,6 @@ test('an id-less C-CDA entry keys alike in two documents that number its narrati
   expect(key(nka('#al1'))).toBe(key(nka('#allergy-7')));
   // any other content still separates entries
   expect(key(nka('#al1'))).not.toBe(key({ ...nka('#al1'), clinicalStatus: { text: 'resolved' } } as Resource));
+  // two id-less entries of one document named only by text (the library puts a referenced name in code.text) stay two
+  expect(key({ ...nka('#al1'), code: { text: 'Peanuts' } } as Resource)).not.toBe(key({ ...nka('#al2'), code: { text: 'Shellfish' } } as Resource));
 });

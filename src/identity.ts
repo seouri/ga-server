@@ -65,6 +65,9 @@ export const sorted = (_k: string, v: unknown) =>
 // converter's narrative anchors (a "#id" each Epic export numbers anew: the same entry in two summaries must key alike).
 // Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
 // refs: a reference read as its target's own key (for a record that is its links); without it references are left out.
+// shortcut: two id-less entries of one document whose only difference is the narrative row they point at now key alike (one
+// record); none in the owner's 8 documents (Task 12), and a name given only in the narrative still differs (it is code.text).
+// Upgrade, if that case appears: key on the narrative text the anchor resolves to (convertCcdaLocal has the XML).
 const NARRATIVE_REF = 'https://medplum.com/fhir/StructureDefinition/ccda-narrative-reference';
 export function contentHash(r: Resource, patientId = '', refs?: (ref: string) => string | undefined): string {
   const { id: _id, meta: _meta, ...rest } = r;
