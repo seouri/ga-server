@@ -299,9 +299,6 @@ const PLANNED_MOODS = new Set(['INT', 'PRP', 'RQO', 'ARQ']);
 // (age at onset, caused death); a negated one is none (medplum#11243).
 const FAMILY_DETAILS = [OID.OID_AGE_OBSERVATION, OID.OID_FAMILY_HISTORY_DEATH_OBSERVATION];
 const negated = (o: CcdaObservation) => o['@_negationInd'] === 'true';
-// What makes an observation value say something (processVitalsObservation keeps an uncoded observation that has one; a typed
-// value without it is data-absent, not converted).
-const VALUED = OBSERVATION_VALUE_CONTENT;
 const NUMERIC = new Set(['PQ', 'REAL', 'INT']);
 const root0 = (t: CcdaTemplateId[] | undefined) => t?.[0]?.['@_root'];
 const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) => !!n.templateId?.some((t) => roots.includes(t['@_root']));
@@ -327,7 +324,6 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
     const name = sectionName(s);
     const made = (comp?.section?.[i]?.entry ?? []).map((e) => byRef.get(e.reference ?? ''));
     const entries = s.entry ?? [];
-    const statements = entries.flatMap((e) => STATEMENTS.flatMap((k) => (e as Record<string, unknown[] | undefined>)[k] ?? []));
     // Payers: one Coverage per policy activity of a coverage act (none: the act produced no record).
     const payers = hasTemplate(s, OID.OID_PAYERS_SECTION, OID.OID_PAYERS_SECTION_V2);
     const policies = payers ? entries.flatMap((e) => e.act ?? []).map((a) => (a.entryRelationship ?? []).flatMap((er) => er.act ?? [])) : [];
@@ -343,7 +339,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
         return code && !GENERIC_ALLERGY_TYPES.has(code) && !m.category && !m.type;
       }).length, 'allergy type not converted');
     }
-    const expected = statements.length + supplies(s) + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
+    const expected = statementCount(s) + [...policies.map((p) => p.length), ...concerns].reduce((n, k) => n + Math.max(0, k - 1), 0);
     add(name, root0(s.templateId), expected - made.length, made.length ? 'entry produced no record' : 'section not supported by the converter');
     // The library keeps the payer, covered party and subscriber id; a guarantor and the policy holder's own details (name, address) have no Coverage field.
     for (const p of policies.flat()) {
@@ -392,7 +388,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
         return;
       }
       // No code and no value: the library makes no record (a value alone is kept, its code data-absent).
-      if (!o.code && !VALUED.some((k) => (o.value as X | undefined)?.[k] !== undefined)) {
+      if (!o.code && !OBSERVATION_VALUE_CONTENT.some((k) => (o.value as X | undefined)?.[k] !== undefined)) {
         if (nested) add(name, root0(o.templateId), 1, 'observation without a code');
         return;
       }
