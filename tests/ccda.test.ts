@@ -11,7 +11,7 @@ import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, import
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
 import { onStore } from './temp-store.ts';
-import { isPlanned } from '../src/current.ts';
+import { isActive, isPlanned } from '../src/current.ts';
 import { labResults, labRow, type LabRow } from '../src/labs.ts';
 import { vitals } from '../src/vitals.ts';
 import { reviewList } from '../src/concepts-cli.ts';
@@ -537,6 +537,13 @@ test('a taking entry stays a MedicationStatement with its source id and name', (
     // The narrative's name (what the clinician sees), RxNorm kept.
     medicationCodeableConcept: { text: 'examplepril 10 mg tablet', coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '314076' }] },
   });
+});
+
+test('a negated medication list entry (negationInd, statusCode active) stays not-taken and is not a current medication', () => {
+  const doc = EPIC.replace('<substanceAdministration classCode="SBADM" moodCode="EVN">', '<substanceAdministration classCode="SBADM" moodCode="EVN" negationInd="true">');
+  const st = convertCcdaLocal(doc).resources.find((r) => r.resourceType === 'MedicationStatement') as MedicationStatement;
+  expect(st.status).toBe('not-taken');
+  expect(isActive(st)).toBe(false);
 });
 
 test('a medication list entry in INT mood is a MedicationStatement too, with its source id and status', () => {

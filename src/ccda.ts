@@ -184,7 +184,8 @@ export function repair(rs: Resource[], xml: string): Resource[] {
       if (m.medicationCodeableConcept) r = { ...m, medicationCodeableConcept: named(m.medicationCodeableConcept, info) } as Resource;
       if (m.contained) r = { ...r, contained: m.contained.map((c) => (c.resourceType === 'Medication' ? { ...c, code: named(c.code, info) } : c)) } as Resource;
     }
-    if (r.resourceType === 'MedicationStatement') {
+    // not-taken comes from negationInd (the library, PATCHES row 51), which statusCode never overrides.
+    if (r.resourceType === 'MedicationStatement' && r.status !== 'not-taken') {
       return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
     }
     if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
