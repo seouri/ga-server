@@ -102,6 +102,7 @@ Not supported yet; each answers with an error (400, or 404/405 for an unknown ro
 
 - Special search parameters; on tokens the modifiers `:above`, `:below`, `:in`, `:not-in` (terminology).
 - Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
+- `_filter` operators `ew` and `po` (Medplum 5.2.14's parser refuses both: `Invalid operator: ew`), `ss`, `sb`, `in` and `ni` (terminology, as the token modifiers above).
 - `_contained`, `_text`, `_content`, and `_include=*` (Medplum 5.2.14 refuses it too; plan 4 decides).
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
 - FHIR R4 only (the definitions ship R4); one patient-compartment definition (Patient).
