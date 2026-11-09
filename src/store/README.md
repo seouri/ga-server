@@ -76,6 +76,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).
 - Ids need not be UUIDs (R4 `id`: letters, digits, `-` and `.`, up to 64): `PUT Patient/123` of a missing record is 404 (Medplum refuses a non-UUID id with 400 `Invalid id`).
 - Ids are case-sensitive, as R4 defines them: `Patient/<ID IN UPPER CASE>` is another (missing) record (Medplum's uuid column folds case and finds the record).
+- A search whose value list is too long for one SQLite statement (about 1,000 comma values on one parameter, or `_filter` terms) is 400 `Search has too many values` (Medplum runs it).
 - A negative `_count` or `_offset` is 400 (Medplum clamps it to its default).
 - A conditional request (update, delete, If-None-Exist, conditional reference) needs a real search criterion: only paging, sorting, shaping or format parameters, or empty values, are 400.
 - `:contains` and `:exact` on a token parameter are 400: R4 defines them for string parameters only (Medplum accepts both on tokens; `:exact` as plain equality).

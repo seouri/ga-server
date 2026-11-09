@@ -862,4 +862,14 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(fail('Observation', '_filter=nope eq x').message).toBe('Unknown search parameter: nope');
     expect(fail('Observation', '_filter=code in http://example.com/vs').message).toBe('Invalid modifier :in for code'); // terminology: plan 2
   });
+
+  it('a value list too long for one SQL statement is 400, not a server error', () => {
+    obs('o1');
+    const n = Array.from({ length: 1100 }, (_, i) => i);
+    for (const q of [`code=${n.map((i) => `c${i}`).join(',')}`, `combo-code-value-quantity=${n.map((i) => `c${i}$${i}`).join(',')}`,
+      `_filter=${encodeURIComponent(n.map(() => 'status eq final').join(' and '))}`]) {
+      const e = fail('Observation', q);
+      expect([e.status, e.message]).toEqual([400, 'Search has too many values']);
+    }
+  });
 });
