@@ -1075,7 +1075,8 @@ class CcdaToFhirConverter {
       const statement: MedicationStatement = {
         resourceType: 'MedicationStatement',
         ...shared,
-        status: MEDICATION_STATEMENT_STATUSES[substanceAdmin.statusCode?.['@_code'] ?? ''] ?? 'unknown',
+        // Not taken (negationInd: e.g. Epic's "no medications" entry): not-taken, whatever its statusCode
+        status: substanceAdmin['@_negationInd'] === 'true' ? 'not-taken' : (MEDICATION_STATEMENT_STATUSES[substanceAdmin.statusCode?.['@_code'] ?? ''] ?? 'unknown'),
         ...(effectivePeriod ? { effectivePeriod } : { effectiveDateTime: this.mapEffectiveTimeToDateTime(effectiveTime) }),
         dateAsserted: mapCcdaToFhirDateTime(substanceAdmin.author?.[0]?.time?.['@_value']),
         dosage,

@@ -57,6 +57,12 @@ test('a medication list entry in INT mood is a MedicationStatement too (the list
   });
 });
 
+test('a negated medication list entry (negationInd, "not taking", e.g. no medications) is a MedicationStatement not-taken', () => {
+  const negated = (mood: string) => medications(mood).replace(`moodCode="${mood}">`, `moodCode="${mood}" negationInd="true">`);
+  for (const mood of ['INT', 'EVN']) expect(resourcesOf<MedicationStatement>(convertSections(negated(mood)), 'MedicationStatement')[0].status).toBe('not-taken');
+  expect(resourcesOf<MedicationStatement>(convertSections(medications('INT').replace('moodCode="INT">', 'moodCode="INT" negationInd="false">')), 'MedicationStatement')[0].status).toBe('active');
+});
+
 // Medication Supply Order (22.4.17, INT) and Medication Dispense (22.4.18, EVN) inside a Medication Activity.
 const supply = (moodCode: string, template: string, id: string, product = '') => `<entryRelationship typeCode="REFR">
   <supply classCode="SPLY" moodCode="${moodCode}"><templateId root="${template}" extension="2014-06-09"/>
