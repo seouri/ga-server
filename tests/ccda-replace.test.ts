@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Mock, test, vi } from 'vitest';
-import type { MedplumClient } from '@medplum/core';
+import { type MedplumClient, OperationOutcomeError, serverError } from '@medplum/core';
 import type { Basic, Composition, Encounter, Identifier, Immunization, Observation, Provenance, Resource } from '@medplum/fhirtypes';
 import { ccdaDate, convertCcdaLocal, custodian, importPath, repair } from '../src/ccda.ts';
 import { replaceCcda } from '../src/ccda-replace.ts';
@@ -403,6 +403,21 @@ test('a reference to a record that never existed (a Microsoft placeholder never 
     await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, code: { text: 'x' }, extension: [{ url: 'urn:x', valueReference: { reference: 'Observation/0b6e3c3e-0000-4000-8000-000000000000' } }] });
     expect((await run(w, true)).dangling).toBe(0);
     expect(flag(w)).toBe('medplum');
+  });
+});
+
+test('a target the check cannot read (the store answers 500) stops the rerun: it never counts as not missing', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client);
+    await run(w, true);
+    writeFileSync(w.configFile, JSON.stringify(w.cfg)); // flag unset, as after a crash on the last delete
+    const target = 'Observation/0b6e3c3e-0000-4000-8000-000000000001';
+    await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, code: { text: 'x' }, extension: [{ url: 'urn:x', valueReference: { reference: target } }] });
+    const failing = new Proxy(client, { get: (t, p) => (p === 'readResource'
+      ? (type: string, id: string) => (`${type}/${id}` === target ? Promise.reject(new OperationOutcomeError(serverError(new Error('down')))) : t.readResource(type as 'Observation', id))
+      : ((v) => (typeof v === 'function' ? v.bind(t) : v))(Reflect.get(t, p, t))) });
+    await expect(run(w, true, undefined, failing)).rejects.toThrow();
+    expect(flag(w)).toBeUndefined();
   });
 });
 

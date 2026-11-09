@@ -8,7 +8,7 @@
 //     identifiers and src-ccda tag, so the new import links to it again.
 //  4. write: every stored document imported on the new path, oldest first, with the other old records hidden from the import
 //     (it can neither find, link, merge nor flag them). Each record it writes carries MARK; one it creates takes its document's
-//     import time as arrival.
+//     import time as arrival: the earliest arrival of that document's old records, else none (GA never stamps the stored file).
 //  5. match: each old record to the converted record it continues (matchEntries, per source document), found in the store by its
 //     new C-CDA key. A new record takes its old counterpart's arrival time.
 //  6. protected (source-conflict, person-edited, agent-written): the old record stays with its body and takes its counterpart's
@@ -18,11 +18,13 @@
 //     Microsoft-era, so a rerun runs in full). An old record with no counterpart is kept, pointed at or not: never less. (One
 //     holding no information, which compare explains, cannot be stored: both stores refuse an Observation without a code.)
 //  9. check: nothing points at a deleted record; only then "ccdaConverter": "medplum" in the config.
+// A run that stopped is rerun on the store it started on: after ga migrate-store a deleted record reads 404 (the copy holds no
+// deletes), which the final check cannot tell from a reference that never pointed anywhere.
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isGone, type MedplumClient, OperationOutcomeError } from '@medplum/core';
+import { isGone, isNotFound, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Resource } from '@medplum/fhirtypes';
 import { ccdaDate, convertCcdaLocal, custodian, isCcda } from './ccda.ts';
 import { compareCcda, matchEntries } from './ccda-compare.ts';
@@ -51,7 +53,7 @@ export type ReplaceOptions = {
 };
 
 type R = Resource & { identifier?: Identifier | Identifier[]; extension?: Extension[] };
-type Doc = { id: string; hash: string; title: string; xml: string; arrived?: string; file?: string; at?: string };
+type Doc = { id: string; hash: string; title: string; xml: string; file?: string; at?: string };
 
 const CCDA = 'urn:ga-server:id:ccda';
 // On every record this command wrote: a rerun never takes it for an old one.
@@ -109,7 +111,9 @@ async function scan(client: MedplumClient, pid: string, fn: (r: R) => void): Pro
 // References from anything scan reads to a deleted record of a scanned type (a run that stopped after its last delete no longer
 // knows what it deleted). Targets outside the scan (another patient's, a patient-less record) are read to be sure. A target that
 // never existed is not counted: the Microsoft path pointed reports at placeholder results the store refused (no code), long before
-// this command; both stores tell a deleted record (410 gone) from one never written (404).
+// this command; both stores tell a deleted record (410 gone) from one never written (404). Any other error (a store down, a
+// rate limit, a lost login) stops the check: it never counts as "not missing". After ga migrate-store a deleted record reads 404
+// (the copy holds no deletes), so a crashed run must be rerun on the store it started on.
 async function missingTargets(client: MedplumClient, pid: string): Promise<number> {
   const have = new Set<string>();
   const refs: string[] = [];
@@ -121,7 +125,11 @@ async function missingTargets(client: MedplumClient, pid: string): Promise<numbe
   let missing = 0;
   for (const x of new Set(refs.filter((x) => !have.has(x)))) {
     const [type, id] = x.split('/');
-    const gone = await client.readResource(type as 'Observation', id).then(() => false, (e) => e instanceof OperationOutcomeError && isGone(e.outcome));
+    const gone = await client.readResource(type as 'Observation', id).then(() => false, (e) => {
+      if (e instanceof OperationOutcomeError && isGone(e.outcome)) return true;
+      if (e instanceof OperationOutcomeError && isNotFound(e.outcome)) return false;
+      throw e;
+    });
     if (gone) missing += refs.filter((y) => y === x).length;
   }
   return missing;
@@ -134,15 +142,14 @@ async function storedDocs(client: MedplumClient, pid: string): Promise<Doc[]> {
     const att = (d as unknown as { content?: { attachment: { url?: string; title?: string } }[] }).content?.[0]?.attachment;
     const xml = att?.url ? await (await client.download(att.url)).text() : '';
     const hash = idsOf(d).find((i) => i.system === 'urn:ga-server:id:file')?.value;
-    // its own arrival only: lastUpdated is not one (a copy into GA's own project rewrote it)
-    if (hash && isCcda(xml)) docs.push({ id: d.id as string, hash, title: att?.title ?? '', xml, arrived: arrivedAt(d) });
+    if (hash && isCcda(xml)) docs.push({ id: d.id as string, hash, title: att?.title ?? '', xml });
   }
   return docs;
 }
 
 // The import, with the old records hidden from every search it makes; every record it writes with a C-CDA identifier gets MARK,
-// and one it creates arrives at its document's import time (at) instead of now; with none known (the document and its old records
-// came before GA recorded arrivals) it carries no arrival, like the records it replaces, so it never reads as new.
+// and one it creates arrives at its document's import time (at: the earliest arrival of its old records) instead of now; with none
+// (old records from before GA recorded arrivals) it carries no arrival, like the records it replaces, so it never reads as new.
 function hiding(client: MedplumClient, hidden: Set<string>, at: () => string | undefined, created: Record<string, number>): MedplumClient {
   const visible = <T extends Resource>(rs: T[]) => rs.filter((r) => !hidden.has(refOf(r)));
   const mark = (r: R): R => (idsOf(r).some((i) => i.system === CCDA) ? untag(retag(r, MARK), STRIPPED) : r);
@@ -247,7 +254,6 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
   }
   // The path the document was imported from (records this command wrote keep it too, for a rerun); never a bare file name.
   for (const r of records) { const d = docOf(r.meta?.source); if (d) d.file ??= r.meta?.source; }
-  for (const d of docs) d.at ??= d.arrived;
   conv.sort((a, b) => Date.parse(ccdaDate(a.d.xml)) - Date.parse(ccdaDate(b.d.xml)));
   const sourceOf = (d: Doc): SourceInfo => ({ kind: 'ccda', file: d.file ?? `DocumentReference/${d.id}`, org: custodian(d.xml), date: ccdaDate(d.xml), writer: 'importer', local: true });
 
@@ -303,7 +309,7 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
       invalid += (await importResources(view, c.resources, sourceOf(c.d), pid, c.d.hash)).invalid;
       await o.after?.('document');
     }
-    if (invalid) throw new GaError(`stopped, no old record deleted: ${invalid} new-path records were refused as invalid. Fix that, then run ga ccda replace --yes again`);
+    if (invalid) throw new GaError(`stopped, no old record deleted: ${invalid} new-path records were refused as invalid. Fix that, then run ga ccda replace --yes again, on this same store (not after ga migrate-store)`);
     // A stripped record the new path did not link again may now have a separate copy beside it: never duplicates, so stop.
     const unlinked: Record<string, number> = {};
     for (const [type, field] of Object.entries(COMPARTMENT)) for (const r of await all(client, type, { _tag: `${TAG}|${STRIPPED}`, [field]: `Patient/${pid}` })) add(unlinked, type);
@@ -428,7 +434,7 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
     await repointAll(await pointing(batch));
     report.dangling = 0;
     await scan(client, pid, (r) => { report.dangling += pointsAt(r, batch).length; });
-    if (report.dangling) throw new GaError(`stopped: ${report.dangling} references still point at deleted records; the flag is not set. Run ga ccda replace --yes again`);
+    if (report.dangling) throw new GaError(`stopped: ${report.dangling} references still point at deleted records; the flag is not set. Run ga ccda replace --yes again, on this same store (not after ga migrate-store)`);
   }
   if (o.yes) setCcdaConverter(configFile);
   o.log(`${o.yes ? 'replaced' : 'dry run, nothing changed'}: ${report.documents} documents; deleted ${sum(report.deleted)} (${byType(report.deleted)}); stripped ${sum(report.stripped)} (${byType(report.stripped)}); kept ${sum(report.kept)} (${byType(report.kept)}); ${o.yes ? 'created' : 'new'} ${sum(report.created)} (${byType(report.created)}); repointed ${report.repointed}${sum(left) ? `; left alone (no patient, outside every check): ${byType(left)}` : ''}${filled ? `; ${filled} old records continued by another source's record (their fields it lacked were added to it)` : ''}${o.yes ? `; dangling ${report.dangling}; ${configFile}: "ccdaConverter": "medplum"` : '. Run ga ccda replace --yes to replace (it backs up first)'}`);
