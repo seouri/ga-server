@@ -539,6 +539,27 @@ describe('store server: Medplum-compatible routes', () => {
     expect([ok.json.entry[0].response.status, ok.json.entry[0].resource.entry[0].response.status]).toEqual(['200', '201']);
   });
 
+  it('an unexpected error in a batch entry is that entry\'s 500 and keeps the Binary saved entries reference; a failed transaction removes its staged Binary', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const boom = vi.spyOn(Store.prototype, 'searchJson').mockImplementation(() => { throw new Error('boom'); });
+    try {
+      const urn = 'urn:uuid:11111111-1111-1111-1111-111111111111';
+      const entries = (last: BundleEntry): BundleEntry[] => [
+        { fullUrl: urn, request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'aGVsbG8=' } },
+        { request: { method: 'POST', url: 'DocumentReference' }, resource: { resourceType: 'DocumentReference', status: 'current', content: [{ attachment: { url: urn } }] } as Resource },
+        last,
+      ];
+      const r = await tx('batch', entries({ request: { method: 'GET', url: 'Observation?status=final' } }));
+      expect([r.status, r.json.entry.map((e: BundleEntry) => e.response!.status)]).toEqual([200, ['201', '201', '500']]);
+      expect(r.json.entry[2].response.outcome.issue[0]).toMatchObject({ code: 'exception', details: { text: 'Internal error' } });
+      const url = r.json.entry[1].resource.content[0].attachment.url;
+      expect(await (await fetch(`${base}fhir/R4/${url}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text()).toBe('hello');
+      const t = await tx('transaction', entries({ request: { method: 'POST', url: 'Observation' }, resource: { resourceType: 'Observation', status: 'bad' } as unknown as Resource }));
+      expect(t.status).toBe(400);
+      expect(readdirSync(join(dir, 'binary')).filter((f) => !f.startsWith('.'))).toEqual([url.slice('Binary/'.length)]);
+    } finally { boom.mockRestore(); err.mockRestore(); }
+  });
+
   it('as Medplum: unknown types 400, DELETE If-Match, FHIRPath Patch, _pretty, Prefer return=minimal, empty values dropped, $validate of a Parameters body', async () => {
     for (const [m, p] of [['GET', 'Patientx/1'], ['GET', 'xyz/1/_history'], ['GET', 'xyz/1/_history/2'], ['DELETE', 'xyz/1'], ['PATCH', 'Foo/1'], ['GET', 'Patientx']]) {
       const r = await call(m, p, m === 'PATCH' ? { resourceType: 'Parameters' } : undefined);
