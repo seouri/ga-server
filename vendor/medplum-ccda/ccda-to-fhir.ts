@@ -757,7 +757,9 @@ class CcdaToFhirConverter {
     // 716186003, active and confirmed), never a nameless allergy
     if (observation['@_negationInd'] === 'true') {
       if (allergy.code?.coding?.some((c) => c.code) || allergy.code?.text) {
+        // FHIR ait-1 keeps a clinical status beside refuted; inactive, since no allergy is ongoing (readers never show it as one)
         allergy.verificationStatus = { coding: [{ system: ALLERGY_VERIFICATION_CODE_SYSTEM, code: 'refuted' }] };
+        allergy.clinicalStatus = { coding: [{ system: ALLERGY_CLINICAL_CODE_SYSTEM, code: 'inactive' }] };
       } else {
         allergy.code = { coding: [{ system: SNOMED, code: '716186003', display: 'No known allergy' }], text: 'No known allergy' };
       }

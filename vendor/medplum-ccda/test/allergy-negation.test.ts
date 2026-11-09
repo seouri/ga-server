@@ -33,10 +33,11 @@ test('a negated allergy observation with no substance ("no known allergies") is 
   }
 });
 
-test('a negated allergy observation naming a substance is that substance, refuted (not allergic to it)', () => {
+test('a negated allergy observation naming a substance is that substance, refuted and inactive (not allergic to it)', () => {
   const a = allergy(true, substance('<code code="7980" codeSystem="2.16.840.1.113883.6.88" displayName="Penicillin G"/>'));
   expect(a.code?.coding?.[0]?.code).toBe('7980');
   expect(a.verificationStatus?.coding?.[0]?.code).toBe('refuted');
+  expect(a.clinicalStatus?.coding?.[0]?.code).toBe('inactive');
 });
 
 test('an allergy observation that is not negated is unchanged', () => {

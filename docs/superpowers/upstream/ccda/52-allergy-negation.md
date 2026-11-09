@@ -19,11 +19,11 @@ Reproduction (synthetic):
 </observation>
 ```
 
-Expected: `"code": { "coding": [{ "system": "http://snomed.info/sct", "code": "716186003", "display": "No known allergy" }] }` (US Core's no-known-allergies pattern), active and confirmed. With a substance: that substance, `verificationStatus` `refuted`. Actual: no `code` (or the substance), `confirmed`.
+Expected: `"code": { "coding": [{ "system": "http://snomed.info/sct", "code": "716186003", "display": "No known allergy" }] }` (US Core's no-known-allergies pattern), active and confirmed. With a substance: that substance, `verificationStatus` `refuted`, `clinicalStatus` `inactive`. Actual: no `code` (or the substance), `confirmed`.
 
 ## PR: fix(ccda): a negated allergy observation is "no known allergy" or a refuted substance
 
-- `ccda-to-fhir.ts`: when `negationInd="true"`, no substance → `code` SNOMED 716186003; a substance → `verificationStatus` `refuted`.
+- `ccda-to-fhir.ts`: when `negationInd="true"`, no substance → `code` SNOMED 716186003; a substance → `verificationStatus` `refuted`, `clinicalStatus` `inactive`.
 - Test `allergy-negation.test.ts`.
 
 # GA-internal (do not post)
