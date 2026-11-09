@@ -263,7 +263,7 @@ const ALLOWED: Record<string, readonly string[]> = {
 function cond(type: string, f: Filter, a: string): Cond {
   if (f.code === '_filter') {
     let e: FhirFilterExpression;
-    try { e = parseFilterParameter(f.value); } catch (err) { throw badRequest(`Invalid _filter: ${err instanceof Error ? err.message : String(err)}`); }
+    try { e = parseFilterParameter(f.value); } catch (err) { throw badRequest(err instanceof Error ? err.message : String(err)); } // Medplum's text
     return filterExpr(type, e, a);
   }
   if (f.code.startsWith('_has:') || f.code.includes('.')) return chainCond(type, f, a);

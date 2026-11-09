@@ -737,4 +737,89 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     add({ resourceType: 'Patient', id: 'p1' });
     expect(ids('Patient', '_id:exact=p1')).toEqual(['p1']);
   });
+
+  it('meta parameters _security, _source, _tag and _profile, on any type (Resource meta search params, Can search … on _profile)', () => {
+    const meta = { profile: ['http://example.com/fhir/a-patient-profile'], security: [{ system: 'http://hl7.org/fhir/v3/Confidentiality', code: 'N' }],
+      source: 'http://example.org', tag: [{ system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' }] };
+    add({ resourceType: 'Patient', id: 'm1', meta });
+    add({ resourceType: 'Patient', id: 'm2' });
+    add({ resourceType: 'Organization', id: 'o1', meta: { profile: ['http://example.com/org'] } });
+    add({ resourceType: 'MedicinalProductManufactured', id: 'x1', meta: { profile: ['http://example.com/mpm'] }, manufacturedDoseForm: { text: 'tablet' }, quantity: { value: 1 } } as Resource);
+    expect(ids('Patient', '_security=http://hl7.org/fhir/v3/Confidentiality|N')).toEqual(['m1']);
+    expect(ids('Patient', '_source=http://example.org')).toEqual(['m1']);
+    expect(ids('Patient', '_tag=http://hl7.org/fhir/v3/ObservationValue|SUBSETTED')).toEqual(['m1']);
+    expect(ids('Patient', '_tag=SUBSETTED')).toEqual(['m1']);
+    expect(ids('Patient', '_profile=http://example.com/fhir/a-patient-profile')).toEqual(['m1']);
+    expect(ids('Patient', '_profile:missing=true')).toEqual(['m2']);
+    expect(ids('Organization', '_profile=http://example.com/org')).toEqual(['o1']);
+    expect(ids('MedicinalProductManufactured', '_profile=http://example.com/mpm')).toEqual(['x1']);
+  });
+
+  it('_filter: and, or, not and parentheses (_filter search)', () => {
+    let n = 0;
+    for (const status of ['preliminary', 'final'] as const) for (const code of ['123', '456']) obs(`f${++n}`, { status, code: { coding: [{ code }] }, subject: { reference: 'Patient/p' } });
+    expect(ids('Observation', `subject=Patient/p&_filter=${encodeURIComponent('(status eq preliminary and code eq 123) or (not (status eq preliminary) and code eq 456)')}`)).toEqual(['f1', 'f4']);
+  });
+
+  it('_filter eq on a string is exact, sw a prefix, co a substring, ne its negation (_filter eq, sw, ne; Disjunction with lookup tables)', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ given: ['Evelyn', 'Dierdre'], family: 'Arachnae' }] });
+    add({ resourceType: 'Patient', id: 'p2', name: [{ given: ['Eve'], family: 'Zed' }] });
+    expect(ids('Patient', '_filter=given eq Eve')).toEqual(['p2']);
+    expect(ids('Patient', '_filter=given eq Evelyn')).toEqual(['p1']);
+    expect(ids('Patient', '_filter=name eq Dier')).toEqual([]);
+    expect(ids('Patient', '_filter=name sw Dier')).toEqual(['p1']);
+    expect(ids('Patient', '_filter=given ne Eve')).toEqual([]); // ne negates the prefix match, as Medplum
+    expect(ids('Patient', '_filter=given ne Evelyn')).toEqual(['p2']);
+    expect(ids('Patient', `_filter=${encodeURIComponent('name co "rachn" or name co "zed"')}`)).toEqual(['p1', 'p2']);
+  });
+
+  it('_filter values: quoted, a date, a UUID (_filter birthdate eq, _filter with UUID value)', () => {
+    add({ resourceType: 'Patient', id: '0b2b1f4e-0000-4000-8000-000000000001', birthDate: '2000-01-01' });
+    add({ resourceType: 'Patient', id: 'p2', birthDate: '2001-01-01' });
+    expect(ids('Patient', '_filter=birthdate eq "2000-01-01"')).toEqual(['0b2b1f4e-0000-4000-8000-000000000001']);
+    expect(ids('Patient', '_filter=birthdate gt 2000-06-01')).toEqual(['p2']);
+    expect(ids('Patient', '_filter=birthdate le 2000-06-01')).toEqual(['0b2b1f4e-0000-4000-8000-000000000001']);
+    for (const v of ['_id eq 12345678-1234-4123-8123-123456789abc or _id eq p2', '(_id eq 12345678-1234-4123-8123-123456789abc or _id eq p2)']) {
+      expect(ids('Patient', `_filter=${encodeURIComponent(v)}`)).toEqual(['p2']);
+    }
+  });
+
+  it('_filter re and ne on references (_filter re, Reference search patterns)', () => {
+    add({ resourceType: 'Patient', id: 'p1', identifier: [{ value: 'u' }] });
+    add({ resourceType: 'Patient', id: 'p2', identifier: [{ value: 'u' }], link: [{ type: 'refer', other: { reference: 'Patient/p1' } }], managingOrganization: { reference: 'Organization/o1' } });
+    expect(ids('Patient', '_filter=organization re Organization/o1')).toEqual(['p2']);
+    expect(ids('Patient', `_filter=${encodeURIComponent('identifier eq "u" and link re "Patient/p1"')}`)).toEqual(['p2']);
+    expect(ids('Patient', `_filter=${encodeURIComponent('identifier eq "u" and link ne "Patient/p1"')}`)).toEqual(['p1']);
+  });
+
+  it('_filter with chains and _has, and _has:…:_filter (_filter with chained search, with reverse chained search; Reverse chained search with _filter)', () => {
+    add({ resourceType: 'Patient', id: 'p1', identifier: [{ system: 'http://example.com/mrn', value: 'mrn1' }] });
+    add({ resourceType: 'Patient', id: 'p2', identifier: [{ system: 'http://example.com/mrn', value: 'no-match' }] });
+    add({ resourceType: 'Practitioner', id: 'pr1', identifier: [{ system: 'http://example.com/npi', value: 'npi1' }] });
+    obs('o1', { subject: { reference: 'Patient/p1' }, performer: [{ reference: 'Patient/p1' }], effectiveDateTime: '2000-01-01' });
+    obs('o2', { code: { coding: [{ system: LOINC, code: '3141-9' }] }, performer: [{ reference: 'Practitioner/pr1' }], subject: { reference: 'Patient/p2' }, valueDateTime: '2020-01-02T03:04:05Z' });
+    const f = (type: string, v: string) => ids(type, `_filter=${encodeURIComponent(v)}`);
+    expect(f('Observation', 'subject:Patient.identifier eq http://example.com/mrn|mrn1 or performer:Practitioner.identifier eq http://example.com/npi|npi1')).toEqual(['o1', 'o2']);
+    expect(f('Patient', "_has:Observation:performer:_id eq 'o1'")).toEqual(['p1']);
+    expect(f('Patient', "_has:Observation:performer:_id eq 'o2'")).toEqual([]);
+    expect(f('Patient', "_has:Observation:performer:_id ne 'o1'")).toEqual([]);
+    expect(f('Patient', "_has:Observation:performer:_id ne 'o2'")).toEqual(['p1']);
+    expect(f('Patient', '_has:Observation:subject:date pr true')).toEqual(['p1']);
+    expect(ids('Patient', `_has:Observation:subject:_filter=${encodeURIComponent('code eq "3141-9" and value-date eq "2020-01-02T03:04:05Z"')}`)).toEqual(['p2']);
+    expect(ids('Patient', `_has:Observation:subject:_filter=${encodeURIComponent('code eq "xyz"')}`)).toEqual([]);
+  });
+
+  it('_filter operators on numbers and quantities; pr; a bad expression is 400 with Medplum\'s text', () => {
+    obs('q1', { valueQuantity: { value: 5, system: UCUM, code: 'mg' } });
+    obs('q2', { valueQuantity: { value: 50, system: UCUM, code: 'mg' } });
+    obs('q3');
+    expect(ids('Observation', '_filter=value-quantity gt 10')).toEqual(['q2']);
+    expect(ids('Observation', '_filter=value-quantity lt 10')).toEqual(['q1']);
+    expect(ids('Observation', '_filter=value-quantity ap 51')).toEqual(['q2']);
+    expect(ids('Observation', '_filter=value-quantity pr false')).toEqual(['q3']);
+    expect(fail('Observation', '_filter=code ew x').message).toBe('Invalid operator: ew');
+    expect(fail('Observation', '_filter=code ss x').message).toBe('Invalid operator: ss');
+    expect(fail('Observation', '_filter=nope eq x').message).toBe('Unknown search parameter: nope');
+    expect(fail('Observation', '_filter=code in http://example.com/vs').message).toBe('Invalid modifier :in for code'); // terminology: plan 2
+  });
 });

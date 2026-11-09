@@ -121,21 +121,21 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference identifier search | ported | modifier |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Task patient identifier search | ported | modifier |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by a shared token column search param, _security | skipped | meta | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _source | skipped | meta | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _tag | skipped | meta | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by a shared token column search param, _security | ported | meta |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _source | ported | meta |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _tag | ported | meta |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token :text search | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate covers all hours: %d (%s) | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate with multiple values | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter search | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter eq | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with UUID value | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter birthdate eq | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter ne | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter re | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with reverse chained search | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter sw | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with chained search | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter search | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter eq | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with UUID value | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter birthdate eq | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter ne | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter re | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with reverse chained search | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter sw | ported | filter |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with chained search | ported | filter |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › reverse chain with prefix modifier | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Lookup table exact match with comma disjunction | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Duplicate rows from token lookup | ported | existing |  |
@@ -149,7 +149,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient by name with stop word | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by ID | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Numeric parameter | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Disjunction with lookup tables | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Disjunction with lookup tables | ported | filter |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by unknown search parameter | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date range search | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type | ported | type |  |
@@ -160,7 +160,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreEncounterDischargeDisposition | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreGoalDescription | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCorePatient race, ethnicity, genderIdentity | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search patterns | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search patterns | ported | filter |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search with inline resource | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Basic reference | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Reference values with special characters | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
@@ -193,7 +193,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | systemRepo › Should calculate count with join | skipped | platform | getCount / SQL shape |
 | server/src/fhir/search.test.ts | systemRepo › maxResourceVersion | skipped | platform | maxResourceVersion (Medplum internal) |
 | server/src/fhir/search.test.ts | systemRepo › Search for deleted resources | skipped | platform | _deleted is a Medplum-only search parameter |
-| server/src/fhir/search.test.ts | systemRepo › Reverse chained search with _filter | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | systemRepo › Reverse chained search with _filter | ported | filter |  |
 | server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | ported | modifier |  |
 | server/src/fhir/search.test.ts | parseChainedParameter › reverse chained search with prefix operators | skipped | platform | parseChainedParameter unit test |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Appointment.end | ported | existing |  |
@@ -467,8 +467,8 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/routes.test.ts | FHIR Routes › Resend as project admin | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › ProjectMembership with null access policy | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › Set accounts on create | skipped | platform | access policy / project / reader routing |
-| server/src/fhir/structure.test.ts | FHIR structure › Can search Organization on _profile | skipped | meta | not yet ported (Task 8) |
-| server/src/fhir/structure.test.ts | FHIR structure › Can search MedicinalProductManufactured on _profile | skipped | meta | not yet ported (Task 8) |
+| server/src/fhir/structure.test.ts | FHIR structure › Can search Organization on _profile | ported | meta |  |
+| server/src/fhir/structure.test.ts | FHIR structure › Can search MedicinalProductManufactured on _profile | ported | meta |  |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Success | ported | existing |  |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Inline DocumentReference attachments | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Project setting enables inline DocumentReference attachments | skipped | platform | inline attachments setting / Medplum helper |

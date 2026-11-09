@@ -339,7 +339,8 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(nextUrl).toContain('code:not=x');
   }));
 
-  test('project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+  // Medplum's beforeAll patient, once per side; each search is scoped by its identifier.
+  const metaPatient = once(async (s) => {
     const patientIdentifier = crypto.randomUUID();
     const patient = await s.create({
       resourceType: 'Patient', identifier: [{ system: 'http://example.com', value: patientIdentifier }],
@@ -348,8 +349,36 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
         source: 'http://example.org', tag: [{ system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' }],
       },
     });
-    const bundle1 = await search(s, q('Patient', ['identifier', patientIdentifier], ['_profile', 'http://example.com/fhir/a-patient-profile']));
-    expect(has(bundle1, patient)).toBe(true);
+    return { patientIdentifier, patient };
+  });
+  const metaSearch = async (s: Side, code: string, value: string) => {
+    const { patientIdentifier, patient } = await metaPatient(s);
+    return has(await search(s, q('Patient', ['identifier', patientIdentifier], [code, value])), patient);
+  };
+
+  test('project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    expect(await metaSearch(s, '_profile', 'http://example.com/fhir/a-patient-profile')).toBe(true);
+  }));
+
+  // Added: the code alone, another system, :not and :missing.
+  test('project-scoped Repository w/ %j › Resource meta search params › Search by a shared token column search param, _security [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    expect(await metaSearch(s, '_security', 'http://hl7.org/fhir/v3/Confidentiality|N')).toBe(true);
+    return [await metaSearch(s, '_security', 'N'), await metaSearch(s, '_security', 'http://other|N'), await metaSearch(s, '_security:not', 'http://hl7.org/fhir/v3/Confidentiality|N'),
+      await metaSearch(s, '_security:missing', 'true'), await metaSearch(s, '_security:missing', 'false')];
+  }));
+
+  // Added: another source, :missing, :below.
+  test('project-scoped Repository w/ %j › Resource meta search params › Search by _source [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    expect(await metaSearch(s, '_source', 'http://example.org')).toBe(true);
+    return [await metaSearch(s, '_source', 'http://example.com'), await metaSearch(s, '_source:missing', 'false'), await metaSearch(s, '_source:below', 'http://example.org')];
+  }));
+
+  // Added: the code alone, the system only, :not and :missing.
+  test('project-scoped Repository w/ %j › Resource meta search params › Search by _tag [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    expect(await metaSearch(s, '_tag', 'http://hl7.org/fhir/v3/ObservationValue|SUBSETTED')).toBe(true);
+    return [await metaSearch(s, '_tag', 'SUBSETTED'), await metaSearch(s, '_tag', 'http://hl7.org/fhir/v3/ObservationValue|'),
+      await metaSearch(s, '_tag:not', 'http://hl7.org/fhir/v3/ObservationValue|SUBSETTED'), await metaSearch(s, '_tag:not', 'x'),
+      await metaSearch(s, '_tag:missing', 'true'), await metaSearch(s, '_tag:missing', 'false')];
   }));
 
   test('project-scoped Repository w/ %j › Token :text search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
@@ -386,6 +415,125 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     const e = await error(s, q('Patient', ['organization', patient.managingOrganization.reference], ['birthdate', '2000-01-01,2001-01-01']));
     expect(e).toEqual({ status: 400, text: 'Invalid format for date search parameter: 2000-01-01,2001-01-01' });
     return e;
+  }));
+
+  // Medplum's project is shared: each search is scoped by an organization (or identifier) the test made.
+  const f = (type: string, filter: string, ...params: [string, string][]) => q(type, ...params, ['_filter', filter]);
+
+  test('project-scoped Repository w/ %j › _filter search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const observations: Record<string, { id: string }> = {};
+    for (const status of ['preliminary', 'final'] as const) for (const code of ['123', '456']) observations[`${status}-${code}`] = await s.create({ resourceType: 'Observation', subject: ref(patient), status, code: { coding: [{ code }] } });
+    const result = await search(s, f('Observation', '(status eq preliminary and code eq 123) or (not (status eq preliminary) and code eq 456)', ['subject', `Patient/${patient.id}`]));
+    expect(result.entry).toHaveLength(2);
+    return names(result, observations).sort();
+  }));
+
+  // Added: an expression Medplum cannot parse, an operator it lacks (ew, ss, in on a non-terminology parameter) and an unknown path.
+  test('project-scoped Repository w/ %j › _filter eq [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Evelyn'] }], managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    const org: [string, string] = ['organization', patient.managingOrganization.reference];
+    expect((await search(s, f('Patient', 'given eq Eve', org))).entry ?? []).toHaveLength(0);
+    expect((await search(s, f('Patient', 'given eq Evelyn', org))).entry).toHaveLength(1);
+    const errors = [];
+    for (const x of ['given eq', 'given ew Eve', 'given ss Eve', 'nope eq x', '(given eq Eve']) errors.push(await error(s, f('Patient', x, org)));
+    return errors;
+  }));
+
+  test('project-scoped Repository w/ %j › _filter with UUID value [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Evelyn'] }] });
+    for (const value of [`_id eq 12345678-1234-4123-8123-123456789abc or _id eq ${patient.id}`, `(_id eq 12345678-1234-4123-8123-123456789abc or _id eq ${patient.id})`]) {
+      const result = await search(s, q('Patient', ['_filter', value]));
+      expect(result.entry).toHaveLength(1);
+      expect(result.entry?.[0]?.resource?.id).toBe(patient.id);
+    }
+  }));
+
+  // Added: gt, lt, ge, le, sa, eb and ne on the date, in _filter and as a parameter's prefix (ap: below).
+  test('project-scoped Repository w/ %j › _filter birthdate eq [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Evelyn'] }], birthDate: '2000-01-01', managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    const org: [string, string] = ['organization', patient.managingOrganization.reference];
+    expect((await search(s, f('Patient', 'birthdate eq "2000-01-01"', org))).entry).toHaveLength(1);
+    const out = [];
+    for (const op of ['gt', 'lt', 'ge', 'le', 'sa', 'eb', 'ne']) {
+      for (const d of ['1999-12-31', '2000-01-01', '2000-01-02']) {
+        const g = await s.call('GET', f('Patient', `birthdate ${op} ${d}`, org));
+        out.push(`${op} ${d} ${g.status} ${g.json?.entry?.length ?? g.json?.issue?.[0]?.details?.text ?? 0}`);
+      }
+      const g = await s.call('GET', q('Patient', org, ['birthdate', `${op}2000-01-01`]));
+      out.push(`${op} param ${g.status} ${g.json?.entry?.length ?? g.json?.issue?.[0]?.details?.text ?? 0}`);
+    }
+    return out;
+  }));
+
+  // README: ap on a date is R4's approximately (the store matches a date whose range overlaps the value's); Medplum 5.2.14
+  // refuses ap on dates, in _filter and as a prefix.
+  test('differs on purpose: project-scoped Repository w/ %j › _filter birthdate eq [server/src/fhir/search.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const patient = await s.create({ resourceType: 'Patient', birthDate: '2000-01-01', managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+      const org: [string, string] = ['organization', patient.managingOrganization.reference];
+      const out = [];
+      for (const path of [f('Patient', 'birthdate ap 2000-01-01', org), f('Patient', 'birthdate ap 2000-01-02', org), q('Patient', org, ['birthdate', 'ap2000-01-01'])]) {
+        const g = await s.call('GET', path);
+        out.push(`${g.status} ${g.json?.entry?.length ?? g.json?.issue?.[0]?.details?.text ?? 0}`);
+      }
+      return out;
+    });
+    expect(medplum).toEqual(Array(3).fill('400 Unknown FHIR operator: ap'));
+    expect(store).toEqual(['200 1', '200 0', '200 1']);
+  });
+
+  test('project-scoped Repository w/ %j › _filter ne [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Eve'] }], managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    const result = await search(s, f('Patient', 'given ne Eve', ['organization', patient.managingOrganization.reference]));
+    expect(result.entry ?? []).toHaveLength(0);
+  }));
+
+  test('project-scoped Repository w/ %j › _filter re [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Eve'] }], managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    const result = await search(s, q('Patient', ['_filter', 'organization re ' + patient.managingOrganization.reference]));
+    expect(result.entry).toHaveLength(1);
+    expect(result.entry?.[0]?.resource?.id).toBe(patient.id);
+  }));
+
+  // Added: pr false and pr on the patient's own birthdate.
+  test('project-scoped Repository w/ %j › _filter with reverse chained search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', birthDate: '2000-01-01', name: [{ given: ['Eve'] }], managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    await s.create({ resourceType: 'Observation', effectiveDateTime: '2000-01-01', status: 'final', code: { text: 'Born' }, subject: ref(patient) });
+    const org: [string, string] = ['organization', patient.managingOrganization.reference];
+    const result = await search(s, f('Patient', '_has:Observation:subject:date pr true', org));
+    expect(result.entry).toHaveLength(1);
+    expect(result.entry?.[0]?.resource?.id).toBe(patient.id);
+    return [(await search(s, f('Patient', '_has:Observation:subject:date pr false', org))).entry?.length ?? 0,
+      (await search(s, f('Patient', 'birthdate pr true', org))).entry?.length ?? 0, (await search(s, f('Patient', 'birthdate pr false', org))).entry?.length ?? 0];
+  }));
+
+  // Added: co.
+  test('project-scoped Repository w/ %j › _filter sw [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Evelyn', 'Dierdre'], family: 'Arachnae' }], managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
+    const org: [string, string] = ['organization', patient.managingOrganization.reference];
+    expect((await search(s, f('Patient', 'name eq Dier', org))).entry ?? []).toHaveLength(0);
+    const result2 = await search(s, f('Patient', 'name sw Dier', org));
+    expect(result2.entry).toHaveLength(1);
+    expect(result2.entry?.[0]?.resource?.id).toBe(patient.id);
+    return [(await search(s, f('Patient', 'name co rach', org))).entry?.length ?? 0, (await search(s, f('Patient', 'name co xyz', org))).entry?.length ?? 0];
+  }));
+
+  // The second Patient is scoped by its own marker identifier (Medplum's is 'no-match', shared by every run).
+  test('project-scoped Repository w/ %j › _filter with chained search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const mrn = crypto.randomUUID(), npi = crypto.randomUUID();
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Eve'] }], identifier: [{ system: 'http://example.com/mrn', value: mrn }] });
+    await s.create({ resourceType: 'Patient', identifier: [{ system: 'http://example.com/mrn', value: marker() }] });
+    const practitioner = await s.create({ resourceType: 'Practitioner', name: [{ given: ['Yves'] }], identifier: [{ system: 'http://example.com/npi', value: npi }] });
+    const observation1 = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'Strep test' }, subject: ref(patient), performer: [ref(patient)] });
+    const observation2 = await s.create({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: 'http://example.com/obs', code: 'STRP' }] }, performer: [ref(practitioner)] });
+    const result = await search(s, q('Observation', ['_filter', `subject:Patient.identifier eq http://example.com/mrn|${mrn} or performer:Practitioner.identifier eq http://example.com/npi|${npi}`]));
+    expect(names(result, { observation1, observation2 }).sort()).toEqual(['observation1', 'observation2']);
+    const ids = async (filter: string) => (await search(s, f('Patient', filter, ['identifier', mrn]))).entry?.map((e) => e.resource?.id) ?? [];
+    expect(await ids(`_has:Observation:performer:_id eq '${observation1.id}'`)).toEqual([patient.id]);
+    expect(await ids(`_has:Observation:performer:_id eq '${observation2.id}'`)).toEqual([]);
+    expect(await ids(`_has:Observation:performer:_id ne '${observation1.id}'`)).toEqual([]);
+    expect(await ids(`_has:Observation:performer:_id ne '${observation2.id}'`)).toEqual([patient.id]);
   }));
 
   test('project-scoped Repository w/ %j › reverse chain with prefix modifier [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
@@ -505,6 +653,14 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
       prediction: [prediction(0.000168, undefined, 53), prediction(0.000368, 54, 57), prediction(0.000594, 58, 62), prediction(0.000838, 63, 67)] });
     const result = await search(s, q('RiskAssessment', ['identifier', ident], ['probability', 'gt0.0005']));
     expect(result.entry).toHaveLength(1);
+  }));
+
+  test('project-scoped Repository w/ %j › Disjunction with lookup tables [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const n1 = crypto.randomUUID(), n2 = crypto.randomUUID();
+    const p1 = await s.create({ resourceType: 'Patient', name: [{ family: n1 }] });
+    const p2 = await s.create({ resourceType: 'Patient', name: [{ family: n2 }] });
+    const result = await search(s, q('Patient', ['_filter', `name co "${n1}" or name co "${n2}"`]));
+    expect(names(result, { p1, p2 }).sort()).toEqual(['p1', 'p2']);
   }));
 
   test('project-scoped Repository w/ %j › Sort by unknown search parameter [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
@@ -720,6 +876,18 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     }
   }));
 
+  test('project-scoped Repository w/ %j › Reference search patterns [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const uuid = crypto.randomUUID();
+    const patient1 = await s.create({ resourceType: 'Patient', identifier: [{ value: uuid }] });
+    const patient2 = await s.create({ resourceType: 'Patient', identifier: [{ value: uuid }], link: [{ type: 'refer', other: ref(patient1) }] });
+    const refStr = `Patient/${patient1.id}`;
+    const only = async (path: string) => (await search(s, path)).entry?.map((e) => e.resource?.id);
+    expect(await only(`Patient?identifier=${uuid}&link=${refStr}`)).toEqual([patient2.id]);
+    expect(await only(`Patient?identifier=${uuid}&link:not=${refStr}`)).toEqual([patient1.id]);
+    expect(await only(q('Patient', ['_filter', `identifier eq "${uuid}" and link re "${refStr}"`]))).toEqual([patient2.id]);
+    expect(await only(q('Patient', ['_filter', `identifier eq "${uuid}" and link ne "${refStr}"`]))).toEqual([patient1.id]);
+  }));
+
   test('project-scoped Repository w/ %j › Reference search with inline resource [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const date = new Date().toISOString();
     const composition = await s.create({ resourceType: 'Composition', status: 'final', type: { text: 'test' }, date, author: [{ reference: 'Practitioner/example' }], title: 'Test Composition' });
@@ -826,6 +994,17 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     const bundle4 = await search(s, q('Patient', ['name', family], ['_sort', '-_lastUpdated']));
     expect(names(bundle4, { patient1, patient2 })).toEqual(['patient2', 'patient1']);
   }));
+  // Medplum's own project; here the patient carries a marker the search is scoped by.
+  test('systemRepo › Reverse chained search with _filter [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const id = marker();
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Alice'], family: 'Smith' }], identifier: [{ value: id }] });
+    await s.create({ resourceType: 'Observation', status: 'final', subject: ref(patient), code: { coding: [{ system: LOINC, code: '3141-9' }] }, valueDateTime: '2020-01-02T03:04:05Z' });
+    const result1 = await search(s, q('Patient', ['identifier', id], ['_has:Observation:subject:_filter', 'code eq "3141-9" and value-date eq "2020-01-02T03:04:05Z"']));
+    expect(result1.entry?.[0]?.resource?.id).toBe(patient.id);
+    const result2 = await search(s, q('Patient', ['identifier', id], ['_has:Observation:subject:_filter', 'code eq "xyz"']));
+    expect(result2.entry?.length ?? 0).toBe(0);
+  }));
+
   test('project-scoped Repository w/ %j › Reference identifier search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const code = crypto.randomUUID();
     const c1 = await s.create({ resourceType: 'Condition', code: { coding: [{ code }] }, subject: { identifier: { system: 'mrn', value: '123456' } } } as Condition);
@@ -933,4 +1112,20 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(medplum).toEqual(['400 Invalid modifier :in for _deleted', '400 Invalid modifier :not-in for _deleted']);
     expect(store).toEqual(['400 Unknown search parameter: _deleted', '400 Unknown search parameter: _deleted']);
   });
+
+  // Medplum's structure.test.ts checks the definitions hold _profile for these types; here, a search by it finds the record.
+  // Added: a versioned canonical (url|version) is matched as written, by neither the bare url.
+  test('FHIR structure › Can search Organization on _profile [server/src/fhir/structure.test.ts]', () => same(sides, async (s) => {
+    const url = `http://example.com/fhir/${marker()}`;
+    const org = await s.create({ resourceType: 'Organization', meta: { profile: [url] } });
+    const versioned = await s.create({ resourceType: 'Organization', meta: { profile: [`${url}-v|1.0`] } });
+    return [names(await search(s, q('Organization', ['_profile', url])), { org, versioned }), names(await search(s, q('Organization', ['_profile', `${url}-v`])), { org, versioned }),
+      names(await search(s, q('Organization', ['_profile', `${url}-v|1.0`])), { org, versioned })];
+  }));
+
+  test('FHIR structure › Can search MedicinalProductManufactured on _profile [server/src/fhir/structure.test.ts]', () => same(sides, async (s) => {
+    const url = `http://example.com/fhir/${marker()}`;
+    const mpm = await s.create({ resourceType: 'MedicinalProductManufactured', meta: { profile: [url] }, manufacturedDoseForm: { text: 'tablet' }, quantity: { value: 1 } } as never);
+    return names(await search(s, q('MedicinalProductManufactured', ['_profile', url])), { mpm });
+  }));
 });
