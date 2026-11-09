@@ -80,6 +80,16 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Patient', 'name:exact=doe')).toEqual([]);
   });
 
+  it('a prefix range reaches characters above U+FFFF (UTF-8 order): string starts-with and uri :below', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ family: 'Ab\u{20000}c' }] });
+    add({ resourceType: 'Patient', id: 'p2', name: [{ family: 'Ab\u{1F600}\u{1F600}' }] }); // also indexed as the word 'ab'
+    add({ resourceType: 'Questionnaire', id: 'q1', status: 'active', url: 'http://ex.org/q/\u{1F600}' });
+    expect(ids('Patient', 'name=ab')).toEqual(['p1', 'p2']);
+    expect(ids('Patient', `name=${encodeURIComponent('ab\u{20000}')}`)).toEqual(['p1']);
+    expect(ids('Patient', `name=${encodeURIComponent('ab\u{1F600}')}`)).toEqual(['p2']);
+    expect(ids('Questionnaire', 'url:below=http://ex.org/q')).toEqual(['q1']);
+  });
+
   it('date: eq/ge/gt/le/lt on days and times; a Period with no end ends at its start', () => {
     obs('d1', { effectiveDateTime: '2023-12-31T12:00:00Z' });
     obs('d2', { effectiveDateTime: '2024-05-10' });

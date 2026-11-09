@@ -338,12 +338,12 @@ function valueSql(type: string, p: SearchParameter, op: string, v: string, i: st
       const l = v.toLowerCase();
       if (op === Operator.EXACT) return [`${i}.val = ? and ${i}.sys = ?`, [l, v]];
       if (op === Operator.CONTAINS) return [`${i}.val like ? escape '\\'`, [`%${likeEscape(l)}%`]];
-      return [`${i}.val >= ? and ${i}.val < ?`, [l, `${l}￿`]]; // starts-with as an index range
+      return [`${i}.val >= ? and ${i}.val < ?`, [l, `${l}\u{10FFFF}`]]; // starts-with as an index range (UTF-8 order: U+10FFFF sorts last)
     }
     case 'uri': {
       // :below, a uri at or under the value's path; :above, a uri the value is at or under (FHIR R4 3.1.1.5.5).
       const base = v.replace(/\/$/, '');
-      if (op === Operator.BELOW) return [`${i}.val = ? or (${i}.val >= ? and ${i}.val < ?)`, [v, `${base}/`, `${base}/￿`]];
+      if (op === Operator.BELOW) return [`${i}.val = ? or (${i}.val >= ? and ${i}.val < ?)`, [v, `${base}/`, `${base}/\u{10FFFF}`]];
       if (op === Operator.ABOVE) return [`${i}.val = ? or substr(?, 1, length(rtrim(${i}.val, '/')) + 1) = rtrim(${i}.val, '/') || '/'`, [v, v]];
       return [`${i}.val = ?`, [v]];
     }
