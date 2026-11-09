@@ -26,3 +26,11 @@ GA's draft 9 (one AllergyIntolerance per SUBJ observation of a concern act) move
 ```
 
 Expected: `"category": ["medication"], "type": "allergy"`. Before: `"category": ["food"], "type": "allergy"`.
+
+## Filing metadata
+
+- PATCHES rows: 29 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): b74e576, 43f871c (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: PR medplum#11308 (fixes #11298)
+- Depends on / builds on: drafts 9
+- Status: external PR; 43f871c is GA's accounting only. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

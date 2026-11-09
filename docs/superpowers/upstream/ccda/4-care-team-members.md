@@ -47,3 +47,11 @@ Expected FHIR (that component's participants):
 
 - `processCareTeamMember` becomes `processCareTeamMembers`, returning one participant per performer of each member act. Participant fields are unchanged.
 - Test: `care-team-members.test.ts` (two components, the second with two performers: three participants).
+
+## Filing metadata
+
+- PATCHES rows: 4 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 0dc3444 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

@@ -19,3 +19,11 @@ Expected: no `valueQuantity`, `"dataAbsentReason": { "coding": [{ "system": "htt
 - `ccda-to-fhir.ts`: before the type switch, a typed value with none of the content keys (`OBSERVATION_VALUE_CONTENT`, exported) gets `dataAbsentReason` `unknown`; PQ and INT write a number only when it parses.
 - The nullFlavor code (UNK, ASKU, NAV, MSK, ...) could map to the matching data-absent-reason code if `sanitizeNullFlavors` kept it on values; out of scope here.
 - Test `observation-ts-bl.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 37 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): d1898d7 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 26
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

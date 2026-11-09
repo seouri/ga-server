@@ -88,3 +88,11 @@ Expected FHIR:
 Each payer performer becomes an `Organization` (identifier from the assigned entity's id; name, address and telecom from its
 representedOrganization, else the assigned entity's own) and `Coverage.payor` references it with the name as display, instead of
 a bare `{ identifier, display }` that dropped the payer's address and telephone. Test `payers-section.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 7, 43 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): fba4572, 257e865 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

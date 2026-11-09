@@ -19,3 +19,11 @@ Expected: the PractitionerRole's `specialty: [{ coding: [{ system: "http://nucc.
 
 - `ccda-to-fhir.ts`: `specialty` in `mapAssignedEntityToReference`.
 - Test `encounter.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 44 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 82c08e9 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 33
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

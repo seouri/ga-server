@@ -48,3 +48,11 @@ Expected FHIR:
 - `processReferralAct`: status from statusCode (active, completed, aborted/cancelled → revoked, suspended → on-hold, else unknown); intent from moodCode (INT → plan, PRP → proposal, RQO/ARQ → order, else order); fixed referral category; code; occurrence from effectiveTime; authoredOn and requester from the first author; performers as PractitionerRoles; the act text (inline or by narrative reference) as a note; ids as identifiers.
 - Also routes the V2 section root.
 - Test: `referral-section.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 6 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 2e7b889 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 3 (PR medplum#11242)
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

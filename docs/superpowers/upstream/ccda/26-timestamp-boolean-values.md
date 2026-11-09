@@ -26,3 +26,11 @@ Expected: `"valueDateTime": "2024-01-01"`; with `<value xsi:type="BL" value="tru
 - `ccda-to-fhir.ts`: `case 'TS'` and `case 'BL'` → exported `mapTimestampOrBooleanValue`: `valueDateTime` through `mapCcdaToFhirDateTime` when the timestamp is well formed and its result is a valid R4 dateTime; `valueBoolean` for `true`/`false` in any case; `dataAbsentReason` `unknown` when the value has no `@value` (a nullFlavor); nothing otherwise (exported so a caller can report the unread value).
 - `types.ts`: `CcdaTimestampOrBoolean` (`'@_xsi:type': 'TS' | 'BL'`) joins `CcdaValue`.
 - Test `observation-ts-bl.test.ts`: TS, BL true and BL false give those values without a warning; BL in another case parses; a malformed TS or BL gives no value; a nullFlavor gives `dataAbsentReason`.
+
+## Filing metadata
+
+- PATCHES rows: 26, 35 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 4a40fb4, 44802b2 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 16 (neighbouring case)
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

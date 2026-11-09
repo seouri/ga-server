@@ -89,3 +89,11 @@ Expected FHIR (today: an Encounter and no Condition):
 - `processConditionAct` gains a category parameter, `problem-list-item` by default.
 - The existing RSON path is unchanged.
 - Test: `encounter-diagnoses.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 10 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): ab6ee22 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 9
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

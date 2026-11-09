@@ -30,3 +30,11 @@ Expected (today: `"valueQuantity": { "system": "http://unitsofmeasure.org" }`):
 - `ccda-to-fhir.ts`: `case 'CO'` moves from the quantity branch to the `CD`/`CE` branch (`mapCode`).
 - `types.ts`: `'CO'` moves from `CcdaQuantity['@_xsi:type']` to `CcdaCode['@_xsi:type']`.
 - Test `observation-coded-ordinal.test.ts`: the dipstick value above gives that `valueCodeableConcept` and no `valueQuantity`; fails on `main`.
+
+## Filing metadata
+
+- PATCHES rows: 22 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 57c35ad (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

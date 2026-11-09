@@ -15,3 +15,11 @@ Expected: one Practitioner `1111111111` (with the telecom), both AllergyIntolera
 - `ccda-to-fhir.ts`: `mergeSharedResources(composition)` after conversion: per identifier the first resource is kept and filled with fields only later copies have, and array fields take every distinct element of every copy (a single-valued field both hold differently keeps the first); then PractitionerRoles by practitioner + organization; references repointed across the bundle. `mapAssignedEntityToReference` creates an Organization only for a `representedOrganization`.
 - Test `shared-resources.test.ts`.
 - Not merged: resources with no identifier (nothing says two nameless copies are one).
+
+## Filing metadata
+
+- PATCHES rows: 33 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 596c79e, 1d7ec27 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 32
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

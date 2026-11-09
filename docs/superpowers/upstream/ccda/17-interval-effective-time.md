@@ -36,8 +36,16 @@ Reproduction (synthetic, the PR's own):
 
 Expected: Hemoglobin `"effectivePeriod": { "start": "2026-01-01T15:07:00Z", "end": "2026-01-01T16:30:00Z" }`; CBC panel `"effectiveDateTime": "2026-01-01T15:07:00Z"`.
 
-Why GA needs it: Epic writes every Result Organizer's time as `<low>`/`<high>` and many Social History observations as `<low>` only. On the owner's documents the spike found 43 of 44 lab panels with no date, and 17 social-history and 3 lab results it could only find on the Microsoft path. The spike matched records on the same day and code, so a record with no date counted as missing: these are the likely cause.
+Why GA needs it: Epic writes every Result Organizer's time as `<low>`/`<high>` and many Social History observations as `<low>` only. A record with no date cannot be placed on a timeline or matched to the same result from another source.
 
 How GA applied it: `git apply -p4 --directory=vendor/medplum-ccda` of the PR diff (offsets only). The PR's test is `test/observation-effective-time.test.ts`, ported to vitest. GA row 19 (Result Organizer → DiagnosticReport) reuses the same helper for the report's `effective[x]`.
 
 If the PR changes in review, re-apply its final diff and rerun `npx vitest run vendor`.
+
+## Filing metadata
+
+- PATCHES rows: 17 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 668e567 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: PR medplum#11244 (fixes #11203)
+- Depends on / builds on: nothing
+- Status: external PR, nothing to file. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

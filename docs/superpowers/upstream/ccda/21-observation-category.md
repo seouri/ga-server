@@ -59,3 +59,11 @@ Expected (today: `"category": []` on both):
 - Tests (`observation-category.test.ts`): a vendor-template Social History observation is `social-history`; an Assessment Scale Observation there is `survey` and `social-history`; vendor-template observations in Results and Vital Signs are `laboratory` and `vital-signs`; a Vital Signs Observation in Results is `vital-signs` only; a Reason for Visit observation takes the section code; an unclassified observation in an uncoded section has no `category`.
 
 Open point for review: the section-code fallback uses a LOINC section code as an Observation category (the element's binding is example only). If maintainers prefer, drop that branch and leave such observations uncategorised (`undefined`).
+
+## Filing metadata
+
+- PATCHES rows: 21 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 7a72b3c, 50834ba (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

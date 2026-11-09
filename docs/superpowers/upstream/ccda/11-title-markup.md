@@ -49,3 +49,11 @@ Expected FHIR (fields this fix changes):
   - `Notes &amp; Plan` becomes `Notes & Plan`.
 - The parsed object form loses the order of mixed content and fuses the trimmed text pieces, so it cannot be used for this. No other code reads `title`: section routing uses templateIds.
 - Test: `title-markup.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 11 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 87a09a4, 75dee73 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

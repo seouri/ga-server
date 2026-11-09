@@ -74,3 +74,11 @@ The same for an Allergy Concern Act with two Allergy Intolerance Observations (`
 - AllergyIntolerance gets `identifier` (it had none).
 - Note for reviewers: the observation id now comes before the act id in `Condition.identifier`. Consumers keying on `identifier[0]` see the observation id.
 - Test: `concern-observations.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 9 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): fb3e513 (docs 02d5e09, 9dcb59c) (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 29 touches the same allergy body
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

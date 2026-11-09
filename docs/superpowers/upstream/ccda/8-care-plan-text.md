@@ -42,3 +42,11 @@ Expected FHIR (fields this fix adds):
 
 - `description: nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference)`, and the narrative-reference extension as on other resources.
 - Test: `care-plan-text.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 8 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 50f8b78 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 3 (PR medplum#11242)
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

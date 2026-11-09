@@ -56,3 +56,11 @@ The same for an Instruction act (`22.4.20`) in an Instructions section and a Not
 - `processAct` sends a Note Activity to `processNoteAct` whatever the section, and every act in the Notes, Instructions (and V2) and HPI sections. New OID constant `OID_HISTORY_OF_PRESENT_ILLNESS_SECTION`.
 - `processNoteAct`: text from the act's own text or the narrative it references (`resolveNarrativeReference`, #11242), base64 in a `text/plain` attachment titled with the section title; `type` from the act code (translations kept), `category` from the section code, `context.period` from effectiveTime (`DocumentReference.date` is an instant, which a CDA date often is not), authors as Practitioners, ids as identifiers.
 - Test: `note-sections.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 5 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): b1ad72e (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 3 (PR medplum#11242)
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

@@ -56,3 +56,11 @@ Expected FHIR (the medication, abridged):
 - `OID_PROBLEMS_SECTION_V2_ENTRIES_REQUIRED` had a space (`...2.5.1 .2`) and could never match.
 - A section with no templateId no longer throws a TypeError (`section.templateId[0]`): it is unsupported like any unknown section.
 - Tests: `section-template-order.test.ts` (Epic order, entries-optional only, Problems not first and V2, no templateId). Existing fixtures list the routed template first, so their output is unchanged.
+
+## Filing metadata
+
+- PATCHES rows: 1 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 5090775 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: issue medplum#10671
+- Depends on / builds on: nothing
+- Status: issue-first (invited issue exists). Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

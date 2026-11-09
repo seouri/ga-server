@@ -117,3 +117,11 @@ The same supply with `moodCode="EVN"` (`22.4.18`):
 - **Parsing.** `types.ts` gains `CcdaSupply` and `CcdaEntryRelationship.supply`. `xml.ts` parses `entryRelationship.supply`, `product.manufacturedProduct` and `supply.performer` as arrays.
 - **Not converted.** A supply order's `instructions`, left for a follow-up.
 - **Test.** `medication-activity.test.ts`: a supply order; a dispense with its own product; a dispense's author (dataenterer) and performer (dispenser).
+
+## Filing metadata
+
+- PATCHES rows: 15 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 1677fd3, 4512d3a, 1e31c57 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 12, 13, 14
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

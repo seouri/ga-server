@@ -22,3 +22,11 @@ Expected: `"valueQuantity": { "value": 1.1 }`.
 How GA applied it: `git apply -p4 --directory=vendor/medplum-ccda` of the PR diff (ccda-to-fhir.ts, types.ts: offset only). The PR's test is `test/observation-value.test.ts`, ported to vitest (explicit `vitest` import, `.ts` imports). GA's accounting (`src/ccda.ts` `VALUE_TYPES`) now counts `REAL` as converted.
 
 If the PR changes in review, re-apply its final diff and rerun `npx vitest run vendor`.
+
+## Filing metadata
+
+- PATCHES rows: 16 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): f554466 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: PR medplum#11241 (fixes #11201)
+- Depends on / builds on: nothing
+- Status: external PR, nothing to file. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

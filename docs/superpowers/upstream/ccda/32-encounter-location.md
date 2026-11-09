@@ -28,3 +28,11 @@ Expected: a `Location` (identifier `urn:oid:2.16.840.1.113883.19.5.9|DEPT-1`, na
 - `ccda-to-fhir.ts`: `mapLocationToReference(participantRole)` builds the Location (address: the first `addr`, since `Location.address` is 0..1) and the Encounter points at it, one entry per LOC participant.
 - Test `encounter.test.ts`.
 - Follow-up (draft 33): the same location in several encounters should be one Location.
+
+## Filing metadata
+
+- PATCHES rows: 32 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 22338ab (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

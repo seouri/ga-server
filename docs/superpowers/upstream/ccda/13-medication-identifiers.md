@@ -51,3 +51,11 @@ Expected FHIR (today: the same, without `identifier`):
 
 - `processMedicationSubstanceAdministration`: `identifier: this.mapIdentifiers(substanceAdmin.id)`, the same helper the other statements use. A bare UUID root still becomes the resource `id` and is not repeated as an identifier.
 - Test: `medication-activity.test.ts` (`a medication record keeps its substanceAdministration id as its identifier`).
+
+## Filing metadata
+
+- PATCHES rows: 13 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 0f0e77e (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

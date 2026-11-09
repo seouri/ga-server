@@ -50,3 +50,11 @@ Expected FHIR (today: a Goal "Unknown goal"):
 - Tests (`planned-observation.test.ts`): an RQO Planned Observation gives that ServiceRequest and no Goal; INT, PRP and ARQ give plan, proposal and order; a GOL observation in the same section stays a Goal.
 
 Not mapped: a value on a planned observation (unusual) and its child observations; GA names these in its own accounting.
+
+## Filing metadata
+
+- PATCHES rows: 23 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 9c7f7fa, f56b651 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 6, 17
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

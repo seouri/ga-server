@@ -29,3 +29,11 @@ Expected: `"status": "not-done"`, `"statusReason": { "coding": [{ "code": "PATOB
 
 - `ccda-to-fhir.ts`: when `negationInd="true"`, `status = 'not-done'` and `statusReason` = the refusal reason observation's code.
 - Test `immunization.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 36 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 902bde7 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

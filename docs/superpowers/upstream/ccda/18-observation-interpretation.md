@@ -48,3 +48,11 @@ Expected FHIR (today: no `interpretation`):
 - Test `observation-interpretation.test.ts`: one High code (system, code, display); two codes kept in order; none, or a nullFlavor, gives none. Both fail on `main`.
 
 FHIR to C-CDA is unchanged (it does not write interpretation today).
+
+## Filing metadata
+
+- PATCHES rows: 18 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): e8dd672 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

@@ -64,3 +64,11 @@ Expected FHIR (today: two Observations, the panel one with `hasMember` and no va
 - `processOrganizer`: a Result Organizer (root or V2 template, among any of the organizer's templates) goes to the new `processResultOrganizer`. Vital Signs and other organizers keep today's panel Observation.
 - `processResultOrganizer`: id and identifier from the organizer; status from statusCode (completed → final, active → partial, aborted/cancelled → cancelled, otherwise unknown); category v2-0074 `LAB` (`DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM` in `systems.ts`); code (absent: a data-absent-reason `unknown`, since FHIR requires it); subject; `effective[x]` from `mapObservationEffectiveTime`; `result` → the component Observations, made exactly as before by `processVitalsComponent`.
 - Tests (`result-organizer.test.ts`): a Result Organizer gives one DiagnosticReport with the results and no panel Observation; the V2 template and an `active` status give `partial`; a Vital Signs Organizer stays a panel Observation. Existing tests that read the Result Organizer as an Observation (the #11243 and #11244 organizer cases) read the report.
+
+## Filing metadata
+
+- PATCHES rows: 20 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): ff9a701 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 17
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

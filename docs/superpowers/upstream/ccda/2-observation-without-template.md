@@ -46,3 +46,11 @@ Expected FHIR (abridged):
 - `processObservation` tests the goal templates with `getTemplateIds(observation)` (from the #10671 fix), so a goal is also recognised when its goal template is not listed first.
 - `mapGoalLifecycleStatus` reads `statusCode?.['@_code']` (absent → `active`, as documented in its comment).
 - Test: `observation-without-template.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 2 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 274250c (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 1 (same cause; may fold into its PR)
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

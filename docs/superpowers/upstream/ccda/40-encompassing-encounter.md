@@ -35,3 +35,11 @@ Nothing the header states is dropped. Tests in `encompassing-encounter.test.ts`.
 The header facility's Location is always created and merged by identifier with an entry Location of the same id (so its name
 and address are kept); only a duplicate `Encounter.location` entry is skipped. Header participants the Encounter already has
 (same type and person) are not repeated.
+
+## Filing metadata
+
+- PATCHES rows: 40, 45, 48 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 117b10c, ec5ca6a, 52466f0 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 31, 32, 33
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

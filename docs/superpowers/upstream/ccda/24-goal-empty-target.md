@@ -37,3 +37,11 @@ Expected: a Goal with `description: { text: "Walk daily" }` and neither `target`
 - A target is added only when the relationship's act gives a code (`measure`, `detailCodeableConcept`) or a time (`dueDate`).
 - `target` and `category` are left out when empty.
 - Test: the goal above has no target and no category; a goal with an act relationship keeps its one target (code and due date).
+
+## Filing metadata
+
+- PATCHES rows: 24 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 02ce415 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

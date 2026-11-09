@@ -22,3 +22,11 @@ Expected: a `Procedure` (code, performed time) whose `report` points at the Diag
 - `ccda-to-fhir.ts`: `processResultOrganizer` maps procedure components (`processProcedure` + `report`), `mapSpecimen` (one per specimen id), and `resolveReportEncounters` after all sections.
 - `oids.ts`: `OID_SPECIMEN_RECEIVED`; `types.ts`: organizer `specimen`, component `procedure`/`encounter`, procedure `entryRelationship`, `specimenPlayingEntity`; `xml.ts`: the new arrays.
 - Tests in `result-organizer.test.ts`.
+
+## Filing metadata
+
+- PATCHES rows: 46 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 2db9cc0 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 20
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

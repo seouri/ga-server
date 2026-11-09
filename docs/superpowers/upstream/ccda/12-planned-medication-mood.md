@@ -14,3 +14,11 @@ How GA applied it:
 - **Test.** `test/planned-medication.test.ts` is ported to vitest. The ONC-sample case is dropped because GA does not vendor `testdata/170.315_b1_toc_amb_ccd_r21_sample1_v13.xml`.
 
 If the fork commit changes before it becomes a PR, re-apply its final diff and rerun `npx vitest run vendor`. Drafts 13 and 14 build on its `intent` parameter.
+
+## Filing metadata
+
+- PATCHES rows: 12 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 79457b3 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: issue medplum#10847 (fix on a fork, no PR)
+- Depends on / builds on: nothing
+- Status: external, nothing to file. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

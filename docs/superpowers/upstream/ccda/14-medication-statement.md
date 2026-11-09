@@ -1,6 +1,6 @@
 # 14. A Medication Activity in the Medications section becomes a MedicationStatement
 
-No existing issue or PR. medplum#10847 (draft 12) covers planned medications in the Plan of Treatment section and explicitly leaves the Medications section alone. Builds on drafts 12 (`intent` parameter) and 13 (identifier). Nothing filed. **This one may stay a GA patch:** upstream may prefer the C-CDA on FHIR mood → intent route (below). GA carries it either way, because its owner ruled that a medication list entry is what the patient takes.
+No existing issue or PR. medplum#10847 (draft 12) covers planned medications in the Plan of Treatment section and explicitly leaves the Medications section alone. Builds on drafts 12 (`intent` parameter) and 13 (identifier). Nothing filed. **This one may stay a GA patch:** upstream may prefer the C-CDA on FHIR mood → intent route (below). GA carries it either way, because GA decided that a medication list entry is what the patient takes.
 
 ## Issue: @medplum/ccda: the patient's medication list is converted to orders (MedicationRequest, intent order)
 
@@ -80,3 +80,11 @@ The same entry with `moodCode="INT"` gives the same MedicationStatement.
   - `medication-activity.test.ts`: EVN → statement, INT → statement, the status for every statusCode.
   - Tests that build a Medications section entry and read the MedicationRequest now read the MedicationStatement: `medication-dose`, `nullflavor` (routeCode translation), `narrative-reference`, `section-template-order`, and draft 12's `keeps intent order for a Medication Activity in INT mood`. Their assertions are unchanged; `dosageInstruction` is read as `dosage`.
 - **Breaking for consumers** that read the medication list only as MedicationRequest. The release notes should say so.
+
+## Filing metadata
+
+- PATCHES rows: 14 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): ff145f5, b31e280 (docs f879df3) (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 12, 13
+- Status: issue-first; may stay a GA patch (upstream may prefer the IG mood route). Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

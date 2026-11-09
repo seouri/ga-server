@@ -30,3 +30,11 @@ given name is kept as text.
 
 fast-xml-parser trims and concatenates mixed-content text pieces, so `Dr. <given>John</given> Smith` reads as "Dr.Smith". The fix
 marks the loose text pieces of a name with parts before parsing and joins them with single spaces: text "Dr. Smith".
+
+## Filing metadata
+
+- PATCHES rows: 47, 49, 50 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 6abc9b4, e4315aa, 57bf61d (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

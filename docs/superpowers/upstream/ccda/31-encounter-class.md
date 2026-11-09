@@ -24,3 +24,11 @@ Expected: `type[0].coding[0]` = CPT 99213 (as now); `class` = an ActCode only if
 - `ccda-to-fhir.ts`: `mapEncounterClass(encounter.code)`: the code or its first translation in ActCode; otherwise a data-absent Coding.
 - Test `encounter.test.ts`: CPT only → type CPT, class data-absent; no code → data-absent; an ActCode code or translation → that class.
 - Behaviour change to call out: documents with no encounter code no longer get `AMB`. If maintainers prefer keeping `AMB` as the default, the CPT part stands alone.
+
+## Filing metadata
+
+- PATCHES rows: 31 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 155d3ca (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: nothing
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

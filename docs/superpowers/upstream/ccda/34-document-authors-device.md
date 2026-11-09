@@ -24,3 +24,11 @@ Expected: `Composition.author` = [Practitioner, Device]; the Device has `deviceN
 - `ccda-to-fhir.ts`: `mapDocumentAuthorToReference(author)` for each header author: a person as before, an authoring device as a Device owned by its represented organization.
 - Test `document-authors.test.ts`.
 - Not changed: entry-level authors (recorder, asserter, requester) take no Device in FHIR R4; a device there still goes through `mapAuthorToReference`.
+
+## Filing metadata
+
+- PATCHES rows: 34 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 40adb9a (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 33
+- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.

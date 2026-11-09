@@ -55,4 +55,12 @@ How GA applied it, and the one change:
 - **Test.** `test/family-history.test.ts` ported to vitest; its "skips an unknown organizer" case is replaced by "keeps an organizer of another template as Observations".
 - **GA accounting** (`src/ccda.ts`) names a negated or uncoded family history observation, and a related observation other than age at onset or death, in `notImported`.
 
-The Microsoft path produced a FamilyMemberHistory from the same section (checked with the local converter on the synthetic fragment above). On the owner's 8 documents the spike listed no FamilyMemberHistory on either path, so this may not occur there.
+The Microsoft path produced a FamilyMemberHistory from the same section (checked with the local converter on the synthetic fragment above).
+
+## Filing metadata
+
+- PATCHES rows: 19 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): aa1d08f, 1578cdf (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: PR medplum#11243 (fixes #11200)
+- Depends on / builds on: drafts 1, 4 (applied by hand onto their routing)
+- Status: external PR; GA additions (1578cdf) could be proposed in its review. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
