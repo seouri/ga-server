@@ -474,7 +474,7 @@ function capability(): string {
     patchFormat: ['application/json-patch+json', 'application/fhir+json'], software: { name: 'fhir-sqlite-store' }, implementation: { description: 'FHIR R4 store on SQLite' },
     rest: [{
       mode: 'server',
-      interaction: [{ code: 'transaction' }, { code: 'batch' }, { code: 'history-system' }],
+      interaction: [{ code: 'transaction' }, { code: 'batch' }, { code: 'history-system' }, { code: 'search-system' }],
       operation: [{ name: 'validate', definition: 'http://hl7.org/fhir/OperationDefinition/Resource-validate' }],
       resource: storedTypes().map((type) => type === 'Binary'
         ? { type, interaction: ['read', 'create', 'update', 'delete'].map((code) => ({ code })), versioning: 'no-version', readHistory: false, updateCreate: false }
