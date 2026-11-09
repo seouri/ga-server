@@ -9,7 +9,7 @@ import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { createGunzip, createInflate } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
-import { applyPatch, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
+import { applyPatch, evalFhirPathTyped, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
 import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { IGNORED } from './search.ts';
@@ -359,11 +359,25 @@ function history(store: Store, r: Req, q: { type?: string; id?: string }): Answe
   return { status: 200, json: JSON.stringify({ resourceType: 'Bundle', type: 'history', ...(total !== undefined ? { total } : { link: links(r.base, path, r, count, offset, count > 0 && rows.length > count) }), entry }) };
 }
 
+// Medplum's care date of a record, for $everything start/end; a type not listed has none (always kept).
+const CARE_DATE: Record<string, string> = {
+  AllergyIntolerance: 'recordedDate', CarePlan: 'created', ClinicalImpression: 'date', Condition: 'recordedDate', DeviceUseStatement: 'recordedOn',
+  DiagnosticReport: 'issued', Encounter: 'period.start', Goal: 'startDate', Immunization: 'occurrenceDateTime', MedicationRequest: 'authoredOn',
+  Observation: 'issued', Procedure: 'performedDateTime', ServiceRequest: 'occurrenceDateTime',
+};
+const instant = (v: unknown): string | undefined => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isNaN(t) ? undefined : new Date(t).toISOString(); };
+
 // Patient/<id>/$everything as Medplum answers it: the Patient and its compartment ordered by lastUpdated (_type keeps the
 // Patient, _since filters by lastUpdated), _count 1000 by default with _offset pages, then per page the records its entries
-// reference that are in no Patient compartment (Practitioner, Medication, Organization...) as includes.
+// reference that are in no Patient compartment (Practitioner, Medication, Organization...) as includes. start/end keep a
+// page's records whose care date is in [start, end) or that have none (as Medplum, after paging).
 function everything(store: Store, pid: string, r: Req): Answer {
-  queryOf(r, ['_count', '_offset', '_since', '_type']);
+  queryOf(r, ['_count', '_offset', '_since', '_type', 'start', 'end']);
+  const [start, end] = ['start', 'end'].map((k) => {
+    const v = r.query.get(k);
+    if (v !== null && !instant(v)) throw new HttpError(400, `Invalid ${k}: ${v}`);
+    return v === null ? undefined : instant(v);
+  });
   if (!store.readRow('Patient', pid, true)) throw new HttpError(404, 'Not found');
   const count = Math.min(num(r, '_count', 1000), 1000), offset = num(r, '_offset', 0), from = since(r);
   const only = r.query.get('_type')?.split(',');
@@ -373,7 +387,10 @@ function everything(store: Store, pid: string, r: Req): Answer {
   const rows = store.db.prepare(`select r.type, r.id, r.json from idx i join resources r on r.rid = i.rid join sortkeys s on s.rid = i.rid and s.code = '_lastUpdated'
     where i.type in (${types.map(() => '?').join(', ')}) and i.code = '_compartment' and i.val = ?${from ? ' and s.lo >= ?' : ''} order by s.lo, i.rid limit ? offset ?`)
     .all(...types, P, ...(from ? [from] : []), count + 1, offset) as { type: string; id: string; json: string }[];
-  const page = rows.slice(0, count).map((x) => JSON.parse(x.json) as Resource);
+  const page = rows.slice(0, count).map((x) => JSON.parse(x.json) as Resource).filter((x) => {
+    const at = CARE_DATE[x.resourceType] && instant(evalFhirPathTyped(CARE_DATE[x.resourceType], [toTypedValue(x)])[0]?.value);
+    return !at || ((!start || at >= start) && (!end || at < end));
+  });
   const seen = new Set(page.map((x) => `${x.resourceType}/${x.id}`));
   const included: Resource[] = [];
   const walk = (v: unknown): void => {

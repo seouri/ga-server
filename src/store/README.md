@@ -58,7 +58,7 @@ Under `/fhir/R4/`:
 - Conditional `PUT <Type>?query` and `DELETE <Type>?query`.
 - History: `<Type>/<id>/_history[/<vid>]`, `<Type>/_history`, `_history` (`_count`, `_since`).
 - `POST /` batch and transaction bundles (urn rewriting, conditional references, GET/POST/PUT/PATCH/DELETE entries, `POST Binary` entries with base64 `data`, a nested bundle as a `POST /` entry).
-- `Patient/<id>/$everything` (`_count`, `_offset`, `_since`, `_type`); `<Type>/$validate`.
+- `Patient/<id>/$everything` (`_count`, `_offset`, `_since`, `_type`, `start` and `end` by Medplum's care dates); `<Type>/$validate`.
 - `Binary`: `POST` and `PUT Binary/<id>` stream the raw body to disk (`Content-Encoding` gzip or deflate decoded), `GET Binary/<id>` streams it back, `DELETE`.
 - `GET metadata`: a CapabilityStatement of what this store supports.
 - `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.

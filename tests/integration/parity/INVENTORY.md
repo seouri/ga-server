@@ -340,12 +340,12 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/binary.test.ts | Binary › Invalid Binary JSON | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
 | server/src/fhir/binary.test.ts | Binary › Handle non-binary JSON | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Error for disallowed file type | skipped | platform | Medplum's upload policy (blocked file extensions and executable content types) |
-| server/src/fhir/metadata.test.ts | CapabilityStatement › Default statement | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/metadata.test.ts | CapabilityStatement › Default statement | ported | existing |  |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Include resource types | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Exclude resource types | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Read-only endpoint | skipped | platform | Medplum CapabilityStatement build options |
-| server/src/fhir/metadata.test.ts | CapabilityStatement › Per resource type interactions | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/metadata.test.ts | CapabilityStatement › Search parameters are still generated for included resource types | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/metadata.test.ts | CapabilityStatement › Per resource type interactions | skipped | platform | Medplum CapabilityStatement build options |
+| server/src/fhir/metadata.test.ts | CapabilityStatement › Search parameters are still generated for included resource types | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Disable supported profiles | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Replace supported profiles per resource type | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Add supported profiles to a type with none | skipped | platform | Medplum CapabilityStatement build options |
@@ -359,13 +359,13 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/patient.test.ts | FHIR Patient utils › Follow search params | skipped | existing | Medplum helper functions (getPatients, compartment utils), no HTTP behaviour |
 | server/src/fhir/patient.test.ts | FHIR Patient utils › External patient ID | skipped | existing | Medplum helper functions (getPatients, compartment utils), no HTTP behaviour |
 | server/src/fhir/patient.test.ts | FHIR Patient utils › getPatientResourceTypes | skipped | existing | Medplum helper functions (getPatients, compartment utils), no HTTP behaviour |
-| server/src/fhir/references.test.ts | Reference checks › Check references on write | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/references.test.ts | Reference checks › Check references on write | skipped | platform | Medplum checkReferencesOnWrite project setting (the store does not check that references resolve) |
 | server/src/fhir/references.test.ts | Reference checks › References to resources in linked Project | skipped | platform | project/_project |
 | server/src/fhir/references.test.ts | Reference checks › Project reference validation | skipped | platform | project/_project |
 | server/src/fhir/references.test.ts | Reference checks › ProjectMembership reference validation | skipped | platform | project/_project |
-| server/src/fhir/references.test.ts | Reference checks › Check references with non-literal reference | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/references.test.ts | Reference checks › Check references with reference placeholder | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/references.test.ts | Reference checks › Resources with identical references | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/references.test.ts | Reference checks › Check references with non-literal reference | ported | existing |  |
+| server/src/fhir/references.test.ts | Reference checks › Check references with reference placeholder | skipped | platform | access policy compartment placeholder (%patient) |
+| server/src/fhir/references.test.ts | Reference checks › Resources with identical references | skipped | platform | ReferenceTable internals (SQL storage) |
 | server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Identifier | ported | existing |  |
 | server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › %s with empty value does not throw errors | ported | existing |  |
 | server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Multiple identifiers | ported | existing |  |
@@ -405,7 +405,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/tokens.test.ts | Token-based searches › MedicationRequest.code legacy behavior › Search by system and value only works when using token columns | skipped | platform | Medplum token column vs legacy implementation |
 | server/src/fhir/tokens.test.ts | Token-based searches › MedicationRequest.code legacy behavior › Sort by code always works | skipped | platform | Medplum token column vs legacy implementation |
 | server/src/fhir/tokens.test.ts | Token-based searches › buildTokens › empty resource | skipped | platform | buildTokens unit test (Medplum token columns) |
-| server/src/fhir/searchunique.test.ts | searchUnique › Multiple matches are logged once per window and the first match is returned | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/searchunique.test.ts | searchUnique › Multiple matches are logged once per window and the first match is returned | skipped | platform | Medplum logging window of an in-process repository helper |
 | server/src/fhir/routes.test.ts | FHIR Routes › Get CapabilityStatement anonymously | skipped | platform | auth / SMART config (GA store has one bearer token) |
 | server/src/fhir/routes.test.ts | FHIR Routes › Get CapabilityStatement authenticated | skipped | platform | auth / SMART config (GA store has one bearer token) |
 | server/src/fhir/routes.test.ts | FHIR Routes › Get versions anonymously | skipped | platform | auth / SMART config (GA store has one bearer token) |
@@ -469,11 +469,11 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/routes.test.ts | FHIR Routes › Set accounts on create | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/structure.test.ts | FHIR structure › Can search Organization on _profile | skipped | meta | not yet ported (Task 8) |
 | server/src/fhir/structure.test.ts | FHIR structure › Can search MedicinalProductManufactured on _profile | skipped | meta | not yet ported (Task 8) |
-| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Success | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Success | ported | existing |  |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Inline DocumentReference attachments | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Project setting enables inline DocumentReference attachments | skipped | platform | inline attachments setting / Medplum helper |
-| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Cursor pagination with _type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Skips inlining attachments when the attachment cannot fit or be read | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Cursor pagination with _type | ported | existing |  |
+| server/src/fhir/operations/patienteverything.test.ts | Patient Everything Operation › Skips inlining attachments when the attachment cannot fit or be read | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Identifies inlineable Binary attachments | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads current and versioned Binary attachments | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads string and Buffer stream chunks into a Buffer | skipped | platform | inline attachments setting / Medplum helper |

@@ -478,6 +478,16 @@ describe('store server: Medplum-compatible routes', () => {
     expect((await call('PATCH', `Observation/${o.id}`, [], jp)).status).toBe(410);
   });
 
+  it('Patient/$everything start and end keep records whose care date is in [start, end) (Medplum\'s care dates); undated records stay', async () => {
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;
+    const o = (issued: string) => call('POST', 'Observation', ob({ subject: P(p.id), issued }));
+    const early = (await o('2019-06-01T00:00:00Z')).json, mid = (await o('2021-06-01T00:00:00Z')).json;
+    const undated = (await call('POST', 'Observation', ob({ subject: P(p.id) }))).json;
+    const ids = async (q: string) => (await call('GET', `Patient/${p.id}/$everything?${q}`)).json.entry.map((e: BundleEntry) => e.resource!.id).sort();
+    expect(await ids('start=2020-01-01&end=2040-01-01')).toEqual([p.id, mid.id, undated.id].sort());
+    expect(await ids('end=2020-01-01')).toEqual([p.id, early.id, undated.id].sort());
+  });
+
   it('as Medplum: a Binary body in gzip or deflate is decoded, another Content-Encoding is 400', async () => {
     const bin = (method: string, path: string, body: BodyInit, enc?: string) => fetch(`${base}fhir/R4/${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain', ...(enc ? { 'content-encoding': enc } : {}) }, body });
     const read = async (id: string) => (await fetch(`${base}fhir/R4/Binary/${id}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text();
