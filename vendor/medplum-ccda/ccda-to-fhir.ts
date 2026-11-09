@@ -753,6 +753,16 @@ class CcdaToFhirConverter {
       }
     }
 
+    // Negated (negationInd): with a substance (coded or named), not allergic to it (refuted); with none, "no known allergies" (US Core: SNOMED
+    // 716186003, active and confirmed), never a nameless allergy
+    if (observation['@_negationInd'] === 'true') {
+      if (allergy.code?.coding?.some((c) => c.code) || allergy.code?.text) {
+        allergy.verificationStatus = { coding: [{ system: ALLERGY_VERIFICATION_CODE_SYSTEM, code: 'refuted' }] };
+      } else {
+        allergy.code = { coding: [{ system: SNOMED, code: '716186003', display: 'No known allergy' }], text: 'No known allergy' };
+      }
+    }
+
     const reactionObservations = observation.entryRelationship?.find(
       (rel) => rel['@_typeCode'] === 'MFST'
     )?.observation;

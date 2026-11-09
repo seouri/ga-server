@@ -285,7 +285,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     {
       description:
         "A one-call snapshot of the user's health record in GA: call this first for any personal health question, then drill down with the other tools. " +
-        'Returns age and sex; problems, medications and allergies (currency "current" or "unconfirmed" by the hospital currency rule); key labs ' +
+        'Returns age and sex; problems, medications and allergies (currency "current" or "unconfirmed" by the hospital currency rule; an allergy row with currency "none known" says no known allergies, never an allergy); key labs ' +
         '(A1c, glucose, lipids, creatinine, eGFR, ALT, AST, hemoglobin, platelets, potassium, sodium, TSH, whichever exist: the lab_results summary entry, ' +
         'latest and previous value); latest weight, BMI, blood pressure and resting heart rate per setting (clinic/home); health maintenance ' +
         '(screenings, vaccines and the doctor\'s planned follow-ups worth raising now, upcoming within 6 months, and the byTheWay line; call health_maintenance for dates, why and citations); the last visit; imported sources with their last import date. Each item has its date and source. ' +
@@ -390,7 +390,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
   const lists: [string, Kind, string][] = [
     ['current_medications', 'medications', "The user's current medications from GA (active MedicationStatement and MedicationRequest, every source; C-CDA planned or proposed requests left out): use this for \"what am I taking\" instead of fhir_search."],
     ['current_problems', 'problems', "The user's problem list from GA (active Conditions in the problem list, not one-visit diagnoses): use this instead of fhir_search."],
-    ['allergies', 'allergies', "The user's allergies and intolerances from GA (active, plus any with no clinical status recorded): use this instead of fhir_search."],
+    ['allergies', 'allergies', "The user's allergies and intolerances from GA (active, plus any with no clinical status recorded; a 'no known allergies' statement is a row with currency 'none known', not an allergy): use this instead of fhir_search."],
   ];
   for (const [name, kind, what] of lists)
     server.registerTool(

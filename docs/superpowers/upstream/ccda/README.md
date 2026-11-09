@@ -44,6 +44,7 @@ Each draft ends with a `Filing metadata` block (rows, commits, external work, de
 | [27-cvx-system.md](27-cvx-system.md) | CVX code system URI | 27 | df39876 | - | - | issue-first |
 | [28-immunization-route.md](28-immunization-route.md) | Immunization route | 28 | 4000e5d | - | - | issue-first |
 | [36-immunization-not-given.md](36-immunization-not-given.md) | Immunization not given (negationInd) | 36 | 902bde7 | - | - | issue-first |
+| [52-allergy-negation.md](52-allergy-negation.md) | No known allergies, and a negated allergy | 52 | see draft | - | 29 (same function) | issue-first |
 | [37-null-flavor-values.md](37-null-flavor-values.md) | A nullFlavor observation value is data-absent | 37 | d1898d7 | - | 26 | issue-first |
 
 ### Wave 3: document and encounter structure, categories, names

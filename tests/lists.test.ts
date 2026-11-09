@@ -32,6 +32,17 @@ test('problems: problem list only; allergies: unstated status kept, refuted drop
   expect(listRows(all, ctx, 'allergies')).toEqual([{ name: 'Penicillin', status: 'not stated', reason: expect.stringMatching(/possibly active/), id: 'al' }]);
 });
 
+test('allergies: a "no known allergies" statement is one row saying so (currency none known), never an allergy', () => {
+  const nka = (id: string, text: string, src: string) => ({ resourceType: 'AllergyIntolerance', id, clinicalStatus: { coding: [{ code: 'active' }] }, verificationStatus: { coding: [{ code: 'confirmed' }] },
+    code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003', display: 'No known allergy' }], text }, meta: { source: src } }) as Resource;
+  const rs = [nka('n1', 'No known allergy', '/x/a.xml'), nka('n2', 'No Known Allergies', '/x/apple')];
+  const rows = listRows(rs, currencyContext(rs, []), 'allergies');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ name: 'No known allergies', currency: 'none known', reason: expect.stringMatching(/not an allergy/), ids: ['n1', 'n2'] });
+  // a real allergy is listed first and as itself
+  expect(listRows([...rs, ...all], currencyContext([...rs, ...all], []), 'allergies').map((r) => r.name)).toEqual(['Penicillin', 'No known allergies']);
+});
+
 test('one row per item across sources; best currency wins, inactive never hides active', () => {
   const stamp = (d: string) => ({ extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }] });
   const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '617310' }], text: 'atorvastatin 40 mg tablet' };
