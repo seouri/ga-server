@@ -434,16 +434,20 @@ export function addNotImported(total: NotImported[], rows: NotImported[]): NotIm
 export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId): Promise<ImportReport> {
   const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   const files = ccdaFiles(path);
-  // Decided once: this import's own records must not switch the path between its files.
-  const local = files.length > 0 && (await ccdaConverter(cfg, client, patientId)) === 'medplum';
-  if (local) total.notImported = [];
-  for (const file of files) {
-    const xml = readFileSync(file, 'utf8');
-    const { resources, notImported } = local ? convertCcdaLocal(xml) : { resources: await convertCcdaMs(xml, cfg.converterUrl), notImported: undefined };
-    const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-    const r = await withImportLock(() => importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer', ...(local && { local: true }) }, patientId, fileHash));
-    addReport(total, r);
-    if (notImported && total.notImported) addNotImported(total.notImported, notImported);
-  }
-  return total;
+  if (!files.length) return total;
+  // Decided once, under the one import lock held for every file: this import's own records must not switch the path between
+  // its files, and a `ga ccda replace` that held the lock first has removed the Microsoft-era records by the time this decides.
+  return withImportLock(async () => {
+    const local = (await ccdaConverter(cfg, client, patientId)) === 'medplum';
+    if (local) total.notImported = [];
+    for (const file of files) {
+      const xml = readFileSync(file, 'utf8');
+      const { resources, notImported } = local ? convertCcdaLocal(xml) : { resources: await convertCcdaMs(xml, cfg.converterUrl), notImported: undefined };
+      const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
+      const r = await importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer', ...(local && { local: true }) }, patientId, fileHash);
+      addReport(total, r);
+      if (notImported && total.notImported) addNotImported(total.notImported, notImported);
+    }
+    return total;
+  });
 }

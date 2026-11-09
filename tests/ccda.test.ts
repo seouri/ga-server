@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { takeLock } from '../src/lock.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
@@ -785,6 +786,28 @@ test('a C-CDA note whose Epic note id is an EHI note GA holds (same Epic org) me
     expect(notes.find((d) => d.id === other.id)?.identifier).toHaveLength(1);
     expect(notes.filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'))).toHaveLength(3);
   });
+});
+
+test('a C-CDA import waiting on the import lock decides its converter once it holds the lock (a replace that finished meanwhile counts)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-ccda-lock-'));
+  vi.stubEnv('GA_CONFIG', join(dir, 'config.json'));
+  try {
+    await onStore(async ({ client }) => {
+      const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+      // A Microsoft-era Composition: the path is Microsoft until ga ccda replace (holding the lock) removes it.
+      const old = await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', title: 'x', author: [{ display: 'x' }],
+        subject: { reference: `Patient/${pid}` }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
+      const lock = await takeLock(join(dir, 'import.lock'), 0);
+      const running = importPath(client, cfgFor(pid), writeDoc(SYNTHETIC), pid);
+      await new Promise((r) => setTimeout(r, 300));
+      await client.deleteResource('Composition', old.id as string);
+      rmSync(lock as string);
+      const report = await running; // the Microsoft path would fail (no converter at converterUrl)
+      expect(report.notImported).toBeDefined();
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });
 
 // Note linking by Epic note id is C-CDA <-> EHI only: a portal note and an EHI note with the same id stay two records.
