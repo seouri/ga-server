@@ -154,7 +154,7 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   let json: unknown;
   if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
     const text = await body(req);
-    if (id === '_search') for (const [k, v] of new URLSearchParams(text)) query.append(k, v);
+    if (id === '_search' || (type === '_search' && !id)) for (const [k, v] of new URLSearchParams(text)) query.append(k, v);
     else json = parse(text);
   }
   const staged = !type && method === 'POST' ? await stageBinaries(store, json) : [];
@@ -173,6 +173,18 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   if (a.status < 300 && /\breturn=minimal\b/.test(header(req, 'prefer') ?? '')) out = ''; // as Medplum, on reads too
   else if (query.get('_pretty') === 'true') out = JSON.stringify(JSON.parse(out), undefined, 2);
   send(res, a.status, out, h);
+}
+
+// GET [base]?_type=A,B: a search across the listed types (Medplum's texts for no types, an unknown type and Binary).
+function systemSearch(store: Store, r: Req): Answer {
+  const types = r.query.get('_type')?.split(',');
+  if (!types) throw new HttpError(400, 'No types specified');
+  for (const t of types) {
+    if (!t) throw new HttpError(400, 'Resource type is null');
+    if (t === 'Binary') throw new HttpError(400, 'Cannot search on Binary resource type');
+    if (!storedTypes().includes(t)) throw new HttpError(400, 'Unknown resource type');
+  }
+  return { status: 200, json: store.searchJson(types, [...r.query], r.base) };
 }
 
 const header = (req: IncomingMessage, name: string): string | undefined => {
@@ -202,8 +214,10 @@ function dispatch(store: Store, r: Req): Answer {
   const [type, id, op, vid] = r.parts;
   if (!type) {
     if (method === 'POST') return { status: 200, json: JSON.stringify(batch(store, r.body as Bundle, r.base)) };
+    if (method === 'GET') return systemSearch(store, r);
     throw new HttpError(405, `${method} not allowed`);
   }
+  if (type === '_search' && !id && method === 'POST') return systemSearch(store, r); // R4's POST [base]/_search
   if (type[0] === '$') throw new HttpError(404, `Not found: ${type}`); // no system-level operations
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});

@@ -733,6 +733,68 @@ describe('store server: Medplum-compatible routes', () => {
     expect((await call('GET', `Observation/${o.id}/$everything`)).status).toBe(404);
   });
 
+  it('_type=Patient,Observation returns both types (GET with and without the trailing slash, POST _search)', async () => {
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;
+    const o = (await call('POST', 'Observation', ob({ subject: P(p.id) }))).json;
+    await call('POST', 'Condition', { resourceType: 'Condition', subject: P(p.id) });
+    const ids = (b: Bundle) => b.entry!.map((e) => `${e.resource!.resourceType}/${e.resource!.id}`).sort();
+    const want = [`Observation/${o.id}`, `Patient/${p.id}`].sort();
+    const r = await call('GET', '?_type=Patient,Observation');
+    expect([r.status, ids(r.json)]).toEqual([200, want]);
+    expect(r.json.entry.map((e: BundleEntry) => e.fullUrl).sort()).toEqual(want.map((x) => `${base}fhir/R4/${x}`));
+    expect(r.json.link[0].url).toBe(`${base}fhir/R4?_type=Patient%2CObservation`);
+    expect(ids((await fetch(`${base}fhir/R4?_type=Patient,Observation`, { headers: { authorization: `Bearer ${token}` } }).then((x) => x.json())) as Bundle)).toEqual(want);
+    const post = await call('POST', '_search', '_type=Patient,Observation', { 'content-type': 'application/x-www-form-urlencoded' });
+    expect([post.status, ids(post.json)]).toEqual([200, want]);
+    // common parameters, includes, _total and _summary across the types
+    expect(ids((await call('GET', `?_type=Patient,Observation&_id=${p.id},${o.id}&_total=accurate`)).json)).toEqual(want);
+    expect((await call('GET', `?_type=Patient,Observation&_compartment=Patient/${p.id}&_total=accurate`)).json.total).toBe(2);
+    const inc = (await call('GET', `?_type=Observation,Condition&_include=Observation:subject&_summary=true`)).json;
+    expect(inc.entry.map((e: BundleEntry) => `${e.search!.mode}:${e.resource!.resourceType}`).sort()).toEqual(['include:Patient', 'match:Condition', 'match:Observation']);
+    expect(inc.entry.every((e: BundleEntry) => e.resource!.meta!.tag!.some((t) => t.code === 'SUBSETTED'))).toBe(true);
+  });
+
+  it('_type with a parameter one type lacks is 400; unknown types, Binary and a sort key outside _id/_lastUpdated too', async () => {
+    const err = async (q: string) => { const r = await call('GET', q); return [r.status, r.json.issue[0].details.text]; };
+    expect(await err('?_type=Patient,Observation&code=x')).toEqual([400, 'Unknown search parameter: code']); // Medplum's text
+    expect(await err('?_type=Patient,Nope')).toEqual([400, 'Unknown resource type']);
+    expect(await err('?_type=')).toEqual([400, 'Resource type is null']);
+    expect(await err('?_type=Patient,Binary')).toEqual([400, 'Cannot search on Binary resource type']);
+    expect(await err('?_type=Patient,Observation&_sort=birthdate')).toEqual([400, 'Unknown search parameter: birthdate']);
+    expect((await call('GET', '?_type=Patient,Observation&_sort=-_lastUpdated')).status).toBe(200);
+    expect(await err('Patient?_type=Observation')).toEqual([400, '_type is not supported on a type-level search']);
+  });
+
+  it('_type cursor pages have no repeats and no gaps across types', async () => {
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;
+    const want = [`Patient/${p.id}`];
+    await tx('batch', Array.from({ length: 44 }, (_, i) => ({ request: { method: 'POST', url: i % 2 ? 'Observation' : 'Condition' }, resource: i % 2 ? ob({ subject: P(p.id) }) : { resourceType: 'Condition', subject: P(p.id) } })))
+      .then((r) => r.json.entry.forEach((e: BundleEntry) => want.push(e.response!.location!.split('/_history')[0])));
+    await call('POST', 'Observation', ob()); // outside the compartment
+    for (const sort of ['_lastUpdated', '-_lastUpdated', '_id']) {
+      const seen: string[] = [], sizes: number[] = [], keys: string[] = [];
+      let path: string | undefined = `?_type=Patient,Observation,Condition&_compartment=Patient/${p.id}&_sort=${sort}&_count=10`;
+      while (path) {
+        const b = (await call('GET', path)).json as Bundle;
+        sizes.push(b.entry?.length ?? 0);
+        seen.push(...b.entry!.map((e) => `${e.resource!.resourceType}/${e.resource!.id}`));
+        keys.push(...b.entry!.map((e) => (sort === '_id' ? e.resource!.id! : e.resource!.meta!.lastUpdated!)));
+        const next = b.link?.find((l) => l.relation === 'next')?.url;
+        if (next) expect(next).toMatch(new RegExp(`^${base}fhir/R4\\?.*_cursor=`));
+        path = next?.slice(`${base}fhir/R4`.length);
+      }
+      expect(sizes).toEqual([10, 10, 10, 10, 5]);
+      const sorted = [...keys].sort();
+      expect(keys).toEqual(sort.startsWith('-') ? sorted.reverse() : sorted); // in order across pages and types
+      expect(seen.sort()).toEqual(want.map((x) => x.replace(/^.*?\/fhir\/R4\//, '')).sort());
+    }
+  });
+
+  it('system search without _type is 400', async () => {
+    const r = await call('GET', '');
+    expect([r.status, r.json.issue[0].details.text]).toEqual([400, 'No types specified']); // Medplum's text
+  });
+
   it('conditional requests need a real criterion: paging, sorting, shaping or format params alone and empty values are 400 and change nothing', async () => {
     const p = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;
     const other = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;

@@ -443,34 +443,19 @@ function normalize(type: string, query: [string, string][]): [string, string][] 
 type RawEntry = { fullUrl: string; mode: 'match' | 'include'; json: string };
 type RawBundle = { total?: number; entry?: RawEntry[]; link?: Bundle['link'] };
 
-export function searchJson(prep: Prep, type: string, query: [string, string][], base: string): string {
+// `type` an array: a system-level search across those types (_type), its filters applied per type as Medplum does.
+export function searchJson(prep: Prep, type: string | string[], query: [string, string][], base: string): string {
   const raw = searchRaw(prep, type, query, base);
   const entry = raw.entry?.map((e) => `{"fullUrl":${JSON.stringify(e.fullUrl)},"search":{"mode":"${e.mode}"},"resource":${e.json}}`).join(',');
   return `{"resourceType":"Bundle","type":"searchset"${raw.total !== undefined ? `,"total":${raw.total}` : ''}${entry ? `,"entry":[${entry}]` : ''}${raw.link ? `,"link":${JSON.stringify(raw.link)}` : ''}}`;
 }
 
-function searchRaw(prep: Prep, type: string, query: [string, string][], base: string): RawBundle {
-  aliasN = 0; // same query, same SQL text (statement cache)
-  if (!getSearchParameters(type)) throw badRequest(`Unknown search parameter: resource type ${type} is not stored`);
-  const summary = query.find(([k]) => k === '_summary')?.[1];
-  if (summary && !['count', 'false', 'true', 'data', 'text'].includes(summary)) throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
-  if (query.some(([, v]) => v.includes('\0'))) throw badRequest('Search filter value cannot contain null bytes'); // Medplum's text
-  let req: SearchRequest;
-  try {
-    req = parseSearchRequest(`${type}?${new URLSearchParams(normalize(type, query).filter(([k]) => !IGNORED.has(k)))}`);
-  } catch (e) {
-    throw badRequest(e instanceof Error ? e.message : String(e));
-  }
-  const conds = (req.filters ?? []).map((f) => cond(type, f, 'd'));
-  const count = Math.min(req.count ?? 20, MAX_COUNT); // _summary=count: parseSearchRequest reads params in order, as Medplum
-  const keys = (req.sortRules ?? []).map((s, i) => sortKey(type, s.code, !!s.descending, i));
-  keys.push({ expr: 'd.rid', desc: false });
-
-  // Distinct rids of each candidate set, counted up to the smallest so far (at most driveMax); the smallest drives.
-  // References count last: in a one-patient store, subject/patient/_compartment match nearly everything.
-  // Probes run smallest first, negations last.
+// The driver of a search's filters, as SQL: distinct rids of each candidate set, counted up to the smallest so far (at most
+// driveMax); the smallest drives. References count last: in a one-patient store, subject/patient/_compartment match nearly
+// everything. Probes run smallest first, negations last.
+function plan(prep: Prep, conds: Cond[]): { driver?: Cond; size: number; probesFor: (driven: boolean) => Cond[] } {
   const sizes = new Map<Cond, number>();
-  const { driveMax, walkPerRow } = searchTuning;
+  const { driveMax } = searchTuning;
   let cap = driveMax;
   // A one-value match lists each rid about once (index order; a name or address once per matching word, which only over-counts
   // its size for the driver choice); OR lists and texts (text and display) need distinct.
@@ -484,18 +469,57 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   }
   conds.sort((x, y) => sizes.get(x)! - sizes.get(y)!);
   const driver = conds.find((c) => c.set);
-  const size = driver ? sizes.get(driver)! : Infinity;
-  const probesFor = (driven: boolean) => conds.filter((c) => !driven || c !== driver);
+  return { driver, size: driver ? sizes.get(driver)! : Infinity, probesFor: (driven) => conds.filter((c) => !driven || c !== driver) };
+}
+
+function searchRaw(prep: Prep, typeOrTypes: string | string[], query: [string, string][], base: string): RawBundle {
+  aliasN = 0; // same query, same SQL text (statement cache)
+  const system = Array.isArray(typeOrTypes);
+  const types = system ? [...new Set(typeOrTypes)] : [typeOrTypes];
+  const type = types[0];
+  for (const t of types) if (!getSearchParameters(t)) throw badRequest(`Unknown search parameter: resource type ${t} is not stored`);
+  const summary = query.find(([k]) => k === '_summary')?.[1];
+  if (summary && !['count', 'false', 'true', 'data', 'text'].includes(summary)) throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
+  if (query.some(([, v]) => v.includes('\0'))) throw badRequest('Search filter value cannot contain null bytes'); // Medplum's text
+  const parse = (t: string): SearchRequest => {
+    try {
+      return parseSearchRequest(`${t}?${new URLSearchParams(normalize(t, system ? query.filter(([k]) => k !== '_type') : query).filter(([k]) => !IGNORED.has(k)))}`);
+    } catch (e) {
+      throw badRequest(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const reqs = types.map(parse);
+  const req = reqs[0];
+  const conds = types.map((t, i) => (reqs[i].filters ?? []).map((f) => cond(t, f, 'd')));
+  const count = Math.min(req.count ?? 20, MAX_COUNT); // _summary=count: parseSearchRequest reads params in order, as Medplum
+  const keys = (req.sortRules ?? []).map((s, i) => {
+    // Across types only _id and _lastUpdated sort, as Medplum (it looks any other code up on no type).
+    if (system && s.code !== '_id' && s.code !== '_lastUpdated') throw badRequest(`Unknown search parameter: ${s.code}`); // Medplum's text
+    return sortKey(type, s.code, !!s.descending, i);
+  });
+  keys.push({ expr: 'd.rid', desc: false });
+  const plans = conds.map((c) => plan(prep, c));
+  // One type's matching rows `d`: its driver set (or every rid of the type) with its other filters as probes.
+  const part = (i: number, cols: string): { sql: string; args: Arg[] } => {
+    const { driver, probesFor } = plans[i];
+    const probes = probesFor(!!driver);
+    return {
+      sql: `select ${cols} from ${driver ? `(${driver.set!.sql.replace(/^select /, 'select distinct ')}) d where 1` : `sortkeys d where d.type = ? and d.code = '_id'`}${probes.map((c) => ` and ${c.sql}`).join('')}`,
+      args: [...(driver ? driver.set!.args : [types[i]]), ...probes.flatMap((c) => c.args)],
+    };
+  };
+  // A system search is one SQL over the union of its types' rids (unique across types), so its cursor is one key tuple.
+  const union = system ? types.map((_, i) => part(i, 'd.rid')).reduce((a, b) => ({ sql: `${a.sql} union all ${b.sql}`, args: [...a.args, ...b.args] })) : undefined;
+  const { driver, size, probesFor } = plans[0];
+  const { driveMax, walkPerRow } = searchTuning;
   const bundle: RawBundle = {};
   if (req.total === 'accurate' || req.total === 'estimate') {
-    const src = driver ? `(${driver.set!.sql.replace(/^select /, 'select distinct ')}) d where 1` : `sortkeys d where d.type = ? and d.code = '_id'`;
-    const probes = probesFor(!!driver);
-    bundle.total = (prep(`select count(*) n from ${src}${probes.map((c) => ` and ${c.sql}`).join('')}`)
-      .get(...(driver ? driver.set!.args : [type]), ...probes.flatMap((c) => c.args)) as { n: number }).n;
+    const q = union ? { sql: `select count(*) n from (${union.sql})`, args: union.args } : part(0, 'count(*) n');
+    bundle.total = (prep(q.sql).get(...q.args) as { n: number }).n;
   }
   // Links as Medplum's: self always; first, next and previous on a non-empty page. Medplum's links carry _elements as _fields.
   // Names as written (code:not=x), values encoded, as Medplum's links.
-  const url = (q: [string, string][]) => `${base}fhir/R4/${type}?${q.map(([k, v]) => `${encodeURIComponent(k).replaceAll('%3A', ':')}=${encodeURIComponent(v)}`).join('&')}`;
+  const url = (q: [string, string][]) => `${base}fhir/R4${system ? '' : `/${type}`}?${q.map(([k, v]) => `${encodeURIComponent(k).replaceAll('%3A', ':')}=${encodeURIComponent(v)}`).join('&')}`;
   const linkQuery = (set: Record<string, string>) => {
     const q = query.filter(([k]) => k !== '_offset' && k !== '_cursor' && !Object.hasOwn(set, k)).map(([k, v]): [string, string] => [k === '_elements' ? '_fields' : k, v]);
     return url([...q, ...Object.entries(set)]);
@@ -506,7 +530,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   const offset = req.cursor ? 0 : req.offset ?? 0;
   const cursor = req.cursor ? decodeCursor(req.cursor, keys.length) : undefined;
   // mode walk: `d` is the first sort key's sortkeys row, walked in order (the whole index, or its first `budget` rows);
-  // mode driver: `d` is the driver set (or every resource of the type), sorted after the probes.
+  // mode driver: `d` is the driver set (or every resource of the type; a system search: the union), sorted after the probes.
   const run = (walk: boolean, budget?: number): Record<string, Arg>[] => {
     const ks = keys.map((k, i) => (walk && i === 0 ? { ...k, expr: k.expr.replace('s0.', 'd.') } : k));
     const col = keys[0].desc ? 'hi' : 'lo';
@@ -514,9 +538,10 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
       ? budget
         ? [`(select * from sortkeys where type = ? and code = ? order by ${col}${keys[0].desc ? ' desc' : ''} limit ${budget}) d`, '1', [type, keys[0].code!]]
         : ['sortkeys d', 'd.type = ? and d.code = ?', [type, keys[0].code!]]
+      : union ? [`(${union.sql}) d`, '1', union.args]
       : driver ? [`(${driver.set!.sql.replace(/^select /, 'select distinct ')}) d`, '1', driver.set!.args] : ['sortkeys d', "d.type = ? and d.code = '_id'", [type]];
     const joins = ks.map((k, i) => (k.code && !(walk && i === 0) ? ` join sortkeys s${i} on s${i}.rid = d.rid and s${i}.code = ${lit(k.code)}` : '')).join('');
-    const probes = probesFor(!walk);
+    const probes = union ? [] : probesFor(!walk);
     const args: Arg[] = [...srcArgs, ...probes.flatMap((c) => c.args)];
     let after = '';
     if (cursor) {
@@ -534,7 +559,8 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
     return prep(sql).all(...args, count + 1, offset) as Record<string, Arg>[];
   };
   let found: Record<string, Arg>[] | undefined;
-  if (keys[0].code && size >= driveMax) found = run(true);
+  if (union) found = run(false); // the walks read one type's sort index
+  else if (keys[0].code && size >= driveMax) found = run(true);
   else if (keys[0].code && walkPerRow * (count + 1 + offset) < size) {
     // A small page from a large set: walk the first rows of the sort index and keep the result only if it is provably the
     // page (full, and its last key comes before the last walked key, so no tied row was cut off); else use the driver.
@@ -549,14 +575,14 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   const page = found.slice(0, count);
   const last = `k${keys.length - 1}`;
   const rids = page.map((x) => x[last] as number);
-  const byRid = new Map<number, { rid: number; id: string; json: string }>();
-  for (const x of rids.length ? prep(`select rid, id, json from resources where rid in (${qs(rids.length)})`).all(...rids) as { rid: number; id: string; json: string }[] : []) byRid.set(x.rid, x);
+  const byRid = new Map<number, Found>();
+  for (const x of rids.length ? prep(`select rid, type, id, json from resources where rid in (${qs(rids.length)})`).all(...rids) as Found[] : []) byRid.set(x.rid, x);
   const matches = rids.map((rid) => byRid.get(rid)!);
 
   const entry: RawEntry[] = matches.map((m) => ({
-    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match', json: m.json,
+    fullUrl: `${base}fhir/R4/${m.type}/${m.id}`, mode: 'match', json: m.json,
   }));
-  includes(prep, req, matches.map((m) => ({ ...m, type })), entry, base);
+  includes(prep, req, matches, entry, base);
   // _elements, else _summary, on every entry, includes too (Medplum's removeResourceFields).
   if (req.fields || req.summary) {
     for (const e of entry) {

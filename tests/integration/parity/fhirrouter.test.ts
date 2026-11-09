@@ -73,6 +73,11 @@ describe.skipIf(SQLITE)('Medplum fhir-router fhirrouter.test.ts (parity)', () =>
     expect([res.status, res.json.resourceType]).toEqual([200, 'Bundle']);
   }));
 
+  test(`FHIR Router › Search multiple types [fhir-router/src/fhirrouter.test.ts]`, () => same(sides, async (s) => {
+    const res = await s.call('GET', '?_type=Patient,Observation');
+    expect([res.status, res.json.resourceType]).toEqual([200, 'Bundle']);
+  }));
+
   // Medplum's router takes the query parsed or as a string; over HTTP the two tests are the same request.
   const conditionalUpdate = () => same(sides, async (s) => {
     const patient = mrnPatient();

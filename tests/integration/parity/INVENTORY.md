@@ -152,8 +152,8 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Disjunction with lookup tables | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by unknown search parameter | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date range search | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type | skipped | type | not yet ported (Task 5) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results | skipped | type | not yet ported (Task 5) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type | ported | type |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results | ported | type |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Binary search not allowed | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreCareTeamRole | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreConditionAssertedDate | ported | existing |  |
@@ -172,7 +172,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Error on cursor and offset | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination dedupes across page boundaries | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination with multiple resource types from _type | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination with multiple resource types from _type | ported | type |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › V1 cursor is not parsed as V2 | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (DeviceRequest.encounter) | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (PractitionerRole.practitioner) | ported | existing |  |
@@ -451,7 +451,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search | ported | existing | Medplum reader/writer pool spies left out (internal) |
 | server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST | ported | existing | Medplum reader/writer pool spies left out (internal) |
 | server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST with multiple includes | ported | existing | Medplum reader/writer pool spies left out (internal) |
-| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search multiple resource types with _type | skipped | type | not yet ported (Task 5) |
+| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search multiple resource types with _type | ported | type |  |
 | server/src/fhir/routes.test.ts | FHIR Routes › chainedSearchOnReader only routes chained searches to reader | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › readonlyBatchOnReader only routes read-only batches to reader | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › readonlyBatchOnReader does not break a nested read-only batch inside a transaction | skipped | platform | access policy / project / reader routing |
@@ -602,7 +602,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Update with correct precondition | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Delete with precondition | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Search by post | ported | existing |  |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Search multiple types | skipped | type | not yet ported (Task 5) |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Search multiple types | ported | type |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update with unparsed query string | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Patch resource | ported | existing |  |

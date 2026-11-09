@@ -451,6 +451,61 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
       eq: Array(10).fill(0), ne: Array(10).fill(1), lt: [0, 0, 1, 1, 1, 0, 0, 1, 1, 1], gt: [1, 1, 1, 0, 0, 1, 1, 1, 0, 0] });
   });
 
+  // Medplum's {resourceType: 'Patient', types: [...]} search goes to the system URL ?_type=...: R4 defines _type on system (and
+  // compartment) searches, and the store refuses it on a type-level one (README, deliberate differences); Medplum takes both.
+  // Next links: Medplum's are .../MultipleTypes?..._offset= or _cursor=, the store's ...R4?..._cursor=; each side follows its own.
+  const next = (b: Bundle) => b.link?.find((l) => l.relation === 'next')?.url;
+  const follow = async (s: Side, path: string) => {
+    const ids: string[] = [], sizes: number[] = [], links: string[] = [];
+    for (let p: string | undefined = path; p;) {
+      const b = await search(s, p);
+      sizes.push(b.entry?.length ?? 0);
+      ids.push(...(b.entry ?? []).map((e) => e.resource!.id!));
+      const n = next(b);
+      if (n) links.push(n);
+      p = n?.slice(`${s.base}fhir/R4`.length).replace(/^\//, '');
+    }
+    return { ids, sizes, links };
+  };
+  const nextKind = (s: Side) => (s.name === 'medplum' ? '_offset=' : '_cursor=');
+
+  test('project-scoped Repository w/ %j › Multiple resource types with _type [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
+    const bundle = await search(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}`);
+    expect(bundle.entry?.length).toBe(2);
+    expect(has(bundle, patient)).toBeTruthy();
+    expect(has(bundle, obs)).toBeTruthy();
+  }));
+
+  test('project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const expectedIds = [patient.id];
+    for (let i = 0; i < 4; i++) expectedIds.push((await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) })).id);
+    const { ids, sizes, links } = await follow(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_id&_count=2`);
+    for (const l of links) {
+      expect(new URL(l).searchParams.get('_type')).toBe('Patient,Observation');
+      expect(l).toContain(nextKind(s)); // Medplum pages by offset here, the store by cursor: no repeats, no gaps either way
+    }
+    expect(sizes).toStrictEqual([2, 2, 1]);
+    expect([...ids].sort()).toEqual([...expectedIds].sort());
+    expect(ids).toEqual([...ids].sort()); // in _id order across pages and types
+  }));
+
+  test('project-scoped Repository w/ %j › searchByReference › Cursor pagination with multiple resource types from _type [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const expectedIds = [patient.id];
+    for (let i = 0; i < 49; i++) expectedIds.push((await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'cursor_type_test' }, subject: ref(patient) })).id);
+    const { ids, links } = await follow(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_lastUpdated&_count=20`);
+    for (const l of links) {
+      expect(new URL(l).searchParams.get('_type')).toBe('Patient,Observation');
+      expect(l).toContain('_cursor=');
+    }
+    expect(ids.length).toBe(50);
+    expect([...ids].sort()).toEqual([...expectedIds].sort());
+    expect(ids).toEqual(expectedIds); // created in order, so _lastUpdated order
+  }));
+
   test('project-scoped Repository w/ %j › Binary search not allowed [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const e = await error(s, 'Binary');
     expect(e.status).toBe(400);

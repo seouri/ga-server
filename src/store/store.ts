@@ -87,11 +87,12 @@ export class Store {
     return st;
   };
 
-  // FHIR search: a searchset Bundle (search.ts). Unsupported features and unknown parameters are StoreError 400.
-  search(type: string, query: [string, string][], base: string): Bundle { return JSON.parse(this.searchJson(type, query, base)); }
+  // FHIR search: a searchset Bundle (search.ts); type an array: a system-level search across those types (_type). Unsupported
+  // features and unknown parameters are StoreError 400.
+  search(type: string | string[], query: [string, string][], base: string): Bundle { return JSON.parse(this.searchJson(type, query, base)); }
 
   // The same search as JSON text, each resource spliced in as stored (no parse and re-stringify), for the HTTP server.
-  searchJson(type: string, query: [string, string][], base: string): string {
+  searchJson(type: string | string[], query: [string, string][], base: string): string {
     try {
       return searchJson(this.prep, type, query, base);
     } catch (e) {

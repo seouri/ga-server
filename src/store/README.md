@@ -41,7 +41,7 @@ From `store.ts`, for in-process use (one `Store` per file, in the owning process
 
 - `new Store(file, { types? })`; `close()`; `db` (the `DatabaseSync`).
 - `create(resource, ifNoneExist?)`, `update(resource, ifMatch?)`, `delete(type, id)`, `read(type, id)`, `readRow(type, id)`, `version(type, id, versionId)`, `history({ type?, id?, since?, count?, offset? })`, `find(type, query)`, `validate(resource)`.
-- `search(type, query, base)` / `searchJson(...)`: a searchset Bundle (object or JSON text).
+- `search(type, query, base)` / `searchJson(...)`: a searchset Bundle (object or JSON text); `type` an array of types: a system-level search across them.
 - `put(resource, { history? })`: import keeping the given id, versionId and lastUpdated (for migrations).
 - Binaries: `putBinaryStream(contentType, data, id?, replace?)`, `openBinary(id)`, `deleteBinary(id)`.
 - `StoreError` (an `OperationOutcomeError` with an HTTP `status`), `INDEX_VERSION` (the on-disk index format) and `IndexFormatError` (thrown by the constructor for a file in another format: rebuild it from its source).
@@ -54,7 +54,7 @@ Every request except `GET /healthz` needs `Authorization: Bearer <token>` (compa
 
 Under `/fhir/R4/`:
 
-- `GET|POST <Type>` (search; `POST <Type>/_search` with a form body), `GET <Type>/<id>`, `PUT <Type>/<id>` (`If-Match` → 412 on another version), `PATCH <Type>/<id>` (JSON Patch, or FHIRPath Patch as a Parameters), `DELETE <Type>/<id>` (`If-Match`); `POST <Type>` (`If-None-Exist`).
+- `GET|POST <Type>` (search; `POST <Type>/_search` with a form body); system-level search `GET ?_type=A,B` (or `POST _search`): filters and `_sort` (`_id`, `_lastUpdated`, as Medplum) common to the types, paged by cursor across them; `GET <Type>/<id>`, `PUT <Type>/<id>` (`If-Match` → 412 on another version), `PATCH <Type>/<id>` (JSON Patch, or FHIRPath Patch as a Parameters), `DELETE <Type>/<id>` (`If-Match`); `POST <Type>` (`If-None-Exist`).
 - Conditional `PUT <Type>?query`, `PATCH <Type>?query` (JSON Patch) and `DELETE <Type>?query`.
 - History: `<Type>/<id>/_history[/<vid>]`, `<Type>/_history`, `_history` (`_count`, `_since`).
 - `POST /` batch and transaction bundles (urn rewriting, also with its colons URL-encoded inside strings; conditional references; GET/POST/PUT/PATCH/DELETE entries, a PATCH entry's patch as a base64 JSON Patch `Binary` or a `Parameters` (FHIRPath Patch, or JSON Patch as `op` parts); `POST Binary` entries with base64 `data` (top-level entries; a failed transaction keeps none), a nested bundle as a `POST /` entry).
@@ -85,6 +85,9 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - `_include`/`_revinclude` of a versioned canonical (`url|version`) resolve to the resource with that `url` and `version`, as R4 canonicals mean (Medplum resolves `url|version` to nothing, and a `_revinclude` finds only references to the bare `url`).
 - `_include`/`_revinclude` naming a parameter that is not a reference is 400, as R4 search.html (Including other resources) defines them on reference parameters (Medplum evaluates it, finds no references and answers 200).
 - An invalid `_include`/`_revinclude` parameter is 400 even when nothing matches (Medplum checks it only when there are matches and answers 200 otherwise).
+- `_type` is 400 on a type-level search (`Patient?_type=Observation`): R4 defines it on system and compartment searches (Medplum treats `Patient?_type=A,B` as the system search `?_type=A,B`).
+- `POST _search` (form body) is the system-level search, as R4 defines it (Medplum 5.2.14 has no such route and answers 400).
+- System-level search pages by cursor, with next links at `fhir/R4?…` (Medplum pages by `_offset` unless sorted by `_lastUpdated` ascending, and its links point at `fhir/R4/MultipleTypes?…`).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support

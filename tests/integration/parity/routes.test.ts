@@ -222,6 +222,18 @@ describe.skipIf(SQLITE)('Medplum routes.test.ts (parity)', () => {
     expect(await status(s, 'GET', 'Patient')).toBe(200);
   }));
 
+  // Medplum's test makes a new project; here the shared one is scoped by _compartment. '../R4?' is fhir/R4 without the slash.
+  test('FHIR Routes › On %s › Search multiple resource types with _type [server/src/fhir/routes.test.ts]', () => same(sides, async (s) => {
+    const patient = await newPatient(s);
+    const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: { reference: `Patient/${patient.id}` } });
+    for (const path of [`../R4?_type=Patient,Observation&_compartment=Patient/${patient.id}`, `?_type=Patient,Observation&_compartment=Patient/${patient.id}`]) {
+      const res = await s.call('GET', path);
+      expect(res.status).toBe(200);
+      expect(res.json.entry?.length).toBe(2);
+      expect(res.json.entry.map((e: { resource: { id: string } }) => e.resource.id).sort()).toEqual([patient.id, obs.id].sort());
+    }
+  }));
+
   test('FHIR Routes › On %s › Search by POST [server/src/fhir/routes.test.ts]', () => same(sides, async (s) => {
     await testPatient(s);
     const res = await s.call('POST', 'Patient/_search', '', { 'content-type': 'application/x-www-form-urlencoded' });
