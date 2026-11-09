@@ -251,6 +251,24 @@ test('an old record flagged against the very record the new path merges into: on
   });
 });
 
+test('a record of another source the new path links to, protected while the run is between steps, is never filled from the old record', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client, { ehiLab: true });
+    const old = (await records(client, w.pid)).find((x) => hasId(x, 'EX-RES-2')) as Observation;
+    expect(old.category).toBeDefined();
+    let id = '';
+    await run(w, true, async (step) => {
+      if (step !== 'protected') return;
+      // A person edits the linked EHI lab (taking its category off) after the match, before the fill.
+      const { category: _, ...ehi } = (await records(client, w.pid)).find((x) => hasId(x, 'ORDER_RESULTS|1')) as Observation;
+      id = ehi.id as string;
+      await client.updateResource({ ...ehi, meta: { ...ehi.meta, tag: [...(ehi.meta?.tag ?? []), { system: 'urn:ga-server:tag', code: 'person-edited' }] } });
+    });
+    expect(id).not.toBe('');
+    expect(await client.readResource('Observation', id)).not.toHaveProperty('category');
+  });
+});
+
 test('a Microsoft-era Composition stored with no patient is replaced too', async () => {
   await onStore(async ({ client }) => {
     const w = await world(client);

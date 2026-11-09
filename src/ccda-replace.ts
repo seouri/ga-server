@@ -376,8 +376,9 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
   // held is added to that record before the old one goes (never less); references in it are repointed below.
   if (o.yes) {
     for (const [r, n] of counterpart) {
-      if (isProtected(r) || !otherSource(n)) continue;
+      if (isProtected(r) || isProtected(n) || !otherSource(n)) continue;
       const cur = (await client.readResource(n.resourceType as 'Observation', n.id as string)) as R;
+      if (isProtected(cur)) continue; // protected since the match (a person's edit mid-run)
       const have = new Set(Object.keys(cur).map(choiceBase));
       const only = Object.entries(asConverted(r)).filter(([k]) => !['resourceType', 'id', 'meta', 'identifier', 'extension', 'text'].includes(k) && !have.has(choiceBase(k)));
       if (!only.length) continue;
