@@ -37,6 +37,19 @@ test('only active problem-list conditions are problems', () => {
   expect(s.problems.map((p) => p.label)).toEqual(['a']);
 });
 
+test('a refuted allergy or problem (clinical status active, from any source) is never listed as one', () => {
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const refuted = { verificationStatus: { coding: [{ code: 'refuted' }] }, clinicalStatus: { coding: [{ code: 'active' }] } };
+  const s = summarize(scoped([
+    r({ resourceType: 'AllergyIntolerance', id: 'e', code: { text: 'Penicillin' }, ...refuted, ...tag('src-ehi') }),
+    r({ resourceType: 'AllergyIntolerance', id: 'c', code: { text: 'Peanut' }, ...refuted, ...tag('src-ccda') }),
+    r({ resourceType: 'AllergyIntolerance', id: 'x', code: { text: 'Latex' }, clinicalStatus: { coding: [{ code: 'active' }] } }),
+    r({ ...cond('d', 'active', 'problem-list-item'), verificationStatus: { coding: [{ code: 'refuted' }] } }),
+  ]));
+  expect(s.allergies.map((a) => a.label)).toEqual(['Latex']);
+  expect(s.problems).toEqual([]);
+});
+
 test('medication reference is named from support; blood pressure components join', () => {
   const med = r({ resourceType: 'Medication', id: 'm', code: { text: 'Atorvastatin' } });
   const ms = r({ resourceType: 'MedicationRequest', id: 'q', status: 'active', medicationReference: { reference: 'Medication/m' } });

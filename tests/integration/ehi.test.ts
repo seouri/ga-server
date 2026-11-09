@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Condition, DiagnosticReport, Encounter, Immunization, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { convertCcda, importPath } from '../../src/ccda.ts';
+import { convertCcdaMs, importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { mapConditions } from '../../src/ehi/conditions.ts';
 import { mapEncounters } from '../../src/ehi/encounters.ts';
@@ -27,7 +27,7 @@ let client: MedplumClient;
 let pid: string;
 
 beforeAll(async () => {
-  cfg = loadConfig();
+  cfg = { ...loadConfig(), ccdaConverter: 'microsoft' }; // what these tests and their cleanup expect
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   await importPath(client, cfg, CCDA, pid);
@@ -36,7 +36,7 @@ beforeAll(async () => {
 // Same cleanup as ccda.test.ts: stable identifiers are global, delete what the fixture wrote (plus the patient compartment).
 afterAll(async () => {
   await cleanupTestMaps(client);
-  for (const r of await convertCcda(readFileSync(CCDA, 'utf8'), cfg.converterUrl)) {
+  for (const r of await convertCcdaMs(readFileSync(CCDA, 'utf8'), cfg.converterUrl)) {
     const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
     for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
       if (hit.resourceType !== 'Patient' && hit.meta?.source === CCDA) await client.deleteResource(hit.resourceType, hit.id as string);

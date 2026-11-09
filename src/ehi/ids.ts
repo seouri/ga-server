@@ -15,7 +15,8 @@ export const ehiId = (ctx: EhiCtx, table: string, pk: string): Identifier => ({ 
 
 // Suffixes under the org root, from recon (d). imm: IMMUNE_ID (R15: all 28 match C-CDA immunization ids; same root as problems).
 // dx: a visit diagnosis, value `<CSN>-<DX_ID>` (R12: matched 53 of 77 real PAT_ENC_DX rows).
-const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', imm: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1' };
+// note: HNO NOTE_ID (Task 9: the C-CDA Notes section's note ids are EHI note ids under this suffix).
+const EPIC_SUFFIX = { order: '2.7.2.798268', problem: '2.7.2.768076', imm: '2.7.2.768076', csn: '2.7.3.698084.8', dx: '2.7.1.1099.1', note: '2.7.2.727879' };
 // R13: C-CDAs carry a CSN under the org root or under 1.2.840.114350.1.72.75210, so a CSN gets both.
 export const epicId = (ctx: EhiCtx, kind: keyof typeof EPIC_SUFFIX, value: string): Identifier[] =>
   ctx.epicOrgNumber && value

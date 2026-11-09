@@ -1,0 +1,489 @@
+import type { MedplumClient } from '@medplum/core';
+import type { Composition, DocumentReference, Identifier, Medication, PractitionerRole, Resource } from '@medplum/fhirtypes';
+import { CVX_URL, convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
+import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
+import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, norm, sectionName, statementCount } from './ccda.ts';
+import type { NotImported } from './engine.ts';
+import { searchAll } from './labs.ts';
+
+// `ga ccda compare`: each stored C-CDA document converted both ways, compared entry by entry. Read-only. The report holds
+// counts, resource types, element paths, section names and template ids, never values.
+export type Loss = { type: string; path: string; count: number; explained?: string };
+export type CompareReport = { documents: number; skipped: number; failed: number; losses: Loss[]; gains: Record<string, number>; unaccounted: NotImported[]; notImported: NotImported[] };
+
+type R = Record<string, unknown>;
+// Classes matched across resource types (taking vs ordered; organizer as report vs panel): the type change is a loss at `resourceType`.
+const FAMILY: Record<string, string> = { MedicationRequest: 'MedicationStatement', Observation: 'DiagnosticReport' };
+const family = (t: string) => FAMILY[t] ?? t;
+
+// One spelling per system: the library's own OID table both ways (http://loinc.org = urn:oid:2.16.840.1.113883.6.1). Except
+// http://nucc.org/cvx (the library's alternate CVX URI), which GA's readers do not know (vaccines.ts): kept apart, so a coding in it is a loss.
+const system = (s?: string) => (!s ? '' : s === CVX_URL ? s : (mapFhirSystemToCcda(s) ?? s));
+// An id's surrounding whitespace (Epic pads some extensions) is not part of it: the library's XML reader trims it, the Microsoft path keeps it.
+const idKey = (i: Identifier) => fhirKey(i.system === 'urn:ietf:rfc:3986' ? i : { ...i, system: system(i.system), value: i.value?.trim() });
+const keys = (r: Resource): string[] =>
+  [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat().map(idKey).filter((k): k is string => !!k);
+
+const CODING = new Set(['system', 'version', 'code', 'display', 'userSelected', 'extension']);
+const isCoding = (o: R) => typeof o.code === 'string' && Object.keys(o).every((k) => CODING.has(k));
+// AdministrativeGender: the library's own table maps the v3 OID to the FHIR system, whose codes spell the same genders out.
+const GENDER_SYSTEM = '2.16.840.1.113883.5.1';
+const GENDER: Record<string, string> = { M: 'male', F: 'female', UN: 'unknown' };
+const codingKey = (o: R) => {
+  const s = system(o.system as string).toLowerCase();
+  return `${s}|${s === GENDER_SYSTEM ? (GENDER[o.code as string] ?? o.code) : o.code}`;
+};
+// Labels, present or not: a narrative div, and a display beside the code or reference that carries the identity. A display that
+// is the element's only content (a Coding without code, a Reference without reference) is compared as text.
+const PRESENCE = new Set(['display', 'div']);
+const LABEL = '#display'; // key under which such a display is compared
+// Elements holding a date, dateTime or instant (choice ones read as `start`): only these get the date-precision rule.
+const DATED = /^(start|end|date|issued|authoredOn|recorded|asserted|lastOccurrence|\w+Date|\w+DateTime|\w+Instant)$/;
+// Choice elements [x] (FHIR R4 prefixes and data types): one name whatever the type; a date or time reads as a Period's start.
+const CHOICE = new RegExp(`^(value|effective|onset|abatement|occurrence|performed|medication|deceased|multipleBirth|asNeeded|serviced|timing|born|age|dose|rate|reported|product|item|answer|allowed|used|defaultValue|location|subject|scheduled|collected|fasting|substance|onBehalfOf)(${
+  'Base64Binary|Boolean|Canonical|Code|Date|DateTime|Decimal|Id|Instant|Integer|Markdown|Oid|PositiveInt|String|Time|UnsignedInt|Uri|Url|Uuid|Address|Age|Annotation|Attachment|CodeableConcept|Coding|ContactPoint|Count|Distance|Duration|HumanName|Identifier|Money|Period|Quantity|Range|Ratio|Reference|SampledData|Signature|Timing|Dosage'})$`);
+const TIME = new Set(['Date', 'DateTime', 'Instant']);
+
+// The comparable form of a record: no id or meta; choice elements renamed `name[x]` (a dateTime as `name[x].start`, so it equals a
+// Period's start; a choice Period that is one moment, end = start, as its start: the Microsoft path writes a panel's low = high so;
+// its bornString is the raw CDA birth time, YYYYMMDD, read as that date). Unset keys are skipped: one never hides a set choice.
+const CDA_DATE = /^(\d{4})(\d{2})?(\d{2})?$/;
+function prep(n: unknown): unknown {
+  if (Array.isArray(n)) return n.map(prep);
+  if (!n || typeof n !== 'object') return n;
+  const out: R = {};
+  for (const [k, v] of Object.entries(n)) {
+    if (k === 'id' || k === 'meta' || v === undefined) continue;
+    const m = CHOICE.exec(k);
+    const moment = m?.[2] === 'Period' && !!v && (v as R).start !== undefined && (v as R).start === (v as R).end;
+    const born = k === 'bornString' && typeof v === 'string' ? CDA_DATE.exec(v) : null;
+    out[m ? `${m[1]}[x]` : k] = born ? { start: born.slice(1).filter(Boolean).join('-') } : m && TIME.has(m[2]) ? { start: v } : moment ? { start: (v as R).start } : prep(v);
+  }
+  return out;
+}
+
+const DATE = /^\d{4}(-\d{2}(-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?)?)?$/;
+// Same meaning: numbers and booleans only as equal JSON values; strings equal after collapsing whitespace, or a date the new path
+// gives as precisely or more (same year/month/day prefix, or the same instant in another zone).
+function same(a: unknown, b: unknown, dated = false): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return a === b;
+  const [x, y] = [a.replace(/\s+/g, ' ').trim(), b.replace(/\s+/g, ' ').trim()];
+  return x === y || (dated && DATE.test(x) && DATE.test(y) && (y.startsWith(x) || (x.length > 10 && y.length > 10 && Date.parse(x) === Date.parse(y))));
+}
+
+// A reference's expected new target: the new counterpart of the old target; null when that has none; undefined when unknown
+// (presence only). root: comparing the document Compositions (the root-id rule below). role: a new PractitionerRole reference ->
+// its practitioner (the library points at a role where the Microsoft path points at the practitioner).
+type Ref = ((oldRef: string) => string | null | undefined) & { root?: boolean; role?: (newRef: string) => string | undefined };
+
+// Element paths (array indices dropped) the old value holds that the new one lacks or holds with another meaning; one per lost leaf.
+// A Coding is one unit (system|code) and an Identifier one (its key); a reference must point at the new counterpart of its target.
+function diff(o: unknown, n: unknown, path: string, key: string, ref: Ref, out: string[]): string[] {
+  if (o === undefined || o === null || o === '') return out;
+  if (Array.isArray(o)) return pair(o, n === undefined ? [] : [n].flat(), path, key, ref, out);
+  const at = (k: string) => (path ? `${path}.${k}` : k);
+  if (typeof o !== 'object') {
+    // GA's repair writes status 'unknown' when the source has none: any new status holds as much, except entered-in-error.
+    const any = PRESENCE.has(key) || (key === 'status' && o === 'unknown' && n !== 'entered-in-error');
+    if (any ? n === undefined || n === '' : !same(o, n, DATED.test(key))) out.push(path);
+    return out;
+  }
+  const a = textDisplay(o as R);
+  const b = n && typeof n === 'object' && !Array.isArray(n) ? (n as R) : undefined;
+  if (isCoding(a)) {
+    // An old coding with no system is held by a new one adding the system to the same code and display (the Microsoft path drops
+    // the system of a patient's race and ethnicity codes).
+    const sysless = !a.system && !!b?.system && a.code === b.code && a.display !== undefined && same(a.display, b.display);
+    if (!b || !isCoding(b) || (codingKey(a) !== codingKey(b) && !sysless)) out.push(path);
+    else for (const k of ['display', 'extension']) diff(a[k], b[k], at(k), k, ref, out);
+    return out;
+  }
+  if (key === 'identifier') {
+    // The Microsoft path gives the document id as {value: <root OID>} with no system: the same id as the new path's system, or, for
+    // a root with no extension, as the new path's URI value (urn:oid:<root>, system urn:ietf:rfc:3986).
+    const root = ref.root && path === 'identifier' && !a.system && b?.system &&
+      same(norm(String(a.value)), norm(b.system === 'urn:ietf:rfc:3986' ? String(b.value) : system(b.system as string)));
+    if (!b || (idKey(a as Identifier) !== idKey(b as Identifier) && !root)) out.push(path);
+    return out;
+  }
+  for (const [k, v] of Object.entries(a)) {
+    if (k === 'reference' && typeof v === 'string') {
+      const want = ref(v);
+      if (typeof b?.reference !== 'string' || want === null || (want !== undefined && b.reference !== want && ref.role?.(b.reference) !== want)) out.push(at(k));
+    } else diff(v, b?.[k], at(k), k === 'display' && typeof a.code !== 'string' && typeof a.reference !== 'string' ? LABEL : k, ref, out);
+  }
+  return out;
+}
+
+// One equivalence: a coding's display that repeats its CodeableConcept's text (the Microsoft path copies the narrative name of a
+// drug into both; the new path keeps it as text only) is that text, compared as `text`; a display that differs stays compared.
+function textDisplay(a: R): R {
+  if (typeof a.text !== 'string' || !Array.isArray(a.coding)) return a;
+  return { ...a, coding: a.coding.map((c: R) => {
+    if (!c || !isCoding(c) || !same(c.display, a.text)) return c;
+    const { display: _, ...rest } = c;
+    return rest;
+  }) };
+}
+
+// Array elements paired one to one, each old element with the unused new one it loses least to (a different `code` loses most:
+// it is the element's identity, as a component's); duplicates count; an old element left over loses all its leaves.
+function pair(os: unknown[], ns: unknown[], path: string, key: string, ref: Ref, out: string[]): string[] {
+  const used = new Set<number>();
+  for (const o of os) {
+    let best: string[] | undefined;
+    let bi = -1;
+    let bc = Infinity;
+    for (let i = 0; i < ns.length && bc > 0; i++) {
+      if (used.has(i)) continue;
+      const l = diff(o, ns[i], path, key, ref, []);
+      const c = l.length + (l.some((p) => p === `${path}.code` || p.startsWith(`${path}.code.`)) ? 1000 : 0);
+      if (c < bc) [best, bi, bc] = [l, i, c];
+    }
+    if (bi >= 0) used.add(bi);
+    out.push(...(best ?? diff(o, undefined, path, key, ref, [])));
+  }
+  return out;
+}
+
+const lenient: Ref = () => undefined;
+const cost = (o: Resource, n: Resource) => diff(prep(o), prep(n), '', '', lenient, []).length;
+
+// The Microsoft path names the drug in a Medication it points at: when that Medication holds nothing but its code, the code is the
+// statement's medication[x], as the new path has it. A Medication with more (form, batch, ingredient) stays a record of its own.
+function inlineMedications(rs: Resource[]): Resource[] {
+  const meds = new Map(rs.filter((r) => r.resourceType === 'Medication' && Object.keys(r).every((k) => ['resourceType', 'id', 'meta', 'code'].includes(k)))
+    .map((r) => [`Medication/${r.id}`, r as Medication]));
+  const used = new Set<Resource>();
+  const out = rs.map((r) => {
+    const ref = (r as { medicationReference?: { reference?: string } }).medicationReference?.reference;
+    const med = ref ? meds.get(ref) : undefined;
+    if (!med) return r;
+    used.add(med);
+    const { medicationReference: _, ...rest } = r as unknown as R;
+    return { ...rest, medicationCodeableConcept: med.code } as Resource;
+  });
+  return out.filter((r) => !used.has(r));
+}
+
+// A record's names (a string name, or a HumanName's family).
+const namesOf = (r: Resource) => [(prep(r) as { name?: unknown }).name].flat().map((x) => (typeof x === 'string' ? x : (x as { family?: string } | undefined)?.family)).filter((x): x is string => !!x);
+// Matching key for an id-less record: its codes (code, vaccine, drug) and names.
+const sig = (r: Resource) => {
+  const p = prep(r) as R & { code?: { coding?: R[] }; vaccineCode?: { coding?: R[] }; 'medication[x]'?: { coding?: R[] }; name?: unknown };
+  const codes = [p.code, p.vaccineCode, p['medication[x]']].flatMap((c) => c?.coding ?? []).filter(isCoding).map(codingKey);
+  return new Set([...codes, ...namesOf(r)]);
+};
+
+// Old record -> its new counterpart. 0) A document's one Composition pairs with the other's (the Microsoft path gives it
+// no system, so no key matches). 1) The source CDA entry id: a new record of the same class sharing any identifier (the same
+// resource type first, then the copy it loses least to: the new path repeats a practitioner per occurrence); several old records
+// may share one. 2) Fallback for old records left over (the new path keeps no id on some entries: medications; Task 6):
+// a new record of the same class with no identifier, sharing a code or name (any, when the old one has none), in document order, one to one;
+// for an old record with no identifier, also a keyed new record of the same type (below).
+export function matchEntries(old: Resource[], neu: Resource[]): Map<Resource, Resource | undefined> {
+  const byKey = new Map<string, Resource[]>();
+  for (const n of neu) for (const k of keys(n)) byKey.set(k, [...(byKey.get(k) ?? []), n]);
+  const out = new Map<Resource, Resource | undefined>();
+  const comps = [old, neu].map((rs) => rs.filter((r) => r.resourceType === 'Composition'));
+  for (const o of old) {
+    // A record holding no information has no counterpart (its id may be another record's: a placeholder shares its organizer's).
+    if (explain(o)) {
+      out.set(o, undefined);
+      continue;
+    }
+    if (o.resourceType === 'Composition' && comps[0].length === 1 && comps[1].length === 1) {
+      out.set(o, comps[1][0]);
+      continue;
+    }
+    const hits = [...new Set(keys(o).flatMap((k) => byKey.get(k) ?? []))].filter((n) => family(n.resourceType) === family(o.resourceType) || fromDispense(o, n));
+    const typed = hits.filter((n) => n.resourceType === o.resourceType);
+    const pool = typed.length ? typed : hits;
+    out.set(o, pool.length > 1 ? pool.reduce((x, y) => (cost(o, y) < cost(o, x) ? y : x)) : pool[0]);
+  }
+  const used = new Set(out.values());
+  // An old record with no identifier (the Microsoft path keeps none on a payer, or on a policy whose id is a nullFlavor) may also
+  // pair with an unused new record of the same type that has one: by name (a name identifies an organization or person; a code
+  // does not identify an entry), or, when the old one has neither name nor code, when each document holds one record of that type.
+  const idless = neu.filter((n) => !keys(n).length);
+  const only = (rs: Resource[], t: string) => rs.filter((r) => r.resourceType === t).length === 1;
+  for (const o of old) {
+    if (out.get(o) || explain(o)) continue;
+    const s = sig(o);
+    const find = (pool: Resource[], match: (c: Resource) => boolean) => pool.find((c) => !used.has(c) && family(c.resourceType) === family(o.resourceType) && match(c));
+    const keyed = keys(o).length ? [] : neu.filter((c) => keys(c).length && c.resourceType === o.resourceType);
+    const names = new Set(namesOf(o));
+    const n = find(idless, (c) => !s.size || [...sig(c)].some((x) => s.has(x))) ??
+      find(keyed, (c) => (names.size ? namesOf(c).some((x) => names.has(x)) : !s.size && only(old, o.resourceType) && only(neu, o.resourceType)));
+    out.set(o, n);
+    if (n) used.add(n);
+  }
+  return out;
+}
+
+// Explained only when an old record with no counterpart holds no information: an Observation holding nothing beyond these
+// elements and no code at all (the Microsoft path's empty lab placeholders; a code's text alone is information).
+const PLACEHOLDER = 'no value and no code';
+const PLACEHOLDER_KEYS = new Set(['resourceType', 'status', 'category', 'subject', 'identifier', 'effective[x]']);
+const placeholder = (r: Resource) => {
+  const p = prep(r) as R;
+  return r.resourceType === 'Observation' && Object.keys(p).every((k) => PLACEHOLDER_KEYS.has(k)) && [undefined, 'final', 'unknown'].includes(p.status as string);
+};
+// And any record holding nothing but its id (the Microsoft path's Location for a facility it read nothing from).
+const ID_ONLY = 'nothing but its id';
+const explain = (r: Resource) => (placeholder(r) ? PLACEHOLDER : Object.keys(prep(r) as R).every((k) => k === 'resourceType') ? ID_ONLY : undefined);
+
+// A reference to such a record carries nothing: its `reference` is taken out of the old record (an element left empty with it) and
+// counted as explained at its path, never compared (it would starve the pairing of the array it sits in).
+const REF_TO_NOTHING = 'reference to a record holding no information';
+function dropRefs(n: unknown, gone: (ref: string) => boolean, path: string, hit: (path: string) => void): unknown {
+  if (Array.isArray(n)) {
+    const a = n.map((x) => dropRefs(x, gone, path, hit)).filter((x) => x !== undefined);
+    return a.length ? a : undefined;
+  }
+  if (!n || typeof n !== 'object') return n;
+  const out: R = {};
+  for (const [k, v] of Object.entries(n)) {
+    // Only the reference goes: its siblings (a display, an identifier) are still compared.
+    if (k === 'reference' && typeof v === 'string' && gone(v)) {
+      hit(path ? `${path}.reference` : 'reference');
+      continue;
+    }
+    const x = dropRefs(v, gone, path ? `${path}.${k}` : k, hit);
+    if (x !== undefined) out[k] = x;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// One path equivalence: the Microsoft path files a Coverage's policy type (the Policy Activity code, e.g. PPO) under
+// `relationship`; the new path under `type`, its FHIR field. The old `relationship` is compared as `type` only when the old
+// record has no `type` and the new `type` carries every one of its codings (system|code); otherwise it stays a loss.
+function policyType(o: Resource, n: Resource): Resource {
+  const { relationship, ...rest } = o as unknown as R & { relationship?: { coding?: R[] } };
+  const have = new Set(((n as unknown as { type?: { coding?: R[] } }).type?.coding ?? []).filter(isCoding).map(codingKey));
+  const moved = o.resourceType === 'Coverage' && rest.type === undefined && !!relationship?.coding?.length && relationship.coding.every((c) => isCoding(c) && have.has(codingKey(c)));
+  return moved ? ({ ...rest, type: relationship } as unknown as Resource) : o;
+}
+
+// One path equivalence: the Microsoft path files an encounter code of another system (Epic's CPT visit code) as `class`; the new
+// path keeps it as `type` (class is a v3 ActCode, data-absent when the source has none). The old `class` is dropped only when it is
+// not an ActCode and the new `type` carries its coding (system|code); otherwise it stays a compared leaf.
+const ACT_CODE = system('http://terminology.hl7.org/CodeSystem/v3-ActCode');
+function encounterClass(o: Resource, n: Resource): Resource {
+  const { class: cls, ...rest } = o as unknown as R & { class?: R };
+  if (o.resourceType !== 'Encounter' || !cls || !isCoding(cls) || system(cls.system as string) === ACT_CODE) return o;
+  const types = ((n as unknown as { type?: { coding?: R[] }[] }).type ?? []).flatMap((t) => t.coding ?? []).filter(isCoding).map(codingKey);
+  return types.includes(codingKey(cls)) ? (rest as unknown as Resource) : o;
+}
+
+// One path equivalence: the Microsoft path writes an authoring device's model name (CDA manufacturerModelName) as `manufacturer`
+// and as a code-less `type` coding's display; the new path as `deviceName` of type model-name. Each is dropped only when it is
+// that name exactly (a `type` only when every coding is a bare display of it); otherwise it stays a compared leaf.
+function deviceModel(o: Resource, n: Resource): Resource {
+  if (o.resourceType !== 'Device') return o;
+  const names = new Set(((n as unknown as { deviceName?: { name?: string; type?: string }[] }).deviceName ?? []).filter((d) => d.type === 'model-name').map((d) => d.name));
+  const out = { ...o } as unknown as R & { manufacturer?: string; type?: { coding?: R[] } };
+  const type = out.type;
+  if (type?.coding?.length && Object.keys(type).every((k) => k === 'coding') && type.coding.every((c) => Object.keys(c).every((k) => k === 'display') && names.has(c.display as string))) delete out.type;
+  if (out.manufacturer !== undefined && names.has(out.manufacturer)) delete out.manufacturer;
+  return out as unknown as Resource;
+}
+
+// One path equivalence: a CDA legal name (use="L") is `usual` on the Microsoft path and `official` in the library (FHIR's own v3
+// map pairs neither with L). An old `usual` Patient name reads as `official` only when a source L name has its family and given
+// names, and only as many times as there are such L names (a C name of the same family stays usual).
+const nameKey = (family?: string, given: (string | undefined)[] = []) => `${family ?? ''}|${given.join(' ')}`;
+function legalName(o: Resource, legal: string[]): Resource {
+  if (o.resourceType !== 'Patient' || !legal.length) return o;
+  const left = [...legal];
+  const names = (o as unknown as { name?: { use?: string; family?: string; given?: string[] }[] }).name;
+  return { ...o, name: names?.map((nm) => {
+    const i = nm.use === 'usual' ? left.indexOf(nameKey(nm.family, nm.given)) : -1;
+    if (i < 0) return nm;
+    left.splice(i, 1);
+    return { ...nm, use: 'official' };
+  }) } as unknown as Resource;
+}
+
+// One correction, not a loss: the Microsoft path writes a vaccine not given (negationInd="true") as `completed`; the new path as
+// `not-done`. The old status is dropped only for an Immunization whose source entry is negated and when the new one is not-done.
+function refusedVaccine(o: Resource, n: Resource, negated: Set<string>): Resource {
+  if (o.resourceType !== 'Immunization' || (n as { status?: string }).status !== 'not-done' || !keys(o).some((k) => negated.has(k))) return o;
+  const { status: _, ...rest } = o as unknown as R;
+  return rest as unknown as Resource;
+}
+
+// One path equivalence: the Microsoft path makes a MedicationRequest from every supply in a medication, a Medication Dispense
+// (22.4.18, EVN) too; the new path makes that one a MedicationDispense. The pair needs the same source id (no id-less fallback).
+// The old record is read as a dispense: drug, status (the same statusCode in each type's word: active / in-progress, draft /
+// preparation), quantity and the day (validityPeriod start or authoredOn as whenHandedOver); intent, an order's mood, is dropped.
+// Its requester is the dispense's C-CDA author, which the new path keeps as a performer with function dataenterer: compared as
+// that performer (the same practitioner, through the reference rule; another one, or a performer without the function, is a loss).
+// Anything else it holds is compared as is.
+const fromDispense = (o: Resource, n: Resource) => o.resourceType === 'MedicationRequest' && n.resourceType === 'MedicationDispense';
+const DISPENSE_STATUS: Record<string, string> = { active: 'in-progress', draft: 'preparation' };
+const DATA_ENTERER = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/medicationdispense-performer-function', code: 'dataenterer' }] };
+function asDispense(o: Resource, n: Resource): Resource {
+  if (!fromDispense(o, n)) return o;
+  const { resourceType: _t, intent: _i, status, dispenseRequest, authoredOn, requester, ...rest } = o as unknown as R & { status?: string; authoredOn?: string;
+    dispenseRequest?: { quantity?: unknown; validityPeriod?: { start?: string } }; requester?: unknown };
+  const { quantity, validityPeriod, ...more } = dispenseRequest ?? {};
+  // The start is the day handed over; anything else in the period (an end) has no dispense field and stays a compared leaf.
+  const { start: handed, ...period } = (validityPeriod ?? {}) as { start?: string };
+  if (Object.keys(period).length) (more as R).validityPeriod = period;
+  return { resourceType: 'MedicationDispense', ...rest, status: status && (DISPENSE_STATUS[status] ?? status), quantity,
+    whenHandedOver: handed ?? authoredOn, ...(Object.keys(more).length && { dispenseRequest: more }),
+    ...(requester ? { performer: [{ function: DATA_ENTERER, actor: requester }] } : {}) } as unknown as Resource;
+}
+
+// One correction, not a loss: the Microsoft path reads a PQ value written with a leading dot (value=".14") without the dot (14);
+// the new path reads the number (0.14). The old value is replaced by the new one only when the record's own source entry (same id)
+// holds such a value whose digits are the old number and whose number is the new one.
+// Source entry id -> its leading-dot values, over every element of the document that has an id and a value.
+function leadingDots(node: unknown, out = new Map<string, string[]>()): Map<string, string[]> {
+  if (Array.isArray(node)) for (const x of node) leadingDots(x, out);
+  else if (node && typeof node === 'object') {
+    const n = node as R;
+    for (const v of [n.value ?? []].flat() as R[]) {
+      const raw = v?.['@_value'];
+      if (typeof raw === 'string' && /^\.\d+$/.test(raw)) for (const k of cdaKeys(n)) out.set(k, [...(out.get(k) ?? []), raw]);
+    }
+    for (const v of Object.values(n)) leadingDots(v, out);
+  }
+  return out;
+}
+function leadingDot(o: Resource, n: Resource, dots: string[]): Resource {
+  const [a, b] = [(o as { valueQuantity?: { value?: number } }).valueQuantity, (n as { valueQuantity?: { value?: number } }).valueQuantity];
+  if (o.resourceType !== 'Observation' || a?.value === undefined || !dots.some((d) => Number(d.slice(1)) === a.value && Number(d) === b?.value)) return o;
+  return { ...o, valueQuantity: { ...a, value: b?.value } } as Resource;
+}
+
+// One path equivalence: an assigned entity's code (a provider taxonomy) is a Practitioner qualification on the Microsoft path and
+// the specialty of the new path's PractitionerRole of that practitioner. An old qualification holding only a code is dropped when
+// every one of its codings is in the specialty of a new role pointing at the counterpart; otherwise it stays a compared leaf.
+// Codings are compared by system|code only: a display is presence-only everywhere in this comparison, so a display the role's
+// specialty lacks is not a loss here either.
+function roleSpecialty(o: Resource, m: Resource, neu: Resource[]): Resource {
+  const quals = (o as { qualification?: { code?: { coding?: R[] } }[] }).qualification;
+  if (o.resourceType !== 'Practitioner' || !quals) return o;
+  const have = new Set(neu.filter((r) => r.resourceType === 'PractitionerRole' && (r as PractitionerRole).practitioner?.reference === `Practitioner/${m.id}`)
+    .flatMap((r) => (r as PractitionerRole).specialty ?? []).flatMap((c) => (c.coding ?? []) as R[]).filter(isCoding).map(codingKey));
+  const left = quals.filter((q) => !(Object.keys(q).every((k) => k === 'code') && q.code?.coding?.length && q.code.coding.every((c) => isCoding(c) && have.has(codingKey(c)))));
+  const { qualification: _, ...rest } = o as unknown as R;
+  return (left.length ? { ...rest, qualification: left } : rest) as unknown as Resource;
+}
+
+// Reasons convertCcdaLocal gives for a section's own entries (the other rows name parts of entries).
+const ENTRY_LEVEL = new Set(['section not supported by the converter', 'entry produced no record', 'section without template']);
+
+export function compareCcda(xml: string, old: Resource[], neu: Resource[], notImported: NotImported[]): { losses: Loss[]; gains: Record<string, number>; unaccounted: NotImported[] } {
+  const ccda = sanitizeNullFlavors(convertXmlToCcda(xml));
+  const legal = (ccda.recordTarget?.[0]?.patientRole?.patient?.name ?? []).filter((nm) => nm['@_use'] === 'L')
+    .map((nm) => nameKey(nodeToPlainText(nm.family), (nm.given ?? []).map(nodeToPlainText)));
+  const [o, n] = [inlineMedications(old).map((r) => legalName(r, legal)), inlineMedications(neu)];
+  const negated = new Set((ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []).flatMap((sec) => sec.entry ?? [])
+    .flatMap((e) => e.substanceAdministration ?? []).filter((sa) => sa['@_negationInd'] === 'true').flatMap((sa) => cdaKeys(sa as unknown as R)));
+  const dotsBy = leadingDots(ccda);
+  const dots = (r: Resource) => keys(r).flatMap((k) => dotsBy.get(k) ?? []);
+  const match = matchEntries(o, n);
+  const losses = new Map<string, Loss>();
+  const add = (type: string, path: string, explained?: string) => {
+    const k = `${type}\0${path}\0${explained ?? ''}`;
+    const l = losses.get(k) ?? { type, path, count: 0, ...(explained && { explained }) };
+    l.count++;
+    losses.set(k, l);
+  };
+  const byRef = new Map(o.map((r) => [`${r.resourceType}/${r.id}`, r]));
+  // One reference equivalence: an old reference to a Practitioner holds when the new one is a PractitionerRole whose practitioner
+  // is that Practitioner's new counterpart (the library's shape for an assigned entity: role, practitioner, organization).
+  const roles = new Map(n.filter((r) => r.resourceType === 'PractitionerRole').map((r) => [`PractitionerRole/${r.id}`, (r as PractitionerRole).practitioner?.reference]));
+  const ref: Ref = Object.assign((v: string) => {
+    const t = byRef.get(v);
+    if (!t) return undefined;
+    const m = match.get(t);
+    return m ? `${m.resourceType}/${m.id}` : null;
+  }, { role: (v: string) => roles.get(v) });
+  const gone = (v: string) => { const t = byRef.get(v); return !!t && !!explain(t); };
+  for (const [r, m] of match) {
+    if (!m) add(r.resourceType, '(record)', explain(r));
+    else {
+      const old = dropRefs(prep(asDispense(policyType(encounterClass(deviceModel(roleSpecialty(leadingDot(refusedVaccine(r, m, negated), m, dots(r)), m, n), m), m), m), m)), gone, '', (p) => add(r.resourceType, p, REF_TO_NOTHING));
+      for (const p of new Set(diff(old, prep(m), '', '', r.resourceType === 'Composition' ? Object.assign((v: string) => ref(v), { root: true, role: ref.role }) : ref, []))) add(r.resourceType, p);
+    }
+  }
+  // Gains: new records with no old counterpart, one per entity (the new path repeats a practitioner per occurrence).
+  const matched = new Set(match.values());
+  const seen = new Set([...matched].flatMap((m) => (m ? keys(m) : [])));
+  const gains: Record<string, number> = {};
+  for (const r of n) {
+    const ks = keys(r);
+    if (matched.has(r) || ks.some((k) => seen.has(k))) continue;
+    for (const k of ks) seen.add(k);
+    gains[r.resourceType] = (gains[r.resourceType] ?? 0) + 1;
+  }
+  // Accounting: each section's entries are records the Composition lists (and that exist) or named in notImported.
+  const sections = (ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
+  const comp = n.find((r): r is Composition => r.resourceType === 'Composition');
+  const ids = new Set(n.map((r) => `${r.resourceType}/${r.id}`));
+  const left = new Map<string, NotImported>();
+  sections.forEach((s, i) => {
+    const section = sectionName(s);
+    const made = (comp?.section?.[i]?.entry ?? []).filter((e) => ids.has(e.reference ?? '')).length;
+    const row = left.get(section) ?? { section, ...(s.templateId?.[0]?.['@_root'] && { templateId: s.templateId[0]['@_root'] }), entries: 0, reason: 'not imported and not named' };
+    row.entries += statementCount(s) - made;
+    left.set(section, row);
+  });
+  for (const r of notImported) if (ENTRY_LEVEL.has(r.reason) && left.has(r.section)) (left.get(r.section) as NotImported).entries -= r.entries;
+  return { losses: [...losses.values()], gains, unaccounted: [...left.values()].filter((r) => r.entries > 0) };
+}
+
+// Every XML file stored for the patient, with its text ('' when it has no file), oldest first.
+export async function* storedXml(client: MedplumClient, patientId: string): AsyncGenerator<{ doc: DocumentReference; xml: string }> {
+  const q = { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml' };
+  for (const doc of (await searchAll(client, 'DocumentReference', q)) as DocumentReference[]) {
+    const url = doc.content?.[0]?.attachment?.url;
+    yield { doc, xml: url ? await (await client.download(url)).text() : '' };
+  }
+}
+
+export async function ccdaCompare(
+  client: MedplumClient,
+  patientId: string,
+  converterUrl: string,
+  convertMs: (xml: string, converterUrl: string) => Promise<Resource[]> = convertCcdaMs,
+): Promise<CompareReport> {
+  const report: CompareReport = { documents: 0, skipped: 0, failed: 0, losses: [], gains: {}, unaccounted: [], notImported: [] };
+  for await (const { xml } of storedXml(client, patientId)) {
+    if (!isCcda(xml)) {
+      report.skipped++; // no file, or XML that is not a C-CDA
+      continue;
+    }
+    const old = await convertMs(xml, converterUrl); // CONVERTER_DOWN when the Microsoft converter is not running
+    report.documents++;
+    let r: ReturnType<typeof compareCcda>;
+    try {
+      const local = convertCcdaLocal(xml);
+      r = compareCcda(xml, old, local.resources, local.notImported);
+      addNotImported(report.notImported, local.notImported);
+    } catch {
+      // Counted, never the message (it may quote the document). Every Microsoft record is a loss and the document is
+      // unaccounted: a document the new path cannot convert or compare never passes the gate.
+      report.failed++;
+      const losses = new Map<string, Loss>();
+      for (const x of old) {
+        const l = losses.get(x.resourceType) ?? { type: x.resourceType, path: '(record)', count: 0 };
+        l.count++;
+        losses.set(x.resourceType, l);
+      }
+      r = { losses: [...losses.values()], gains: {}, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] };
+    }
+    for (const l of r.losses) {
+      const same = report.losses.find((x) => x.type === l.type && x.path === l.path && x.explained === l.explained);
+      if (same) same.count += l.count;
+      else report.losses.push({ ...l });
+    }
+    for (const [t, c] of Object.entries(r.gains)) report.gains[t] = (report.gains[t] ?? 0) + c;
+    addNotImported(report.unaccounted, r.unaccounted);
+  }
+  return report;
+}

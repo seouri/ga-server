@@ -5,5 +5,5 @@
     "allowImportingTsExtensions": true, "rewriteRelativeImportExtensions": true,
     "types": ["node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "vendor"]
 }

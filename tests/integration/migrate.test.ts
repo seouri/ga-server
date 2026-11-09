@@ -48,7 +48,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     // A distinct file: the EHI fixture holds the same PDF as media, and a file is imported once.
     writeFileSync(join(src, 'labs.pdf'), Buffer.concat([readFileSync(join(FIX, 'labs-synthetic.pdf')), Buffer.from('\n%migrate-test\n')]));
     const old = await getClient(legacy);
-    await importPath(old, legacy, join(src, 'ccda', 'summary.xml'));
+    await importPath(old, { ...legacy, ccdaConverter: 'microsoft' }, join(src, 'ccda', 'summary.xml')); // a Microsoft-era record: migrate keeps that converter
     await importEhi(old, legacy, join(src, 'ehi'));
     await importAppleHealth(old, legacy, join(src, 'apple'));
     await importExtracted(old, legacy, [

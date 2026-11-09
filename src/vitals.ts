@@ -3,7 +3,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { codesFor, conceptNamed, conceptOf, isVitalCode } from './concepts.ts';
 import { hasTag, isClinic, sameNumbers, TAG } from './identity.ts';
-import { collect, dateRange, fit, labRow, qty, type LabRow } from './labs.ts';
+import { collect, dateRange, fit, isPanel, labRow, qty, type LabRow } from './labs.ts';
 
 // Apple's per-day (and per-night) summaries are stored with these words in code.text (src/apple/daily.ts).
 export const SUMMARY = /, (daily mean|daily total|daily|nightly)\b/i;
@@ -65,6 +65,7 @@ export function readingRows(obs: Observation[]): VitalRow[] {
   type K = { o: Observation; r: VitalRow; origins: Set<string> };
   const kept: K[] = [];
   for (const o of obs) {
+    if (isPanel(o)) continue; // its members are the readings
     const r = vitalRow(o), org = origin(o);
     const m = kept.find((k) => r.date && k.r.date === r.date && sameNumbers(k.o, o) && vitalKey(k.o) === vitalKey(o)
       && !k.origins.has(org) && (!time(k.o) || !time(o) || time(k.o) === time(o))

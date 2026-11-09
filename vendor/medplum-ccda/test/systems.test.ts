@@ -1,0 +1,199 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import { describe, expect, test } from 'vitest';
+import { LOINC, SNOMED } from '@medplum/core';
+import { OID_SNOMED_CT_CODE_SYSTEM } from '../oids.ts';
+import { EnumMapper, mapCcdaCodeToCodeableConcept, mapCcdaSystemToFhir, mapCodeableConceptToCcdaCode, mapFhirSystemToCcda } from '../systems.ts';
+
+describe('EnumMapper', () => {
+  const mapper = new EnumMapper<string, string>(
+    {
+      ccdaSystemOid: OID_SNOMED_CT_CODE_SYSTEM,
+      fhirSystemUrl: SNOMED,
+    },
+    [
+      { ccdaValue: 'c0', fhirValue: 'f0', displayName: 'd0' },
+      { ccdaValue: 'c1', fhirValue: 'f1', displayName: 'd1' },
+      { ccdaValue: 'c2', fhirValue: 'f2', displayName: 'd2' },
+    ]
+  );
+
+  test('getEntryByFhir', () => {
+    expect(mapper.getEntryByFhir('f0')?.ccdaValue).toBe('c0');
+    expect(mapper.getEntryByFhir('c0')).toBeUndefined();
+  });
+
+  test('mapCcdaToFhir', () => {
+    expect(mapper.mapCcdaToFhir('c0')).toBe('f0');
+    expect(mapper.mapCcdaToFhir('f0')).toBeUndefined();
+    expect(mapper.mapCcdaToFhir('')).toBeUndefined();
+  });
+
+  test('mapCcdaToFhirWithDefault', () => {
+    expect(mapper.mapCcdaToFhirWithDefault('c0', 'f1')).toBe('f0');
+    expect(mapper.mapCcdaToFhirWithDefault('c3', 'f1')).toBe('f1');
+  });
+
+  test('mapFhirToCcdaWithDefault', () => {
+    expect(mapper.mapFhirToCcdaWithDefault('f0', 'c1')).toBe('c0');
+    expect(mapper.mapFhirToCcdaWithDefault('f3', 'c1')).toBe('c1');
+  });
+
+  test('mapCcdaToFhirCodeableConcept', () => {
+    const r1 = mapper.mapCcdaToFhirCodeableConcept('c0');
+    expect(r1?.coding?.[0]?.code).toBe('f0');
+    expect(r1?.coding?.[0]?.system).toBe(SNOMED);
+    expect(r1?.text).toBe('d0');
+
+    const r2 = mapper.mapCcdaToFhirCodeableConcept('c3');
+    expect(r2).toBeUndefined();
+  });
+
+  test('mapCcdaCodeToCodeableConcept', () => {
+    const r0 = mapCcdaCodeToCodeableConcept(undefined);
+    expect(r0).toBeUndefined();
+
+    const r1 = mapCcdaCodeToCodeableConcept({
+      '@_codeSystem': OID_SNOMED_CT_CODE_SYSTEM,
+      '@_code': 'c0',
+      '@_displayName': 'd0',
+    });
+    expect(r1?.coding?.[0]?.code).toBe('c0');
+    expect(r1?.coding?.[0]?.system).toBe(SNOMED);
+    expect(r1?.text).toBe('d0');
+
+    const r2 = mapCcdaCodeToCodeableConcept({
+      '@_codeSystem': OID_SNOMED_CT_CODE_SYSTEM,
+      '@_code': 'c1',
+      '@_displayName': 'd1',
+      translation: [
+        { '@_codeSystem': '2.16.840.1.113883.6.1', '@_code': 'c3', '@_displayName': 'd3' },
+        { '@_code': 'c4' },
+      ],
+    });
+
+    expect(r2?.coding?.length).toBe(3);
+    expect(r2?.coding?.[0]?.code).toBe('c1');
+    expect(r2?.coding?.[0]?.system).toBe(SNOMED);
+    expect(r2?.coding?.[1]?.code).toBe('c3');
+    expect(r2?.coding?.[2]?.code).toBe('c4');
+    expect(r2?.coding?.[2]?.system).toBeUndefined();
+    expect(r2?.text).toBe('d1');
+  });
+
+  test('mapFhirToCcda', () => {
+    expect(mapper.mapFhirToCcda('f0')).toBe('c0');
+    expect(mapper.mapFhirToCcda('c0')).toBeUndefined();
+    expect(mapper.mapFhirToCcda('')).toBeUndefined();
+  });
+
+  test('mapFhirToCcdaCode', () => {
+    const r1 = mapper.mapFhirToCcdaCode('f0');
+    expect(r1?.['@_code']).toBe('c0');
+    expect(r1?.['@_codeSystem']).toBe(OID_SNOMED_CT_CODE_SYSTEM);
+    expect(r1?.['@_codeSystemName']).toBe('SNOMED CT');
+    expect(r1?.['@_displayName']).toBe('d0');
+
+    const r2 = mapper.mapFhirToCcdaCode('c3');
+    expect(r2).toBeUndefined();
+
+    const r3 = mapper.mapFhirToCcdaCode('');
+    expect(r3).toBeUndefined();
+  });
+
+  test('mapCodeableConceptToCcdaCode', () => {
+    const r1 = mapCodeableConceptToCcdaCode({ text: 'test' });
+    expect(r1).toBeUndefined();
+
+    const r2 = mapCodeableConceptToCcdaCode({ coding: [{ code: 'foo' }] });
+    expect(r2).toMatchObject({ '@_code': 'foo' });
+
+    const r3 = mapCodeableConceptToCcdaCode({
+      coding: [
+        { system: SNOMED, code: 'foo', display: 'Foo' },
+        { system: LOINC, code: 'bar', display: 'Bar' },
+      ],
+    });
+    expect(r3).toMatchObject({
+      '@_code': 'foo',
+      '@_codeSystem': '2.16.840.1.113883.6.96',
+      '@_codeSystemName': 'SNOMED CT',
+      '@_displayName': 'Foo',
+      translation: [
+        {
+          '@_code': 'bar',
+          '@_codeSystem': '2.16.840.1.113883.6.1',
+          '@_codeSystemName': 'LOINC',
+          '@_displayName': 'Bar',
+        },
+      ],
+    });
+
+    const r4 = mapCodeableConceptToCcdaCode({ coding: [{ code: 'foo', system: 'urn:oid:9.9.9.9' }] });
+    expect(r4).toMatchObject({ '@_code': 'foo', '@_codeSystem': '9.9.9.9' });
+  });
+
+  describe('mapCcdaCodeToCodeableConcept nullFlavor handling', () => {
+    test('returns undefined for code with only nullFlavor', () => {
+      const result = mapCcdaCodeToCodeableConcept({
+        '@_nullFlavor': 'NA',
+      });
+      expect(result).toBeUndefined();
+    });
+
+    test('returns coding with just system when codeSystem present but no code or displayName', () => {
+      const result = mapCcdaCodeToCodeableConcept({
+        '@_nullFlavor': 'OTH',
+        '@_codeSystem': OID_SNOMED_CT_CODE_SYSTEM,
+      });
+      expect(result).toEqual({ coding: [{ system: SNOMED }] });
+    });
+
+    test('returns coding with display when displayName present', () => {
+      const result = mapCcdaCodeToCodeableConcept({
+        '@_nullFlavor': 'OTH',
+        '@_displayName': 'Some description',
+      });
+      expect(result).toEqual({ coding: [{ display: 'Some description' }], text: 'Some description' });
+    });
+
+    test('includes primary coding with just system when codeSystem present plus translations', () => {
+      const result = mapCcdaCodeToCodeableConcept({
+        '@_nullFlavor': 'OTH',
+        '@_codeSystem': OID_SNOMED_CT_CODE_SYSTEM,
+        translation: [
+          { '@_codeSystem': '2.16.840.1.113883.6.1', '@_code': 'trans1', '@_displayName': 'Translation 1' },
+        ],
+      });
+      expect(result).toBeDefined();
+      expect(result?.coding?.length).toBe(2);
+      expect(result?.coding?.[0]?.system).toBe(SNOMED);
+      expect(result?.coding?.[0]?.code).toBeUndefined();
+      expect(result?.coding?.[1]?.code).toBe('trans1');
+      expect(result?.coding?.[1]?.system).toBe(LOINC);
+    });
+
+    test('filters out translations with nullFlavor', () => {
+      const result = mapCcdaCodeToCodeableConcept({
+        '@_codeSystem': OID_SNOMED_CT_CODE_SYSTEM,
+        '@_code': 'primary',
+        '@_displayName': 'Primary',
+        translation: [
+          { '@_codeSystem': '2.16.840.1.113883.6.1', '@_code': 'trans1', '@_displayName': 'Translation 1' },
+          { '@_nullFlavor': 'NA' },
+          { '@_codeSystem': '2.16.840.1.113883.6.1', '@_code': 'trans2', '@_displayName': 'Translation 2' },
+        ],
+      });
+      expect(result).toBeDefined();
+      expect(result?.coding?.length).toBe(3);
+      expect(result?.coding?.[0]?.code).toBe('primary');
+      expect(result?.coding?.[1]?.code).toBe('trans1');
+      expect(result?.coding?.[2]?.code).toBe('trans2');
+    });
+  });
+});
+
+test('the Source of Payment Typology has its HL7 URI both ways (a policy type keeps its system)', () => {
+  expect(mapCcdaSystemToFhir('2.16.840.1.113883.3.221.5')).toBe('https://nahdo.org/sopt');
+  expect(mapFhirSystemToCcda('https://nahdo.org/sopt')).toBe('2.16.840.1.113883.3.221.5');
+});

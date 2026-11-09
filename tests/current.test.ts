@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import type { AllergyIntolerance, Endpoint, MedicationStatement, Observation } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Endpoint, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { currency, currencyContext } from '../src/current.ts';
 
 const T1 = '2026-11-01T00:00:00Z';
@@ -63,4 +63,11 @@ test('inactive and uncovered types are undefined', () => {
   expect(currency(med({ status: 'stopped', seen: T1, keys: ['a'] }), ctx)).toBeUndefined();
   const o: Observation = { resourceType: 'Observation', status: 'final', code: { text: 'x' } };
   expect(currency(o, ctx)).toBeUndefined();
+});
+
+test('a C-CDA planned MedicationRequest is not active; a portal one with the same intent still is', () => {
+  const req = (code: string) => ({ resourceType: 'MedicationRequest', status: 'active', intent: 'plan', subject: { reference: 'Patient/p' }, medicationCodeableConcept: { text: 'm' },
+    meta: { tag: [{ system: 'urn:ga-server:tag', code }] } }) as Resource;
+  expect(currency(req('src-ccda'), ctx)).toBeUndefined();
+  expect(currency(req('src-smart'), ctx)).toBe('current');
 });

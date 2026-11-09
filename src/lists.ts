@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Endpoint, Resource } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
-import { currencyContext, explain, smartKeys, type Ctx } from './current.ts';
+import { currencyContext, explain, isPlanned, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
 import { collect, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
@@ -15,7 +15,11 @@ type ListRow = { name?: string; status?: string; currency?: string; reason?: str
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
 export const concept = (c?: Any): string | undefined => c?.text ?? c?.coding?.find((x: Any) => x.display)?.display ?? c?.coding?.[0]?.code;
-const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'inactive'].indexOf(r.currency);
+const rank = (r: ListRow) => ['current', 'unconfirmed', undefined, 'none known', 'planned', 'inactive'].indexOf(r.currency);
+
+// A "no known allergies" statement (SNOMED situations, as hospitals' FHIR and GA's C-CDA import code it) is no allergy.
+const NO_KNOWN: Record<string, string> = { '716186003': 'No known allergies', '409137002': 'No known drug allergies', '429625007': 'No known food allergies', '428607008': 'No known environmental allergies' };
+const noKnown = (r: Any): string | undefined => r.code?.coding?.map((c: Any) => (c.system === 'http://snomed.info/sct' ? NO_KNOWN[c.code] : undefined)).find(Boolean);
 
 export const medMap = (all: Resource[]) => new Map(all.filter((r) => r.resourceType === 'Medication').map((m) => [`Medication/${m.id}`, m]));
 
@@ -46,15 +50,15 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     const e = explain(res, ctx);
     const status = r.status ?? r.clinicalStatus?.coding?.[0]?.code;
     // An allergy without a clinical status is still listed: leaving out a real allergy is the worse mistake.
-    const unstated = kind === 'allergies' && !status && !['refuted', 'entered-in-error'].includes(r.verificationStatus?.coding?.[0]?.code);
+    const unstated = kind === 'allergies' && !status && !r.verificationStatus?.coding?.some((c: Any) => ['refuted', 'entered-in-error'].includes(c.code));
     if (!e && !unstated && include !== 'all') return [];
     const keys = smartKeys(res);
     const tags = new Set(r.meta?.tag?.filter((t: Any) => t.system === TAG).map((t: Any) => t.code));
     const row: ListRow = {
       name: concept(r.medicationCodeableConcept) ?? concept(meds.get(r.medicationReference?.reference)?.code) ?? r.medicationReference?.display ?? concept(r.code),
       status: status ?? 'not stated',
-      currency: e?.currency ?? (unstated ? undefined : 'inactive'),
-      reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : undefined),
+      currency: e?.currency ?? (unstated ? undefined : isPlanned(res) ? 'planned' : 'inactive'),
+      reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : isPlanned(res) ? 'planned or proposed in a plan of treatment; not taken yet' : undefined),
       since: (r.effectiveDateTime ?? r.effectivePeriod?.start ?? r.authoredOn ?? r.onsetDateTime ?? r.onsetPeriod?.start ?? r.recordedDate ?? r.dateAsserted)?.slice(0, 10),
       source: keys.length
         ? `hospital portal ${keys.join(', ')}`
@@ -63,8 +67,16 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,
     };
+    // A "no known allergies" statement, active or with no clinical status, is no allergy
+    const none = kind === 'allergies' && (e || unstated) ? noKnown(r) : undefined;
+    if (none) Object.assign(row, { name: none, currency: 'none known', reason: 'a "no known allergies" statement in the record, not an allergy' });
+    // A refuted allergy is never current (isActive); with include "all" it reads as what it says
+    else if (kind === 'allergies' && r.verificationStatus?.coding?.some((c: Any) => c.code === 'refuted')) {
+      const nk = noKnown(r); // a withdrawn "no known allergies" statement says nothing about any substance
+      Object.assign(row, nk ? { name: `${nk} (refuted)`, reason: 'refuted: the record withdraws this "no known allergies" statement' } : { name: `Not allergic to ${row.name ?? 'the substance'}`, reason: 'refuted: the record says the person is not allergic' });
+    }
     const cc = kind === 'medications' ? medCode(res, meds).cc : r.code;
-    const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
+    const name = (none ?? concept(cc))?.toLowerCase().replace(/\s+/g, ' ').trim();
     const dupKeys = kind === 'medications' ? medKeys(cc, res) : name ? [`name:${name}`] : [];
     const coding = kind === 'medications' ? undefined : r.code?.coding?.find((x: Any) => x.system && x.code);
     return [{ row, keys: dupKeys, code: coding && `${coding.system}|${coding.code}` }];

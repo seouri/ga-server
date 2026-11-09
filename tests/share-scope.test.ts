@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
+import { convertCcdaLocal } from '../src/ccda.ts';
 import type { Patient, Resource } from '@medplum/fhirtypes';
 import { OperationOutcomeError, preconditionFailed, type MedplumClient } from '@medplum/core';
 import { COMPARTMENT_TYPES, dateOf, groupOf, inScope, loadScoped, newestEpicImport, scopedCache, selectScoped, storeNewestImport, trimPatient } from '../src/share/scope.ts';
@@ -46,6 +49,10 @@ test('dateOf takes the first present field, sliced to a day', () => {
   expect(dateOf(r({ resourceType: 'Observation', effectivePeriod: { start: '2024-03-05T10:00:00Z' }, issued: '2024-04-01T00:00:00Z' }))).toBe('2024-03-05');
   expect(dateOf(r({ resourceType: 'Encounter', period: { start: '2023-01-02' } }))).toBe('2023-01-02');
   expect(dateOf(r({ resourceType: 'Observation' }))).toBeUndefined();
+  // A planned medication with no author: placed by the start of its validity period.
+  expect(dateOf(r({ resourceType: 'MedicationRequest', dispenseRequest: { validityPeriod: { start: '2025-01-01' } } }))).toBe('2025-01-01');
+  expect(dateOf(r({ resourceType: 'MedicationDispense', whenHandedOver: '2025-02-03T09:00:00Z' }))).toBe('2025-02-03');
+  expect(dateOf(r({ resourceType: 'DocumentReference', context: { period: { start: '2025-04-05T10:00:00-05:00' } } }))).toBe('2025-04-05');
 });
 
 const archive = (system: string) => r({ resourceType: 'DocumentReference', identifier: [{ system, value: 'a' }], date: '2025-02-01' });
@@ -137,6 +144,22 @@ test('selectScoped follows support references only from in-scope records', () =>
   expect(out.refs.sort()).toEqual(['Medication/m1', 'Practitioner/pr1']);
   const all = selectScoped([note], share());
   expect(all.refs).toEqual(['Binary/00000000-0000-0000-0000-000000000001']);
+});
+
+test('C-CDA record kinds: Goal and CareTeam are compartment records, a PractitionerRole is followed as support, RelatedPerson never', () => {
+  expect(COMPARTMENT_TYPES).toEqual(expect.arrayContaining(['Goal', 'CareTeam', 'CarePlan']));
+  expect(COMPARTMENT_TYPES).not.toContain('RelatedPerson');
+  const team = r({ resourceType: 'CareTeam', ...inP, subject: { reference: 'Patient/p' }, participant: [{ member: { reference: 'PractitionerRole/pr3' } }] });
+  expect(selectScoped([team], share()).refs).toEqual(['PractitionerRole/pr3']);
+});
+
+test('payers become Coverage, never shared', () => {
+  const xml = readFileSync(join(import.meta.dirname, 'fixtures', 'ccda-epic-style.xml'), 'utf8');
+  const coverage = convertCcdaLocal(xml).resources.find((x) => x.resourceType === 'Coverage');
+  expect(coverage).toMatchObject({ identifier: [{ value: 'EX-POLICY-1' }], type: { coding: [{ code: 'PPO' }] } });
+  expect(COMPARTMENT_TYPES).not.toContain('Coverage');
+  const mine = r({ ...coverage, ...inP, beneficiary: { reference: 'Patient/p' } });
+  expect(selectScoped([mine], share()).resources).toEqual([]);
 });
 
 test("selectScoped drops records not in the share patient's compartment", () => {

@@ -17,6 +17,9 @@ test('kindOf covers each branch', () => {
   expect(kindOf(obs({ category: [{ coding: [{ code: 'laboratory' }] }] }))).toBe('lab results');
   expect(kindOf(obs({ meta: tag('extracted-by-llm') }))).toBe('lab results');
   expect(kindOf(obs())).toBe('lab results');
+  // Social history, an assessment, a reason for visit, and a panel that only groups its readings are not lab results.
+  for (const code of ['social-history', 'survey', '29299-5']) expect(kindOf(obs({ category: [{ coding: [{ code }] }] }))).toBe('other');
+  expect(kindOf(obs({ category: [{ coding: [{ code: 'vital-signs' }] }], hasMember: [{ reference: 'Observation/a' }] }))).toBe('other');
   const t = (resourceType: string) => kindOf({ resourceType } as Resource);
   expect([t('MedicationStatement'), t('MedicationRequest'), t('Condition'), t('AllergyIntolerance'), t('Immunization'), t('Procedure'), t('Encounter'), t('DocumentReference'), t('Communication'), t('FamilyMemberHistory')])
     .toEqual(['medications', 'medications', 'problems', 'allergies', 'vaccines', 'procedures', 'visits', 'notes and messages', 'notes and messages', 'other']);
@@ -91,6 +94,13 @@ test('medicationItems: new only when no earlier record shares the code or name',
   const named = (id: string, text: string, ext: object) => med(id, { medicationCodeableConcept: { text }, ...ext });
   const oldN = named('o', 'Drug  B', {}), newN = named('n', 'drug b', arrivedExt('2026-11-02T00:00:00Z'));
   expect(medicationItems([newN], [oldN, newN], since, '2026-11-07')).toEqual([]);
+});
+
+test('medicationItems: a drug not taken (a no-medications entry) or entered in error is never a new medication', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const recent = (id: string, status: string) => med(id, { status, medicationCodeableConcept: { coding: [{ system: RX, code: id }], text: id }, effectiveDateTime: '2026-11-02', ...arrivedExt('2026-11-02T00:00:00Z') });
+  const rs = [recent('1', 'not-taken'), recent('2', 'entered-in-error'), recent('3', 'active')];
+  expect(medicationItems(rs, rs, since, '2026-11-07').map((i) => i.title)).toEqual(['3']);
 });
 
 const item = (topic: string, status: string, extra: object = {}) => ({ topic, name: topic, kind: 'screening', status, importance: 'high', evidence: [], ...extra }) as Item;
@@ -315,4 +325,12 @@ test('new notes and messages are listed with their opening text; source files ar
     ['note or message', 'Progress note', '2026-10-01', 'DocumentReference/d1'],
   ]);
   expect(items[0].detail.text).toContain('repeat your lab panel in 6 weeks');
+});
+
+test('medicationItems: a C-CDA planned medication is not a new medication; a portal one is', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const req = (id: string, code: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', intent: 'plan', medicationCodeableConcept: { text: `Drug ${id}` },
+    meta: { tag: [{ system: 'urn:ga-server:tag', code }] }, ...arrivedExt('2026-11-02T00:00:00Z') }) as Resource;
+  const [ccda, smart] = [req('c', 'src-ccda'), req('s', 'src-smart')];
+  expect(medicationItems([ccda, smart], [ccda, smart], since, '2026-11-07').map((i) => i.id)).toEqual(['s']);
 });

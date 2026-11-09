@@ -4,9 +4,10 @@ import { basename, dirname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
 import { defaultConfigPath } from './config.ts';
+import { isPlanned } from './current.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { fit, groupLabs, highLow, labRow, loadObservations, searchAll } from './labs.ts';
+import { fit, groupLabs, highLow, isPanel, labRow, loadObservations, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medCode, medKeys, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
@@ -22,7 +23,10 @@ export function kindOf(r: Resource): Kind {
   switch (r.resourceType) {
     case 'Observation':
       if (hasTag(r, 'src-apple-health')) return 'Apple Health readings';
-      return r.category?.some((c) => c.coding?.some((x) => x.code === 'vital-signs')) ? 'vital signs' : 'lab results';
+      if (isPanel(r)) return 'other'; // its members are the readings
+      if (hasCategory(r, 'vital-signs')) return 'vital signs';
+      // Uncategorised (older PDF imports) and AI-read results count as labs; social history, assessments and the like do not.
+      return !r.category?.length || hasCategory(r, 'laboratory') || hasTag(r, 'extracted-by-llm') ? 'lab results' : 'other';
     case 'MedicationStatement': case 'MedicationRequest': return 'medications';
     case 'Condition': return 'problems';
     case 'AllergyIntolerance': return 'allergies';
@@ -127,7 +131,8 @@ export function medicationItems(arrived: Resource[], all: Resource[], since: str
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
     const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
-    if (!keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
+    // not-taken (e.g. a no-medications entry) and entered-in-error are no medication the person started
+    if (isPlanned(r) || status === 'not-taken' || status === 'entered-in-error' || !keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
     keys.forEach((k) => seen.add(k));
     const rx = keys.find((k) => k.startsWith('rx:'));
     return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date, detail: { rxnorm: rx?.slice(3), status }, source: sourceOf(r), id: r.id }];

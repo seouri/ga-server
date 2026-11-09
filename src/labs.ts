@@ -39,7 +39,8 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
   return {
     date: (o.effectiveDateTime ?? o.effectivePeriod?.start ?? o.effectiveInstant ?? o.issued)?.slice(0, 10),
     name: o.code?.text ?? c?.display ?? c?.code,
-    value: qty(o.valueQuantity) ?? o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.[0]?.display,
+    value: qty(o.valueQuantity) ?? o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.[0]?.display ?? o.valueDateTime
+      ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)),
     range,
     interpretation: o.interpretation?.[0]?.coding?.[0]?.code ?? o.interpretation?.[0]?.text,
     source: o.meta?.source ? basename(o.meta.source) : undefined,
@@ -47,6 +48,12 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
     id: o.id,
   };
 }
+
+// A panel that only groups its members (C-CDA vital signs organizer: hasMember, nothing of its own): its members are the rows.
+// A panel with its own value, interpretation, note, range or absent reason (a portal's) is a row.
+const OWN = ['component', 'interpretation', 'note', 'referenceRange', 'dataAbsentReason'] as const;
+export const isPanel = (o: Observation) =>
+  !!o.hasMember?.length && !OWN.some((k) => { const v = o[k]; return Array.isArray(v) ? v.length > 0 : v !== undefined; }) && !Object.keys(o).some((k) => k.startsWith('value'));
 
 export const validDay = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().startsWith(d);
 
@@ -188,7 +195,7 @@ export async function labResults(
   { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string | string[]; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
 ): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
   // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
-  const isLab = (o: Observation) => (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
+  const isLab = (o: Observation) => !isPanel(o) && (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const query = (n?: string) => {
     const q = new URLSearchParams([

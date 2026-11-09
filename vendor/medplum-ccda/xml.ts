@@ -1,0 +1,191 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
+import { XMLBuilder, XMLParser } from 'fast-xml-parser';
+import { XSI_URL } from './systems.ts';
+import type { Ccda } from './types.ts';
+
+const ARRAY_PATHS = [
+  'ClinicalDocument.participant',
+  'ClinicalDocument.recordTarget',
+  'ClinicalDocument.authenticator',
+  'encompassingEncounter.encounterParticipant',
+
+  // Always arrays
+  '.id',
+  '.templateId',
+  '.name',
+  '.addr',
+  '.telecom',
+  '.streetAddressLine',
+  '.author',
+  '.effectiveTime',
+
+  // Name
+  'name.given',
+  'name.suffix',
+  'name.prefix',
+
+  // Patient
+  'patient.raceCode',
+  'patient.sdtc:raceCode',
+  'patient.ethnicGroupCode',
+  'patient.languageCommunication',
+
+  // Document structure arrays
+  'component.structuredBody.component',
+  'component.structuredBody.component.section',
+  'component.section',
+  'component.observation',
+  'component.act',
+
+  'code.translation',
+  'value.translation',
+  'routeCode.translation',
+  'methodCode.translation',
+  'targetSiteCode.translation',
+  'approachSiteCode.translation',
+  'administrationUnitCode.translation',
+
+  'section.entry',
+
+  'entry.act',
+  'entry.organizer',
+  'entry.substanceAdministration',
+  'entry.observation',
+  'entry.encounter',
+  'entry.procedure',
+
+  'encounter.performer',
+  'encounter.participant',
+  'encounter.entryRelationship',
+
+  'entryRelationship.observation',
+  'entryRelationship.substanceAdministration',
+  'entryRelationship.act',
+  'entryRelationship.supply',
+
+  'organizer.component',
+  'organizer.performer',
+  'organizer.specimen',
+  'component.procedure',
+  'component.encounter',
+  'procedure.participant',
+  'procedure.entryRelationship',
+
+  'substanceAdministration.consumable.manufacturedProduct',
+  'substanceAdministration.entryRelationship',
+  'substanceAdministration.performer',
+  'supply.performer',
+
+  // Act paths
+  'act.entryRelationship',
+  'act.performer',
+  'act.participant',
+
+  // Observation paths
+  'observation.participant',
+  'observation.entryRelationship',
+  'observation.referenceRange',
+  'observation.interpretationCode',
+
+  'consumable.manufacturedProduct',
+  'product.manufacturedProduct',
+
+  'manufacturedProduct.manufacturedMaterial',
+  'manufacturedProduct.manufacturerOrganization',
+  'manufacturedProduct.manufacturedLabeledDrug',
+
+  'manufacturedMaterial.code',
+  'manufacturedMaterial.lotNumberText',
+];
+
+export function convertXmlToCcda(xml: string): Ccda {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    parseAttributeValue: false,
+    parseTagValue: false,
+    jPath: true,
+    isArray: (_tagName, jPath, _isLeafNode, _isAttribute) => ARRAY_PATHS.some((p) => (jPath as string).endsWith(p)),
+    // A title may hold markup (<content>, <sup>): kept as its raw inner XML, in order, for nodeToPlainText
+    stopNodes: ['*.title'],
+  });
+
+  const parsedData = parser.parse(markNameText(xml));
+  return parsedData.ClinicalDocument;
+}
+
+// The XML reader trims each text piece of mixed content and joins them with nothing ("Dr. <given>J</given> Smith" -> "Dr.Smith").
+// In a name with parts, each loose text piece is wrapped in NAME_TEXT_GAP so the gaps survive; readers turn them into spaces.
+export const NAME_TEXT_GAP = '\u001f';
+function markNameText(xml: string): string {
+  return xml.replace(/(<name\b(?:[^>]*[^/])?>)([\s\S]*?)(<\/name>)/g, (all, open: string, body: string, close: string) => {
+    if (!/<\w/.test(body)) {
+      return all; // text only (an organization's or place's name): unchanged
+    }
+    let depth = 0;
+    const out = body.replace(/<[^>]+>|[^<]+/g, (token) => {
+      if (token.startsWith('</')) {
+        depth--;
+      } else if (token.startsWith('<')) {
+        depth += token.endsWith('/>') || token.startsWith('<!') || token.startsWith('<?') ? 0 : 1;
+      } else if (depth === 0 && token.trim()) {
+        return `${NAME_TEXT_GAP}${token.trim()}${NAME_TEXT_GAP}`;
+      }
+      return token;
+    });
+    return open + out + close;
+  });
+}
+
+export function convertCcdaToXml(ccda: Ccda): string {
+  const builder = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    format: true,
+    suppressBooleanAttributes: false,
+    suppressEmptyNode: true,
+  });
+  return builder.build({
+    '?xml': { '@_version': '1.0', '@_encoding': 'UTF-8' },
+    '?xml-stylesheet': { '@_type': 'text/xsl', '@_href': 'CDA.xsl' },
+    ClinicalDocument: {
+      '@_xmlns': 'urn:hl7-org:v3',
+      '@_xmlns:xsi': XSI_URL,
+      '@_xmlns:voc': 'urn:hl7-org:v3/voc',
+      '@_xmlns:sdtc': 'urn:hl7-org:sdtc',
+      ...ccda,
+    },
+  });
+}
+
+export function parseXml(xml: string): any {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    parseAttributeValue: false,
+    parseTagValue: false,
+  });
+  return parser.parse(xml);
+}
+
+export function convertToCompactXml(obj: any): string {
+  if (!obj) {
+    return '';
+  }
+  if (typeof obj === 'string') {
+    return obj;
+  }
+  const builder = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    format: false,
+    suppressBooleanAttributes: false,
+    suppressEmptyNode: true,
+  });
+  const xml = builder.build(obj);
+  return xml
+    .split('\n')
+    .map((line: string) => line.trim())
+    .join('');
+}

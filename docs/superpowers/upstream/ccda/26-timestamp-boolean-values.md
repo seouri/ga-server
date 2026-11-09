@@ -1,0 +1,40 @@
+# 26. TS and BL observation values
+
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
+No existing issue or PR. Independent of the other drafts (sits next to medplum#11241's REAL case). Nothing filed.
+
+## Issue: @medplum/ccda: TS and BL observation values are dropped
+
+`processVitalsObservation` has no case for `xsi:type="TS"` (a point in time, such as a last menstrual period date) or `xsi:type="BL"` (a yes/no answer). Both fall to `console.warn('Unhandled observation value type: ...')` and the Observation gets no value, although FHIR R4 has `valueDateTime` and `valueBoolean`.
+
+Reproduction (synthetic):
+
+```xml
+<observation classCode="OBS" moodCode="EVN">
+  <templateId root="2.16.840.1.113883.10.20.22.4.2" extension="2015-08-01"/>
+  <id root="2.16.840.1.113883.19.5" extension="LAB-1"/>
+  <code code="8665-2" codeSystem="2.16.840.1.113883.6.1" displayName="Last menstrual period start date"/>
+  <statusCode code="completed"/>
+  <effectiveTime value="20240210"/>
+  <value xsi:type="TS" value="20240101"/>
+</observation>
+```
+
+Expected: `"valueDateTime": "2024-01-01"`; with `<value xsi:type="BL" value="true"/>` (or `TRUE`), `"valueBoolean": true`; with `nullFlavor="UNK"`, `"dataAbsentReason": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/data-absent-reason", "code": "unknown" }] }`; with a value that does not parse (`value="garbage"`, `value="20241345"`), no value rather than an invalid `dateTime`.
+
+## PR: fix(ccda): map TS and BL observation values
+
+- `ccda-to-fhir.ts`: `case 'TS'` and `case 'BL'` → exported `mapTimestampOrBooleanValue`: `valueDateTime` through `mapCcdaToFhirDateTime` when the timestamp is well formed and its result is a valid R4 dateTime; `valueBoolean` for `true`/`false` in any case; `dataAbsentReason` `unknown` when the value has no `@value` (a nullFlavor); nothing otherwise (exported so a caller can report the unread value).
+- `types.ts`: `CcdaTimestampOrBoolean` (`'@_xsi:type': 'TS' | 'BL'`) joins `CcdaValue`.
+- Test `observation-ts-bl.test.ts`: TS, BL true and BL false give those values without a warning; BL in another case parses; a malformed TS or BL gives no value; a nullFlavor gives `dataAbsentReason`.
+
+# GA-internal (do not post)
+
+## Filing metadata
+
+- PATCHES rows: 26, 35 (`vendor/medplum-ccda/PATCHES.md`)
+- Vendored commit(s): 4a40fb4, 44802b2 (`git log --oneline -- vendor/medplum-ccda`)
+- Existing external work: none
+- Depends on / builds on: drafts 16 (neighbouring case)
+- Status: issue-first. Nothing filed (the README has the approval process).

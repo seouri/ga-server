@@ -32,6 +32,50 @@ test('problems: problem list only; allergies: unstated status kept, refuted drop
   expect(listRows(all, ctx, 'allergies')).toEqual([{ name: 'Penicillin', status: 'not stated', reason: expect.stringMatching(/possibly active/), id: 'al' }]);
 });
 
+test('allergies: a "no known allergies" statement is one row saying so (currency none known), never an allergy', () => {
+  const nka = (id: string, text: string, src: string) => ({ resourceType: 'AllergyIntolerance', id, clinicalStatus: { coding: [{ code: 'active' }] }, verificationStatus: { coding: [{ code: 'confirmed' }] },
+    code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003', display: 'No known allergy' }], text }, meta: { source: src } }) as Resource;
+  const rs = [nka('n1', 'No known allergy', '/x/a.xml'), nka('n2', 'No Known Allergies', '/x/apple')];
+  const rows = listRows(rs, currencyContext(rs, []), 'allergies');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ name: 'No known allergies', currency: 'none known', reason: expect.stringMatching(/not an allergy/), ids: ['n1', 'n2'] });
+  // a real allergy is listed first and as itself
+  expect(listRows([...rs, ...all], currencyContext([...rs, ...all], []), 'allergies').map((r) => r.name)).toEqual(['Penicillin', 'No known allergies']);
+});
+
+test('a refuted allergy or problem (clinical status active, any source) is never current; with include all it reads "Not allergic to"', () => {
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const refuted = { verificationStatus: { coding: [{ code: 'refuted' }] }, clinicalStatus: { coding: [{ code: 'active' }] } };
+  const rs = [
+    { resourceType: 'AllergyIntolerance', id: 'e', code: { text: 'Penicillin' }, ...refuted, ...tag('src-ehi') },
+    { resourceType: 'AllergyIntolerance', id: 'c', code: { text: 'Peanut' }, ...refuted, ...tag('src-ccda') },
+    { resourceType: 'Condition', id: 'd', code: { text: 'Asthma' }, category: [{ coding: [{ code: 'problem-list-item' }] }], ...refuted },
+  ] as Resource[];
+  const c = currencyContext(rs, []);
+  expect(listRows(rs, c, 'allergies')).toEqual([]);
+  expect(listRows(rs, c, 'problems')).toEqual([]);
+  expect(listRows(rs, c, 'allergies', 'all').map((r) => `${r.name}|${r.currency}`).sort()).toEqual(['Not allergic to Peanut|inactive', 'Not allergic to Penicillin|inactive']);
+});
+
+test('a "no known allergies" statement with no clinical status is still that, never an allergy', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'n', code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003' }] } }] as Resource[];
+  expect(listRows(rs, currencyContext(rs, []), 'allergies')).toMatchObject([{ name: 'No known allergies', currency: 'none known' }]);
+});
+
+test('an allergy with no clinical status, refuted in any verification coding, is not listed', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'x', code: { text: 'Peanut' },
+    verificationStatus: { coding: [{ system: 'urn:local', code: 'no' }, { system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'refuted' }] } }] as Resource[];
+  expect(listRows(rs, currencyContext(rs, []), 'allergies')).toEqual([]);
+});
+
+test('a refuted "no known allergies" statement reads as that under include all, never "Not allergic to" a code', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'n', code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003' }] },
+    clinicalStatus: { coding: [{ code: 'active' }] }, verificationStatus: { coding: [{ code: 'refuted' }] } }] as Resource[];
+  const c = currencyContext(rs, []);
+  expect(listRows(rs, c, 'allergies')).toEqual([]);
+  expect(listRows(rs, c, 'allergies', 'all')).toMatchObject([{ name: 'No known allergies (refuted)', currency: 'inactive' }]);
+});
+
 test('one row per item across sources; best currency wins, inactive never hides active', () => {
   const stamp = (d: string) => ({ extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }] });
   const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '617310' }], text: 'atorvastatin 40 mg tablet' };
@@ -48,4 +92,15 @@ test('one row per item across sources; best currency wins, inactive never hides 
   const p = listRows([cond('1', '/a/one'), cond('2', '/a/two')] as Resource[], c, 'problems');
   expect(p).toHaveLength(1);
   expect(p[0]).toMatchObject({ source: 'one; two', ids: ['1', '2'] });
+});
+
+test('medications: a C-CDA planned or proposed MedicationRequest is not current (listed as planned with include all); a portal\'s is as before', () => {
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const req = (id: string, src: string, intent?: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', ...(intent && { intent }), medicationCodeableConcept: { text: `Drug ${id}` }, ...tag(src) });
+  const rows = [req('plan', 'src-ccda', 'plan'), req('prop', 'src-ccda', 'proposal'), req('order', 'src-ccda', 'order'), req('none', 'src-ccda'), req('portal', 'src-smart', 'plan')] as Resource[];
+  expect(listRows(rows, ctx, 'medications').map((r) => r.id).sort()).toEqual(['none', 'order', 'portal']);
+  const all = listRows(rows, ctx, 'medications', 'all');
+  expect(all.filter((r) => r.currency === 'planned').map((r) => r.id).sort()).toEqual(['plan', 'prop']);
+  expect(all.filter((r) => r.currency === 'planned').map((r) => r.reason)).toEqual([expect.stringMatching(/planned/), expect.stringMatching(/planned/)]);
+  expect(all.map((r) => r.currency).indexOf('planned')).toBeGreaterThan(all.map((r) => r.currency).lastIndexOf('current'));
 });

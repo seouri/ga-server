@@ -300,3 +300,116 @@ test('only a C-CDA import also looks for a patientless record by its stable iden
     expect(params.some((p) => 'subject:missing' in p), source.kind).toBe(expected);
   }
 });
+
+test('an id-less PractitionerRole whose practitioner is refused keys the same on every import: no duplicate', async () => {
+  await onStore(async ({ client }) => {
+    const p = await client.createResource({ resourceType: 'Patient' });
+    const batch = () => [
+      { resourceType: 'Practitioner', id: crypto.randomUUID(), notAField: true, name: [{ family: 'Refused' }] },
+      { resourceType: 'Practitioner', id: crypto.randomUUID(), name: [{ family: 'Kept' }] },
+    ].flatMap((doc) => [doc, { resourceType: 'PractitionerRole', id: crypto.randomUUID(), practitioner: { reference: `Practitioner/${doc.id}` } }]) as Resource[];
+    const first = await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    expect(first.invalid).toBeGreaterThan(0);
+    await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    await importResources(client, batch(), src('2024-01-01'), p.id as string, 'h');
+    // One role per practitioner, however many imports (converter ids change every time).
+    expect(await client.searchResources('PractitionerRole', {})).toHaveLength(first.invalid === 1 ? 2 : 1);
+  });
+});
+
+test('mergeCopies: nested fields merge, arrays union, the newer wins a leaf, a placeholder never wins, extensions union by url', async () => {
+  const { mergeCopies } = await import('../src/engine.ts');
+  const ext = (date: string, more: object[] = []) => [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }, ...more];
+  const older = { resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, period: { start: '2020-01-02', end: '2020-01-05' },
+    type: [{ text: 'a' }], extension: ext('2020-01-10', [{ url: 'urn:x:one', valueString: '1' }]) } as unknown as Resource;
+  const newer = { resourceType: 'Encounter', status: 'unknown', class: { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] },
+    period: { start: '2020-01-03' }, type: [{ text: 'b' }], extension: ext('2020-02-01', [{ url: 'urn:x:two', valueString: '2' }]) } as unknown as Resource;
+  for (const [a, b] of [[older, newer], [newer, older]]) {
+    const m = mergeCopies(a as never, b as never) as unknown as Record<string, unknown>;
+    expect(m.status).toBe('finished');
+    expect(m.class).toEqual({ code: 'AMB' });
+    expect(m.period).toEqual({ start: '2020-01-03', end: '2020-01-05' });
+    expect((m.type as unknown[]).length).toBe(2);
+    expect((m.extension as { url: string; valueDateTime?: string }[]).map((e) => e.url).sort()).toEqual(['urn:ga-server:ext:source-date', 'urn:x:one', 'urn:x:two']);
+    expect((m.extension as { url: string; valueDateTime?: string }[]).find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime).toBe('2020-02-01');
+  }
+});
+
+test('a hospital or PDF result that takes over an Apple copy is no longer tagged Apple: lab readers see it', async () => {
+  const { loadObservations } = await import('../src/labs.ts');
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const obs = (id: string) => ({ resourceType: 'Observation', id, status: 'final', subject: { reference: `Patient/${pid}` }, effectiveDateTime: '2024-03-01T08:00:00Z',
+      category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'laboratory' }] }], code: { coding: [{ system: 'http://loinc.org', code: '2345-7' }] },
+      valueQuantity: { value: 95, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' } }) as Resource;
+    await importResources(client, [{ ...obs('a1'), identifier: [{ system: 'urn:ga-server:id:apple-health', value: 'r1' }] } as Resource], { kind: 'apple-health', file: 'export.xml', date: '2024-03-02T00:00:00Z', writer: 'importer' }, pid, 'h1');
+    await importResources(client, [obs('e1')], { kind: 'pdf', file: '/x/lab.pdf', date: '2024-03-05T00:00:00Z', writer: 'importer' }, pid, 'h2');
+    const [o, ...more] = await client.searchResources('Observation', { subject: `Patient/${pid}` });
+    expect(more).toHaveLength(0);
+    expect(o.meta?.tag?.map((t) => t.code)).not.toContain('src-apple-health');
+    expect(await loadObservations(client, pid)).toHaveLength(1);
+  });
+});
+
+test("a portal update of an EHI record takes the portal's tag only: the newest Epic import stays the EHI one", async () => {
+  const { currencyContext } = await import('../src/current.ts');
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const EP = { system: 'urn:oid:1.2.840.114350.1.13.999.2.7.2.798268', value: 'E1' };
+    const med = { resourceType: 'MedicationRequest', id: 'a', status: 'active', intent: 'order', subject: { reference: `Patient/${pid}` }, medicationCodeableConcept: { text: 'amlodipine' } };
+    await importResources(client, [{ ...med, identifier: [{ system: 'urn:ga-server:id:ehi:org-999', value: 'ORDER_MED|1' }, EP] } as Resource],
+      { kind: 'ehi', file: '/x/ehi', org: 'org-999', date: '2024-01-01T00:00:00Z', writer: 'importer' } as SourceInfo, pid, 'h1');
+    const at = '2026-11-01T00:00:00Z';
+    await importResources(client, [{ ...med, id: 'p1', identifier: [{ system: 'urn:ga-server:id:smart:fhir.example', value: 'MedicationRequest/p1' }, EP], meta: { lastUpdated: '2026-10-01T00:00:00Z' }, dosageInstruction: [{ text: 'daily' }] } as Resource],
+      { kind: 'smart', file: 'https://fhir.example/api', date: at, writer: 'importer', dateOf: (r: Resource) => r.meta?.lastUpdated, seenAt: at } as SourceInfo, pid, 'h2');
+    const all = await client.searchResources('MedicationRequest', { subject: `Patient/${pid}` });
+    expect(all).toHaveLength(1);
+    expect(all[0].meta?.tag?.map((t) => t.code)).not.toContain('src-ehi');
+    expect(currencyContext(all, []).newestImport).toBeLessThan(Date.parse('2026-10-01'));
+  });
+});
+
+test('a portal update follows the portal: an extension it no longer sends goes, its data-absent value is written', async () => {
+  const ex = { resourceType: 'Encounter', id: 'srv-1', status: 'finished', class: { code: 'AMB' }, subject: { reference: 'Patient/p' },
+    identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Encounter/1' }],
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2026-10-01T00:00:00Z' }, { url: 'urn:x:portal', valueString: 'old' }] } as Resource;
+  const writes: Resource[] = [];
+  const client = {
+    searchResourcePages: async function* () {},
+    readResource: async () => ({ resourceType: 'Patient', id: 'p', identifier: [] }),
+    searchOne: async () => ex,
+    searchResources: async () => [],
+    updateResource: async (r: Resource) => (writes.push(r), r),
+  } as unknown as MedplumClient;
+  const incoming = { resourceType: 'Encounter', id: '1', status: 'finished', subject: { reference: 'Patient/p' }, identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Encounter/1' }],
+    class: { extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown' }] } } as Resource;
+  await importResources(client, [incoming], { kind: 'smart', file: 'https://h/fhir', date: '2026-11-02T00:00:00Z', writer: 'importer' }, 'p', '');
+  const w = writes.at(-1) as Resource & { class?: object; extension?: { url: string }[] };
+  expect(w.extension?.map((e) => e.url)).not.toContain('urn:x:portal');
+  expect(w.class).toEqual((incoming as Resource & { class?: object }).class);
+});
+
+test('an EHI or portal fill: an incoming field set to undefined is written as given (only C-CDA merges skip it)', () => {
+  const ex = { resourceType: 'Observation', status: 'final', referenceRange: [{ text: '1-2' }] } as Resource;
+  for (const kind of ['ehi', 'smart'] as const) {
+    const out = fillFrom(ex, { resourceType: 'Observation', status: 'final', referenceRange: undefined } as Resource, { kind } as SourceInfo);
+    expect(JSON.parse(JSON.stringify(out)).referenceRange).toBeUndefined();
+  }
+});
+
+test('mergeCopies: a CodeableConcept is one value (the newer wins whole); a less precise date never replaces a more precise one it contains', async () => {
+  const { mergeCopies } = await import('../src/engine.ts');
+  const sd = (d: string) => [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }];
+  const a = { resourceType: 'Encounter', serviceType: { coding: [{ system: 's', code: 'CARD' }], text: 'Cardiology' },
+    hospitalization: { dischargeDisposition: { coding: [{ system: 'd', code: 'home' }] } }, period: { start: '2022-01-01T09:00:00Z', end: '2022-01-01T10:00:00Z' }, extension: sd('2020-01-01') };
+  const b = { resourceType: 'Encounter', serviceType: { coding: [{ system: 's', code: 'NEURO' }], text: 'Neurology' },
+    hospitalization: { dischargeDisposition: { coding: [{ system: 'd', code: 'snf' }] } }, period: { start: '2022-01-01', end: '2022-01' }, extension: sd('2020-02-01') };
+  for (const [x, y] of [[a, b], [b, a]]) {
+    const m = mergeCopies(x as never, y as never) as unknown as Record<string, unknown>;
+    expect(m.serviceType).toEqual(b.serviceType);
+    expect(m.hospitalization).toEqual(b.hospitalization);
+    expect(m.period).toEqual(a.period);
+  }
+  // A different day is not contained: the newer wins as before.
+  expect((mergeCopies(a as never, { ...b, period: { start: '2022-01-02' } } as never) as unknown as { period: object }).period).toEqual({ start: '2022-01-02', end: '2022-01-01T10:00:00Z' });
+});

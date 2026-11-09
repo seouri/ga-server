@@ -124,3 +124,20 @@ test('sameDay reads the instant in the first value\'s offset; a date-only side c
   expect(sameDay('2024-03-01', '2024-03-01T22:00:00-05:00')).toBe(true);
   expect(sameDay('2024-03-01', '2024-03-02')).toBe(false);
 });
+
+test('a C-CDA Encounter keys on its id alone from the in-process converter; the Microsoft path keeps id + content hash', () => {
+  const enc = { resourceType: 'Encounter', identifier: [{ system: 'urn:oid:1.2', value: 'v1' }], status: 'finished' } as Resource;
+  expect(stableIdentifier(enc, { ...ccda, local: true }, 'h').value).toBe('Encounter|urn:oid:1.2|v1');
+  expect(stableIdentifier(enc, ccda, 'h').value).toMatch(/^Encounter\|urn:oid:1\.2\|v1\|[0-9a-f]{64}$/);
+});
+
+test('an id-less C-CDA entry keys alike in two documents that number its narrative anchor differently', () => {
+  const nka = (anchor: string) => ({ resourceType: 'AllergyIntolerance', patient: { reference: 'urn:uuid:p' }, clinicalStatus: { text: 'active' },
+    extension: [{ url: 'https://medplum.com/fhir/StructureDefinition/ccda-narrative-reference', valueString: anchor }] }) as Resource;
+  const key = (r: Resource) => stableIdentifier(r, { ...ccda, local: true }, 'h', 'pid').value;
+  expect(key(nka('#al1'))).toBe(key(nka('#allergy-7')));
+  // any other content still separates entries
+  expect(key(nka('#al1'))).not.toBe(key({ ...nka('#al1'), clinicalStatus: { text: 'resolved' } } as Resource));
+  // two id-less entries of one document named only by text (the library puts a referenced name in code.text) stay two
+  expect(key({ ...nka('#al1'), code: { text: 'Peanuts' } } as Resource)).not.toBe(key({ ...nka('#al2'), code: { text: 'Shellfish' } } as Resource));
+});

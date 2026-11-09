@@ -8,6 +8,8 @@ import { collapsePatients, walkReferences } from './patient.ts';
 import { newestEpicImport, storeNewestImport } from './share/scope.ts';
 
 export type Decision = 'create' | 'update' | 'skip' | 'conflict';
+// A C-CDA section, or part of one, the in-process converter turned into no record (src/ccda.ts convertCcdaLocal). Names and counts only.
+export type NotImported = { section: string; templateId?: string; entries: number; reason: string };
 export type ImportReport = {
   created: number;
   updated: number;
@@ -19,6 +21,7 @@ export type ImportReport = {
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
   unmapped: Unmapped[]; // in-scope terms of this batch with no standard code, for review (src/concept-apply.ts)
+  notImported?: NotImported[]; // C-CDA converted in process only: what became no record
 };
 const COUNTS = ['created', 'updated', 'skipped', 'merged', 'conflicts', 'possibleDuplicates', 'invalid'] as const;
 // Adds one importResources report into a running total (several files or batches of one import).
@@ -45,6 +48,9 @@ export const COMPARTMENT: Record<string, string> = {
   ...Object.fromEntries(['Immunization', 'AllergyIntolerance', 'FamilyMemberHistory', 'Device', 'EpisodeOfCare', 'Consent'].map((t) => [t, 'patient'])),
   Coverage: 'beneficiary',
 };
+// Epic's note id (HNO) under an org root: the id of a clinical note, the EHI export's HNO_INFO NOTE_ID.
+const EPIC_NOTE = /^urn:oid:1\.2\.840\.114350\.1\.13\.\d+\.2\.7\.2\.727879$/;
+const EPIC_ORG = /^urn:oid:1\.2\.840\.114350\.1\.13\.(\d+)\./;
 // Not patient data: linked globally. Any other type is not linked.
 const SHARED = new Set(['Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Medication']);
 // Medplum's validator reports 400 with structure/invariant issues carrying an element path. Generic 'invalid'
@@ -78,7 +84,7 @@ function body(r: R): unknown {
 // C-CDA bodies are complete documents and replace as before.
 const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
 // Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
-const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
+export const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
 const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
 type O = Record<string, unknown>;
 const isObj = (x: unknown): x is O => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -212,7 +218,7 @@ function topoSort(rs: Resource[]): Resource[] {
   return out;
 }
 
-const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
+export const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
 
 // R19: coded values compare by their first coding (system|code); a coding-less concept never matches.
 const firstCoding = (o: Observation) => {
@@ -226,6 +232,66 @@ export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueCodeableConcept && b.valueCodeableConcept) return !!firstCoding(a) && firstCoding(a) === firstCoding(b);
   if (a.valueBoolean !== undefined || b.valueBoolean !== undefined) return a.valueBoolean === b.valueBoolean;
   return a.valueString !== undefined && a.valueString === b.valueString;
+}
+
+// Copies of one record from the in-process converter: a visit (one Encounter per visit id), or an id-less record keyed by its
+// content (references aside, so a second copy may link elsewhere: a collection procedure reporting in two panels). The stored
+// record and the incoming copy merge field by field, whatever their dates: a field only one holds is kept, arrays are unioned (equal elements once), and where both hold a
+// single value the newer source wins. A later document that says less never wipes what a fuller one added. Identifiers are
+// unionUpdate's; meta and GA's bookkeeping extensions are picked below.
+// keepExisting: the stored record is another source's (EHI, portal) that a C-CDA copy links to: its values win every leaf.
+export function mergeCopies(existing: R, incoming: R, keepExisting = false): R {
+  const newer = !keepExisting && (!srcDate(existing) || !srcDate(incoming) || Date.parse(srcDate(incoming) as string) > Date.parse(srcDate(existing) as string));
+  const out = mergeValue(existing, incoming, newer, '') as O;
+  // Extensions by url: a source's own extensions are unioned (the newer wins one url); GA's bookkeeping follows its rules: the
+  // newer copy's source date and last-seen, and the stored arrival and possible-duplicate links (unionUpdate re-adds them).
+  const book = new Set([SRC_DATE, LAST_SEEN, ARRIVED, DUP_OF]);
+  const byUrl = new Map<string, Extension>();
+  for (const e of [...(newer ? [] : incoming.extension ?? []), ...(existing.extension ?? []), ...(newer ? incoming.extension ?? [] : [])]) {
+    if (!book.has(e.url)) byUrl.set(e.url, e);
+  }
+  const ga = ((newer ? incoming : existing).extension ?? []).filter((e) => e.url === SRC_DATE || e.url === LAST_SEEN);
+  out.extension = [...byUrl.values(), ...ga];
+  // meta is never merged: another source's visit keeps its own tags and meta.source (the currency rule and migrate read them).
+  out.meta = (keepExisting || !newer ? existing : incoming).meta;
+  return out as unknown as R;
+}
+
+// A converter placeholder (status unknown, a data-absent value) never wins over a real value.
+export const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
+const placeholderValue = (k: string, v: unknown) =>
+  (k === 'status' && v === 'unknown') ||
+  (!!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every((x) => x === 'extension') &&
+    ((v as O).extension as Extension[] | undefined)?.every((e) => e.url === DATA_ABSENT) === true);
+// A Coding, CodeableConcept, Quantity or Reference is one value (its parts belong together); other objects (a period) merge field by field.
+const codeable = (v: O) => ('coding' in v || 'text' in v) && Object.keys(v).every((x) => ['coding', 'text', 'id', 'extension'].includes(x));
+const atomic = (v: O) => 'code' in v || 'system' in v || 'reference' in v || 'value' in v || codeable(v);
+const DATE = /^\d{4}(-\d\d(-\d\d(T.+)?)?)?$/;
+// Of two dates where one contains the other (the same day, month or year), the more precise.
+const precise = (a: unknown, b: unknown) =>
+  typeof a === 'string' && typeof b === 'string' && DATE.test(a) && DATE.test(b) ? (a.startsWith(b) ? a : b.startsWith(a) ? b : undefined) : undefined;
+// Field by field: a field only one copy has is kept, arrays are unioned (the stored order first, equal elements once), plain
+// objects merge recursively, and where both hold a leaf the newer source wins, except that a placeholder never wins.
+function mergeValue(a: unknown, b: unknown, newer: boolean, k: string): unknown {
+  if (b === undefined) return a;
+  if (a === undefined) return b;
+  if (placeholderValue(k, b) && !placeholderValue(k, a)) return a;
+  if (placeholderValue(k, a) && !placeholderValue(k, b)) return b;
+  const p = precise(a, b);
+  if (p) return p;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (k === 'identifier') return b; // unionUpdate unions the stored and incoming identifiers
+    if (k === 'extension') return a; // mergeCopies' own
+    const seen = new Set(a.map((e) => JSON.stringify(e, sorted)));
+    return [...a, ...b.filter((e) => !seen.has(JSON.stringify(e, sorted)))];
+  }
+  const plain = (v: unknown): v is O => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (plain(a) && plain(b) && (k === '' || (!atomic(a) && !atomic(b)))) {
+    const out: O = { ...a };
+    for (const [key, v] of Object.entries(b)) out[key] = mergeValue(a[key], v, newer, key);
+    return out;
+  }
+  return newer ? b : a;
 }
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
@@ -244,6 +310,38 @@ async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promis
   } as Resource);
 }
 
+// One batch as importResources keys it: Patients collapsed, records in reference order, each record's stable identifier value
+// (keyOf), the values held by two different records (colliding: each gets its content hash), and idOf, the value it is stored
+// under (C-CDA; src/ccda-replace.ts finds a document's records by it).
+export function batchKeys(resources: Resource[], source: SourceInfo, fileHash: string, patientId: string) {
+  const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
+  const ordered = topoSort(collapsed);
+  // Same stable identifier twice in one batch with different content would make the second a silent skip:
+  // give every member of such a group source id + content hash (deterministic, order-independent).
+  // A reference in the batch reads as its target's key (C-CDA links: identity.ts), computed from the batch as the source sent it.
+  const bySource = new Map(ordered.flatMap((r) => sourceKeys(r).map((k) => [k, r] as const)));
+  const keys = new Map<Resource, string>();
+  const resolve = (ref: string): string | undefined => {
+    const t = bySource.get(ref);
+    return t && keyOf(t);
+  };
+  const keyOf = (r: Resource): string => {
+    if (!keys.has(r)) keys.set(r, stableIdentifier(r, source, fileHash, patientId, resolve).value as string);
+    return keys.get(r) as string;
+  };
+  const groups = new Map<string, Set<string>>();
+  for (const r of ordered) {
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, new Set());
+    groups.get(k)?.add(contentHash(r, patientId));
+  }
+  // A visit on the in-process path is one record per id: its copies in one batch merge (mergeCopies), never split by content.
+  const oneVisit = (r: Resource) => source.kind === 'ccda' && !!source.local && r.resourceType === 'Encounter';
+  const colliding = new Set([...groups].filter(([k, h]) => h.size > 1 && !ordered.some((r) => oneVisit(r) && keyOf(r) === k)).map(([k]) => k));
+  const idOf = (r: Resource): string => (colliding.has(keyOf(r)) ? `${keyOf(r)}|${contentHash(r, patientId)}` : keyOf(r));
+  return { ordered, patientIdentifiers, keyOf, colliding, idOf };
+}
+
 export async function importResources(
   client: MedplumClient,
   resources: Resource[],
@@ -259,8 +357,7 @@ export async function importResources(
   };
   // Stamped at each create, not once per import: a whats_new markSeen during a long import must not hide its later records.
   const arrived = (): Extension => ({ url: ARRIVED, valueInstant: new Date().toISOString() });
-  const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
-  const ordered = topoSort(collapsed); // throws before any write
+  const { ordered, patientIdentifiers, keyOf, colliding } = batchKeys(resources, source, fileHash, patientId); // throws before any write
   // The agent wrote this record (or it is protected): smart fill-only writes leave it alone (last-seen still advances).
   const agentOrShielded = (r: Resource): boolean => shielded(r) || hasTag(r, 'writer-agent');
   // Writes a kept record when it changed or its last-seen is behind this import's seenAt (that extension only).
@@ -295,22 +392,40 @@ export async function importResources(
   const filled = (['birthDate', 'gender', 'name'] as const).some((f) => next[f] !== patient[f]);
   if (missing.length || filled) await client.updateResource<Patient>({ ...next, identifier: [...(patient.identifier ?? []), ...missing] });
 
-  // Same stable identifier twice in one batch with different content would make the second a silent skip:
-  // give every member of such a group source id + content hash (deterministic, order-independent).
-  const keyOf = (r: Resource) => stableIdentifier(r, source, fileHash, patientId).value as string;
-  const groups = new Map<string, Set<string>>();
-  for (const r of ordered) {
-    const k = keyOf(r);
-    if (!groups.has(k)) groups.set(k, new Set());
-    groups.get(k)?.add(contentHash(r, patientId));
-  }
-  const colliding = new Set([...groups].filter(([, h]) => h.size > 1).map(([k]) => k));
   for (const r of ordered) if (colliding.has(keyOf(r))) console.error(`source id collision: ${r.resourceType}`);
 
   // Link lookup by Epic id. A candidate that already has an identifier in the incoming stable system is a different
   // record from the same kind of source (Epic reuses entry ids; one batch must not merge into itself). One remaining
   // candidate is a link; several, or only same-source ones, are possible duplicates (C-CDA excepted: milestone 1 already
   // tells same-id entries apart by content, and real documents reuse ids across whole groups of entries).
+  // The EHI note systems (one per export) of the patient, each with the Epic org numbers its export's records carry (EHI visits
+  // hold Epic CSN ids under the org root), read once per import when a note carries an Epic note id.
+  let noteSystems: Promise<Map<string, Set<string>>> | undefined;
+  const orgOf = (ids: Identifier[]) => ids.map((i) => EPIC_ORG.exec(i.system ?? '')?.[1]).filter((n): n is string => !!n);
+  const readNoteSystems = async () => {
+    const systems = new Map<string, Set<string>>();
+    for await (const page of client.searchResourcePages('DocumentReference', { subject: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' })) {
+      for (const d of page) for (const i of d.identifier ?? []) if (i.system?.startsWith('urn:ga-server:id:ehi:') && i.value?.startsWith('HNO_INFO|')) systems.set(i.system, new Set());
+    }
+    for (const [system, orgs] of systems) {
+      for (const e of await client.searchResources('Encounter', { identifier: `${system}|`, subject: `Patient/${patientId}`, _count: '100' }, { cache: 'no-cache' })) {
+        for (const n of orgOf(e.identifier ?? [])) orgs.add(n);
+      }
+    }
+    return systems;
+  };
+  // EHI notes (known by their EHI identifier: another source's update drops the src-ehi tag) with one of these Epic note ids,
+  // from an export of the same Epic org only (an unknown org never links).
+  const ehiNotes = async (ids: Identifier[]): Promise<R[]> => {
+    if (!ids.length) return [];
+    noteSystems ??= readNoteSystems();
+    const out: R[] = [];
+    for (const [system, orgs] of await noteSystems) for (const i of ids) {
+      if (!orgOf([i]).some((n) => orgs.has(n))) continue;
+      out.push(...((await client.searchResources('DocumentReference', { identifier: `${system}|HNO_INFO|${i.value}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' })) as R[]));
+    }
+    return out;
+  };
   const linkHit = async (incoming: R, ident: Identifier): Promise<{ hit?: R; dups: R[] }> => {
     const type = incoming.resourceType;
     const field = COMPARTMENT[type];
@@ -323,8 +438,21 @@ export async function importResources(
       return { dups: [] };
     }
     const { found: all, free: open } = await linkCandidates(client, type, epic, patientId, ident.system as string);
-    const found = all as R[];
-    const free = open as R[];
+    // Note linking by Epic note id is C-CDA <-> EHI only: a portal note stays apart from EHI and C-CDA notes (a merge would replace the text).
+    const fileNote = (x: string) => x.startsWith('urn:ga-server:id:ehi:') || x === 'urn:ga-server:id:ccda';
+    const other = source.kind === 'smart' ? fileNote : source.kind === 'ehi' || source.kind === 'ccda' ? (x: string) => x.startsWith('urn:ga-server:id:smart:') : undefined;
+    const allowed = (c: Resource) => type !== 'DocumentReference' || !other || !idList(c as R).some((x) => other(x.system ?? ''));
+    const found = (all as R[]).filter(allowed);
+    const free = (open as R[]).filter(allowed);
+    // A note's Epic id (HNO note id) is the NOTE_ID of the EHI note GA may already hold (identifier <ehi system>|HNO_INFO|<id>,
+    // with no Epic-OID identifier of its own): such a note is a candidate too.
+    if (type === 'DocumentReference' && source.kind === 'ccda') {
+      for (const n of await ehiNotes(epic.filter((i) => EPIC_NOTE.test(i.system ?? '')))) {
+        if (found.some((f) => f.id === n.id)) continue;
+        found.push(n);
+        if (!idList(n).some((x) => x.system === ident.system)) free.push(n);
+      }
+    }
     if (free.length === 1) return { hit: free[0], dups: [] };
     if (free.length) return { dups: free };
     return { dups: source.kind === 'ccda' ? [] : found };
@@ -359,7 +487,8 @@ export async function importResources(
       report.invalid++;
       continue;
     }
-    let ident = stableIdentifier(r, source, fileHash, patientId);
+    // C-CDA keys come from the record as the source sent it (its links resolve in the batch); they ignore what the rewrite changes.
+    let ident = source.kind === 'ccda' ? { ...stableIdentifier(r, source, fileHash, patientId), value: keyOf(src) } : stableIdentifier(r, source, fileHash, patientId);
     if (!ident.value) throw new GaError(`${r.resourceType} has no source id`);
     if (colliding.has(keyOf(src))) ident = { ...ident, value: `${ident.value}|${contentHash(r, patientId)}` };
     const incoming = stamp(r, source, ident) as R;
@@ -435,7 +564,28 @@ export async function importResources(
     const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
     try {
       let target: Resource;
-      if (existing) {
+      const idless = ![(src as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0]?.value;
+      // A copy of this source's own record (found by its C-CDA key, or carrying one), or a visit it links to by Epic id. A visit
+      // another source wrote (EHI, portal) keeps its values for this and every later document; the copy adds what it lacks.
+      const own = !!existing && (existing === byStable || idList(existing).some((i) => i.system === 'urn:ga-server:id:ccda'));
+      const copies = !!existing && source.kind === 'ccda' && !!source.local && (type === 'Encounter' || (own && idless)) && !agentOrShielded(existing as R);
+      if (copies) {
+        // Another source's visit keeps its values only while that source wrote it last: a Microsoft-era C-CDA body on an EHI visit
+        // (src-ccda tag, ga ccda replace) takes the new path's values.
+        const theirs = idList(existing as R).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== 'urn:ga-server:id:ccda') && !hasTag(existing as R, 'src-ccda');
+        const merged = mergeCopies(existing as R, coded, theirs);
+        const body = (x: R) => JSON.stringify({ ...x, id: undefined, meta: undefined, extension: undefined, identifier: undefined }, sorted);
+        const have = new Set(idList(existing as R).map(idKey));
+        const ids = idList(incoming).some((i) => !have.has(idKey(i)));
+        if (body(merged) !== body(existing as R) || ids) {
+          target = await unionUpdate(client, existing as R, merged);
+          report.updated++;
+        } else {
+          await keep(existing as R, false);
+          target = existing as Resource;
+          report.skipped++;
+        }
+      } else if (existing) {
         target = existing;
         const filled = fillFrom(existing, coded, source);
         const d = decide(existing, filled);
