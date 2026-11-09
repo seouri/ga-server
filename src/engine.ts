@@ -21,7 +21,7 @@ export type ImportReport = {
   seen?: number; // kept records whose last-seen advanced (only when SourceInfo.seenAt is set)
   byType?: Record<string, TypeCounts>; // only for kind 'smart'
   unmapped: Unmapped[]; // in-scope terms of this batch with no standard code, for review (src/concept-apply.ts)
-  notImported?: NotImported[]; // C-CDA converted in process only: what became no record
+  notImported?: NotImported[]; // C-CDA only: what became no record
 };
 const COUNTS = ['created', 'updated', 'skipped', 'merged', 'conflicts', 'possibleDuplicates', 'invalid'] as const;
 // Adds one importResources report into a running total (several files or batches of one import).
@@ -84,7 +84,7 @@ function body(r: R): unknown {
 // C-CDA bodies are complete documents and replace as before.
 const BOOKKEEPING = new Set(['id', 'meta', 'identifier', 'extension', 'text']);
 // Choice-type element base (onsetDateTime -> onset), so an incoming onsetX replaces any existing onsetY.
-export const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
+const choiceBase = (k: string) => k.replace(/(DateTime|Date|Period|Age|Range|String|Quantity|CodeableConcept|Reference|Boolean|Integer|Instant|Time|Timing|Ratio|SampledData|Attachment|Duration)$/, '');
 const code0 = (c: unknown) => (c as { coding?: { code?: string }[] } | undefined)?.coding?.[0]?.code;
 type O = Record<string, unknown>;
 const isObj = (x: unknown): x is O => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -218,7 +218,7 @@ function topoSort(rs: Resource[]): Resource[] {
   return out;
 }
 
-export const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
+const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
 
 // R19: coded values compare by their first coding (system|code); a coding-less concept never matches.
 const firstCoding = (o: Observation) => {
@@ -258,7 +258,7 @@ export function mergeCopies(existing: R, incoming: R, keepExisting = false): R {
 }
 
 // A converter placeholder (status unknown, a data-absent value) never wins over a real value.
-export const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
+const DATA_ABSENT = 'http://hl7.org/fhir/StructureDefinition/data-absent-reason';
 const placeholderValue = (k: string, v: unknown) =>
   (k === 'status' && v === 'unknown') ||
   (!!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).every((x) => x === 'extension') &&
@@ -311,9 +311,8 @@ async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promis
 }
 
 // One batch as importResources keys it: Patients collapsed, records in reference order, each record's stable identifier value
-// (keyOf), the values held by two different records (colliding: each gets its content hash), and idOf, the value it is stored
-// under (C-CDA; src/ccda-replace.ts finds a document's records by it).
-export function batchKeys(resources: Resource[], source: SourceInfo, fileHash: string, patientId: string) {
+// (keyOf) and the values held by two different records (colliding: each gets its content hash).
+function batchKeys(resources: Resource[], source: SourceInfo, fileHash: string, patientId: string) {
   const { resources: collapsed, patientIdentifiers } = collapsePatients(resources, patientId);
   const ordered = topoSort(collapsed);
   // Same stable identifier twice in one batch with different content would make the second a silent skip:
@@ -335,11 +334,10 @@ export function batchKeys(resources: Resource[], source: SourceInfo, fileHash: s
     if (!groups.has(k)) groups.set(k, new Set());
     groups.get(k)?.add(contentHash(r, patientId));
   }
-  // A visit on the in-process path is one record per id: its copies in one batch merge (mergeCopies), never split by content.
-  const oneVisit = (r: Resource) => source.kind === 'ccda' && !!source.local && r.resourceType === 'Encounter';
+  // A C-CDA visit is one record per id: its copies in one batch merge (mergeCopies), never split by content.
+  const oneVisit = (r: Resource) => source.kind === 'ccda' && r.resourceType === 'Encounter';
   const colliding = new Set([...groups].filter(([k, h]) => h.size > 1 && !ordered.some((r) => oneVisit(r) && keyOf(r) === k)).map(([k]) => k));
-  const idOf = (r: Resource): string => (colliding.has(keyOf(r)) ? `${keyOf(r)}|${contentHash(r, patientId)}` : keyOf(r));
-  return { ordered, patientIdentifiers, keyOf, colliding, idOf };
+  return { ordered, patientIdentifiers, keyOf, colliding };
 }
 
 export async function importResources(
@@ -568,10 +566,10 @@ export async function importResources(
       // A copy of this source's own record (found by its C-CDA key, or carrying one), or a visit it links to by Epic id. A visit
       // another source wrote (EHI, portal) keeps its values for this and every later document; the copy adds what it lacks.
       const own = !!existing && (existing === byStable || idList(existing).some((i) => i.system === 'urn:ga-server:id:ccda'));
-      const copies = !!existing && source.kind === 'ccda' && !!source.local && (type === 'Encounter' || (own && idless)) && !agentOrShielded(existing as R);
+      const copies = !!existing && source.kind === 'ccda' && (type === 'Encounter' || (own && idless)) && !agentOrShielded(existing as R);
       if (copies) {
-        // Another source's visit keeps its values only while that source wrote it last: a Microsoft-era C-CDA body on an EHI visit
-        // (src-ccda tag, ga ccda replace) takes the new path's values.
+        // Another source's visit keeps its values only while that source wrote it last: a C-CDA body on an EHI visit (src-ccda tag)
+        // takes the new document's values.
         const theirs = idList(existing as R).some((i) => i.system?.startsWith('urn:ga-server:id:') && i.system !== 'urn:ga-server:id:ccda') && !hasTag(existing as R, 'src-ccda');
         const merged = mergeCopies(existing as R, coded, theirs);
         const body = (x: R) => JSON.stringify({ ...x, id: undefined, meta: undefined, extension: undefined, identifier: undefined }, sorted);

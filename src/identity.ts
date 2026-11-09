@@ -12,7 +12,6 @@ export type SourceInfo = {
   dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
   seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
-  local?: boolean; // C-CDA converted in process (@medplum/ccda): an Encounter is one per source id (ccdaKey); copies merge (engine mergeCopies)
 };
 // On the Patient: the newest source date of any C-CDA or EHI import, so list reads need not scan every Epic record (src/share/scope.ts newestEpicImport).
 export const NEWEST_IMPORT = 'urn:ga-server:ext:newest-epic-import';
@@ -66,8 +65,8 @@ export const sorted = (_k: string, v: unknown) =>
 // Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
 // refs: a reference read as its target's own key (for a record that is its links); without it references are left out.
 // shortcut: entries of one document that differ only in the narrative row their anchor points at now key alike (one record):
-// id-less entries, an entry whose only name is its own text reference (not resolved into code.text), and Observations or
-// Encounters sharing a source id (keyed id + content hash). None in the owner's 8 documents (Task 12). Upgrade, if that
+// id-less entries, an entry whose only name is its own text reference (not resolved into code.text), and Observations
+// sharing a source id (keyed id + content hash). None in the owner's 8 documents (Task 12). Upgrade, if that
 // case appears: key on the narrative text the anchor resolves to (convertCcdaLocal has the XML).
 const NARRATIVE_REF = 'https://medplum.com/fhir/StructureDefinition/ccda-narrative-reference';
 export function contentHash(r: Resource, patientId = '', refs?: (ref: string) => string | undefined): string {
@@ -80,23 +79,19 @@ export function contentHash(r: Resource, patientId = '', refs?: (ref: string) =>
   })}`);
 }
 
-// Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
-// diagnostic: 32 Observation and 6 Encounter groups), so for these types the source id alone is not unique.
-const SRC_ID_NOT_UNIQUE = new Set(['Observation', 'Encounter']);
-
 const LINKED = new Set(['PractitionerRole', 'CareTeam']);
 // Converter ids change between documents; the C-CDA entry <id> the converter copies into identifier[0] doesn't.
-function ccdaKey(r: Resource, patientId: string, resolve?: (ref: string) => string | undefined, local = false): string {
+function ccdaKey(r: Resource, patientId: string, resolve?: (ref: string) => string | undefined): string {
   const src = [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0];
   // A PractitionerRole or CareTeam is mostly its links (practitioner, organization, members): without them id-less ones hash
   // alike and merge into one. Each link reads as its target's own source key (resolve: the batch's converter id -> that key),
   // never a stored or converter id, so the key holds across imports even when a target is refused.
   if (!src?.value) return `${r.resourceType}|${contentHash(r, patientId, LINKED.has(r.resourceType) ? (resolve ?? (() => undefined)) : undefined)}`;
   const key = `${r.resourceType}|${src.system ?? ''}|${src.value}`;
-  // The in-process converter makes one Encounter per visit id in a document (an entry, the header's visit and a panel's visit
-  // merge), so a visit is keyed by its id alone and documents merge into it (engine mergeCopies). The Microsoft path keeps its keys.
-  if (local && r.resourceType === 'Encounter') return key;
-  return SRC_ID_NOT_UNIQUE.has(r.resourceType) ? `${key}|${contentHash(r, patientId)}` : key;
+  // Epic docs reuse one entry <id> for several different Observations within a single document, so an Observation's source id
+  // alone is not unique. A visit is: the converter makes one Encounter per visit id in a document (an entry, the header's visit
+  // and a panel's visit merge), so it is keyed by its id alone and documents merge into it (engine mergeCopies).
+  return r.resourceType === 'Observation' ? `${key}|${contentHash(r, patientId)}` : key;
 }
 
 // Epic OIDs (any org root): the Epic-native ids C-CDA and EHI records share, used to link records across sources.
@@ -117,7 +112,7 @@ export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, p
     if (!id?.system || !own.ok(id.system) || !id.value) throw new GaError(`${r.resourceType} has no ${own.name} identifier`);
     return { system: id.system, value: id.value };
   }
-  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId, resolve, s.local) };
+  if (s.kind === 'ccda') return { system: 'urn:ga-server:id:ccda', value: ccdaKey(r, patientId, resolve) };
   let key: string;
   if (r.resourceType === 'Observation') {
     const o = r as Observation;
