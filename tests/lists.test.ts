@@ -62,6 +62,20 @@ test('a "no known allergies" statement with no clinical status is still that, ne
   expect(listRows(rs, currencyContext(rs, []), 'allergies')).toMatchObject([{ name: 'No known allergies', currency: 'none known' }]);
 });
 
+test('an allergy with no clinical status, refuted in any verification coding, is not listed', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'x', code: { text: 'Peanut' },
+    verificationStatus: { coding: [{ system: 'urn:local', code: 'no' }, { system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification', code: 'refuted' }] } }] as Resource[];
+  expect(listRows(rs, currencyContext(rs, []), 'allergies')).toEqual([]);
+});
+
+test('a refuted "no known allergies" statement reads as that under include all, never "Not allergic to" a code', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'n', code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003' }] },
+    clinicalStatus: { coding: [{ code: 'active' }] }, verificationStatus: { coding: [{ code: 'refuted' }] } }] as Resource[];
+  const c = currencyContext(rs, []);
+  expect(listRows(rs, c, 'allergies')).toEqual([]);
+  expect(listRows(rs, c, 'allergies', 'all')).toMatchObject([{ name: 'No known allergies (refuted)', currency: 'inactive' }]);
+});
+
 test('one row per item across sources; best currency wins, inactive never hides active', () => {
   const stamp = (d: string) => ({ extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }] });
   const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '617310' }], text: 'atorvastatin 40 mg tablet' };

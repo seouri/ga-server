@@ -50,7 +50,7 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     const e = explain(res, ctx);
     const status = r.status ?? r.clinicalStatus?.coding?.[0]?.code;
     // An allergy without a clinical status is still listed: leaving out a real allergy is the worse mistake.
-    const unstated = kind === 'allergies' && !status && !['refuted', 'entered-in-error'].includes(r.verificationStatus?.coding?.[0]?.code);
+    const unstated = kind === 'allergies' && !status && !r.verificationStatus?.coding?.some((c: Any) => ['refuted', 'entered-in-error'].includes(c.code));
     if (!e && !unstated && include !== 'all') return [];
     const keys = smartKeys(res);
     const tags = new Set(r.meta?.tag?.filter((t: Any) => t.system === TAG).map((t: Any) => t.code));
@@ -71,7 +71,10 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     const none = kind === 'allergies' && (e || unstated) ? noKnown(r) : undefined;
     if (none) Object.assign(row, { name: none, currency: 'none known', reason: 'a "no known allergies" statement in the record, not an allergy' });
     // A refuted allergy is never current (isActive); with include "all" it reads as what it says
-    else if (kind === 'allergies' && r.verificationStatus?.coding?.some((c: Any) => c.code === 'refuted')) Object.assign(row, { name: `Not allergic to ${row.name ?? 'the substance'}`, reason: 'refuted: the record says the person is not allergic' });
+    else if (kind === 'allergies' && r.verificationStatus?.coding?.some((c: Any) => c.code === 'refuted')) {
+      const nk = noKnown(r); // a withdrawn "no known allergies" statement says nothing about any substance
+      Object.assign(row, nk ? { name: `${nk} (refuted)`, reason: 'refuted: the record withdraws this "no known allergies" statement' } : { name: `Not allergic to ${row.name ?? 'the substance'}`, reason: 'refuted: the record says the person is not allergic' });
+    }
     const cc = kind === 'medications' ? medCode(res, meds).cc : r.code;
     const name = (none ?? concept(cc))?.toLowerCase().replace(/\s+/g, ' ').trim();
     const dupKeys = kind === 'medications' ? medKeys(cc, res) : name ? [`name:${name}`] : [];
