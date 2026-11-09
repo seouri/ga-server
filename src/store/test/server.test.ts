@@ -904,14 +904,15 @@ describe('store server: Medplum-compatible routes', () => {
     expect([again.status, again.headers.get('location')]).toEqual([200, null]);
   });
 
-  it('GET metadata describes this store: types, interactions, search parameters (no composite), operations', async () => {
+  it('GET metadata describes this store: types, interactions, search parameters (composites whose components R4 defines), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
     expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
     const rest = m.rest[0];
     expect(rest.interaction.map((i: { code: string }) => i.code)).toEqual(['transaction', 'batch', 'history-system', 'search-system']);
     const obsCap = rest.resource.find((r: { type: string }) => r.type === 'Observation');
     expect(obsCap.searchParam.map((p: { name: string }) => p.name)).toEqual(expect.arrayContaining(['code', 'date', 'subject', '_lastUpdated']));
-    expect(obsCap.searchParam.some((p: { type: string }) => p.type === 'composite')).toBe(false);
+    expect(obsCap.searchParam).toContainEqual({ name: 'code-value-quantity', type: 'composite' });
+    expect(rest.resource.find((r: { type: string }) => r.type === 'ResearchStudy').searchParam.map((p: { name: string }) => p.name)).not.toContain('progress-status-state-actual');
     expect(rest.resource.find((r: { type: string }) => r.type === 'Patient').operation[0].name).toBe('everything');
     for (const t of ['ValueSet', 'Questionnaire', 'Subscription']) expect(rest.resource.some((r: { type: string }) => r.type === t), t).toBe(true);
     expect(rest.resource.length).toBeGreaterThan(140);

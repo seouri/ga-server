@@ -12,7 +12,7 @@ import { pipeline } from 'node:stream/promises';
 import { applyPatch, evalFhirPathTyped, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
 import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
-import { IGNORED } from './search.ts';
+import { components, IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
 
 // Binaries stream to disk, so their limit (serveStore's maxBinaryBytes) can be gigabytes; JSON bodies are read whole.
@@ -484,7 +484,7 @@ function capability(): string {
         : {
           type, interaction: versioned.map((code) => ({ code })), versioning: 'versioned', readHistory: true, updateCreate: false,
           conditionalCreate: true, conditionalUpdate: true, conditionalDelete: 'single',
-          searchParam: Object.values(getSearchParameters(type) ?? {}).filter((p) => p.type !== 'composite' && p.type !== 'special').map((p) => ({ name: p.code, type: p.type })),
+          searchParam: Object.values(getSearchParameters(type) ?? {}).filter((p) => p.type !== 'special' && (p.type !== 'composite' || !!components(type, p))).map((p) => ({ name: p.code, type: p.type })),
           ...(type === 'Patient' && { operation: [{ name: 'everything', definition: 'http://hl7.org/fhir/OperationDefinition/Patient-everything' }] }),
         }),
     }],

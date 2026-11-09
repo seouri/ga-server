@@ -63,7 +63,7 @@ Under `/fhir/R4/`:
 - `GET metadata`: a CapabilityStatement of what this store supports.
 - `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.
 
-Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), chains and reverse chains (`_has`), mixed and nested up to Medplum's limit of three links, through canonical references and `_compartment` too (a link with several target types names one, `subject:Patient.name`, as Medplum), `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
+Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not`, `:identifier` (`subject:identifier=sys|value`), `:of-type` (an Identifier's `typeSystem|typeCode|value`), a uri's `:above` and `:below` (by path segment) and reference type modifiers (`subject:Patient`), composite parameters (`code-value-quantity=http://loinc.org|2093-3$gt200`: one repetition's components, each by its own type), chains and reverse chains (`_has`), mixed and nested up to Medplum's limit of three links, through canonical references and `_compartment` too (a link with several target types names one, `subject:Patient.name`, as Medplum), `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
 
 ## Deliberate differences from Medplum
 
@@ -89,13 +89,17 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - System-level search pages by cursor, with next links at `fhir/R4?…` (Medplum pages by `_offset` unless sorted by `_lastUpdated` ascending, and its links point at `fhir/R4/MultipleTypes?…` or the path type's URL).
 - `_summary=count` (or `_total`) of a `_type` search counts the matches of every listed type (Medplum 5.2.14's count counts one of them).
 - `meta.compartment` holds Patient compartments only: the store has no projects, so `_compartment:missing=true` finds a record in no patient's compartment (as Medplum's own test expects outside a project; inside a Medplum project every record is also in `Project/<id>`'s compartment, so there it finds none); Medplum's `meta.accounts` add no compartment.
+- `:of-type` and composite parameters (`code-value-quantity=…$gt200`) work as R4 defines them (Medplum 5.2.14 refuses both with 400: `Invalid modifier :of-type`, `Unrecognized search parameter type: composite`). R4's `DocumentReference-relationship` gives each component the other's expression; the store pairs `relatesto` with `target` and `relation` with `code`, as R5 fixed it. ResearchStudy's `progress-status-*` composites name components R4 does not define: 400.
+- A uri's `:below` matches the value and every uri under it by path segment, `:above` the value and every uri it is under (Medplum ignores both modifiers and matches the value only).
+- `:identifier` applies to reference parameters only, `:of-type` to tokens on an Identifier, `:above`/`:below` to uris (token `:above`/`:below` are terminology, below): elsewhere 400 (Medplum ignores `:identifier`, `:above`, `:of-type` on strings and references, and `:contains`, `:of-type` on uris, and answers 200).
+- No `_deleted` parameter: the store keeps no deleted records (Medplum's soft delete), so `_deleted` is an unknown parameter (400).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support
 
 Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
 
-- Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
+- Special search parameters; on tokens the modifiers `:above`, `:below`, `:in`, `:not-in` (terminology).
 - Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
 - `_contained`, `_text`, `_content`, and `_include=*` (Medplum 5.2.14 refuses it too; plan 4 decides).
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.

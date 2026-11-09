@@ -118,8 +118,8 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Encounter.period dateTime search | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code system search | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code :not next URL | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference identifier search | skipped | modifier | not yet ported (Task 7) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Task patient identifier search | skipped | modifier | not yet ported (Task 7) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference identifier search | ported | modifier |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Task patient identifier search | ported | modifier |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by a shared token column search param, _security | skipped | meta | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _source | skipped | meta | not yet ported (Task 8) |
@@ -194,7 +194,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | systemRepo › maxResourceVersion | skipped | platform | maxResourceVersion (Medplum internal) |
 | server/src/fhir/search.test.ts | systemRepo › Search for deleted resources | skipped | platform | _deleted is a Medplum-only search parameter |
 | server/src/fhir/search.test.ts | systemRepo › Reverse chained search with _filter | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | skipped | modifier | not yet ported (Task 7) |
+| server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | ported | modifier |  |
 | server/src/fhir/search.test.ts | parseChainedParameter › reverse chained search with prefix operators | skipped | platform | parseChainedParameter unit test |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Appointment.end | ported | existing |  |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Slot.end | ported | existing |  |

@@ -325,7 +325,6 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     obs('x1');
     expect(fail('Observation', 'code:in=http://vs').status).toBe(400);
     expect(fail('Observation', 'code:in=http://vs').message).toMatch(/:in/);
-    expect(fail('Observation', `code-value-quantity=${LOINC}|1$gt5`).message).toMatch(/composite/i);
     expect(fail('Observation', 'code:below=x').message).toMatch(/:below/);
     for (const q of ['_summary=nonsense', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x']) expect(fail('Observation', q).status, q).toBe(400);
     expect(run('Observation', '_summary=false').entry).toHaveLength(1); // a no-op, as Medplum
@@ -631,5 +630,106 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Patient', '_has:Observation:_compartment:_id=o1')).toEqual(['p1', 'p2']);
     add({ resourceType: 'DiagnosticReport', id: 'd1', status: 'final', code: { text: 'x' }, result: [{ reference: 'Observation/o2' }] });
     expect(ids('DiagnosticReport', 'result._compartment:Patient.name=bet')).toEqual(['d1']); // _compartment as a middle link
+  });
+  it('subject:identifier matches a Reference.identifier (Reference identifier search [search.test.ts] reduced)', () => {
+    add({ resourceType: 'Condition', id: 'c1', subject: { identifier: { system: 'mrn', value: '123456' } } } as Resource);
+    add({ resourceType: 'Condition', id: 'c2', subject: { identifier: { system: 'xyz', value: '123456' } } } as Resource);
+    add({ resourceType: 'Condition', id: 'c3', subject: { reference: 'Patient/123456' } } as Resource);
+    expect(ids('Condition', 'subject:identifier=mrn|123456')).toEqual(['c1']);
+    expect(ids('Condition', 'subject:identifier=123456')).toEqual(['c1', 'c2']);
+    expect(ids('Condition', 'subject:identifier=mrn|123456,xyz|123456&_sort=-_id')).toEqual(['c2', 'c1']);
+  });
+
+  it('patient:identifier keeps the parameter\'s own filter (Reference.type), subject:identifier does not', () => {
+    const t = { resourceType: 'Task', status: 'accepted', intent: 'order' } as const;
+    add({ ...t, id: 't1', for: { type: 'Patient', identifier: { system: 'mrn', value: 'v1' } } } as Resource);
+    add({ ...t, id: 't2', for: { identifier: { system: 'mrn', value: 'v1' } } } as Resource);
+    expect(ids('Task', 'subject:identifier=mrn|v1')).toEqual(['t1', 't2']);
+    expect(ids('Task', 'patient:identifier=mrn|v1')).toEqual(['t1']);
+  });
+
+  it('identifier:of-type=typeSystem|typeCode|value', () => {
+    const V2 = 'http://terminology.hl7.org/CodeSystem/v2-0203';
+    add({ resourceType: 'Patient', id: 'p1', identifier: [{ type: { coding: [{ system: V2, code: 'MR' }] }, system: 'http://s', value: '42' }] });
+    add({ resourceType: 'Patient', id: 'p2', identifier: [{ type: { coding: [{ system: V2, code: 'SS' }] }, value: '42' }] });
+    add({ resourceType: 'Patient', id: 'p3', identifier: [{ system: 'http://s', value: '42' }] });
+    expect(ids('Patient', `identifier:of-type=${V2}|MR|42`)).toEqual(['p1']);
+    expect(ids('Patient', `identifier:of-type=${V2}|SS|42`)).toEqual(['p2']);
+    expect(ids('Patient', `identifier:of-type=${V2}|MR|43`)).toEqual([]);
+    expect(fail('Patient', `identifier:of-type=${V2}|MR`).status).toBe(400);
+    expect(fail('Observation', 'code:of-type=a|b|c').message).toBe('Invalid modifier :of-type for code'); // CodeableConcept: no type
+  });
+
+  it('url:below and url:above match by path segment', () => {
+    const q = (id: string, url: string) => add({ resourceType: 'Questionnaire', id, status: 'active', url } as Resource);
+    q('q1', 'http://ex.org/fhir/Questionnaire/a');
+    q('q2', 'http://ex.org/fhir/Questionnaire/a/b');
+    q('q3', 'http://ex.org/fhir/Questionnaire/ab');
+    q('q4', 'http://ex.org/fhir/');
+    expect(ids('Questionnaire', 'url:below=http://ex.org/fhir/Questionnaire/a')).toEqual(['q1', 'q2']);
+    expect(ids('Questionnaire', 'url:below=http://ex.org/fhir/')).toEqual(['q1', 'q2', 'q3', 'q4']);
+    expect(ids('Questionnaire', 'url:above=http://ex.org/fhir/Questionnaire/a/b/_history/1')).toEqual(['q1', 'q2', 'q4']);
+    expect(ids('Questionnaire', 'url:above=http://ex.org/fhir/Questionnaire/a')).toEqual(['q1', 'q4']);
+    expect(fail('Observation', 'code:below=x').message).toBe('Invalid modifier :below for code'); // token: terminology (plan 2)
+  });
+
+  it('Observation?code-value-quantity=http://loinc.org|2093-3$gt200 (composite)', () => {
+    const v = (id: string, code: string, value: number) => obs(id, { code: { coding: [{ system: LOINC, code }] }, valueQuantity: { value, system: UCUM, code: 'mg/dL' } });
+    v('o1', '2093-3', 250);
+    v('o2', '2093-3', 150);
+    v('o3', '2085-9', 250);
+    expect(ids('Observation', `code-value-quantity=${LOINC}|2093-3$gt200`)).toEqual(['o1']);
+    expect(ids('Observation', 'code-value-quantity=2093-3$150')).toEqual(['o2']);
+    expect(ids('Observation', `code-value-quantity=2093-3$le250|${UCUM}|mg/dL`)).toEqual(['o1', 'o2']);
+    expect(ids('Observation', 'code-value-quantity=2093-3$gt200,2085-9$gt200')).toEqual(['o1', 'o3']);
+    expect(ids('Observation', 'code-value-quantity=2093-3$gt200&code=2085-9')).toEqual([]);
+    expect(ids('Observation', 'code-value-quantity:missing=false&_sort=_id')).toEqual(['o1', 'o2', 'o3']);
+    expect(ids('Observation', 'combo-code-value-quantity=2085-9$250')).toEqual(['o3']);
+    add({ resourceType: 'Patient', id: 'p1' });
+    obs('o4', { subject: { reference: 'Patient/p1' }, code: { coding: [{ code: 'x' }] }, effectiveDateTime: '2024-03-01', valueDateTime: '2024-03-02' } as Observation);
+    expect(ids('Observation', 'code-value-date=x$ge2024-03-02')).toEqual(['o4']);
+    expect(ids('Observation', 'code-value-date=x$lt2024-03-02')).toEqual([]);
+    expect(ids('Patient', '_has:Observation:subject:code-value-date=x$2024-03-02')).toEqual(['p1']);
+    expect(fail('Observation', 'code-value-quantity=2093-3').message).toMatch(/code-value-quantity.*\$/);
+    expect(fail('Observation', 'code-value-quantity:exact=a$1').message).toBe('Invalid modifier :exact for code-value-quantity');
+    expect(fail('Observation', '_sort=code-value-quantity').status).toBe(400);
+  });
+
+  it('composite pairs components from the same repetition', () => {
+    obs('o1', { component: [
+      { code: { coding: [{ code: 'A' }] }, valueQuantity: { value: 1 } },
+      { code: { coding: [{ code: 'B' }] }, valueQuantity: { value: 2 } },
+    ] });
+    expect(ids('Observation', 'component-code-value-quantity=A$1')).toEqual(['o1']);
+    expect(ids('Observation', 'component-code-value-quantity=B$2')).toEqual(['o1']);
+    expect(ids('Observation', 'component-code-value-quantity=A$2')).toEqual([]);
+    expect(ids('Observation', 'combo-code-value-quantity=B$2')).toEqual(['o1']);
+  });
+
+  it('composites with three components, %resource, and R4\'s swapped DocumentReference.relationship', () => {
+    add({ resourceType: 'MolecularSequence', id: 'm1', coordinateSystem: 0, referenceSeq: { chromosome: { coding: [{ code: '1' }] }, genomeBuild: 'GRCh38' }, variant: [{ start: 10, end: 20 }] } as Resource);
+    expect(ids('MolecularSequence', 'chromosome-variant-coordinate=1$ge10$le20')).toEqual(['m1']);
+    expect(ids('MolecularSequence', 'chromosome-variant-coordinate=1$gt10$le20')).toEqual([]);
+    add({ resourceType: 'DocumentReference', id: 'd1', status: 'current', content: [{ attachment: { url: 'http://ex.org/d1' } }], relatesTo: [{ code: 'replaces', target: { reference: 'DocumentReference/d0' } }] } as Resource);
+    expect(ids('DocumentReference', 'relationship=DocumentReference/d0$replaces')).toEqual(['d1']);
+    expect(ids('DocumentReference', 'relationship=DocumentReference/d0$appends')).toEqual([]);
+    // A composite shared by many types (`ActivityDefinition.useContext | … | Questionnaire.useContext | …`).
+    add({ resourceType: 'Questionnaire', id: 'q1', status: 'active', useContext: [{ code: { code: 'focus' }, valueCodeableConcept: { coding: [{ code: 'x' }] } }] } as Resource);
+    expect(ids('Questionnaire', 'context-type-value=focus$x')).toEqual(['q1']);
+    expect(ids('Questionnaire', 'context-type-value=focus$y')).toEqual([]);
+    // ResearchStudy's progress-status composites name components R4 does not define.
+    expect(fail('ResearchStudy', 'progress-status-state-actual=a$true').message).toMatch(/progress-status-state-actual/);
+  });
+
+  it('error texts as Medplum for modifiers: Invalid modifier, :missing must be true or false; _id takes eq, ne, :not, :exact', () => {
+    expect(fail('Patient', '_id:text=123').message).toBe('Invalid modifier :text for _id');
+    expect(fail('Patient', '_id:above=123').message).toBe('Invalid modifier :above for _id');
+    expect(fail('Patient', 'identifier:in=123').message).toBe('Invalid modifier :in for identifier');
+    expect(fail('Patient', 'name:identifier=x').message).toBe('Invalid modifier :identifier for name');
+    for (const code of ['_id', '_compartment', 'identifier', 'code-value-quantity']) {
+      expect(fail(code === 'code-value-quantity' ? 'Observation' : 'Patient', `${code}:missing=maybe`).message).toBe("Search filter ':missing' must have a value of 'true' or 'false'");
+    }
+    add({ resourceType: 'Patient', id: 'p1' });
+    expect(ids('Patient', '_id:exact=p1')).toEqual(['p1']);
   });
 });

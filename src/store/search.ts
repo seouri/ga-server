@@ -5,6 +5,10 @@
 // - idx: one row per indexed value. token: sys/val (val lowercased); string: val = lowercased (starts-with/contains),
 //   sys = as written (:exact); uri, reference: val; date: lo/hi = UTC ISO range; number: lo/hi; quantity: lo = hi = value,
 //   sys = system, val = code or unit. CodeableConcept.text / Coding.display are token rows with sys = TEXT, val lowercased.
+//   A reference's identifier is a token row under `<code>:identifier`; an Identifier's type, under `<code>:of-type` with
+//   sys = `typeSystem|typeCode`, val = value.
+// - comp: composite parameters, one row per value of each component (n) of each repetition (grp) of the composite's
+//   expression, in idx's columns; a search joins a repetition's components on (rid, code, grp).
 // - idx_text: the distinct lowercased TEXT values per (type, code), so :text (substring) scans distinct strings, not every row.
 // - sortkeys: one row per resource for _id, _lastUpdated and each date param of its type (MISSING when it has none):
 //   lo = ascending key (earliest start), hi = descending key (latest start). Indexed by (type, code, key), so a sort is an
@@ -17,8 +21,8 @@ import {
   FhirFilterComparison, FhirFilterConnective, FhirFilterNegation, OperationOutcomeError, Operator, convertToSearchableDates,
   convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
   convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameterDetails, getSearchParameters,
-  parseFilterParameter, parseSearchRequest, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
-  type Filter, type FhirFilterExpression, type SearchRequest,
+  parseFhirPath, parseFilterParameter, parseSearchRequest, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
+  type Filter, type FhirFilterExpression, type FhirPathAtom, type SearchRequest, type TypedValue,
 } from '@medplum/core';
 import type { Bundle, Resource, SearchParameter } from '@medplum/fhirtypes';
 import type { StatementSync } from 'node:sqlite';
@@ -28,6 +32,9 @@ export const SEARCH_SCHEMA = `
   create index if not exists idx_v on idx(type, code, val, sys, rid) where val is not null;
   create index if not exists idx_l on idx(type, code, lo, hi, rid) where lo is not null;
   create index if not exists idx_r on idx(rid, code, val, sys, lo, hi);
+  create table if not exists comp(rid integer not null, type text not null, code text not null, grp integer not null, n integer not null, sys text, val, lo, hi);
+  create index if not exists comp_v on comp(type, code, n, val, rid);
+  create index if not exists comp_r on comp(rid, code, grp, n);
   create table if not exists idx_text(type text not null, code text not null, val text not null, primary key(type, code, val)) without rowid;
   create table if not exists sortkeys(rid integer not null, type text not null, code text not null, lo not null, hi not null, primary key(rid, code)) without rowid;
   create index if not exists sortkeys_lo on sortkeys(type, code, lo);
@@ -46,7 +53,9 @@ export const searchTuning = { driveMax: 5000, walkPerRow: 50 };
 
 type Prep = (sql: string) => StatementSync;
 type Arg = string | number | null | Uint8Array;
-type Row = [code: string, sys: string | null, val: string | null, lo: string | number | null, hi: string | number | null];
+type Val = [sys: string | null, val: string | null, lo: string | number | null, hi: string | number | null];
+type Row = [code: string, ...Val];
+type CompRow = [code: string, grp: number, n: number, ...Val];
 
 // A 400 the store rethrows as its StoreError (search.ts must not import store.ts).
 export class SearchError extends OperationOutcomeError {
@@ -74,73 +83,130 @@ function dayRange(v: unknown): { start: string; end: string } | undefined {
 }
 const lower = (s: string | undefined | null): string | null => (s == null ? null : s.toLowerCase());
 // Medplum indexes and matches ContactPoint tokens (email, phone, telecom) case-insensitively; other tokens as written.
-const caseless = (type: string, p: SearchParameter): boolean =>
-  p.type === 'token' && !!getSearchParameterDetails(type, p).elementDefinitions?.some((e) => e.type?.some((t) => t.code === 'ContactPoint'));
+const holds = (type: string, p: SearchParameter, dt: string): boolean =>
+  !!getSearchParameterDetails(type, p).elementDefinitions?.some((e) => e.type?.some((t) => t.code === dt));
+const caseless = (type: string, p: SearchParameter): boolean => p.type === 'token' && holds(type, p, 'ContactPoint');
 const lit = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 const qs = (n: number): string => Array(n).fill('?').join(', ');
 
 // ---------- indexing ----------
 
-function rows(r: Resource): Row[] {
-  const out: Row[] = [];
+// One search parameter's values as index columns, by its type.
+function convert(type: string, p: SearchParameter, v: TypedValue[]): Val[] {
+  const out: Val[] = [];
+  switch (p.type) {
+    case 'token': {
+      // Codes as written (Medplum matches tokens case-sensitively, ContactPoints aside); texts lowercased for :text.
+      const lc = caseless(type, p);
+      // Values trimmed, as Medplum indexes them (' 123' is found by 123).
+      for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([t.system ?? null, t.system === TEXT || lc ? lower(t.value?.trim()) : t.value?.trim() ?? null, null, null]);
+      break;
+    }
+    case 'string':
+      for (const x of v) {
+        for (const s of convertToSearchableStrings([x])) {
+          out.push([s, s.toLowerCase(), null, null]);
+          // Any word of a name or address, as Medplum's word-prefix search of them; a name also by the parts of a word
+          // (Zed-Smith, O'Brien), as Medplum's (Postgres) word split; an address only by whole words, as Medplum.
+          if (x.type !== 'HumanName' && x.type !== 'Address') continue;
+          const words = s.toLowerCase().split(/\s+/);
+          const parts = x.type === 'HumanName' ? words.flatMap((w) => w.split(/[^\p{L}\p{N}]+/u)) : [];
+          for (const w of [...words.slice(1), ...parts]) if (w) out.push([WORD, w, null, null]);
+        }
+      }
+      break;
+    case 'uri': for (const s of convertToSearchableUris(v)) out.push([null, s, null, null]); break;
+    case 'reference': for (const s of convertToSearchableReferences(v)) out.push([null, s, null, null]); break;
+    // Medplum's server treats a Period with no end as ending at its start (its in-memory matcher treats it as open-ended).
+    case 'date':
+      for (const x of v) {
+        const day = dayRange(x.value);
+        for (const d of day ? [day] : convertToSearchableDates([x])) out.push([null, null, utc(d.start) ?? '0000', utc(d.end) ?? utc(d.start) ?? '9999']);
+      }
+      break;
+    case 'number': for (const [a, b] of convertToSearchableNumbers(v)) if (a != null || b != null) out.push([null, null, a ?? b!, b ?? a!]); break;
+    case 'quantity':
+      for (const q of convertToSearchableQuantities(v)) if (q.value != null) out.push([q.system ?? null, q.code ?? q.unit ?? null, q.value, q.value]);
+      break;
+  }
+  return out;
+}
+
+const paths = new Map<string, FhirPathAtom>();
+const path = (e: string): FhirPathAtom => paths.get(e) ?? paths.set(e, parseFhirPath(e)).get(e)!;
+// R4's DocumentReference-relationship gives each component the other's expression (R5 swaps them back).
+const COMPONENT_FIX: Record<string, string[]> = { 'DocumentReference-relationship': ['target', 'code'] };
+
+// A composite's components: each one's own parameter (by its definition url, on the same type) and its expression relative
+// to a repetition of the composite's. undefined when a definition is not on the type (ResearchStudy's progress-status-*).
+export function components(type: string, p: SearchParameter): { p: SearchParameter; expr: FhirPathAtom }[] | undefined {
+  const params = Object.values(getSearchParameters(type) ?? {});
+  const out = (p.component ?? []).map((c, k) => {
+    const cp = params.find((x) => x.url === c.definition);
+    return cp && { p: cp, expr: path(COMPONENT_FIX[p.id ?? '']?.[k] ?? c.expression) };
+  });
+  return out.length && out.every((c) => c) ? out as { p: SearchParameter; expr: FhirPathAtom }[] : undefined;
+}
+
+function rows(r: Resource): { rows: Row[]; comps: CompRow[] } {
+  const out: Row[] = [], comps: CompRow[] = [];
+  const type = r.resourceType;
   const tv = [toTypedValue(r)];
-  for (const p of Object.values(getSearchParameters(r.resourceType) ?? {})) {
+  let grp = 0;
+  for (const p of Object.values(getSearchParameters(type) ?? {})) {
     // _id and _lastUpdated live in sortkeys.
-    if (!p.expression || p.type === 'composite' || p.type === 'special' || p.code === '_id' || p.code === '_lastUpdated') continue;
+    if (!p.expression || p.type === 'special' || p.code === '_id' || p.code === '_lastUpdated') continue;
     let v;
-    try { v = evalFhirPathTyped(getParsedExpressionForResourceType(r.resourceType, p.expression), tv); } catch { continue; }
+    // A composite's expression whole: the per-type parse drops the bare root of `Observation | Observation.component`.
+    try { v = evalFhirPathTyped(p.type === 'composite' ? path(p.expression) : getParsedExpressionForResourceType(type, p.expression), tv); } catch { continue; }
     if (!v.length) continue;
     const code = p.code;
-    switch (p.type) {
-      case 'token': {
-        // Codes as written (Medplum matches tokens case-sensitively, ContactPoints aside); texts lowercased for :text.
-        const lc = caseless(r.resourceType, p);
-        // Values trimmed, as Medplum indexes them (' 123' is found by 123).
-        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT || lc ? lower(t.value?.trim()) : t.value?.trim() ?? null, null, null]);
-        break;
-      }
-      case 'string':
-        for (const x of v) {
-          for (const s of convertToSearchableStrings([x])) {
-            out.push([code, s, s.toLowerCase(), null, null]);
-            // Any word of a name or address, as Medplum's word-prefix search of them; a name also by the parts of a word
-            // (Zed-Smith, O'Brien), as Medplum's (Postgres) word split; an address only by whole words, as Medplum.
-            if (x.type !== 'HumanName' && x.type !== 'Address') continue;
-            const words = s.toLowerCase().split(/\s+/);
-            const parts = x.type === 'HumanName' ? words.flatMap((w) => w.split(/[^\p{L}\p{N}]+/u)) : [];
-            for (const w of [...words.slice(1), ...parts]) if (w) out.push([code, WORD, w, null, null]);
+    if (p.type === 'composite') {
+      const cs = components(type, p);
+      for (const root of cs ? v : []) {
+        // Last component first (the value, often absent), stopping at the first with no values.
+        const vals: Val[][] = [];
+        try {
+          for (let k = cs!.length - 1; k >= 0 && (k === cs!.length - 1 || vals[k + 1].length); k--) {
+            vals[k] = convert(type, cs![k].p, evalFhirPathTyped(cs![k].expr, [root], { '%resource': tv[0] })).filter(([sys]) => sys !== TEXT && sys !== WORD);
           }
-        }
-        break;
-      case 'uri': for (const s of convertToSearchableUris(v)) out.push([code, null, s, null, null]); break;
-      case 'reference': for (const s of convertToSearchableReferences(v)) out.push([code, null, s, null, null]); break;
-      // Medplum's server treats a Period with no end as ending at its start (its in-memory matcher treats it as open-ended).
-      case 'date':
-        for (const x of v) {
-          const day = dayRange(x.value);
-          for (const d of day ? [day] : convertToSearchableDates([x])) out.push([code, null, null, utc(d.start) ?? '0000', utc(d.end) ?? utc(d.start) ?? '9999']);
-        }
-        break;
-      case 'number': for (const [a, b] of convertToSearchableNumbers(v)) if (a != null || b != null) out.push([code, null, null, a ?? b!, b ?? a!]); break;
-      case 'quantity':
-        for (const q of convertToSearchableQuantities(v)) if (q.value != null) out.push([code, q.system ?? null, q.code ?? q.unit ?? null, q.value, q.value]);
-        break;
+        } catch { continue; }
+        if (cs!.some((_, k) => !vals[k]?.length)) continue;
+        grp++;
+        vals.forEach((x, n) => { for (const val of x) comps.push([code, grp, n, ...val]); });
+      }
+      continue;
+    }
+    for (const val of convert(type, p, v)) out.push([code, ...val]);
+    for (const x of v) {
+      const o = x.value as { identifier?: object; type?: { coding?: { system?: string; code?: string }[] }; value?: string } | undefined;
+      // :identifier, a Reference's logical identifier; :of-type, an Identifier's type with its value.
+      if (p.type === 'reference' && x.type === 'Reference' && o?.identifier) {
+        for (const t of convertToSearchableTokens([{ type: 'Identifier', value: o.identifier }])) out.push([`${code}:identifier`, t.system ?? null, t.value?.trim() ?? null, null, null]);
+      }
+      if (p.type === 'token' && x.type === 'Identifier' && o?.value) {
+        for (const c of o.type?.coding ?? []) out.push([`${code}:of-type`, `${c.system ?? ''}|${c.code ?? ''}`, o.value.trim(), null, null]);
+      }
     }
   }
   const seen = new Set<string>();
-  return out.filter((x) => { const k = JSON.stringify(x); return !seen.has(k) && !!seen.add(k); });
+  return { rows: out.filter((x) => { const k = JSON.stringify(x); return !seen.has(k) && !!seen.add(k); }), comps };
 }
 
 // Replaces the search rows of `rid` (r undefined: deleted). Runs inside the write's transaction.
 export function writeIndex(prep: Prep, rid: number, r: Resource | undefined): void {
   prep('delete from idx where rid = ?').run(rid);
   prep('delete from sortkeys where rid = ?').run(rid);
+  prep('delete from comp where rid = ?').run(rid);
   if (!r) return;
   const type = r.resourceType;
   const ins = prep('insert into idx values (?, ?, ?, ?, ?, ?, ?)');
   const text = prep('insert or ignore into idx_text values (?, ?, ?)');
   const dates = new Map<string, [string, string]>();
-  for (const [code, sys, val, lo, hi] of rows(r)) {
+  const { rows: rs, comps } = rows(r);
+  const comp = prep('insert into comp values (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const [code, grp, n, sys, val, lo, hi] of comps) comp.run(rid, type, code, grp, n, sys, val, lo, hi);
+  for (const [code, sys, val, lo, hi] of rs) {
     ins.run(rid, type, code, sys, val, lo, hi);
     // shortcut: idx_text keeps texts of deleted or changed resources (they then match no idx row); prune if it grows large.
     if (sys === TEXT && val) text.run(type, code, val);
@@ -174,6 +240,19 @@ const allOf = (a: string): string => `sortkeys ${a} where ${a}.type = ? and ${a}
 let aliasN = 0;
 const alias = (): string => `t${aliasN++}`;
 
+// Medplum's modifiers (MODIFIER_OPERATORS in @medplum/core): a refused one is "Invalid modifier", a prefix "Invalid operator".
+const MODIFIERS: readonly string[] = ['contains', 'exact', 'above', 'below', 'text', 'not', 'in', 'not-in', 'of-type', 'missing', 'identifier', 'iterate'];
+const refuse = (op: string, code: string): Error => badRequest(MODIFIERS.includes(op) ? `Invalid modifier :${op} for ${code}` : `Invalid operator ${op} for ${code}`);
+const PREFIXES: readonly string[] = ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'sa', 'eb', 'ap'];
+const ALLOWED: Record<string, readonly string[]> = {
+  token: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.TEXT, Operator.OF_TYPE],
+  string: [Operator.EQUALS, Operator.EXACT, Operator.CONTAINS, Operator.NOT, Operator.NOT_EQUALS],
+  uri: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.ABOVE, Operator.BELOW],
+  reference: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.IDENTIFIER],
+  date: PREFIXES, number: PREFIXES.filter((x) => x !== 'sa' && x !== 'eb'), quantity: PREFIXES.filter((x) => x !== 'sa' && x !== 'eb'),
+  composite: [Operator.EQUALS],
+};
+
 function cond(type: string, f: Filter, a: string): Cond {
   if (f.code === '_filter') {
     let e: FhirFilterExpression;
@@ -185,23 +264,18 @@ function cond(type: string, f: Filter, a: string): Cond {
   if (mod) throw badRequest(`Unsupported search modifier: ${f.code}`);
   const p = param(type, code);
   if (!p) throw badRequest(`Unknown search parameter: ${code}`);
-  if (p.type === 'composite' || p.type === 'special') throw badRequest(`Unsupported search parameter type ${p.type}: ${code}`);
+  if (p.type === 'special') throw badRequest(`Unsupported search parameter type ${p.type}: ${code}`);
   const op = f.operator;
   if (op === Operator.MISSING || op === Operator.PRESENT) {
+    if (f.value !== 'true' && f.value !== 'false') throw badRequest(`Search filter ':${op}' must have a value of 'true' or 'false'`); // Medplum's text
     const present = (op === Operator.MISSING) === (f.value === 'false');
     if (code === '_id' || code === '_lastUpdated') return { sql: present ? '1' : '0', args: [] };
-    return { sql: `${present ? '' : 'not '}exists (select 1 from idx i where i.rid = ${a}.rid and i.code = ?)`, args: [code] };
+    return { sql: `${present ? '' : 'not '}exists (select 1 from ${p.type === 'composite' ? 'comp' : 'idx'} i where i.rid = ${a}.rid and i.code = ?)`, args: [code] };
   }
-  const allowed: Record<string, readonly string[]> = {
-    token: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.TEXT],
-    string: [Operator.EQUALS, Operator.EXACT, Operator.CONTAINS, Operator.NOT, Operator.NOT_EQUALS],
-    uri: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS],
-    reference: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS],
-    date: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'sa', 'eb', 'ap'],
-    number: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'ap'],
-    quantity: ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'ap'],
-  };
-  if (!allowed[p.type]?.includes(op)) throw badRequest(`Unsupported search modifier or prefix :${op} on ${code} (${p.type})`);
+  // _id takes what Medplum's id column does.
+  const allowed = code === '_id' ? [Operator.EQUALS, Operator.EXACT, Operator.NOT, Operator.NOT_EQUALS] as string[] : ALLOWED[p.type];
+  if (!allowed?.includes(op) || (op === Operator.OF_TYPE && !holds(type, p, 'Identifier'))) throw refuse(op, code);
+  if (p.type === 'composite') return compositeCond(type, p, f.value, a);
   const vals = splitSearchOnComma(f.value);
   // :not on tokens, strings, uris and references means "no matching value" (FHIR); ne on ranges is a prefix.
   const neg = op === Operator.NOT || (op === Operator.NOT_EQUALS && p.type !== 'date' && p.type !== 'number' && p.type !== 'quantity');
@@ -211,67 +285,96 @@ function cond(type: string, f: Filter, a: string): Cond {
     return { sql: `${neg ? 'not ' : ''}${a}.rid in (${set.sql})`, args: set.args, set: neg ? undefined : set };
   }
   const ors: string[] = [], va: Arg[] = [];
-  const range = (v: string, lo: string, hi: string) => { const [c, ca] = dateCond(op, v, lo, hi); ors.push(c); va.push(...ca); };
   if (code === '_lastUpdated') {
-    for (const v of vals) range(v, 's.lo', 's.hi');
+    for (const v of vals) { const [c, ca] = dateCond(op, v, 's.lo', 's.hi'); ors.push(c); va.push(...ca); }
     const where = `s.code = '_lastUpdated' and (${ors.join(' or ')})`;
     return {
       sql: `exists (select 1 from sortkeys s where s.rid = ${a}.rid and ${where})`, args: va,
       set: { sql: `select s.rid from sortkeys s where s.type = ? and ${where}`, args: [type, ...va] },
     };
   }
-  for (const v of vals) {
-    switch (p.type) {
-      case 'token': {
-        if (op === Operator.TEXT) {
-          // Substring of the distinct texts of this (type, code), then their rows by index.
-          ors.push(`i.sys = ? and i.val in (select x.val from idx_text x where x.type = ? and x.code = ? and x.val like ? escape '\\')`);
-          va.push(TEXT, type, code, `%${likeEscape(v.toLowerCase())}%`);
-          break;
-        }
-        const bar = v.indexOf('|');
-        const ci = (x: string) => (caseless(type, p) ? x.toLowerCase() : x);
-        if (bar < 0) { ors.push('i.val = ? and (i.sys is null or i.sys <> ?)'); va.push(ci(v), TEXT); break; }
-        const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
-        if (!s) { ors.push('i.val = ? and i.sys is null'); va.push(val); }
-        else if (!val) { ors.push('i.sys = ?'); va.push(s); }
-        else { ors.push('i.val = ? and i.sys = ?'); va.push(val, s); }
-        break;
-      }
-      case 'string': {
-        const l = v.toLowerCase();
-        if (op === Operator.EXACT) { ors.push('i.val = ? and i.sys = ?'); va.push(l, v); }
-        else if (op === Operator.CONTAINS) { ors.push(`i.val like ? escape '\\'`); va.push(`%${likeEscape(l)}%`); }
-        else { ors.push('i.val >= ? and i.val < ?'); va.push(l, `${l}￿`); } // starts-with as an index range
-        break;
-      }
-      case 'uri': ors.push('i.val = ?'); va.push(v); break;
-      case 'reference':
-        if (v.includes('/')) { ors.push('i.val = ?'); va.push(v); }
-        else if ((p.target?.length ?? 0) === 1) { ors.push('i.val = ?'); va.push(`${p.target![0]}/${v}`); }
-        else { ors.push(`i.val like ? escape '\\'`); va.push(`%/${likeEscape(v)}`); }
-        break;
-      case 'date': range(v, 'i.lo', 'i.hi'); break;
-      case 'number': case 'quantity': {
-        const [num, sys, unit] = v.split('|');
-        const n = Number(num);
-        if (num === '' || Number.isNaN(n)) throw badRequest(`Invalid number: ${v}`);
-        const cmp: Record<string, string> = { eq: 'i.lo = ?', ne: 'i.lo <> ?', gt: 'i.lo > ?', lt: 'i.lo < ?', ge: 'i.lo >= ?', le: 'i.lo <= ?', ap: 'i.lo between ? * 0.9 and ? * 1.1' };
-        let c = cmp[op];
-        va.push(n);
-        if (op === 'ap') va.push(n);
-        if (sys) { c += ' and i.sys = ?'; va.push(sys); }
-        if (unit) { c += ' and i.val = ?'; va.push(unit); }
-        ors.push(c);
-        break;
-      }
-    }
-  }
+  for (const v of vals) { const [c, ca] = valueSql(type, p, op, v, 'i'); ors.push(c); va.push(...ca); }
+  const ic = op === Operator.IDENTIFIER || op === Operator.OF_TYPE ? `${code}:${op}` : code; // their own rows
   const where = `i.code = ? and (${ors.map((o) => `(${o})`).join(' or ')})`;
   const probe = `exists (select 1 from idx i where i.rid = ${a}.rid and ${where})`;
-  if (neg) return { sql: `not ${probe}`, args: [code, ...va] };
-  return { sql: probe, args: [code, ...va], set: { sql: `select i.rid from idx i where i.type = ? and ${where}`, args: [type, code, ...va] },
-    ref: p.type === 'reference', multi: vals.length > 1 || op === Operator.TEXT };
+  if (neg) return { sql: `not ${probe}`, args: [ic, ...va] };
+  return { sql: probe, args: [ic, ...va], set: { sql: `select i.rid from idx i where i.type = ? and ${where}`, args: [type, ic, ...va] },
+    ref: p.type === 'reference' && op !== Operator.IDENTIFIER, multi: vals.length > 1 || op === Operator.TEXT || op === Operator.ABOVE || op === Operator.BELOW };
+}
+
+// One search value of a parameter as SQL over the index row `i` (idx or comp: the same columns).
+function valueSql(type: string, p: SearchParameter, op: string, v: string, i: string): [string, Arg[]] {
+  switch (p.type) {
+    case 'token': case 'reference': {
+      if (p.type === 'reference' && op !== Operator.IDENTIFIER) {
+        if (v.includes('/')) return [`${i}.val = ?`, [v]];
+        if ((p.target?.length ?? 0) === 1) return [`${i}.val = ?`, [`${p.target![0]}/${v}`]];
+        return [`${i}.val like ? escape '\\'`, [`%/${likeEscape(v)}`]];
+      }
+      // Substring of the distinct texts of this (type, code), then their rows by index.
+      if (op === Operator.TEXT) return [`${i}.sys = ? and ${i}.val in (select x.val from idx_text x where x.type = ? and x.code = ? and x.val like ? escape '\\')`, [TEXT, type, p.code, `%${likeEscape(v.toLowerCase())}%`]];
+      if (op === Operator.OF_TYPE) {
+        const [s, c, ...rest] = v.split('|');
+        if (!rest.length) throw badRequest(`Invalid :of-type value ${v}: want typeSystem|typeCode|value`);
+        return [`${i}.val = ? and ${i}.sys = ?`, [rest.join('|'), `${s}|${c}`]];
+      }
+      const bar = v.indexOf('|');
+      const ci = (x: string) => (caseless(type, p) ? x.toLowerCase() : x);
+      if (bar < 0) return [`${i}.val = ? and (${i}.sys is null or ${i}.sys <> ?)`, [ci(v), TEXT]];
+      const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
+      if (!s) return [`${i}.val = ? and ${i}.sys is null`, [val]];
+      if (!val) return [`${i}.sys = ?`, [s]];
+      return [`${i}.val = ? and ${i}.sys = ?`, [val, s]];
+    }
+    case 'string': {
+      const l = v.toLowerCase();
+      if (op === Operator.EXACT) return [`${i}.val = ? and ${i}.sys = ?`, [l, v]];
+      if (op === Operator.CONTAINS) return [`${i}.val like ? escape '\\'`, [`%${likeEscape(l)}%`]];
+      return [`${i}.val >= ? and ${i}.val < ?`, [l, `${l}￿`]]; // starts-with as an index range
+    }
+    case 'uri': {
+      // :below, a uri at or under the value's path; :above, a uri the value is at or under (FHIR R4 3.1.1.5.5).
+      const base = v.replace(/\/$/, '');
+      if (op === Operator.BELOW) return [`${i}.val = ? or (${i}.val >= ? and ${i}.val < ?)`, [v, `${base}/`, `${base}/￿`]];
+      if (op === Operator.ABOVE) return [`${i}.val = ? or substr(?, 1, length(rtrim(${i}.val, '/')) + 1) = rtrim(${i}.val, '/') || '/'`, [v, v]];
+      return [`${i}.val = ?`, [v]];
+    }
+    case 'date': return dateCond(op, v, `${i}.lo`, `${i}.hi`);
+    case 'number': case 'quantity': {
+      const [num, sys, unit] = v.split('|');
+      const n = Number(num);
+      if (num === '' || Number.isNaN(n)) throw badRequest(`Invalid number: ${v}`);
+      const cmp: Record<string, string> = { eq: '= ?', ne: '<> ?', gt: '> ?', lt: '< ?', ge: '>= ?', le: '<= ?', ap: 'between ? * 0.9 and ? * 1.1' };
+      let c = `${i}.lo ${cmp[op]}`;
+      const args: Arg[] = op === 'ap' ? [n, n] : [n];
+      if (sys) { c += ` and ${i}.sys = ?`; args.push(sys); }
+      if (unit) { c += ` and ${i}.val = ?`; args.push(unit); }
+      return [c, args];
+    }
+  }
+  throw badRequest(`Unsupported search parameter type ${p.type}: ${p.code}`);
+}
+
+// code=a$b[,a$b]: a repetition of the composite whose components match their values, each by its own type (an ordered
+// type takes a prefix). The components of one repetition share (rid, code, grp) in comp.
+function compositeCond(type: string, p: SearchParameter, value: string, a: string): Cond {
+  const cs = components(type, p);
+  if (!cs) throw badRequest(`Unsupported composite search parameter ${p.code}: its components are not defined on ${type}`);
+  const ors: string[] = [], va: Arg[] = [];
+  for (const v of splitSearchOnComma(value)) {
+    const parts = v.split('$');
+    if (parts.length !== cs.length) throw badRequest(`Invalid ${p.code} value ${v}: want ${cs.length} values separated by $`);
+    ors.push(parts.map((x, k) => {
+      const ordered = ['date', 'number', 'quantity'].includes(cs[k].p.type) && PREFIXES.includes(x.slice(0, 2));
+      const [c, ca] = valueSql(type, cs[k].p, ordered ? x.slice(0, 2) : Operator.EQUALS, ordered ? x.slice(2) : x, `c${k}`);
+      va.push(...ca);
+      return `(${c})`;
+    }).join(' and '));
+  }
+  const from = cs.map((_, k) => (k ? ` join comp c${k} on c${k}.rid = c0.rid and c${k}.code = c0.code and c${k}.grp = c0.grp and c${k}.n = ${k}` : 'comp c0')).join('');
+  const where = `c0.code = ? and c0.n = 0 and (${ors.map((o) => `(${o})`).join(' or ')})`;
+  return { sql: `exists (select 1 from ${from} where c0.rid = ${a}.rid and ${where})`, args: [p.code, ...va],
+    set: { sql: `select c0.rid from ${from} where c0.type = ? and ${where}`, args: [type, p.code, ...va] }, multi: true };
 }
 
 const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -399,8 +502,15 @@ function linkSet(l: Link, inner: { sql: string; args: Arg[] }): { sql: string; a
   return { sql: `select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (select ? || x.id from resources x where x.rid in (${inner.sql}))`, args: [l.from, l.code, `${l.to}/`, ...inner.args] };
 }
 
+// A composite parameter as a filter: @medplum/core's parser refuses composites ("Unrecognized search parameter type").
+function compositeFilter(code: string, value: string): Filter {
+  const [c, mod] = code.split(':');
+  return { code: c, operator: (mod ?? Operator.EQUALS) as Operator, value };
+}
+
 // `code=value` parsed as a search parameter of `type` (modifier and prefix).
 function ownFilter(type: string, code: string, value: string): Filter {
+  if (param(type, code.split(':')[0])?.type === 'composite') return compositeFilter(code, value);
   try {
     return parseSearchRequest(`${type}?${new URLSearchParams([[code, value]])}`).filters?.[0] ?? { code, operator: Operator.EQUALS, value };
   } catch (e) {
@@ -541,11 +651,17 @@ function searchRaw(prep: Prep, typeOrTypes: string | string[], query: [string, s
   if (summary && !['count', 'false', 'true', 'data', 'text'].includes(summary)) throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
   if (query.some(([, v]) => v.includes('\0'))) throw badRequest('Search filter value cannot contain null bytes'); // Medplum's text
   const parse = (t: string): SearchRequest => {
+    const q = normalize(t, system ? query.filter(([k]) => k !== '_type') : query).filter(([k]) => !IGNORED.has(k));
+    const composite = ([k]: [string, string]) => param(t, k.split(':')[0])?.type === 'composite';
+    let req: SearchRequest;
     try {
-      return parseSearchRequest(`${t}?${new URLSearchParams(normalize(t, system ? query.filter(([k]) => k !== '_type') : query).filter(([k]) => !IGNORED.has(k)))}`);
+      req = parseSearchRequest(`${t}?${new URLSearchParams(q.filter((x) => !composite(x)))}`);
     } catch (e) {
       throw badRequest(e instanceof Error ? e.message : String(e));
     }
+    const comps = q.filter(composite).map(([k, v]) => compositeFilter(k, v));
+    if (comps.length) req.filters = [...req.filters ?? [], ...comps];
+    return req;
   };
   const reqs = types.map(parse);
   const req = reqs[0];

@@ -1,6 +1,6 @@
 // Medplum 5.2.14 packages/server/src/fhir/search.test.ts, second part (from "Chained search sort order"), ported side by side
 // as in search.test.ts. Medplum's beforeAll fixtures are made once per side, on first use.
-import type { Bundle, Patient, Task } from '@medplum/fhirtypes';
+import type { Bundle, Condition, Patient, Task } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { SQLITE } from '../helpers.ts';
 import { both, error, marker, names, paritySides, q, ref, same, search, type Side } from './harness.ts';
@@ -826,4 +826,79 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     const bundle4 = await search(s, q('Patient', ['name', family], ['_sort', '-_lastUpdated']));
     expect(names(bundle4, { patient1, patient2 })).toEqual(['patient2', 'patient1']);
   }));
+  test('project-scoped Repository w/ %j › Reference identifier search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const code = crypto.randomUUID();
+    const c1 = await s.create({ resourceType: 'Condition', code: { coding: [{ code }] }, subject: { identifier: { system: 'mrn', value: '123456' } } } as Condition);
+    const c2 = await s.create({ resourceType: 'Condition', code: { coding: [{ code }] }, subject: { identifier: { system: 'xyz', value: '123456' } } } as Condition);
+    const bundle1 = await search(s, `Condition?code=${code}&subject:identifier=mrn|123456`);
+    expect(names(bundle1, { c1, c2 })).toEqual(['c1']);
+    const bundle2 = await search(s, `Condition?code=${code}&subject:identifier=123456`);
+    expect(names(bundle2, { c1, c2 }).sort()).toEqual(['c1', 'c2']);
+    const bundle3 = await search(s, `Condition?code=${code}&subject:identifier=mrn|123456&_total=accurate`);
+    expect([bundle3.total, names(bundle3, { c1, c2 })]).toEqual([1, ['c1']]);
+    return [names(bundle1, { c1, c2 }), names(bundle2, { c1, c2 }).sort(), bundle3.total];
+  }));
+
+  test('project-scoped Repository w/ %j › Task patient identifier search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const identifier = crypto.randomUUID();
+    const task1 = await s.create({ resourceType: 'Task', status: 'accepted', intent: 'order', for: { type: 'Patient', identifier: { system: 'mrn', value: identifier } } } as Task);
+    const task2 = await s.create({ resourceType: 'Task', status: 'accepted', intent: 'order', for: { identifier: { system: 'mrn', value: identifier } } } as Task);
+    // subject ignores Reference.type; patient (Task.for.where(resolve() is Patient)) keeps only the typed one.
+    const bundle1 = await search(s, `Task?subject:identifier=mrn|${identifier}&_total=accurate`);
+    expect([bundle1.total, names(bundle1, { task1, task2 }).sort()]).toEqual([2, ['task1', 'task2']]);
+    const bundle2 = await search(s, `Task?patient:identifier=mrn|${identifier}&_total=accurate`);
+    expect([bundle2.total, names(bundle2, { task1, task2 })]).toEqual([1, ['task1']]);
+    return [bundle1.total, bundle2.total, names(bundle2, { task1, task2 })];
+  }));
+
+  // Medplum's test.each, checked as it does: a 400 whose text contains the expected words. _deleted is Medplum's soft-delete
+  // parameter; the store keeps no deleted records and defines no such parameter, so it answers "Unknown search parameter".
+  const invalid: [string, string][] = [
+    ['Patient?_id:in=123', 'Invalid modifier'], ['Patient?_id:not-in=123', 'Invalid modifier'], ['Patient?_id:text=123', 'Invalid modifier'],
+    ['Patient?_id:above=123', 'Invalid modifier'], ['Patient?_id:below=123', 'Invalid modifier'], ['Patient?_id:of-type=123', 'Invalid modifier'],
+    ['Patient?_id:contains=123', 'Invalid modifier'], ['Patient?_id:identifier=123', 'Invalid modifier'], ['Patient?_id:iterate=123', 'Invalid modifier'],
+    ['Patient?_id:missing=maybe', "must have a value of 'true' or 'false'"], ['Patient?_project:missing=maybe', "must have a value of 'true' or 'false'"],
+    ['Patient?_compartment:missing=maybe', "must have a value of 'true' or 'false'"],
+    ['Patient?_lastUpdated:in=2025-10-15', 'Invalid modifier'], ['Patient?_lastUpdated:not-in=2025-10-15', 'Invalid modifier'],
+    ['Patient?_deleted:in=true', 'Invalid modifier'], ['Patient?_deleted:not-in=true', 'Invalid modifier'],
+    ['Patient?_project:in=123', 'Invalid modifier'], ['Patient?_project:not-in=123', 'Invalid modifier'],
+    ['Patient?_compartment:in=123', 'Invalid modifier'], ['Patient?_compartment:not-in=123', 'Invalid modifier'],
+    ['Patient?active:in=true', 'Invalid modifier'], ['Patient?active:not-in=true', 'Invalid modifier'],
+    ['Patient?general-practitioner:in=123', 'Invalid modifier'], ['Patient?general-practitioner:not-in=123', 'Invalid modifier'],
+    ['Patient?identifier:in=123', 'Invalid modifier'], ['Patient?identifier:not-in=123', 'Invalid modifier'],
+    ['Patient?name:in=123', 'Invalid modifier'], ['Patient?name:not-in=123', 'Invalid modifier'],
+  ];
+  test('systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const out = [];
+    for (const [path, expected] of invalid) {
+      const e = await error(s, path);
+      const want = s.name === 'store' && path.includes('_deleted') ? 'Unknown search parameter: _deleted' : expected;
+      expect([path, e.status, e.text?.includes(want)], e.text).toEqual([path, 400, true]);
+      out.push([path, e.status]);
+    }
+    return out;
+  }));
+
+  // FHIR R4 defines these and the store implements them; Medplum 5.2.14 refuses :of-type and composite parameters (400) and
+  // treats a uri's :below/:above as plain equality (a parent or child url finds nothing).
+  test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
+    const V2 = 'http://terminology.hl7.org/CodeSystem/v2-0203';
+    const [medplum, store] = await both(sides, async (s) => {
+      const u = crypto.randomUUID();
+      const patient = await s.create({ resourceType: 'Patient', identifier: [{ type: { coding: [{ system: V2, code: 'MR' }] }, system: 'http://example.com/mrn', value: u }] } as Patient);
+      const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: LOINC, code: u }] }, valueQuantity: { value: 250, system: UCUM, code: 'mg/dL' } });
+      const questionnaire = await s.create({ resourceType: 'Questionnaire', status: 'active', url: `http://example.com/fhir/Questionnaire/${u}` });
+      const out: Record<string, unknown> = {};
+      for (const [k, path] of [
+        ['of-type', `Patient?identifier:of-type=${V2}|MR|${u}`], ['composite', `Observation?code-value-quantity=${LOINC}|${u}$gt200`],
+        ['below', `Questionnaire?url:below=http://example.com/fhir/Questionnaire`], ['above', `Questionnaire?url:above=http://example.com/fhir/Questionnaire/${u}/_history/1`],
+      ]) {
+        const g = await s.call('GET', path);
+        out[k] = g.status === 200 ? names(g.json, { patient, obs, questionnaire }).filter((n) => n !== '?') : `${g.status} ${g.json?.issue?.[0]?.details?.text}`;
+      }
+      return out;
+    });
+    expect(medplum).toEqual({ 'of-type': '400 Invalid modifier :of-type for Patient-identifier', composite: '400 Unrecognized search parameter type: composite', below: [], above: [] });
+    expect(store).toEqual({ 'of-type': ['patient'], composite: ['obs'], below: ['questionnaire'], above: ['questionnaire'] });
+  });
 });
