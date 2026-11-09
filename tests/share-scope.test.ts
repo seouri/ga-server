@@ -51,6 +51,8 @@ test('dateOf takes the first present field, sliced to a day', () => {
   expect(dateOf(r({ resourceType: 'Observation' }))).toBeUndefined();
   // A planned medication with no author: placed by the start of its validity period.
   expect(dateOf(r({ resourceType: 'MedicationRequest', dispenseRequest: { validityPeriod: { start: '2025-01-01' } } }))).toBe('2025-01-01');
+  expect(dateOf(r({ resourceType: 'MedicationDispense', whenHandedOver: '2025-02-03T09:00:00Z' }))).toBe('2025-02-03');
+  expect(dateOf(r({ resourceType: 'DocumentReference', context: { period: { start: '2025-04-05T10:00:00-05:00' } } }))).toBe('2025-04-05');
 });
 
 const archive = (system: string) => r({ resourceType: 'DocumentReference', identifier: [{ system, value: 'a' }], date: '2025-02-01' });
