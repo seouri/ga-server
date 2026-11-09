@@ -1,5 +1,7 @@
 # 28. Immunization route
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts (the test file is shared with draft 27). Nothing filed.
 
 ## Issue: @medplum/ccda: an immunization's route is dropped
@@ -19,10 +21,12 @@ after `effectiveTime`. Expected: `"route": { "coding": [{ "system": "http://ncit
 - `ccda-to-fhir.ts`: `route: this.mapCode(substanceAdmin.routeCode)` in the Immunization.
 - Test `immunization.test.ts`: the route is kept; no routeCode gives no route.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 28 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 4000e5d (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

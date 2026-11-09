@@ -1,5 +1,7 @@
 # 33. One Practitioner, Organization and Location per identifier
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 32 (Location). Nothing filed.
 
 ## Issue: @medplum/ccda: a practitioner is emitted once per occurrence
@@ -16,10 +18,12 @@ Expected: one Practitioner `1111111111` (with the telecom), both AllergyIntolera
 - Test `shared-resources.test.ts`.
 - Not merged: resources with no identifier (nothing says two nameless copies are one).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 33 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 596c79e, 1d7ec27 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 32
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

@@ -1,5 +1,7 @@
 # 30. Composition and CareTeam subject; section mode
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Touches the CareTeam builder of draft 4 (care team members) but not its lines. Nothing filed.
 
 ## Issue: @medplum/ccda: the Composition and CareTeam have no subject
@@ -28,10 +30,12 @@ Expected: `Composition.subject` and `CareTeam.subject` = `{ "reference": "Patien
 - `ccda-to-fhir.ts`: `subject: createReference(this.patient)` (when a patient exists) on both; `mode: 'snapshot'` on each section.
 - Test `document-subject.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 30 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): a043cda (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

@@ -1,5 +1,7 @@
 # 19. Family History organizers → FamilyMemberHistory (existing PR, applied with one GA change)
 
+> Nothing to post: this is existing external work. The whole draft is GA-internal and never posted.
+
 Nothing new to file. GA carries the open external PR **medplum#11243** ("fix(ccda): map Family History organizers to FamilyMemberHistory", fixes #11200), head commit 6af85aab, as row 19 of `vendor/medplum-ccda/PATCHES.md`. Drop the row when a Medplum release contains it, after checking the routing point below.
 
 What it changes: every organizer outside the Care Teams section went through `processVitalsOrganizer`, so a Family History Organizer became the patient's own Observations ("Disease" = Hypertension, "Age at onset" 60 a, and an uncoded organizer Observation), with the relationship lost. Now a Family History Organizer (`2.16.840.1.113883.10.20.22.4.45`) becomes one `FamilyMemberHistory`: relationship, sex, one `condition` per Family History Observation with `onsetAge` and `contributedToDeath`; a negated observation gives no condition.
@@ -57,10 +59,10 @@ How GA applied it, and the one change:
 
 The Microsoft path produced a FamilyMemberHistory from the same section (checked with the local converter on the synthetic fragment above).
 
-## Filing metadata
+## Filing metadata (GA-internal)
 
 - PATCHES rows: 19 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): aa1d08f, 1578cdf (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: PR medplum#11243 (fixes #11200)
 - Depends on / builds on: drafts 1, 4 (applied by hand onto their routing)
-- Status: external PR; GA additions (1578cdf) could be proposed in its review. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: external PR; GA additions (1578cdf) could be proposed in its review. Nothing filed (the README has the approval process).

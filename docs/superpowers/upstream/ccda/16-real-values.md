@@ -1,5 +1,7 @@
 # 16. REAL observation values (existing PR)
 
+> Nothing to post: this is existing external work. The whole draft is GA-internal and never posted.
+
 Nothing new to file. GA carries the open external PR **medplum#11241** ("fix(ccda): map REAL observation values", fixes #11201) unchanged, applied from its head commit aba193d5. Drop row 16 of `vendor/medplum-ccda/PATCHES.md` when a Medplum release contains it.
 
 What it changes: a Result Observation whose value is `xsi:type="REAL"` (INR, pH, specific gravity, ratios) got no `value[x]` and a console warning. It now gets `valueQuantity` from the existing `mapQuantity`: the number, plus unit, UCUM system and code only when the element carries a `unit`. A `REAL` with no number gives no value and no warning.
@@ -23,10 +25,10 @@ How GA applied it: `git apply -p4 --directory=vendor/medplum-ccda` of the PR dif
 
 If the PR changes in review, re-apply its final diff and rerun `npx vitest run vendor`.
 
-## Filing metadata
+## Filing metadata (GA-internal)
 
 - PATCHES rows: 16 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): f554466 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: PR medplum#11241 (fixes #11201)
 - Depends on / builds on: nothing
-- Status: external PR, nothing to file. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: external PR, nothing to file. Nothing filed (the README has the approval process).

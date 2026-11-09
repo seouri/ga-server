@@ -1,5 +1,7 @@
 # 15. A medication's supply orders and dispenses become MedicationRequest and MedicationDispense
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR (searched `ccda`, `ccda medication`, `supply`). Builds on drafts 13 (identifiers) and 14 (`processMedicationSubstanceAdministration` returns the statement or request). Nothing filed.
 
 ## Issue: @medplum/ccda: Medication Supply Order and Medication Dispense inside a Medication Activity are dropped
@@ -118,10 +120,12 @@ The same supply with `moodCode="EVN"` (`22.4.18`):
 - **Not converted.** A supply order's `instructions`, left for a follow-up.
 - **Test.** `medication-activity.test.ts`: a supply order; a dispense with its own product; a dispense's author (dataenterer) and performer (dispenser).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 15 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 1677fd3, 4512d3a, 1e31c57 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 12, 13, 14
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

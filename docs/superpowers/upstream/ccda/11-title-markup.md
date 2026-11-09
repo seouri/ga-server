@@ -1,5 +1,7 @@
 # 11. Titles with markup → plain text
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. The DocumentReference part applies only with draft 5 (note sections). Nothing filed.
 
 ## Issue: @medplum/ccda: a document or section title with markup becomes an object, so the FHIR is invalid
@@ -50,10 +52,12 @@ Expected FHIR (fields this fix changes):
 - The parsed object form loses the order of mixed content and fuses the trimmed text pieces, so it cannot be used for this. No other code reads `title`: section routing uses templateIds.
 - Test: `title-markup.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 11 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 87a09a4, 75dee73 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

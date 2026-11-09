@@ -1,5 +1,7 @@
 # 13. Medication records keep the substanceAdministration id
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 12 (the fork fix for medplum#10847; only its `intent` parameter, not its behaviour). Nothing filed.
 
 ## Issue: @medplum/ccda: MedicationRequest has no identifier (the substanceAdministration id is dropped)
@@ -52,10 +54,12 @@ Expected FHIR (today: the same, without `identifier`):
 - `processMedicationSubstanceAdministration`: `identifier: this.mapIdentifiers(substanceAdmin.id)`, the same helper the other statements use. A bare UUID root still becomes the resource `id` and is not repeated as an identifier.
 - Test: `medication-activity.test.ts` (`a medication record keeps its substanceAdministration id as its identifier`).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 13 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 0f0e77e (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

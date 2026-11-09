@@ -1,5 +1,7 @@
 # 24. A Goal gets no empty target or category
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts. Nothing filed.
 
 ## Issue: @medplum/ccda: a goal observation with an observation entryRelationship gets an empty target `{}`; a goal without a code gets `category: []`
@@ -38,10 +40,12 @@ Expected: a Goal with `description: { text: "Walk daily" }` and neither `target`
 - `target` and `category` are left out when empty.
 - Test: the goal above has no target and no category; a goal with an act relationship keeps its one target (code and due date).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 24 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 02ce415 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

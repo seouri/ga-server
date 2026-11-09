@@ -1,5 +1,7 @@
 # 8. Plan of Treatment act text by reference → CarePlan.description
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Uses medplum#11242 (`resolveNarrativeReference`). Nothing filed.
 
 ## Issue: @medplum/ccda: CarePlan from a Plan of Treatment act has no description when the act text is a narrative reference
@@ -43,10 +45,12 @@ Expected FHIR (fields this fix adds):
 - `description: nodeToString(act.text) || this.resolveNarrativeReference(act.text?.reference)`, and the narrative-reference extension as on other resources.
 - Test: `care-plan-text.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 8 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 50f8b78 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 3 (PR medplum#11242)
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

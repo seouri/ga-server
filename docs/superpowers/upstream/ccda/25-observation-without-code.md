@@ -1,5 +1,7 @@
 # 25. An observation with a value but no code is kept
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts. Nothing filed.
 
 ## Issue: @medplum/ccda: an observation whose code is a nullFlavor is dropped even when it has a value
@@ -43,10 +45,12 @@ Expected (today: no Observation):
 - `processVitalsObservation`: when the code maps to nothing but the value has content (`@value`, `@code`, `@displayName`, text, a reference or originalText), the code is a data-absent-reason `unknown`, as the Coverage payor and FamilyMemberHistory relationship already do for required elements. An observation with neither code nor value is still skipped.
 - Test `observation-without-code.test.ts`: the entry above is kept with that code; an observation with a nullFlavor code and no value, or a nullFlavor value, is skipped.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 25 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): cd148ca (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

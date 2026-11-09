@@ -1,5 +1,7 @@
 # 46. A Result Organizer's procedures, specimens and encounter
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on drafts 19 and 41. Nothing filed.
 
 ## Issue: @medplum/ccda: Result Organizer components other than observations are dropped
@@ -23,10 +25,12 @@ Expected: a `Procedure` (code, performed time) whose `report` points at the Diag
 - `oids.ts`: `OID_SPECIMEN_RECEIVED`; `types.ts`: organizer `specimen`, component `procedure`/`encounter`, procedure `entryRelationship`, `specimenPlayingEntity`; `xml.ts`: the new arrays.
 - Tests in `result-organizer.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 46 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 2db9cc0 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 20
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

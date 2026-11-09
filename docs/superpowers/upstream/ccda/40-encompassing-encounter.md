@@ -1,5 +1,7 @@
 # 40. The encompassing encounter is the Composition encounter
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Nothing filed.
 
 ## Issue: @medplum/ccda: componentOf/encompassingEncounter is dropped
@@ -36,10 +38,12 @@ The header facility's Location is always created and merged by identifier with a
 and address are kept); only a duplicate `Encounter.location` entry is skipped. Header participants the Encounter already has
 (same type and person) are not repeated.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 40, 45, 48 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 117b10c, ec5ca6a, 52466f0 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 31, 32, 33
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

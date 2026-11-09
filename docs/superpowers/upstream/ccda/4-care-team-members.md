@@ -1,5 +1,7 @@
 # 4. Care team: every member and every performer
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Nothing filed.
 
 ## Issue: @medplum/ccda: C-CDA to FHIR keeps only the first act and first performer of a care team member component
@@ -48,10 +50,12 @@ Expected FHIR (that component's participants):
 - `processCareTeamMember` becomes `processCareTeamMembers`, returning one participant per performer of each member act. Participant fields are unchanged.
 - Test: `care-team-members.test.ts` (two components, the second with two performers: three participants).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 4 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 0dc3444 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

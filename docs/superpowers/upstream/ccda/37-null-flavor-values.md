@@ -1,5 +1,7 @@
 # 37. A nullFlavor observation value is data-absent
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 26 (TS/BL) and sits next to medplum#11241 (REAL). Nothing filed.
 
 ## Issue: @medplum/ccda: a nullFlavor observation value becomes an empty value
@@ -20,10 +22,12 @@ Expected: no `valueQuantity`, `"dataAbsentReason": { "coding": [{ "system": "htt
 - The nullFlavor code (UNK, ASKU, NAV, MSK, ...) could map to the matching data-absent-reason code if `sanitizeNullFlavors` kept it on values; out of scope here.
 - Test `observation-ts-bl.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 37 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): d1898d7 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 26
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

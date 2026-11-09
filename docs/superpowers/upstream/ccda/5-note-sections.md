@@ -1,5 +1,7 @@
 # 5. Notes, Instructions and History of Present Illness entries → DocumentReference
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Depends on medplum#11242 (narrative reference index). Nothing filed.
 
 ## Issue: @medplum/ccda: C-CDA to FHIR skips Note Activity, Instructions and History of Present Illness entries
@@ -57,10 +59,12 @@ The same for an Instruction act (`22.4.20`) in an Instructions section and a Not
 - `processNoteAct`: text from the act's own text or the narrative it references (`resolveNarrativeReference`, #11242), base64 in a `text/plain` attachment titled with the section title; `type` from the act code (translations kept), `category` from the section code, `context.period` from effectiveTime (`DocumentReference.date` is an instant, which a CDA date often is not), authors as Practitioners, ids as identifiers.
 - Test: `note-sections.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 5 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): b1ad72e (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 3 (PR medplum#11242)
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

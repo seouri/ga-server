@@ -2,6 +2,12 @@
 
 GA vendors `@medplum/ccda` 5.2.15 in `vendor/medplum-ccda/` and fixes it there (`vendor/medplum-ccda/PATCHES.md`). Each draft below is an issue plus a PR description for one fix. **Nothing is filed or sent anywhere.**
 
+## What is posted
+
+Only a draft's `Issue` and `PR` sections (and its amendment sections, which belong to the PR) are posted. Everything under `GA-internal (do not post)` (filing metadata, how GA applied it, notes above the Issue) stays here. Approval (the owner approves each item first) is a step of this README, not of the drafts.
+
+Reproduction XML shows section or entry fragments only. Wrap them in a minimal ClinicalDocument (a `recordTarget` with a patient, and `component/structuredBody` around the section) when posting; `vendor/medplum-ccda/test/convert-sections.ts` is the wrapper the vendored tests use.
+
 ## Filing process
 
 1. The owner approves one item (a row of the table below) at a time. Nothing is filed without that.

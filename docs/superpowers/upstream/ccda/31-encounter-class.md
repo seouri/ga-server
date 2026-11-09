@@ -1,5 +1,7 @@
 # 31. Encounter class from an ActCode only
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts (draft 10 touches the same function's diagnoses, not `class`). Nothing filed.
 
 ## Issue: @medplum/ccda: Encounter.class carries the encounter code under the v3 ActCode system
@@ -25,10 +27,12 @@ Expected: `type[0].coding[0]` = CPT 99213 (as now); `class` = an ActCode only if
 - Test `encounter.test.ts`: CPT only → type CPT, class data-absent; no code → data-absent; an ActCode code or translation → that class.
 - Behaviour change to call out: documents with no encounter code no longer get `AMB`. If maintainers prefer keeping `AMB` as the default, the CPT part stands alone.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 31 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 155d3ca (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

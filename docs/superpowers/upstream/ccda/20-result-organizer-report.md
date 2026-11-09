@@ -1,5 +1,7 @@
 # 20. Result Organizer → DiagnosticReport
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on medplum#11243 (draft 19: organizers routed by their own templateIds) and medplum#11244 (draft 17: `mapObservationEffectiveTime`). Nothing filed.
 
 ## Issue: @medplum/ccda: a Result Organizer (lab panel) becomes a value-less Observation instead of a DiagnosticReport
@@ -65,10 +67,12 @@ Expected FHIR (today: two Observations, the panel one with `hasMember` and no va
 - `processResultOrganizer`: id and identifier from the organizer; status from statusCode (completed → final, active → partial, aborted/cancelled → cancelled, otherwise unknown); category v2-0074 `LAB` (`DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM` in `systems.ts`); code (absent: a data-absent-reason `unknown`, since FHIR requires it); subject; `effective[x]` from `mapObservationEffectiveTime`; `result` → the component Observations, made exactly as before by `processVitalsComponent`.
 - Tests (`result-organizer.test.ts`): a Result Organizer gives one DiagnosticReport with the results and no panel Observation; the V2 template and an `active` status give `partial`; a Vital Signs Organizer stays a panel Observation. Existing tests that read the Result Organizer as an Observation (the #11243 and #11244 organizer cases) read the report.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 20 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): ff9a701 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 17
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

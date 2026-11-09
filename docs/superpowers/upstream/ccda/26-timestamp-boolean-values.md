@@ -1,5 +1,7 @@
 # 26. TS and BL observation values
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts (sits next to medplum#11241's REAL case). Nothing filed.
 
 ## Issue: @medplum/ccda: TS and BL observation values are dropped
@@ -27,10 +29,12 @@ Expected: `"valueDateTime": "2024-01-01"`; with `<value xsi:type="BL" value="tru
 - `types.ts`: `CcdaTimestampOrBoolean` (`'@_xsi:type': 'TS' | 'BL'`) joins `CcdaValue`.
 - Test `observation-ts-bl.test.ts`: TS, BL true and BL false give those values without a warning; BL in another case parses; a malformed TS or BL gives no value; a nullFlavor gives `dataAbsentReason`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 26, 35 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 4a40fb4, 44802b2 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 16 (neighbouring case)
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

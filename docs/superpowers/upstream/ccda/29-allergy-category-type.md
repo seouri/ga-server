@@ -1,6 +1,8 @@
 # 29. Allergy category and type from the observation value
 
-Existing PR medplum#11308 (fixes #11298), head 16b30642. Nothing new to file: GA applies it by hand and will comment on the PR only with the owner's go-ahead.
+> Nothing to post: this is existing external work. The whole draft is GA-internal and never posted.
+
+Existing PR medplum#11308 (fixes #11298), head 16b30642. Nothing new to file: GA applies it by hand.
 
 ## What GA applied
 
@@ -27,10 +29,10 @@ GA's draft 9 (one AllergyIntolerance per SUBJ observation of a concern act) move
 
 Expected: `"category": ["medication"], "type": "allergy"`. Before: `"category": ["food"], "type": "allergy"`.
 
-## Filing metadata
+## Filing metadata (GA-internal)
 
 - PATCHES rows: 29 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): b74e576, 43f871c (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: PR medplum#11308 (fixes #11298)
 - Depends on / builds on: drafts 9
-- Status: external PR; 43f871c is GA's accounting only. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: external PR; 43f871c is GA's accounting only. Nothing filed (the README has the approval process).

@@ -1,5 +1,7 @@
 # 41. A Result Organizer's performer is the DiagnosticReport performer
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 19 (Result Organizer as DiagnosticReport). Nothing filed.
 
 ## Issue: @medplum/ccda: the lab that performed a result panel is dropped
@@ -21,10 +23,12 @@ Expected: `DiagnosticReport.performer: [{ reference: "PractitionerRole/..." }]`,
 - `types.ts`: `CcdaOrganizer.performer`; `xml.ts`: `organizer.performer` is an array.
 - Test `result-organizer.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 41 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 10c24ca (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 20, 33
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

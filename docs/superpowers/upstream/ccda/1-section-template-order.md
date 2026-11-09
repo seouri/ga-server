@@ -1,6 +1,8 @@
 # 1. Route section entries by any templateId
 
-Builds on the existing issue **medplum#10671** ("C-CDA to FHIR routes section entries by templateId[0] only, so medications are silently dropped when the entries-optional Medications template is listed first"), which proposes exactly this fix and asks for the `open-to-community` label. No PR exists yet. Nothing here is filed; it goes out under the owner's account after their go-ahead.
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
+Builds on the existing issue **medplum#10671** ("C-CDA to FHIR routes section entries by templateId[0] only, so medications are silently dropped when the entries-optional Medications template is listed first"), which proposes exactly this fix and asks for the `open-to-community` label. No PR exists yet.
 
 ## Issue
 
@@ -57,10 +59,12 @@ Expected FHIR (the medication, abridged):
 - A section with no templateId no longer throws a TypeError (`section.templateId[0]`): it is unsupported like any unknown section.
 - Tests: `section-template-order.test.ts` (Epic order, entries-optional only, Problems not first and V2, no templateId). Existing fixtures list the routed template first, so their output is unchanged.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 1 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 5090775 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: issue medplum#10671
 - Depends on / builds on: nothing
-- Status: issue-first (invited issue exists). Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first (invited issue exists). Nothing filed (the README has the approval process).

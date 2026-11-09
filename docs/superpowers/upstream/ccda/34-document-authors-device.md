@@ -1,5 +1,7 @@
 # 34. Every document author; an authoring device is a Device
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts (draft 33's merge pass also merges the device's organization with the custodian when they share an id). Nothing filed.
 
 ## Issue: @medplum/ccda: only the first document author is kept, and a device author becomes an empty Practitioner
@@ -25,10 +27,12 @@ Expected: `Composition.author` = [Practitioner, Device]; the Device has `deviceN
 - Test `document-authors.test.ts`.
 - Not changed: entry-level authors (recorder, asserter, requester) take no Device in FHIR R4; a device there still goes through `mapAuthorToReference`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 34 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 40adb9a (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 33
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

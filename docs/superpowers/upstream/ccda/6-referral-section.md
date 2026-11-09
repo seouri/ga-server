@@ -1,5 +1,7 @@
 # 6. Reason for Referral → ServiceRequest
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Uses medplum#11242 for the narrative text. Nothing filed.
 
 ## Issue: @medplum/ccda: C-CDA to FHIR skips Reason for Referral entries
@@ -49,10 +51,12 @@ Expected FHIR:
 - Also routes the V2 section root.
 - Test: `referral-section.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 6 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 2e7b889 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 3 (PR medplum#11242)
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

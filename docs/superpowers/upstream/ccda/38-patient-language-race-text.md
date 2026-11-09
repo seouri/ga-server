@@ -1,5 +1,7 @@
 # 38. Patient language and the US Core race/ethnicity text
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Nothing filed.
 
 ## Issue: @medplum/ccda: Patient loses languageCommunication; race and ethnicity extensions lack `text`
@@ -21,10 +23,12 @@ Expected: `communication: [{ language: { coding: [{ system: "urn:ietf:bcp:47", c
 - `types.ts`: `CcdaLanguageCommunication.preferenceInd`.
 - Test `patient-demographics.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 38 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): d9cee49 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

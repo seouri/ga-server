@@ -1,5 +1,7 @@
 # 23. Planned observations in Plan of Treatment → ServiceRequest, not Goal
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 6 (Reason for Referral → ServiceRequest: the status and intent maps are shared) and medplum#11244 (draft 17: the time helper). Nothing filed.
 
 ## Issue: @medplum/ccda: a planned test in Plan of Treatment becomes a Goal ("Unknown goal")
@@ -49,7 +51,9 @@ Expected FHIR (today: a Goal "Unknown goal"):
 - `processPlannedObservation`: id and identifier; status from statusCode and intent from moodCode (INT → plan, PRP → proposal, RQO/ARQ → order), the maps the Reason for Referral builder already uses, moved to module constants; `doNotPerform: true` when the observation is negated (`negationInd="true"`: a plan not to do it); code; subject; `occurrenceDateTime` or `occurrencePeriod` from the effectiveTime (`mapObservationEffectiveTime`); authoredOn and requester from the first author; the observation's text, or the narrative it references, as a note.
 - Tests (`planned-observation.test.ts`): an RQO Planned Observation gives that ServiceRequest and no Goal; INT, PRP and ARQ give plan, proposal and order; a GOL observation in the same section stays a Goal.
 
-Not mapped: a value on a planned observation (unusual) and its child observations; GA names these in its own accounting.
+Not mapped: a value on a planned observation (unusual) and its child observations.
+
+# GA-internal (do not post)
 
 ## Filing metadata
 
@@ -57,4 +61,4 @@ Not mapped: a value on a planned observation (unusual) and its child observation
 - Vendored commit(s): 9c7f7fa, f56b651 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 6, 17
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

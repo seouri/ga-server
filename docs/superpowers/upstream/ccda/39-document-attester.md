@@ -1,5 +1,7 @@
 # 39. The document's authenticators are Composition attesters
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Nothing filed.
 
 ## Issue: @medplum/ccda: legalAuthenticator and authenticator are dropped
@@ -21,10 +23,12 @@ Expected: `attester: [{ mode: "legal", time: "2020-01-02T03:04:00-05:00", party:
 - `types.ts`: `Ccda.legalAuthenticator`, `Ccda.authenticator`, `CcdaAuthenticator`; `xml.ts`: `ClinicalDocument.authenticator` is an array.
 - Test `document-attester.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 39 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 4094ef1 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 33
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

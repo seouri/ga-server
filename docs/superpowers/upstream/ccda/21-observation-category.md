@@ -1,5 +1,7 @@
 # 21. Observation category from the section when the observation's own template has none
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 20 (the Result Organizer passes its section down like the other organizers). Nothing filed.
 
 ## Issue: @medplum/ccda: an observation whose templates map to no category gets `category: []`; Social History observations with a vendor template are not social-history
@@ -60,10 +62,12 @@ Expected (today: `"category": []` on both):
 
 Open point for review: the section-code fallback uses a LOINC section code as an Observation category (the element's binding is example only). If maintainers prefer, drop that branch and leave such observations uncategorised (`undefined`).
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 21 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 7a72b3c, 50834ba (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

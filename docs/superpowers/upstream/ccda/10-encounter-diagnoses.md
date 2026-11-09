@@ -1,5 +1,7 @@
 # 10. Encounter Diagnosis acts → Conditions linked to their Encounter
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Builds on draft 9 (`processConditionAct` returns one Condition per SUBJ observation). Nothing filed.
 
 ## Issue: @medplum/ccda: visit diagnoses (Encounter Diagnosis act, 2.16.840.1.113883.10.20.22.4.80) are dropped
@@ -90,10 +92,12 @@ Expected FHIR (today: an Encounter and no Condition):
 - The existing RSON path is unchanged.
 - Test: `encounter-diagnoses.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 10 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): ab6ee22 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 9
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

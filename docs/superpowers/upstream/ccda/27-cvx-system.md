@@ -1,5 +1,7 @@
 # 27. CVX code system URI
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 No existing issue or PR. Independent of the other drafts. Nothing filed.
 
 ## Issue: @medplum/ccda: vaccine codes come out under http://nucc.org/cvx instead of http://hl7.org/fhir/sid/cvx
@@ -26,10 +28,12 @@ Expected: `"vaccineCode": { "coding": [{ "system": "http://hl7.org/fhir/sid/cvx"
 - `systems.ts`: the `FHIR_CVX_URL` row comes first in `SYSTEM_MAPPER`; the `CVX_URL` row moves to the alternates, so a FHIR resource coded `http://nucc.org/cvx` still converts back to the CVX OID.
 - Test `immunization.test.ts`: a CVX vaccine code is in `http://hl7.org/fhir/sid/cvx`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 27 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): df39876 (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: nothing
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).

@@ -1,5 +1,7 @@
 # 2. An observation without a templateId refuses the whole document
 
+> Post only the 'Issue' and 'PR' sections; everything else is GA-internal and never posted.
+
 Same cause as medplum#10671 (`templateId[0]`), on the entry instead of the section. No existing issue or PR. Propose it as its own issue, or fold it into the #10671 PR if the maintainers prefer. Nothing filed.
 
 ## Issue: @medplum/ccda: C-CDA to FHIR throws on an observation without a templateId
@@ -47,10 +49,12 @@ Expected FHIR (abridged):
 - `mapGoalLifecycleStatus` reads `statusCode?.['@_code']` (absent → `active`, as documented in its comment).
 - Test: `observation-without-template.test.ts`.
 
+# GA-internal (do not post)
+
 ## Filing metadata
 
 - PATCHES rows: 2 (`vendor/medplum-ccda/PATCHES.md`)
 - Vendored commit(s): 274250c (`git log --oneline -- vendor/medplum-ccda`)
 - Existing external work: none
 - Depends on / builds on: drafts 1 (same cause; may fold into its PR)
-- Status: issue-first. Nothing filed; the owner approves each item first. Medplum accepts outside PRs only for an issue a maintainer has invited ("vouched"), so the issue goes first.
+- Status: issue-first. Nothing filed (the README has the approval process).
