@@ -438,9 +438,10 @@ export async function importResources(
       return { dups: [] };
     }
     const { found: all, free: open } = await linkCandidates(client, type, epic, patientId, ident.system as string);
-    // Note linking by Epic note id is C-CDA <-> EHI only: a portal note and an EHI note stay separate (a merge would replace the EHI text).
-    const other = source.kind === 'smart' ? 'urn:ga-server:id:ehi:' : source.kind === 'ehi' ? 'urn:ga-server:id:smart:' : undefined;
-    const allowed = (c: Resource) => type !== 'DocumentReference' || !other || !idList(c as R).some((x) => x.system?.startsWith(other));
+    // Note linking by Epic note id is C-CDA <-> EHI only: a portal note stays apart from EHI and C-CDA notes (a merge would replace the text).
+    const fileNote = (x: string) => x.startsWith('urn:ga-server:id:ehi:') || x === 'urn:ga-server:id:ccda';
+    const other = source.kind === 'smart' ? fileNote : source.kind === 'ehi' || source.kind === 'ccda' ? (x: string) => x.startsWith('urn:ga-server:id:smart:') : undefined;
+    const allowed = (c: Resource) => type !== 'DocumentReference' || !other || !idList(c as R).some((x) => other(x.system ?? ''));
     const found = (all as R[]).filter(allowed);
     const free = (open as R[]).filter(allowed);
     // A note's Epic id (HNO note id) is the NOTE_ID of the EHI note GA may already hold (identifier <ehi system>|HNO_INFO|<id>,

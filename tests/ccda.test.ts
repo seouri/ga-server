@@ -847,17 +847,35 @@ test('a portal note never merges into an EHI note with the same Epic note id, in
   }
 });
 
-test('a new EHI export\'s note merges into the C-CDA note with its Epic note id (C-CDA first)', async () => {
-  const xml = `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="NOTE-DOC"/><effectiveTime value="20240210"/>
+const NOTE_XML = `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="NOTE-DOC"/><effectiveTime value="20240210"/>
     <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
     <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.65"/><code code="11506-3" codeSystem="2.16.840.1.113883.6.1"/>
     <title>Progress Notes</title><text><paragraph ID="n1">Seen.</paragraph></text>
     <entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.202"/><id root="${NOTE_ROOT}" extension="555"/>
       <code code="34109-9" codeSystem="2.16.840.1.113883.6.1"/><text><reference value="#n1"/></text><statusCode code="completed"/></act></entry>
     </section></component></structuredBody></component></ClinicalDocument>`;
+
+test('a portal note never merges into a C-CDA note with the same Epic note id, in either order', async () => {
+  for (const first of ['ccda', 'portal']) {
+    await onStore(async ({ client }) => {
+      const n = await noteSetup(client);
+      if (first === 'portal') await n.portal();
+      await importPath(client, cfgFor(n.pid), writeDoc(NOTE_XML), n.pid);
+      if (first === 'ccda') await n.portal();
+      const notes = await n.notes();
+      expect(notes).toHaveLength(2);
+      const portal = notes.filter((d) => d.identifier?.some((i) => i.system === 'urn:ga-server:id:smart:h'));
+      expect(portal).toHaveLength(1);
+      expect(portal[0].identifier?.some((i) => i.system === 'urn:ga-server:id:ccda')).toBe(false);
+      expect(portal[0].content?.map((c) => c.attachment.contentType)).toEqual(['text/html']);
+    });
+  }
+});
+
+test('a new EHI export\'s note merges into the C-CDA note with its Epic note id (C-CDA first)', async () => {
   await onStore(async ({ client }) => {
     const n = await noteSetup(client);
-    await importPath(client, cfgFor(n.pid), writeDoc(xml), n.pid);
+    await importPath(client, cfgFor(n.pid), writeDoc(NOTE_XML), n.pid);
     await n.ehi(true);
     const [one, ...more] = await n.notes();
     expect(more).toHaveLength(0);
