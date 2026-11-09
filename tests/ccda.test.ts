@@ -155,13 +155,13 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   ]);
 });
 
-test('a Health Concern is a visit diagnosis, not a problem-list item, so it is not a current problem (as on the Microsoft path)', () => {
+test('a Health Concern is labelled health-concern (US Core), not a problem-list item, so it is not a current problem', () => {
   const doc = SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.2.5.1" extension="2015-08-01"/>\n          <code code="11450-4" codeSystem="2.16.840.1.113883.6.1" displayName="Problem list"/>',
     '<templateId root="2.16.840.1.113883.10.20.22.2.58" extension="2015-08-01"/>\n          <code code="75310-3" codeSystem="2.16.840.1.113883.6.1" displayName="Health concerns document"/>');
   expect(doc).not.toBe(SYNTHETIC);
   const conds = convertCcdaLocal(doc).resources.filter((r) => r.resourceType === 'Condition') as Condition[];
   expect(conds.length).toBeGreaterThan(0);
-  for (const c of conds) expect(c.category?.flatMap((x) => x.coding?.map((y) => y.code))).toEqual(['encounter-diagnosis']);
+  for (const c of conds) expect(c.category?.flatMap((x) => x.coding?.map((y) => `${y.system}|${y.code}`))).toEqual(['http://hl7.org/fhir/us/core/CodeSystem/condition-category|health-concern']);
 });
 
 test('a TS or BL value that does not parse is named; one in another case or with a nullFlavor is converted', () => {

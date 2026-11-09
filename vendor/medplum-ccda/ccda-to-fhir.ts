@@ -188,6 +188,13 @@ const ENCOUNTER_DIAGNOSIS: Coding = {
   display: 'Encounter Diagnosis',
 };
 
+// US Core's category for a Health Concerns section entry (not a problem-list item)
+const HEALTH_CONCERN: Coding = {
+  system: 'http://hl7.org/fhir/us/core/CodeSystem/condition-category',
+  code: 'health-concern',
+  display: 'Health Concern',
+};
+
 // Problem Status observation (LOINC 33999-4) value → Condition clinical status, by SNOMED code or display name
 const PROBLEM_STATUS_VALUES: Record<string, string> = {
   '55561003': 'active',
@@ -701,7 +708,7 @@ class CcdaToFhirConverter {
         case OID_PLAN_OF_CARE_SECTION:
           return this.processCarePlanAct(act);
         case OID_HEALTH_CONCERNS_SECTION:
-          return this.processConditionAct(act);
+          return this.processConditionAct(act, HEALTH_CONCERN);
         case OID_PROCEDURES_SECTION_ENTRIES_REQUIRED:
           return this.processProcedureAct(act);
         case OID_REASON_FOR_REFERRAL:

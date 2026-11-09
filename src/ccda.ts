@@ -33,14 +33,11 @@ const textOf = (n: unknown): string =>
     : '').replace(/\s+/g, ' ').trim();
 
 const RXNORM_OID = '2.16.840.1.113883.6.88';
-const PROBLEM_SECTION = /^2\.16\.840\.1\.113883\.10\.20\.22\.2\.5(\.1)?$/;
 type MedInfo = { name?: string; rxnorm?: string };
 
-// Per source entry <id>: a substanceAdministration's (or its supply's) drug (narrative name, RxNorm), and whether an observation
-// sits in the Problems section (problem list) or elsewhere (visit diagnoses).
+// Per source entry <id>: a substanceAdministration's (or its supply's) drug (narrative name, RxNorm).
 function sourceInfo(xml: string) {
   const drug = new Map<string, MedInfo>();
-  const problemList = new Map<string, boolean>();
   const narrative = new Map<string, string>();
   const root = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true }).parse(xml) as X;
   const collect = (o: unknown) => {
@@ -61,13 +58,12 @@ function sourceInfo(xml: string) {
       rxnorm: attr(mc, 'codeSystem') === RXNORM_OID ? attr(mc, 'code') : undefined,
     };
   };
-  const walk = (o: X, inProblems: boolean) => {
+  const walk = (o: X) => {
     for (const [k, v] of Object.entries(o)) {
       if (k.startsWith('@_')) continue;
       for (const c of arr(v)) {
         if (!c || typeof c !== 'object') continue;
         const n = c as X;
-        const problems = k === 'section' ? arr(n.templateId as X | X[]).some((t) => PROBLEM_SECTION.test(attr(t, 'root') ?? '')) : inProblems;
         if (k === 'substanceAdministration') {
           const info = drugInfo(n.consumable);
           for (const key of cdaKeys(n)) if ((info.name || info.rxnorm) && !drug.has(key)) drug.set(key, info);
@@ -78,16 +74,14 @@ function sourceInfo(xml: string) {
             for (const key of cdaKeys(s)) if ((sinfo.name || sinfo.rxnorm) && !drug.has(key)) drug.set(key, sinfo);
           }
         }
-        if (k === 'observation') for (const key of cdaKeys(n)) if (!problemList.has(key)) problemList.set(key, problems);
-        walk(n, problems);
+        walk(n);
       }
     }
   };
-  walk(root, false);
-  return { drug, problemList };
+  walk(root);
+  return { drug };
 }
 
-const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
 const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
   [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []]
@@ -118,15 +112,10 @@ function gaChoices(r: Resource, drug: Map<string, MedInfo>): Resource {
   return r;
 }
 
-// GA's choices, and a problem outside the Problems section (a Health Concern) is a visit diagnosis, not a problem-list item (GA
-// lists problem-list items as current problems). Converter fixes live in the library.
+// GA's choices; converter fixes live in the library.
 function localChoices(rs: Resource[], xml: string): Resource[] {
-  const { drug, problemList } = sourceInfo(xml);
-  return rs.map((r) => {
-    r = gaChoices(r, drug);
-    if (r.resourceType !== 'Condition' || !(r as Condition).category?.some((c) => c.coding?.some((x) => x.code === 'problem-list-item'))) return r;
-    return lookup(problemList, r) === false ? { ...r, category: [{ coding: [{ system: CATEGORY, code: 'encounter-diagnosis', display: 'Encounter Diagnosis' }] }] } as Condition : r;
-  });
+  const { drug } = sourceInfo(xml);
+  return rs.map((r) => gaChoices(r, drug));
 }
 
 // Custodian organisation name, matched only inside its own element so a nameless custodian can never pick up a later (patient) <name>.
