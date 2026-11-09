@@ -467,8 +467,8 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
   }));
 
   // README: ap on a date is R4's approximately (the store matches a date whose range overlaps the value's); Medplum 5.2.14
-  // refuses ap on dates, in _filter and as a prefix.
-  test('differs on purpose: project-scoped Repository w/ %j › _filter birthdate eq [server/src/fhir/search.test.ts]', async () => {
+  // refuses ap on dates, in _filter and as a prefix. Not a port: Medplum's _filter birthdate eq is the same() test above.
+  test('differs on purpose: ap on dates', async () => {
     const [medplum, store] = await both(sides, async (s) => {
       const patient = await s.create({ resourceType: 'Patient', birthDate: '2000-01-01', managingOrganization: { reference: 'Organization/' + crypto.randomUUID() } });
       const org: [string, string] = ['organization', patient.managingOrganization.reference];

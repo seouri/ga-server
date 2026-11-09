@@ -11,7 +11,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | --- | --- | --- | --- | --- |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search total | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search count=0 | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search offset max | skipped | platform | Medplum server config (maxSearchOffset) set in-process; the HTTP side cannot change it |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search offset max | ported | existing | at Medplum's default maxSearchOffset (10000): its test sets 200 in-process |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › clampEstimateCount: offset = %p, %p estimated, %p returned => %p | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › returns estimate and accurate with forceAccurate | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › returns estimate without forceAccurate when below threshold | skipped | platform | getCount / estimate-count internals |

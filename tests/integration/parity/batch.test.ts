@@ -85,6 +85,34 @@ describe.skipIf(SQLITE)('Medplum batch.test.ts and binary.test.ts (parity)', () 
     expect(results.entry?.[6]?.resource).toMatchObject({ resourceType: 'RelatedPerson', patient: { reference: `Patient/${createdPatient.id}` } });
   }));
 
+  // README: urn:oid fullUrls are rewritten like urn:uuid (R4 Bundle.entry.fullUrl allows both); Medplum rewrites only urn:uuid.
+  test('differs on purpose: urn:oid fullUrls are rewritten', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const res = await tx(s, 'transaction', [
+        { fullUrl: 'urn:oid:1.2.3.4', request: { method: 'POST', url: 'Practitioner' }, resource: { resourceType: 'Practitioner' } },
+        { request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', generalPractitioner: [{ reference: 'urn:oid:1.2.3.4' }] } },
+      ]);
+      expect([res.status, statuses(res.json)]).toEqual([200, ['201', '201']]);
+      return [res.json.entry[1].resource.generalPractitioner[0].reference, `Practitioner/${res.json.entry[0].resource.id}`];
+    });
+    expect(medplum[0]).toBe('urn:oid:1.2.3.4');
+    expect(store[0]).toBe(store[1]);
+  });
+
+  // README: a reference to a urn no entry defines is 400 (it can never resolve); Medplum stores it as written.
+  test('differs on purpose: a reference to an undefined urn', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const out = [];
+      for (const urn of ['urn:uuid:44444444-4444-4444-8444-444444444444', 'urn:oid:1.2.3.5']) {
+        const res = await tx(s, 'transaction', [{ request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', generalPractitioner: [{ reference: urn }] } }]);
+        out.push(res.status === 200 ? [200, res.json.entry[0].response.status, res.json.entry[0].resource.generalPractitioner[0].reference] : [res.status]);
+      }
+      return out;
+    });
+    expect(medplum).toEqual([[200, '201', 'urn:uuid:44444444-4444-4444-8444-444444444444'], [200, '201', 'urn:oid:1.2.3.5']]);
+    expect(store).toEqual([[400], [400]]);
+  });
+
   test('differs on purpose: Batch and Transaction processing › Transaction rollback [server/src/fhir/batch.test.ts]', async () => {
     const [medplum, store] = await both(sides, async (s) => {
       const { practitioner, toDelete, entry } = await sixEntries(s);

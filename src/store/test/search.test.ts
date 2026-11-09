@@ -367,7 +367,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Patient', '_has:Observation:subject:_id:missing=false')).toEqual(['p1']);
   });
 
-  it('token :contains is 400: R4 defines :contains for strings and uris only (Medplum accepts it)', () => {
+  it('token :contains is 400: R4 defines :contains for strings only (Medplum accepts it)', () => {
     obs('t1', { code: { text: 'LDL Cholesterol' } });
     expect(fail('Observation', 'code:contains=chol').status).toBe(400);
     expect(fail('ServiceRequest', 'order-detail:contains=x').message).toMatch(/:contains/);
@@ -564,6 +564,24 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     add({ resourceType: 'Patient', id: 'p3', generalPractitioner: [{ reference: 'Practitioner/x' }] });
     expect(ids('Patient', 'general-practitioner:Practitioner._has:Provenance:agent:target:Observation.subject=Patient/p2')).toEqual(['p3']);
     expect(ids('Patient', '_has:Observation:subject:_has:Provenance:target:agent:Practitioner._id=x')).toEqual(['p2']);
+  });
+
+  it('a reference type modifier at the end of a chain or _has names the target type (subject:Practitioner=abc is Practitioner/abc)', () => {
+    add({ resourceType: 'Patient', id: 'p1', generalPractitioner: [{ reference: 'Organization/abc' }] });
+    obs('o1', { subject: { reference: 'Patient/p1' }, performer: [{ reference: 'Organization/abc' }] });
+    add({ resourceType: 'Patient', id: 'p2', generalPractitioner: [{ reference: 'Practitioner/abc' }] });
+    obs('o2', { subject: { reference: 'Patient/p2' }, performer: [{ reference: 'Practitioner/abc' }] });
+    expect(ids('Patient', 'general-practitioner:Practitioner=abc')).toEqual(['p2']);
+    expect(ids('Observation', 'subject:Patient.general-practitioner:Practitioner=abc')).toEqual(['o2']);
+    expect(ids('Patient', '_has:Observation:subject:performer:Practitioner=abc')).toEqual(['p2']);
+    expect(ids('Observation', 'subject:Patient._has:Observation:subject:performer:Practitioner=abc')).toEqual(['o2']);
+    expect(fail('Observation', 'subject:Patient.general-practitioner:Practitioner=Organization/abc').status).toBe(400);
+  });
+
+  it('_offset above 10000 is 400 with Medplum\'s text (its default maxSearchOffset)', () => {
+    expect(ids('Patient', '_offset=10000')).toEqual([]);
+    const e = fail('Patient', '_offset=010001');
+    expect([e.status, e.message]).toEqual([400, 'Search offset exceeds maximum (got 10001, max 10000)']);
   });
 
   it('chain longer than Medplum\'s maximum is 400', () => {

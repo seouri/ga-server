@@ -36,6 +36,16 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
     return rels(result1);
   }));
 
+  // Medplum's test lowers maxSearchOffset to 200 in-process; over HTTP both sides answer with Medplum's default, 10000.
+  test('project-scoped Repository w/ %j › Search offset max [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const scope: [string, string] = ['identifier', marker()];
+    const result1 = await search(s, q('Patient', scope, ['_offset', '10000']));
+    expect(result1.entry ?? []).toHaveLength(0);
+    const e = await error(s, q('Patient', scope, ['_offset', '10001']));
+    expect(e).toEqual({ status: 400, text: 'Search offset exceeds maximum (got 10001, max 10000)' });
+    return e;
+  }));
+
   test('project-scoped Repository w/ %j › Search count=0 [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const result1 = await search(s, 'Patient?_count=0');
     expect(result1.entry).toBeUndefined();

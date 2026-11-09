@@ -51,11 +51,21 @@ describe('Store core', () => {
 
   it('empty values are dropped as Medplum drops them: an empty array item becomes null, so a parallel _x array stays aligned', () => {
     const ext = { extension: [{ url: 'urn:x', valueString: 'e' }] };
-    const p = store.create({ resourceType: 'Patient', identifier: [], name: [{ given: ['', 'Bob'], _given: [ext, null] }] } as unknown as Resource).resource as Patient & { name: { _given?: unknown[] }[] };
+    const p = store.create({ resourceType: 'Patient', identifier: [], name: [{ given: [null, 'Bob'], _given: [ext, null] }] } as unknown as Resource).resource as Patient & { name: { _given?: unknown[] }[] };
     expect(p.identifier).toBeUndefined();
     expect([p.name[0].given, p.name[0]._given]).toEqual([[null, 'Bob'], [ext, null]]);
     const q = store.create({ resourceType: 'Patient', name: [{ given: ['A', 'B'], _given: [{}, ext] }] } as unknown as Resource).resource as Patient & { name: { _given?: unknown[] }[] };
     expect(q.name[0]._given).toEqual([null, ext]);
+  });
+
+  it('an empty array item (\'\' or {}) is 400 with Medplum\'s texts: R4 JSON has no empty values (other empty values are dropped)', () => {
+    const issues = (r: unknown) => { try { store.create(r as Resource); } catch (e) { return [(e as StoreError).status, (e as StoreError).outcome.issue?.map((i) => `${i.expression} ${i.details?.text}`)]; } return 'created'; };
+    expect(issues({ resourceType: 'Patient', name: [{ given: ['', ''] }] })).toEqual([400, ['Patient.name[0].given[0] String must contain non-whitespace content', 'Patient.name[0].given[1] String must contain non-whitespace content']]);
+    expect(issues({ resourceType: 'Patient', identifier: [{ value: 'x' }, {}] })).toEqual([400, ['Patient.identifier[1] Invalid empty non-primitive value']]);
+    expect(issues({ resourceType: 'Patient', contact: [{ name: { given: [''] } }] })).toEqual([400, ['Patient.contact[0].name.given[0] String must contain non-whitespace content']]);
+    for (const r of [{ identifier: [] }, { identifier: [{ system: '' }] }, { managingOrganization: {} }, { name: [{ given: ['A'], _given: [{}] }] }]) expect(issues({ resourceType: 'Patient', ...r })).toBe('created');
+    const p = store.create({ resourceType: 'Patient' }).resource;
+    expect(err(() => store.update({ ...p, name: [{ given: [''] }] } as Resource)).status).toBe(400);
   });
 
   it('a submitted meta.deleted (Medplum\'s own field) is dropped on create and update, as Medplum', () => {

@@ -23,6 +23,19 @@ describe.skipIf(SQLITE)('Medplum routes.test.ts (parity)', () => {
   };
   const newPatient = async (s: Side, r: Patient = { resourceType: 'Patient' }) => s.create<Patient>(r);
 
+  // Added (not a Medplum test): R4 JSON has no empty values. An empty array item ('' or {}) is 400; other empty values,
+  // an empty array included, are dropped.
+  test('empty array items are refused, other empty values dropped', () => same(sides, async (s) => {
+    const out = [];
+    for (const r of [{ name: [{ given: ['', ''] }] }, { identifier: [{ value: 'x' }, {}] }, { contact: [{ name: { given: [''] } }] }]) {
+      const g = await s.call('POST', 'Patient', { resourceType: 'Patient', ...r });
+      out.push([g.status, g.json?.issue]);
+    }
+    const p = await newPatient(s, { resourceType: 'Patient', identifier: [], name: [{ given: ['A'], _given: [{}] }], managingOrganization: {} } as unknown as Patient);
+    out.push([p.identifier, p.name, p.managingOrganization]);
+    return out;
+  }));
+
   test('FHIR Routes › Invalid JSON [server/src/fhir/routes.test.ts]', () => same(sides, async (s) => {
     expect(await status(s, 'POST', '', 'not-json', FHIR)).toBe(400);
   }));

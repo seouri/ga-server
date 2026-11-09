@@ -39,9 +39,23 @@ export type Row = { type: string; id: string; versionId: string; lastUpdated: st
 type Meta = NonNullable<Resource['meta']>;
 const now = () => new Date().toISOString();
 const etag = (v: string) => v.replace(/^W\//, '').replace(/"/g, '');
-// Empty strings, arrays and objects dropped by Medplum's own stringify (identifier: [] is no identifier; an empty array item
-// becomes null, so a parallel _x array stays aligned).
-const prune = <T>(v: T): T => JSON.parse(stringify(v));
+// Empty strings, arrays and objects dropped by Medplum's own stringify (identifier: [] is no identifier; a null array item
+// stays, so a parallel _x array stays aligned). An empty array item ('' or {}) is 400 first, as Medplum (R4 JSON has no empty values).
+const prune = (r: Resource): Resource => {
+  const issues = emptyItems(r, r.resourceType);
+  if (issues.length) throw new StoreError(400, issues, { resourceType: 'OperationOutcome', issue: issues.map((i) => ({ severity: 'error', code: 'structure', details: { text: i.text }, expression: i.expression })) });
+  return JSON.parse(stringify(r));
+};
+function emptyItems(v: unknown, path: string, out: StoreIssue[] = []): StoreIssue[] {
+  if (Array.isArray(v)) {
+    v.forEach((x, i) => {
+      if (typeof x === 'string' && !x.trim()) out.push({ expression: [`${path}[${i}]`], text: 'String must contain non-whitespace content' });
+      else if (x && typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) out.push({ expression: [`${path}[${i}]`], text: 'Invalid empty non-primitive value' });
+      else emptyItems(x, `${path}[${i}]`, out);
+    });
+  } else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) if (!k.startsWith('_')) emptyItems(x, `${path}.${k}`, out); // _given: [{}] is dropped, as Medplum
+  return out;
+}
 // Equality for "not modified": everything but the server-set metadata.
 const content = (r: Resource) => ({ ...r, meta: { ...r.meta, versionId: undefined, lastUpdated: undefined, compartment: undefined } });
 

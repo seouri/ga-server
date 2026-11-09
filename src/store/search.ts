@@ -517,8 +517,9 @@ function compositeFilter(code: string, value: string): Filter {
   return { code: c, operator: (mod ?? Operator.EQUALS) as Operator, value };
 }
 
-// `code=value` parsed as a search parameter of `type` (modifier and prefix).
-function ownFilter(type: string, code: string, value: string): Filter {
+// `code=value` parsed as a search parameter of `type` (modifier and prefix), a reference type modifier rewritten as at the top level.
+function ownFilter(type: string, rawCode: string, rawValue: string): Filter {
+  const [[code, value]] = normalize(type, [[rawCode, rawValue]]);
   if (param(type, code.split(':')[0])?.type === 'composite') return compositeFilter(code, value);
   try {
     return parseSearchRequest(`${type}?${new URLSearchParams([[code, value]])}`).filters?.[0] ?? { code, operator: Operator.EQUALS, value };
@@ -600,12 +601,14 @@ function before(a: Arg, b: Arg, desc: boolean): boolean {
 // Request parameters that do not change a result (the server accepts them on every route too).
 export const IGNORED = new Set(['_format', '_pretty']);
 
-// Checks parseSearchRequest leaves out: _type only fits a system-level search; _count/_offset must be numbers; a reference
+const MAX_OFFSET = 10_000; // Medplum's default maxSearchOffset (deeper pages: the cursor in next links)
+// Checks parseSearchRequest leaves out: _type only fits a system-level search; _count/_offset must be numbers, _offset at most MAX_OFFSET; a reference
 // type modifier (subject:Group=a) is the reference Group/a (parseSearchRequest drops the modifier, which would match Patient/a).
 function normalize(type: string, query: [string, string][]): [string, string][] {
   return query.map(([k, v]) => {
     if (k === '_type') throw badRequest('_type is not supported on a type-level search');
     if ((k === '_count' || k === '_offset') && !/^\d+$/.test(v)) throw badRequest(`Invalid ${k}: ${v}`);
+    if (k === '_offset' && Number(v) > MAX_OFFSET) throw badRequest(`Search offset exceeds maximum (got ${Number(v)}, max ${MAX_OFFSET})`);
     const m = /^([a-z][\w-]*):([A-Z][A-Za-z]+)$/.exec(k);
     const p = m && getSearchParameters(type)?.[m[1]];
     if (!m || p?.type !== 'reference') return [k, v];
