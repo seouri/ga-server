@@ -2491,6 +2491,7 @@ class CcdaToFhirConverter {
                 },
               ],
             },
+            category: [{ coding: [ENCOUNTER_DIAGNOSIS] }],
             code: this.mapCode(observation.value as CcdaCode),
             subject: createReference(this.patient as Patient),
             onsetDateTime: mapCcdaToFhirDateTime(observation.effectiveTime?.[0]?.low?.['@_value']),

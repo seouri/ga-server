@@ -47,6 +47,21 @@ test('an encounter indication (RSON) diagnosis takes its status the same way: an
   expect(resourcesOf<Condition>(bundle, 'Condition').map((c) => c.clinicalStatus?.coding?.[0]?.code)).toEqual(['resolved']);
 });
 
+test('an encounter indication (RSON) Condition is categorized as an encounter diagnosis', () => {
+  const bundle = convertSections(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
+    <code code="46240-8" codeSystem="2.16.840.1.113883.6.1"/><title>Encounters</title><text>Visit</text>
+    <entry><encounter classCode="ENC" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+      <id root="2.16.840.1.113883.19.5" extension="ENC-2"/><code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.19"/>
+        <id root="2.16.840.1.113883.19.5" extension="RSON-2"/><code code="404684003" codeSystem="2.16.840.1.113883.6.96"/><statusCode code="completed"/>
+        <value xsi:type="CD" code="38341003" codeSystem="2.16.840.1.113883.6.96"/></observation></entryRelationship>
+    </encounter></entry>
+  </section></component>`);
+  expect(resourcesOf<Condition>(bundle, 'Condition')[0].category).toEqual([
+    { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-category', code: 'encounter-diagnosis', display: 'Encounter Diagnosis' }] },
+  ]);
+});
+
 test('a problem\'s verification status is in the condition-ver-status code system', () => {
   const bundle = convertSections(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.5.1"/>
     <code code="11450-4" codeSystem="2.16.840.1.113883.6.1"/><title>Problems</title><text>Problems</text>
