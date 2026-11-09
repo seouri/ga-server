@@ -4,7 +4,7 @@
 import type { Bundle, Observation, Patient } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { SQLITE } from '../helpers.ts';
-import { error, marker, names, paritySides, ref, same, search, type Side } from './harness.ts';
+import { both, error, marker, names, paritySides, ref, same, search, type Side } from './harness.ts';
 
 const tagged = (b: Bundle, named: Record<string, { id?: string }>, mode: 'match' | 'include') =>
   names(b, named).filter((n) => n.startsWith('include:') === (mode === 'include')).map((n) => n.replace(/^include:/, '')).sort();
@@ -119,6 +119,53 @@ describe.skipIf(SQLITE)('Medplum fhir-router search-include.test.ts (parity)', (
     const bundle = await search(s, `Questionnaire?identifier=${m}&_revinclude=QuestionnaireResponse:questionnaire`);
     expect([tagged(bundle, { q1, r }, 'match'), tagged(bundle, { q1, r }, 'include')]).toEqual([['q1'], ['r']]);
   }));
+
+  // README "Deliberate differences": a versioned canonical (R4 references.html, Canonical URLs: `url|version`) resolves to that
+  // version; Medplum's exact url search resolves it to nothing.
+  test('differs on purpose: MemoryRepository _include/_revinclude › _include resolves canonical references by exact URL [fhir-router/src/search-include.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const m = marker();
+      const url = `http://example.com/${m}`;
+      const q2 = await s.create({ resourceType: 'Questionnaire', status: 'active', url, version: '2' });
+      await s.create({ resourceType: 'Questionnaire', status: 'active', url, version: '3' });
+      await s.create({ resourceType: 'QuestionnaireResponse', status: 'completed', questionnaire: `${url}|2`, identifier: { system: 'urn:parity', value: m } });
+      return tagged(await search(s, `QuestionnaireResponse?identifier=${m}&_include=QuestionnaireResponse:questionnaire`), { q2 }, 'include');
+    });
+    expect(medplum).toEqual([]);
+    expect(store).toEqual(['q2']);
+  });
+
+  test('differs on purpose: MemoryRepository _include/_revinclude › _revinclude resolves canonical references [fhir-router/src/search-include.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const m = marker();
+      const url = `http://example.com/${m}`;
+      const q1 = await s.create({ resourceType: 'Questionnaire', status: 'active', url, version: '2', identifier: id(m) });
+      const r = await s.create({ resourceType: 'QuestionnaireResponse', status: 'completed', questionnaire: `${url}|2` });
+      return tagged(await search(s, `Questionnaire?identifier=${m}&_revinclude=QuestionnaireResponse:questionnaire`), { q1, r }, 'include');
+    });
+    expect(medplum).toEqual([]);
+    expect(store).toEqual(['r']);
+  });
+
+  // README "Deliberate differences": R4 search.html (Including other resources) names a reference parameter in _include, so a
+  // parameter of another type is 400; Medplum evaluates it, finds no references and answers 200.
+  test('differs on purpose: MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest [fhir-router/src/search-include.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const m = marker();
+      await patient(s, m);
+      const g = await s.call('GET', `Patient?identifier=${m}&_include=Patient:name`);
+      return { status: g.status, entries: g.json?.entry?.length, text: g.json?.issue?.[0]?.details?.text };
+    });
+    expect(medplum).toEqual({ status: 200, entries: 1, text: undefined });
+    expect(store).toEqual({ status: 400, entries: undefined, text: 'Invalid include parameter: Patient:name' });
+  });
+
+  // README "Deliberate differences": an invalid _include is 400 whether or not anything matches (R4 search.html, Handling
+  // errors: a parameter the server cannot process is an error, not dependent on the data); Medplum checks it only with matches.
+  test('differs on purpose: MemoryRepository _include/_revinclude › Empty match set skips include processing [fhir-router/src/search-include.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => (await s.call('GET', `Observation?identifier=${marker()}&_include=Observation:bogus`)).status);
+    expect([medplum, store]).toEqual([200, 400]);
+  });
 
   test('MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
     await patient(s, marker());

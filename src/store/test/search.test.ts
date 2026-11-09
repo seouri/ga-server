@@ -450,6 +450,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   it('error texts as Medplum: unknown sort parameter, invalid _include', () => {
     expect(fail('Patient', '_sort=xyz').message).toBe('Unknown search parameter: xyz');
     expect(fail('ServiceRequest', '_include=ServiceRequest:xyz').message).toBe('Invalid include parameter: ServiceRequest:xyz');
+    expect(fail('ServiceRequest', '_revinclude=Observation:xyz').message).toBe('Invalid include parameter: Observation:xyz');
   });
 
   const SUBSETTED = { system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' };
@@ -475,8 +476,12 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     obs('o1', { text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml">x</div>' }, valueString: 'v', subject: { reference: 'Patient/p1' } });
     expect(Object.keys(one('Observation', '_summary=text')).sort()).toEqual(['code', 'id', 'meta', 'resourceType', 'status', 'text']);
     expect(Object.keys(one('Observation', '_summary=text&_elements=subject')).sort()).toEqual(['code', 'id', 'meta', 'resourceType', 'status', 'subject']); // _elements wins, as Medplum
-    add({ resourceType: 'Patient', id: 'p1' });
-    expect((run('Observation', '_summary=true&_include=Observation:subject').entry![1].resource!.meta?.tag)).toBeUndefined(); // includes are whole
+    add({ resourceType: 'Patient', id: 'p1', text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml">x</div>' }, multipleBirthInteger: 2 });
+    // Includes are subsetted too, as Medplum (removeResourceFields on every entry).
+    const inc = (q: string) => Object.keys(run('Observation', q).entry![1].resource!).sort();
+    expect(inc('_summary=true&_include=Observation:subject')).toEqual(['id', 'meta', 'resourceType']);
+    expect(inc('_summary=text&_include=Observation:subject')).toEqual(['id', 'meta', 'resourceType', 'text']);
+    expect(inc('_elements=multipleBirth&_include=Observation:subject')).toEqual(['id', 'meta', 'multipleBirthInteger', 'resourceType']);
   });
 
   const chain = (n: number) => { for (let i = n; i >= 1; i--) add({ resourceType: 'Patient', id: `l${i}`, ...(i < n && { link: [{ type: 'replaces', other: { reference: `Patient/l${i + 1}` } }] }) }); };

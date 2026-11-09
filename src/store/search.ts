@@ -554,10 +554,16 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   const matches = rids.map((rid) => byRid.get(rid)!);
 
   const entry: RawEntry[] = matches.map((m) => ({
-    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match',
-    json: req.fields ? JSON.stringify(elements(JSON.parse(m.json) as Resource, req.fields)) : req.summary ? JSON.stringify(summarize(JSON.parse(m.json) as Resource, req.summary)) : m.json,
+    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match', json: m.json,
   }));
   includes(prep, req, matches.map((m) => ({ ...m, type })), entry, base);
+  // _elements, else _summary, on every entry, includes too (Medplum's removeResourceFields).
+  if (req.fields || req.summary) {
+    for (const e of entry) {
+      const r = JSON.parse(e.json) as Resource;
+      e.json = JSON.stringify(req.fields ? elements(r, req.fields) : summarize(r, req.summary!));
+    }
+  }
   bundle.entry = entry;
   if (!page.length) return bundle;
   bundle.link.push({ relation: 'first', url: linkQuery({}) });
@@ -584,7 +590,7 @@ function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEn
     if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
   }
   for (const inc of req.revInclude ?? []) {
-    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _revinclude parameter: ${inc.resourceType}:${inc.searchParam}`);
+    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
   }
   const seen = new Set(matches.map((m) => `${m.type}/${m.id}`));
   const read = (sql: string, ...args: Arg[]) => prep(sql).all(...args) as Found[];
@@ -602,7 +608,7 @@ function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEn
     for (const inc of req.include ?? []) {
       if (iterateOnly && inc.modifier !== Operator.ITERATE) continue;
       const p = param(inc.resourceType, inc.searchParam)!;
-      const vals = read(`select distinct val from idx where rid in (${qs(rids.length)}) and type = ? and code = ? order by rowid`, ...rids, inc.resourceType, inc.searchParam) as unknown as { val: string }[];
+      const vals = prep(`select distinct val from idx where rid in (${qs(rids.length)}) and type = ? and code = ? order by rowid`).all(...rids, inc.resourceType, inc.searchParam) as { val: string }[];
       if (canonical(inc.resourceType, p)) {
         for (const t of (p.target ?? []).filter((t) => !inc.targetType || t === inc.targetType)) for (const { val } of vals) found.push(...byUrl(t, val));
         continue;
@@ -620,7 +626,7 @@ function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEn
         ? of.flatMap((f) => { const r = JSON.parse(f.json) as { url?: string; version?: string }; return r.url ? [r.url, ...(r.version ? [`${r.url}|${r.version}`] : [])] : []; })
         : of.map((f) => `${f.type}/${f.id}`);
       if (!refs.length) continue;
-      found.push(...read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(refs.length)})) order by r.rid`,
+      found.push(...read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(refs.length)})) order by r.rid limit ${MAX_INCLUDE_ENTRIES + 1}`, // more is refused below
         inc.resourceType, inc.searchParam, ...refs));
     }
     const next = new Map<string, Found>();

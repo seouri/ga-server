@@ -59,9 +59,11 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
   }));
 
   // Medplum's patient, its names and addresses made neutral; _summary on a read is ignored by both (Medplum's read route has none).
+  // Added: an included Organization is subsetted too (Medplum subsets every entry).
   test('project-scoped Repository w/ %j › Search _summary [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const org = await s.create({ resourceType: 'Organization', name: 'org', text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml"></div>' }, alias: ['a'] });
     const resource = await s.create<Patient>({
-      resourceType: 'Patient',
+      resourceType: 'Patient', managingOrganization: ref(org),
       meta: { profile: ['http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient'], tag: [{ system: 'http://example.com/', code: 'test' }] },
       text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml"></div>' },
       identifier: [{ use: 'usual', type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0203', code: 'MR', display: 'Medical Record Number' }], text: 'Medical Record Number' }, system: 'http://example.org', value: marker() }],
@@ -86,9 +88,12 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
     const { multipleBirthInteger: _2, ...summaryExpected } = dataExpected;
     const summaryResult = await get('true');
     expect(summaryResult).toEqual({ ...summaryExpected, meta: expect.objectContaining({ tag: tags }) });
+    const withOrg = await search(s, q('Patient', ['_id', resource.id], ['_summary', 'true'], ['_include', 'Patient:organization']));
+    const included = withOrg.entry?.[1]?.resource;
+    expect(included).toEqual({ resourceType: 'Organization', id: org.id, meta: expect.objectContaining({ tag: [SUBSET_TAG] }), name: 'org' }); // text and alias are not summary elements
     const read = (await s.call('GET', `Patient/${resource.id}?_summary=true`)).json as Patient;
     expect(read.text).toEqual(resource.text);
-    return [textResult, dataResult, summaryResult, read];
+    return [textResult, dataResult, summaryResult, included, read];
   }));
 
   test('project-scoped Repository w/ %j › Search next link [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {

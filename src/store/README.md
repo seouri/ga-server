@@ -83,6 +83,8 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - `eq` with a dateTime against a date never matches: R4 `eq` needs the search value's range to contain the target's, and an instant does not contain a day. Medplum matches the dateTime against the date's day, with or without `range-search`.
 - `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
 - `_include`/`_revinclude` of a versioned canonical (`url|version`) resolve to the resource with that `url` and `version`, as R4 canonicals mean (Medplum resolves `url|version` to nothing, and a `_revinclude` finds only references to the bare `url`).
+- `_include`/`_revinclude` naming a parameter that is not a reference is 400, as R4 search.html (Including other resources) defines them on reference parameters (Medplum evaluates it, finds no references and answers 200).
+- An invalid `_include`/`_revinclude` parameter is 400 even when nothing matches (Medplum checks it only when there are matches and answers 200 otherwise).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support
