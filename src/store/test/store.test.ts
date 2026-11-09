@@ -154,7 +154,7 @@ describe('Store index format', () => {
       const raw = new DatabaseSync(file);
       raw.exec('pragma user_version = 1');
       raw.close();
-      expect(() => new Store(file)).toThrow(/search index format 1, this version needs 2: rebuild/);
+      expect(() => new Store(file)).toThrow(new RegExp(`search index format 1, this version needs ${INDEX_VERSION}: rebuild`));
       const raw0 = new DatabaseSync(file);
       raw0.exec('pragma user_version = 0'); // a file from before versions, with records
       raw0.close();

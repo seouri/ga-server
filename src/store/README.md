@@ -73,6 +73,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).
 - A conditional request (update, delete, If-None-Exist, conditional reference) needs a real search criterion: only paging, sorting, shaping or format parameters, or empty values, are 400.
 - `:contains` on a token parameter is 400: R4 defines `:contains` for string and uri parameters only (Medplum accepts it on tokens).
+- Date search follows R4's ranges, as Medplum's opt-in `range-search` project feature does (Medplum without it compares a Period by its start, ignores the prefix of a multi-valued date, and matches a dateTime against a date's day): `eq` needs the search value's range to contain the target's, so a dateTime does not match a date; `gt`/`ge` match a Period that overlaps the range above the value. `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support
@@ -82,6 +83,7 @@ Not supported yet; each answers with an error (400, or 404/405 for an unknown ro
 - `_summary=true`, `_summary=data`, `_summary=text` (`_summary=count` works; `_summary=false` is accepted and changes nothing).
 - Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
 - Chains deeper than one level; reverse chains (`_has`) beyond one level.
+- Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
 - `_contained`, `_text`, `_content`, `_include:iterate`, `_revinclude:iterate` and `_include=*`.
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
 - FHIR R4 only (the definitions ship R4); one patient-compartment definition (Patient).

@@ -388,4 +388,47 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(fail('ServiceRequest', 'basedOn=ServiceRequest/123').message).toBe('Unknown search parameter: basedOn');
     expect(fail('Patient', '_id=foo\u0000bar').message).toBe('Search filter value cannot contain null bytes');
   });
+
+  it('name matches from any word of a HumanName, as Medplum (given then family); :exact and _sort use the whole name', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ given: ['Alice'], family: 'Zed-Smith' }] });
+    add({ resourceType: 'Patient', id: 'p2', name: [{ given: ['Bob'], family: 'Adams' }] });
+    expect(ids('Patient', 'name=zed-smi')).toEqual(['p1']);
+    expect(ids('Patient', 'name=alice zed')).toEqual(['p1']);
+    expect(ids('Patient', 'name:exact=Zed-Smith')).toEqual([]);
+    expect(ids('Patient', 'name:exact=Alice Zed-Smith')).toEqual(['p1']);
+    expect(ids('Patient', '_sort=name')).toEqual(['p1', 'p2']); // "alice zed-smith" < "bob adams"
+  });
+
+  it('ContactPoint tokens are case-insensitive (Medplum); other tokens stay case-sensitive', () => {
+    add({ resourceType: 'Practitioner', id: 'r1', telecom: [{ system: 'email', value: 'UPPER@EXAMPLE.COM' }], identifier: [{ value: 'MiXeD' }] });
+    expect(ids('Practitioner', 'telecom=uPpeR@ExAmPlE.CoM')).toEqual(['r1']);
+    expect(ids('Practitioner', 'email=upper@example.com')).toEqual(['r1']);
+    expect(ids('Practitioner', 'identifier=mixed')).toEqual([]);
+  });
+
+  it('_revinclude with a target type follows only matches of that type', () => {
+    add({ resourceType: 'Task', id: 't1', status: 'completed', intent: 'order' });
+    add({ resourceType: 'AuditEvent', id: 'a1', recorded: '2026-01-01T00:00:00Z', type: { code: 'rest' }, agent: [{ requestor: true }], source: { observer: { display: 'x' } }, entity: [{ what: { reference: 'Task/t1' } }] } as Resource);
+    const inc = (q: string) => (run('Task', q).entry ?? []).filter((e) => e.search?.mode === 'include').map((e) => e.resource!.id);
+    expect(inc('_revinclude=AuditEvent:entity:Task')).toEqual(['a1']);
+    expect(inc('_revinclude=AuditEvent:entity:Patient')).toEqual([]);
+  });
+
+  it('a Period with an end only sorts by its end, as Medplum', () => {
+    add({ resourceType: 'Task', id: 't2', status: 'requested', intent: 'order', restriction: { period: { start: '2023-06-02T00:00:00Z' } } });
+    add({ resourceType: 'Task', id: 't3', status: 'requested', intent: 'order', restriction: { period: { end: '2023-06-03T00:00:00Z' } } });
+    expect(ids('Task', '_sort=due-date')).toEqual(['t2', 't3']);
+    expect(ids('Task', '_sort=-due-date')).toEqual(['t3', 't2']);
+  });
+
+  it('link parameter names stay unencoded (code:not=x), values encoded, as Medplum', () => {
+    obs('n1'); obs('n2');
+    const next = run('Observation', 'code:not=x&_count=1').link!.find((l) => l.relation === 'next')!.url!;
+    expect(next).toContain('code:not=x');
+  });
+
+  it('error texts as Medplum: unknown sort parameter, invalid _include', () => {
+    expect(fail('Patient', '_sort=xyz').message).toBe('Unknown search parameter: xyz');
+    expect(fail('ServiceRequest', '_include=ServiceRequest:xyz').message).toBe('Invalid include parameter: ServiceRequest:xyz');
+  });
 });

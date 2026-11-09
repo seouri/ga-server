@@ -84,49 +84,49 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Error on invalid search parameter | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient search without resource type | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Subject search without resource type | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on array columns using reference tables | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on single columns using reference tables | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search sort order | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with negated filter | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on array columns using reference tables | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on single columns using reference tables | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search sort order | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with negated filter | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on canonical reference | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Rejects too long chained search | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Rejects chained search through disabled type: %s | skipped | platform | disableChainedSearch (Medplum config) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Allows chained search not using disabled reference table: %s | skipped | platform | disableChainedSearch (Medplum config) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Chained search works again after reindex | skipped | platform | disableChainedSearch (Medplum config) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid chained search parameters: %s | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with modifier | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search deduplication | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token search deduplication | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references success | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid chained search parameters: %s | skipped | chain | not yet ported (Task 6): a two-level chain case and the chain error texts |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with modifier | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search deduplication | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token search deduplication | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references success | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include canonical success | skipped | include | not yet ported (Task 4) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include PlanDefinition mixed types | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references invalid search param | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include Provenance | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references invalid search param | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include Provenance | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include canonical | skipped | include | not yet ported (Task 4) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include on denied type | skipped | platform | access policy |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search through denied type | skipped | platform | access policy |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include:iterate | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include with target type | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude with target type | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include with target type | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude with target type | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude:iterate | skipped | include | not yet ported (Task 4) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include depth limit | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on empty search results | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on page boundary | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include with invalid reference | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › DiagnosticReport category with system | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Encounter.period date search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Encounter.period dateTime search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code system search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code :not next URL | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference identifier search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Task patient identifier search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on empty search results | skipped | include | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on page boundary | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include with invalid reference | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › DiagnosticReport category with system | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Encounter.period date search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Encounter.period dateTime search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code system search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Condition.code :not next URL | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference identifier search | skipped | modifier | not yet ported (Task 7) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Task patient identifier search | skipped | modifier | not yet ported (Task 7) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by dedicated token column search parameter, identifier | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by a shared token column search param, _security | skipped | meta | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _source | skipped | meta | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Resource meta search params › Search by _tag | skipped | meta | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token :text search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate covers all hours: %d (%s) | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate with multiple values | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token :text search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate covers all hours: %d (%s) | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › birthdate with multiple values | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter search | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter eq | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with UUID value | skipped | filter | not yet ported (Task 8) |
@@ -136,32 +136,32 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with reverse chained search | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter sw | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _filter with chained search | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › reverse chain with prefix modifier | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Lookup table exact match with comma disjunction | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Duplicate rows from token lookup | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter Task by due-date › with %s %s | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter Task by due-date › multiple resources | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › reverse chain with prefix modifier | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Lookup table exact match with comma disjunction | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Duplicate rows from token lookup | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter Task by due-date › with %s %s | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter Task by due-date › multiple resources | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Get estimated count with filter on human name | skipped | platform | getCount / estimate-count internals |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Organization by name | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Ambiguous search columns | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Practitioner by email is case insensitive | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Practitioner by identifier is case sensitive | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient by name with stop word | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by ID | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Numeric parameter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Disjunction with lookup tables | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by unknown search parameter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date range search | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Organization by name | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Ambiguous search columns | skipped | platform | Medplum-only resource types (ProjectMembership, User) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Practitioner by email is case insensitive | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Practitioner by identifier is case sensitive | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient by name with stop word | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by ID | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Numeric parameter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Disjunction with lookup tables | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Sort by unknown search parameter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date range search | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type | skipped | type | not yet ported (Task 5) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results | skipped | type | not yet ported (Task 5) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Binary search not allowed | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreCareTeamRole | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreConditionAssertedDate | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreEncounterDischargeDisposition | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreGoalDescription | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCorePatient race, ethnicity, genderIdentity | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search patterns | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search with inline resource | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Binary search not allowed | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreCareTeamRole | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreConditionAssertedDate | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreEncounterDischargeDisposition | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCoreGoalDescription | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › US Core Search Parameters › USCorePatient race, ethnicity, genderIdentity | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search patterns | skipped | filter | not yet ported (Task 8) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search with inline resource | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Basic reference | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Reference values with special characters | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Array reference column | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
@@ -174,27 +174,27 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination dedupes across page boundaries | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination with multiple resource types from _type | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › V1 cursor is not parsed as V2 | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (DeviceRequest.encounter) | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (PractitionerRole.practitioner) | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param on array column: bare uuid matches (Encounter.location) | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Back-compat: bare uuid on multi-target subject column still defaults to Patient | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Non-uuid bare value is not rewritten (avoids corrupting unrelated values) | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Basic | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › With units | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Approximately | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (DeviceRequest.encounter) | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (PractitionerRole.practitioner) | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param on array column: bare uuid matches (Encounter.location) | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Back-compat: bare uuid on multi-target subject column still defaults to Patient | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Non-uuid bare value is not rewritten (avoids corrupting unrelated values) | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Basic | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › With units | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Approximately | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid canonical chained search link | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date array columns match search value %s | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date array columns match search value %s | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › discourage sequential scans › config.fhirSearchDiscourageSeqScan | skipped | platform | SQL planner internals (discourage sequential scans) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › discourage sequential scans › config.fhirSearchMinLimit | skipped | platform | SQL planner internals (discourage sequential scans) |
 | server/src/fhir/search.test.ts | systemRepo › Filter by _project | skipped | platform | systemRepo _project |
 | server/src/fhir/search.test.ts | systemRepo › Sort by _project; desc=%s | skipped | platform | systemRepo _project |
-| server/src/fhir/search.test.ts | systemRepo › Filter by _lastUpdated | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | systemRepo › Sort by _lastUpdated | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | systemRepo › Filter by _lastUpdated | ported | existing |  |
+| server/src/fhir/search.test.ts | systemRepo › Sort by _lastUpdated | ported | existing |  |
 | server/src/fhir/search.test.ts | systemRepo › Should calculate count with join | skipped | platform | getCount / SQL shape |
 | server/src/fhir/search.test.ts | systemRepo › maxResourceVersion | skipped | platform | maxResourceVersion (Medplum internal) |
-| server/src/fhir/search.test.ts | systemRepo › Search for deleted resources | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | systemRepo › Search for deleted resources | skipped | platform | _deleted is a Medplum-only search parameter |
 | server/src/fhir/search.test.ts | systemRepo › Reverse chained search with _filter | skipped | filter | not yet ported (Task 8) |
-| server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | skipped | modifier | not yet ported (Task 7) |
 | server/src/fhir/search.test.ts | parseChainedParameter › reverse chained search with prefix operators | skipped | platform | parseChainedParameter unit test |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Appointment.end | ported | existing |  |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Slot.end | ported | existing |  |

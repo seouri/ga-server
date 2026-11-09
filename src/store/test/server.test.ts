@@ -104,6 +104,12 @@ describe('store server', () => {
     await expect(c.searchResources('Observation', { nope: 'x' })).rejects.toMatchObject({ outcome: { issue: [{ code: 'invalid' }] } });
   });
 
+  it('GET Binary (a search) is 400, as Medplum', async () => {
+    const res = await fetch(`${base}fhir/R4/Binary`, { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { issue: { details: { text: string } }[] }).issue[0].details.text).toBe('Cannot search on Binary resource type');
+  });
+
   it('deleteResource(Binary) removes the row and the file; a second delete is 404', async () => {
     const c = client();
     const bin = await c.createBinary({ data: 'x', contentType: 'text/plain' });

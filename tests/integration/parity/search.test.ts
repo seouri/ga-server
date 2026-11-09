@@ -11,7 +11,6 @@ import { both, error, marker, names, paritySides, q, ref, same, search, type Sid
 const SUBSET_TAG = { system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' };
 const rels = (b: Bundle) => b.link?.map((l) => l.relation);
 const has = (b: Bundle, r: { id: string }) => !!b.entry?.some((e) => e.resource?.id === r.id);
-const pause = () => new Promise((r) => setTimeout(r, 20)); // distinct meta.lastUpdated milliseconds
 // The R4 definitions Medplum serves as records (the store holds only what is written to it).
 const r4 = <T>(file: string) => (JSON.parse(readFileSync(new URL(`../fhir/r4/${file}`, import.meta.resolve('@medplum/definitions')), 'utf8')) as Bundle<T & Resource>).entry!.map((e) => e.resource!);
 const r4SearchParams = r4<SearchParameter>('search-parameters.json');

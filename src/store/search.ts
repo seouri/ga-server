@@ -16,7 +16,7 @@
 import {
   FhirFilterComparison, FhirFilterConnective, FhirFilterNegation, OperationOutcomeError, Operator, convertToSearchableDates,
   convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
-  convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
+  convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameterDetails, getSearchParameters,
   parseFilterParameter, parseSearchRequest, splitSearchOnComma, toTypedValue, tryGetDataType,
   type Filter, type FhirFilterExpression, type SearchRequest,
 } from '@medplum/core';
@@ -34,6 +34,8 @@ export const SEARCH_SCHEMA = `
   create index if not exists sortkeys_hi on sortkeys(type, code, hi);`;
 
 const TEXT = '\u0001text';
+// A string row of one word of a HumanName or Address (name=smi finds "Alice Smith"); :exact and _sort use the whole value.
+const WORD = '\u0001word';
 // Sorts after every number and text value: a missing sort value comes last ascending and first descending (Postgres NULLs, as Medplum).
 const MISSING = new Uint8Array([0xff]);
 const MAX_COUNT = 1000;
@@ -71,6 +73,9 @@ function dayRange(v: unknown): { start: string; end: string } | undefined {
   return { start: new Date(start).toISOString(), end: new Date(end - 1).toISOString() };
 }
 const lower = (s: string | undefined | null): string | null => (s == null ? null : s.toLowerCase());
+// Medplum indexes and matches ContactPoint tokens (email, phone, telecom) case-insensitively; other tokens as written.
+const caseless = (type: string, p: SearchParameter): boolean =>
+  p.type === 'token' && !!getSearchParameterDetails(type, p).elementDefinitions?.some((e) => e.type?.some((t) => t.code === 'ContactPoint'));
 const lit = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 const qs = (n: number): string => Array(n).fill('?').join(', ');
 
@@ -87,11 +92,21 @@ function rows(r: Resource): Row[] {
     if (!v.length) continue;
     const code = p.code;
     switch (p.type) {
-      case 'token':
-        // Codes as written (Medplum matches tokens case-sensitively); texts lowercased for :text.
-        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT ? lower(t.value) : t.value ?? null, null, null]);
+      case 'token': {
+        // Codes as written (Medplum matches tokens case-sensitively, ContactPoints aside); texts lowercased for :text.
+        const lc = caseless(r.resourceType, p);
+        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT || lc ? lower(t.value) : t.value ?? null, null, null]);
         break;
-      case 'string': for (const s of convertToSearchableStrings(v)) out.push([code, s, s.toLowerCase(), null, null]); break;
+      }
+      case 'string':
+        for (const x of v) {
+          for (const s of convertToSearchableStrings([x])) {
+            out.push([code, s, s.toLowerCase(), null, null]);
+            // Any word of a name or address, as Medplum's word-prefix search of them.
+            if (x.type === 'HumanName' || x.type === 'Address') for (const w of s.toLowerCase().split(/\s+/).slice(1)) out.push([code, WORD, w, null, null]);
+          }
+        }
+        break;
       case 'uri': for (const s of convertToSearchableUris(v)) out.push([code, null, s, null, null]); break;
       case 'reference': for (const s of convertToSearchableReferences(v)) out.push([code, null, s, null, null]); break;
       // Medplum's server treats a Period with no end as ending at its start (its in-memory matcher treats it as open-ended).
@@ -125,8 +140,9 @@ export function writeIndex(prep: Prep, rid: number, r: Resource | undefined): vo
     // shortcut: idx_text keeps texts of deleted or changed resources (they then match no idx row); prune if it grows large.
     if (sys === TEXT && val) text.run(type, code, val);
     if (typeof lo === 'string' && val === null) {
+      const at = lo === '0000' ? hi as string : lo; // a Period with an end only sorts by its end, as Medplum
       const k = dates.get(code);
-      dates.set(code, k ? [k[0] < lo ? k[0] : lo, k[1] > lo ? k[1] : lo] : [lo, lo]);
+      dates.set(code, k ? [k[0] < at ? k[0] : at, k[1] > at ? k[1] : at] : [at, at]);
     }
   }
   const sk = prep('insert into sortkeys values (?, ?, ?, ?, ?)');
@@ -210,8 +226,9 @@ function cond(type: string, f: Filter, a: string): Cond {
           break;
         }
         const bar = v.indexOf('|');
-        if (bar < 0) { ors.push('i.val = ? and (i.sys is null or i.sys <> ?)'); va.push(v, TEXT); break; }
-        const s = v.slice(0, bar), val = v.slice(bar + 1);
+        const ci = (x: string) => (caseless(type, p) ? x.toLowerCase() : x);
+        if (bar < 0) { ors.push('i.val = ? and (i.sys is null or i.sys <> ?)'); va.push(ci(v), TEXT); break; }
+        const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
         if (!s) { ors.push('i.val = ? and i.sys is null'); va.push(val); }
         else if (!val) { ors.push('i.sys = ? and i.val is not null'); va.push(s); }
         else { ors.push('i.val = ? and i.sys = ?'); va.push(val, s); }
@@ -364,12 +381,12 @@ type SortKey = { expr: string; desc: boolean; code?: string };
 function sortKey(type: string, code: string, desc: boolean, i: number): SortKey {
   const p = code === '_id' || code === '_lastUpdated' ? undefined : param(type, code);
   if (p?.type === 'date' || !p && (code === '_id' || code === '_lastUpdated')) return { expr: `s${i}.${desc ? 'hi' : 'lo'}`, desc, code };
-  if (!p) throw badRequest(`Unknown sort parameter: ${code} (${type})`);
+  if (!p) throw badRequest(`Unknown search parameter: ${code}`); // Medplum's text
   if (p.type === 'composite' || p.type === 'special') throw badRequest(`Unsupported sort parameter type ${p.type}: ${code}`);
   // shortcut: non-date sort keys are aggregated from index rows per candidate (fast sorts: dates, _id, _lastUpdated; see README Next phase);
   // add them to sortkeys if a use sorts large results by them.
   const col = p.type === 'number' || p.type === 'quantity' ? 'lo' : 'val';
-  return { expr: `coalesce((select ${desc ? 'max' : 'min'}(i.${col}) from idx i where i.rid = d.rid and i.code = ${lit(code)} and (i.sys is null or i.sys <> ${lit(TEXT)})), x'ff')`, desc };
+  return { expr: `coalesce((select ${desc ? 'max' : 'min'}(i.${col}) from idx i where i.rid = d.rid and i.code = ${lit(code)} and (i.sys is null or i.sys not in (${lit(TEXT)}, ${lit(WORD)}))), x'ff')`, desc };
 }
 
 const encodeCursor = (keys: Arg[]): string => Buffer.from(JSON.stringify(keys.map((k) => (k instanceof Uint8Array ? null : k)))).toString('base64url');
@@ -463,12 +480,13 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
       .get(...(driver ? driver.set!.args : [type]), ...probes.flatMap((c) => c.args)) as { n: number }).n;
   }
   // Links as Medplum's: self always; first, next and previous on a non-empty page. Medplum's links carry _elements as _fields.
+  // Names as written (code:not=x), values encoded, as Medplum's links.
+  const url = (q: [string, string][]) => `${base}fhir/R4/${type}?${q.map(([k, v]) => `${encodeURIComponent(k).replaceAll('%3A', ':')}=${encodeURIComponent(v)}`).join('&')}`;
   const linkQuery = (set: Record<string, string>) => {
-    const u = new URLSearchParams(query.filter(([k]) => k !== '_offset' && k !== '_cursor').map(([k, v]) => [k === '_elements' ? '_fields' : k, v]));
-    for (const [k, v] of Object.entries(set)) u.set(k, v);
-    return `${base}fhir/R4/${type}?${u}`;
+    const q = query.filter(([k]) => k !== '_offset' && k !== '_cursor' && !(k in set)).map(([k, v]): [string, string] => [k === '_elements' ? '_fields' : k, v]);
+    return url([...q, ...Object.entries(set)]);
   };
-  bundle.link = [{ relation: 'self', url: `${base}fhir/R4/${type}?${new URLSearchParams(query)}` }];
+  bundle.link = [{ relation: 'self', url: url(query) }];
   if (count === 0) return bundle;
 
   const offset = req.cursor ? 0 : req.offset ?? 0;
@@ -535,7 +553,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   };
   for (const inc of req.include ?? []) {
     if (inc.modifier === 'iterate') throw badRequest('Unsupported _include:iterate');
-    if (param(type, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _include parameter: ${inc.resourceType}:${inc.searchParam}`);
+    if (param(type, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
     if (!rids.length) continue;
     const refs = prep(`select distinct val from idx where rid in (${qs(rids.length)}) and code = ? order by rowid`).all(...rids, inc.searchParam) as { val: string }[];
     for (const { val } of refs) {
@@ -547,7 +565,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   for (const inc of req.revInclude ?? []) {
     if (inc.modifier === 'iterate') throw badRequest('Unsupported _revinclude:iterate');
     if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _revinclude parameter: ${inc.resourceType}:${inc.searchParam}`);
-    if (!matches.length) continue;
+    if (!matches.length || (inc.targetType && inc.targetType !== type)) continue;
     include(prep(`select r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(matches.length)})) order by r.rid`)
       .all(inc.resourceType, inc.searchParam, ...matches.map((m) => `${type}/${m.id}`)) as { type: string; id: string; json: string }[]);
   }

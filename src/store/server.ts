@@ -131,6 +131,7 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
       return;
     }
     if (method === 'DELETE' && id && !op) { store.deleteBinary(id); return send(res, 200, JSON.stringify(OK)); }
+    if (method === 'GET' && !id) throw new HttpError(400, 'Cannot search on Binary resource type'); // Medplum's text
     throw new HttpError(405, `${method} ${url.pathname} not supported for Binary`);
   }
 
