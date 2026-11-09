@@ -189,6 +189,35 @@ const ENCOUNTER_DIAGNOSIS: Coding = {
   display: 'Encounter Diagnosis',
 };
 
+// Problem Status observation (LOINC 33999-4) value → Condition clinical status, by SNOMED code or display name
+const PROBLEM_STATUS_VALUES: Record<string, string> = {
+  '55561003': 'active',
+  '73425007': 'inactive',
+  '413322009': 'resolved',
+  active: 'active',
+  inactive: 'inactive',
+  resolved: 'resolved',
+};
+// Concern act statusCode → Condition clinical status (a completed concern is no longer a concern: resolved)
+const CONCERN_STATUSES: Record<string, string> = { active: 'active', completed: 'resolved', resolved: 'resolved' };
+
+// A problem's clinical status: its Problem Status observation, else resolved when it has an end (effectiveTime/high), else its
+// concern act's statusCode. Undefined when none of them says.
+function mapProblemClinicalStatus(observation: CcdaObservation, act?: CcdaAct): string | undefined {
+  const status = observation.entryRelationship
+    ?.flatMap((rel) => rel.observation ?? EMPTY)
+    .find((o) => o.code?.['@_code'] === '33999-4')?.value as CcdaCode | undefined;
+  const fromStatus =
+    PROBLEM_STATUS_VALUES[status?.['@_code'] ?? ''] ?? PROBLEM_STATUS_VALUES[(status?.['@_displayName'] ?? '').toLowerCase()];
+  if (fromStatus) {
+    return fromStatus;
+  }
+  if (observation.effectiveTime?.[0]?.high?.['@_value']) {
+    return 'resolved';
+  }
+  return CONCERN_STATUSES[act?.statusCode?.['@_code'] ?? ''];
+}
+
 export interface CcdaToFhirOptions {
   ignoreUnsupportedSections?: boolean;
 }
@@ -800,7 +829,9 @@ class CcdaToFhirConverter {
         coding: [
           {
             system: CLINICAL_CONDITION_CODE_SYSTEM,
-            code: PROBLEM_STATUS_MAPPER.mapCcdaToFhirWithDefault(act.statusCode?.['@_code'], 'active'),
+            code:
+              mapProblemClinicalStatus(observation, act) ??
+              PROBLEM_STATUS_MAPPER.mapCcdaToFhirWithDefault(act.statusCode?.['@_code'], 'active'),
           },
         ],
       },
@@ -2449,7 +2480,7 @@ class CcdaToFhirConverter {
               coding: [
                 {
                   system: CLINICAL_CONDITION_CODE_SYSTEM,
-                  code: 'active',
+                  code: mapProblemClinicalStatus(observation) ?? 'active',
                 },
               ],
             },
