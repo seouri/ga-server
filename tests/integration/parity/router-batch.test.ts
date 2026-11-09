@@ -12,6 +12,7 @@ const tx = (s: Side, type: 'batch' | 'transaction', entry: BundleEntry[]) => s.c
 async function statuses(s: Side, type: 'batch' | 'transaction', entry: BundleEntry[]): Promise<{ status?: string; text?: string; resource?: any; location?: string }[]> {
   const g = await tx(s, type, entry);
   if (g.status !== 200) throw new Error(`${s.name} ${type}: ${g.status} ${g.text}`);
+  expect(g.json.type).toBe(`${type}-response`);
   return (g.json as Bundle).entry!.map((e) => ({ status: e.response?.status, text: e.response?.outcome?.issue?.[0]?.details?.text, resource: e.resource, location: e.response?.location }));
 }
 const only = (es: { status?: string; text?: string }[]) => es.map((e) => [e.status, e.text]);
@@ -34,9 +35,12 @@ describe.skipIf(SQLITE)('Medplum fhir-router batch.test.ts (parity)', () => {
     expect(await answer(s, { resourceType: 'Bundle', type: 'xyz' })).toEqual([400, 'Unrecognized bundle type: xyz']);
   }));
 
-  test('Batch › Process batch with missing entries [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
-    expect(await answer(s, { resourceType: 'Bundle', type: 'batch' })).toEqual([400, 'Missing bundle entries']);
-  }));
+  // R4 allows a Bundle with no entries (Bundle.entry 0..*); README, "Deliberate differences".
+  test('differs on purpose: Batch › Process batch with missing entries [fhir-router/src/batch.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => { const g = await s.call('POST', '', { resourceType: 'Bundle', type: 'batch' }); return [g.status, g.json]; });
+    expect(medplum).toEqual([400, expect.objectContaining({ issue: [expect.objectContaining({ details: { text: 'Missing bundle entries' } })] })]);
+    expect(store).toEqual([200, { resourceType: 'Bundle', type: 'batch-response' }]);
+  });
 
   test('Batch › Process batch success [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
     const patientId = crypto.randomUUID(), observationId = crypto.randomUUID();
@@ -215,11 +219,10 @@ describe.skipIf(SQLITE)('Medplum fhir-router batch.test.ts (parity)', () => {
     expect(await serviceRequestPatch(s, [{ op: 'not-an-op', path: '/status', value: 'final' }])).toEqual([['400', 'Invalid operation: not-an-op']]);
   }));
 
-  // Medplum answers an unknown route `Not found`; the store names the route after it.
+  // Medplum answers an unknown route `Not found` (its test's text); the store names the route after it.
   test('Batch › Process batch patch invalid url [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
     const [e] = await statuses(s, 'batch', [{ request: { method: 'PATCH', url: 'Patient/123/$everything' } }]);
-    expect(e.status).toBe('404');
-    expect(e.text).toMatch(/^Not found/);
+    expect([e.status, e.text]).toEqual(['404', s.name === 'medplum' ? 'Not found' : 'Not found: Patient/123/$everything']);
   }));
 
   test('Batch › Process batch patch missing resource [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
@@ -320,50 +323,52 @@ describe.skipIf(SQLITE)('Medplum fhir-router batch.test.ts (parity)', () => {
     expect(store[0]).toBe(400);
   });
 
-  // Medplum's in-memory repository does not validate; both servers refuse the AllergyIntolerance for its invariant ait-1
-  // (no clinicalStatus), so this checks how the failure is answered.
-  test('differs on purpose: Batch › Valid null [fhir-router/src/batch.test.ts]', async () => {
-    const [medplum, store] = await both(sides, (s) => outcome(s, [{ fullUrl: 'urn:uuid:adf86b3c-c254-47df-9e2d-81c4a922f6e7', request: { method: 'POST', url: 'AllergyIntolerance' },
-      resource: { resourceType: 'AllergyIntolerance', category: [null], patient: { display: 'patient' },
-        _category: [{ extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unsupported' }] }] } as unknown as Resource }]));
-    expect(medplum).toEqual([200, ['400']]);
-    expect(store).toEqual([400, expect.stringMatching(/^Constraint ait-1 not met/)]);
-  });
+  // Medplum's in-memory repository does not validate; a real server needs clinicalStatus (invariant ait-1), added here.
+  test('Batch › Valid null [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
+    const r = await statuses(s, 'transaction', [{ fullUrl: 'urn:uuid:adf86b3c-c254-47df-9e2d-81c4a922f6e7', request: { method: 'POST', url: 'AllergyIntolerance' },
+      resource: { resourceType: 'AllergyIntolerance', clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] },
+        category: [null], patient: { display: 'patient' },
+        _category: [{ extension: [{ url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unsupported' }] }] } as unknown as Resource }]);
+    expect(r.map((e) => e.status)).toEqual(['201']);
+    return [r[0].resource.category, r[0].resource._category];
+  }));
 
-  // No Practitioner has the NPI: both conditional references fail (Medplum's in-memory repository leaves them as written).
-  test('differs on purpose: Batch › Concurrent conditional create in transactions [fhir-router/src/batch.test.ts]', async () => {
-    const [medplum, store] = await both(sides, (s) => {
-      const [patientIdentifier, encounterIdentifier, conditionIdentifier] = [1, 2, 3].map(() => crypto.randomUUID());
-      const practitioner = { reference: 'Practitioner?identifier=http://hl7.org.fhir/sid/us-npi|9941339108' };
-      return outcome(s, [
-        { fullUrl: 'urn:uuid:' + patientIdentifier, request: { method: 'POST', url: 'Patient', ifNoneExist: 'identifier=http://example.com|' + patientIdentifier },
-          resource: { resourceType: 'Patient', name: [{ given: ['Bobby' + patientIdentifier], family: 'Tables' }], gender: 'unknown', identifier: [{ system: 'http://example.com', value: patientIdentifier }] } },
-        { request: { method: 'PUT', url: 'CareTeam?subject=urn:uuid:' + patientIdentifier + '&status=active&category=http://loinc.org|LA28865-6' },
-          resource: { resourceType: 'CareTeam', status: 'active', category: [{ coding: [{ system: 'http://loinc.org', code: 'LA28865-6' }], text: 'Holistic Wellness Squad' }],
-            subject: { reference: 'urn:uuid:' + patientIdentifier }, participant: [{ member: practitioner }] } },
-        { fullUrl: 'urn:uuid:' + encounterIdentifier, request: { method: 'POST', url: 'Encounter' },
-          resource: { resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
-            subject: { reference: 'urn:uuid:' + patientIdentifier }, diagnosis: [{ condition: { reference: 'urn:uuid:' + conditionIdentifier } }] } },
-        { fullUrl: 'urn:uuid:' + conditionIdentifier, request: { method: 'POST', url: 'Condition' },
-          resource: { resourceType: 'Condition', verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
-            subject: { reference: 'urn:uuid:' + patientIdentifier }, encounter: { reference: 'urn:uuid:' + encounterIdentifier }, asserter: practitioner,
-            code: { coding: [{ system: 'http://snomed.info/sct', code: '83157008' }], text: 'FFI' } } },
-      ]);
-    });
-    expect(medplum).toEqual([200, ['201', '400', '201', '400']]);
-    expect(store).toEqual([400, expect.stringMatching(/^Conditional reference .* did not match any resources$/)]);
-  });
+  // Medplum's in-memory repository leaves an unmatched conditional reference as written; a real server needs the Practitioner,
+  // created here first (with a marker NPI).
+  test('Batch › Concurrent conditional create in transactions [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
+    const npi = marker();
+    await s.create({ resourceType: 'Practitioner', identifier: [{ system: 'http://hl7.org.fhir/sid/us-npi', value: npi }] });
+    const [patientIdentifier, encounterIdentifier, conditionIdentifier] = [1, 2, 3].map(() => crypto.randomUUID());
+    const practitioner = { reference: 'Practitioner?identifier=http://hl7.org.fhir/sid/us-npi|' + npi };
+    const r = await statuses(s, 'transaction', [
+      { fullUrl: 'urn:uuid:' + patientIdentifier, request: { method: 'POST', url: 'Patient', ifNoneExist: 'identifier=http://example.com|' + patientIdentifier },
+        resource: { resourceType: 'Patient', name: [{ given: ['Bobby' + patientIdentifier], family: 'Tables' }], gender: 'unknown', identifier: [{ system: 'http://example.com', value: patientIdentifier }] } },
+      { request: { method: 'PUT', url: 'CareTeam?subject=urn:uuid:' + patientIdentifier + '&status=active&category=http://loinc.org|LA28865-6' },
+        resource: { resourceType: 'CareTeam', status: 'active', category: [{ coding: [{ system: 'http://loinc.org', code: 'LA28865-6' }], text: 'Holistic Wellness Squad' }],
+          subject: { reference: 'urn:uuid:' + patientIdentifier }, participant: [{ member: practitioner }] } },
+      { fullUrl: 'urn:uuid:' + encounterIdentifier, request: { method: 'POST', url: 'Encounter' },
+        resource: { resourceType: 'Encounter', status: 'finished', class: { system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode', code: 'AMB' },
+          subject: { reference: 'urn:uuid:' + patientIdentifier }, diagnosis: [{ condition: { reference: 'urn:uuid:' + conditionIdentifier } }] } },
+      { fullUrl: 'urn:uuid:' + conditionIdentifier, request: { method: 'POST', url: 'Condition' },
+        resource: { resourceType: 'Condition', verificationStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }] },
+          subject: { reference: 'urn:uuid:' + patientIdentifier }, encounter: { reference: 'urn:uuid:' + encounterIdentifier }, asserter: practitioner,
+          code: { coding: [{ system: 'http://snomed.info/sct', code: '83157008' }], text: 'FFI' } } },
+    ]);
+    expect(r.map((e) => e.status)).toEqual(['201', '201', '201', '201']);
+  }));
 
-  // Medplum's in-memory repository takes the id 12345 and an empty code; both servers refuse them (README: non-UUID ids).
-  test('differs on purpose: Batch › Local reference resolution for update [fhir-router/src/batch.test.ts]', async () => {
-    const [medplum, store] = await both(sides, (s) => outcome(s, [
-      { fullUrl: 'urn:uuid:f1228716-b33c-420d-89ab-46fac9ebcc8b', request: { method: 'PUT', url: 'ServiceRequest/12345' },
-        resource: { id: '12345', resourceType: 'ServiceRequest', intent: 'order', status: 'active', subject: { display: 'Test Patient' } } },
-      { request: { method: 'POST', url: 'DiagnosticReport' }, resource: { resourceType: 'DiagnosticReport', code: {}, status: 'amended', basedOn: [{ reference: 'urn:uuid:f1228716-b33c-420d-89ab-46fac9ebcc8b' }] } },
-    ]));
-    expect(medplum).toEqual([200, ['400', '400']]);
-    expect(store).toEqual([400, 'Missing required property']);
-  });
+  // Medplum's in-memory repository creates ServiceRequest/12345 by the PUT and takes an empty code. Here the ServiceRequest
+  // exists first (the store does not create by PUT: updateCreate false; Medplum refuses the id 12345, README: non-UUID ids) and
+  // the report has a code, so both servers run the rewrite of the PUT entry's fullUrl.
+  test('Batch › Local reference resolution for update [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
+    const { id } = await s.create({ resourceType: 'ServiceRequest', intent: 'order', status: 'draft', subject: { display: 'Test Patient' } });
+    const r = await statuses(s, 'transaction', [
+      { fullUrl: 'urn:uuid:f1228716-b33c-420d-89ab-46fac9ebcc8b', request: { method: 'PUT', url: 'ServiceRequest/' + id },
+        resource: { id, resourceType: 'ServiceRequest', intent: 'order', status: 'active', subject: { display: 'Test Patient' } } },
+      { request: { method: 'POST', url: 'DiagnosticReport' }, resource: { resourceType: 'DiagnosticReport', code: { text: 'test' }, status: 'amended', basedOn: [{ reference: 'urn:uuid:f1228716-b33c-420d-89ab-46fac9ebcc8b' }] } },
+    ]);
+    expect(r[1].resource.basedOn[0].reference).toBe('ServiceRequest/' + id);
+  }));
 
   test('Batch › No self-assigned ID in upsert [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
     const id = crypto.randomUUID();

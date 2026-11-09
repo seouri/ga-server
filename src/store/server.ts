@@ -204,7 +204,7 @@ function dispatch(store: Store, r: Req): Answer {
     if (method === 'POST') return { status: 200, json: JSON.stringify(batch(store, r.body as Bundle, r.base)) };
     throw new HttpError(405, `${method} not allowed`);
   }
-  if (type[0] === '$') throw new HttpError(404, 'Not found'); // no system-level operations (Medplum's text)
+  if (type[0] === '$') throw new HttpError(404, `Not found: ${type}`); // no system-level operations
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});
   if (type === 'Binary') throw new HttpError(400, 'Binary is only served at Binary/<id>, not in a batch');
@@ -295,6 +295,8 @@ function entryPatch(res: Resource | undefined): unknown {
       const op = part('op')?.valueCode;
       if (!op) throw new HttpError(400, 'PATCH Parameters missing op');
       const value = part('value')?.valueString;
+      // add/replace/test without a value would delete the field (applyPatch takes undefined as a value): refused.
+      if (value === undefined && ['add', 'replace', 'test'].includes(op)) throw new HttpError(400, 'PATCH Parameters missing value (a JSON valueString)');
       let parsed: unknown;
       try { parsed = value === undefined ? undefined : JSON.parse(value); } catch { throw new HttpError(400, `Invalid JSON in PATCH value: ${value}`); }
       return { op, path: part('path')?.valueString, ...(['copy', 'move'].includes(op) && { from: part('from')?.valueString }), ...(['add', 'replace', 'test'].includes(op) && { value: parsed }) };
@@ -493,6 +495,8 @@ async function stageBinaries(store: Store, b: unknown): Promise<string[]> {
 
 const URN = /^urn:(uuid|oid):/;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// A urn as written or with any of its colons URL-encoded (`urn%3Auuid%3A...` in a search string), as Medplum rewrites it.
+const urnPattern = (u: string) => esc(u).replaceAll(':', '(?::|%3A)');
 const RANK: Record<string, number> = { DELETE: 0, POST: 1, PUT: 2, PATCH: 2 }; // then GET
 
 // A batch (each entry on its own, in order) or a transaction (all or nothing, one SQLite transaction, entries run DELETE,
@@ -505,7 +509,8 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
   if (b?.resourceType !== 'Bundle') throw new HttpError(400, 'Not a bundle');
   if (b.type !== 'batch' && b.type !== 'transaction') throw new HttpError(400, `Unrecognized bundle type: ${b.type}`);
   if (b.entry !== undefined && (!Array.isArray(b.entry) || b.entry.some((e) => !e || typeof e !== 'object' || Array.isArray(e)))) throw new HttpError(400, 'Bundle.entry must be a list of entries');
-  if (!b.entry?.length) throw new HttpError(400, 'Missing bundle entries');
+  // R4 allows no entries (Bundle.entry 0..*): an empty answer (Medplum refuses it with 400 Missing bundle entries).
+  if (!b.entry?.length) return { resourceType: 'Bundle', type: `${b.type}-response` };
   const entries = b.entry;
   const urns = new Map<string, string>(), pre = new Map<number, string>();
   // Every defined urn replaced, whole urns only (urn:oid:1.2.3 never rewrites inside urn:oid:1.2.3.4); the pattern is rebuilt
@@ -514,15 +519,14 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
   const rewrite = <T>(v: T): T => {
     if (!urns.size) return v;
     if (urns.size !== reSize) {
-      // Each urn also URL-encoded (`urn%3Auuid%3A...`, as in a search string), as Medplum.
-      re = new RegExp(`(?:${[...urns.keys()].flatMap((u) => [u, u.replaceAll(':', '%3A')]).sort((x, y) => y.length - x.length).map(esc).join('|')})(?![\\w.-])`, 'g');
+      re = new RegExp(`(?:${[...urns.keys()].sort((x, y) => y.length - x.length).map(urnPattern).join('|')})(?![\\w.-])`, 'g');
       reSize = urns.size;
     }
     return JSON.parse(JSON.stringify(v).replace(re!, (m) => urns.get(m.replaceAll('%3A', ':'))!));
   };
   // Whether any entry's body (a PATCH's operations decoded) holds this whole urn, as rewrite would replace it.
   const referenced = (urn: string): boolean => {
-    const at = new RegExp(`${esc(urn)}(?![\\w.-])`);
+    const at = new RegExp(`${urnPattern(urn)}(?![\\w.-])`);
     return entries.some((x) => { try { return at.test(JSON.stringify(x.request?.method === 'PATCH' ? entryPatch(x.resource) : x.resource) ?? ''); } catch { return false; } });
   };
   const run = (i: number): BundleEntry => {

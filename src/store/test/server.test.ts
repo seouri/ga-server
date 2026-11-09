@@ -585,12 +585,15 @@ describe('store server: Medplum-compatible routes', () => {
     const one = await call('PATCH', 'Patient?identifier=s|a', op, JP);
     expect([one.status, one.json.id, one.json.active]).toEqual([200, p.id, true]);
     expect((await call('PATCH', 'Patient?identifier=s|none', op, JP)).status).toBe(404);
-    expect(await text('POST', '$custom-operation', {})).toEqual([404, 'Not found']);
+    expect(await text('POST', '$custom-operation', {})).toEqual([404, 'Not found: $custom-operation']);
   });
 
   it('as Medplum\'s batch: its entry error texts and statuses, PATCH entry bodies, URL-encoded urns rewritten in strings', async () => {
-    expect((await call('POST', '', { resourceType: 'Bundle', type: 'batch' })).json.issue[0].details.text).toBe('Missing bundle entries');
-    expect((await call('POST', '', { resourceType: 'Bundle', type: 'batch', entry: [] })).status).toBe(400);
+    // R4 allows a Bundle with no entries (Medplum refuses it): an empty answer.
+    for (const type of ['batch', 'transaction']) for (const entry of [undefined, []]) {
+      const r = await call('POST', '', { resourceType: 'Bundle', type, entry });
+      expect([r.status, r.json]).toEqual([200, { resourceType: 'Bundle', type: `${type}-response` }]);
+    }
     expect((await call('POST', '', { resourceType: 'Bundle', type: 'xyz' })).json.issue[0].details.text).toBe('Unrecognized bundle type: xyz');
     const p = (await call('POST', 'Patient', { resourceType: 'Patient', gender: 'unknown' })).json;
     const bin = (ops: unknown) => ({ resourceType: 'Binary', contentType: 'application/json-patch+json', data: Buffer.from(JSON.stringify(ops)).toString('base64') });
@@ -620,6 +623,31 @@ describe('store server: Medplum-compatible routes', () => {
       { request: { method: 'POST', url: 'Basic' }, resource: { resourceType: 'Basic', code: { text: `QuestionnaireResponse?questionnaire=${Q.replaceAll(':', '%3A')}` } } },
     ]);
     expect(t.json.entry[1].resource.code.text).toBe(`QuestionnaireResponse?questionnaire=Questionnaire/${t.json.entry[0].resource.id}`);
+    const mixed = await tx('transaction', [
+      { fullUrl: Q, request: { method: 'POST', url: 'Questionnaire' }, resource: { resourceType: 'Questionnaire', status: 'active' } },
+      { request: { method: 'POST', url: 'Basic' }, resource: { resourceType: 'Basic', code: { text: `q=${Q.replace(':', '%3A')} r=${Q.replace(/:(?=[^:]*$)/, '%3A')}` } } },
+    ]);
+    const qid = `Questionnaire/${mixed.json.entry[0].resource.id}`;
+    expect(mixed.json.entry[1].resource.code.text).toBe(`q=${qid} r=${qid}`);
+  });
+
+  it('a JSON Patch as Parameters with no valueString for add, replace or test is 400 and changes nothing', async () => {
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient', gender: 'male' })).json;
+    const r = await tx('batch', [{ request: { method: 'PATCH', url: `Patient/${p.id}` }, resource: { resourceType: 'Parameters', parameter: [{ name: 'operation', part: [
+      { name: 'op', valueCode: 'replace' }, { name: 'path', valueString: '/gender' }, { name: 'value', valueCode: 'female' }] }] } } as BundleEntry]);
+    expect([r.json.entry[0].response.status, r.json.entry[0].response.outcome.issue[0].details.text]).toEqual(['400', 'PATCH Parameters missing value (a JSON valueString)']);
+    expect((await call('GET', `Patient/${p.id}`)).json.gender).toBe('male');
+  });
+
+  it('a transaction whose If-None-Exist entry changes its match is 400 when another entry names its urn URL-encoded', async () => {
+    const U = 'urn:uuid:33333333-3333-4333-8333-333333333333';
+    const r = await tx('transaction', [
+      { request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', identifier: [{ system: 's', value: 'enc' }] } },
+      { request: { method: 'POST', url: 'Basic' }, resource: { resourceType: 'Basic', code: { text: `Observation?subject=${U.replaceAll(':', '%3A')}` } } },
+      { fullUrl: U, request: { method: 'POST', url: 'Patient', ifNoneExist: 'identifier=s|enc' }, resource: { resourceType: 'Patient', identifier: [{ system: 's', value: 'enc' }] } },
+    ] as BundleEntry[]);
+    expect(r.status).toBe(400);
+    expect((await call('GET', 'Basic?_summary=count')).json.total).toBe(0);
   });
 
   it('conditional update (0 creates, 1 updates, more 412) and conditional delete (more 412, 1 deletes, 0 is OK)', async () => {
