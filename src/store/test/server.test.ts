@@ -303,7 +303,7 @@ describe('store server: Medplum-compatible routes', () => {
   const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const r = await fetch(`${base}fhir/R4/${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/fhir+json', ...headers }, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) });
     const text = await r.text();
-    return { status: r.status, headers: r.headers, json: text ? JSON.parse(text) : undefined } as { status: number; headers: Headers; json: any };
+    return { status: r.status, headers: r.headers, text, json: text ? JSON.parse(text) : undefined } as { status: number; headers: Headers; text: string; json: any };
   };
   const tx = (type: 'batch' | 'transaction', entry: BundleEntry[]) => call('POST', '', { resourceType: 'Bundle', type, entry });
   const P = (id: string) => ({ reference: `Patient/${id}` });
@@ -471,11 +471,39 @@ describe('store server: Medplum-compatible routes', () => {
     expect([invalid.status, invalid.json.issue[0].expression]).toEqual([400, ['Observation.status']]);
     expect((await call('PATCH', `Observation/${o.id}`, [{ op: 'test', path: '/status', value: 'nope' }], jp)).json.issue[0].details.text).toMatch(/Test failed/);
     expect((await call('PATCH', `Observation/${o.id}`, [{ op: 'replace', path: '/id', value: 'other' }], jp)).json.issue[0].details.text).toBe('Invalid id');
-    expect((await call('PATCH', `Observation/${o.id}`, { resourceType: 'Parameters' }, jp)).status).toBe(400);
     expect((await call('PATCH', 'Observation/nope', [], jp)).status).toBe(404);
     expect((await call('GET', `Observation/${o.id}`)).json.status).toBe('amended');
     await call('DELETE', `Observation/${o.id}`);
     expect((await call('PATCH', `Observation/${o.id}`, [], jp)).status).toBe(410);
+  });
+
+  it('as Medplum: unknown types 400, DELETE If-Match, FHIRPath Patch, _pretty, Prefer return=minimal, empty values dropped, $validate of a Parameters body', async () => {
+    for (const [m, p] of [['GET', 'Patientx/1'], ['GET', 'xyz/1/_history'], ['GET', 'xyz/1/_history/2'], ['DELETE', 'xyz/1'], ['PATCH', 'Foo/1'], ['GET', 'Patientx']]) {
+      const r = await call(m, p, m === 'PATCH' ? { resourceType: 'Parameters' } : undefined);
+      expect([m, p, r.status, r.json.issue[0].details.text]).toEqual([m, p, 400, 'Unknown resource type']);
+    }
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient', name: [{ family: 'Smith' }], identifier: [], gender: '' })).json;
+    expect([p.identifier, p.gender]).toEqual([undefined, undefined]);
+    expect((await call('DELETE', `Patient/${p.id}`, undefined, { 'if-match': 'W/"bad"' })).status).toBe(412);
+    const fp = (type: string, extra: object = {}) => ({ resourceType: 'Parameters', parameter: [{ name: 'operation', part: [{ name: 'type', valueCode: type }, { name: 'path', valueString: `Patient.name.where(family = 'Smith')` }, ...Object.entries(extra).map(([name, v]) => ({ name, ...v }))] }] });
+    const patched = await call('PATCH', `Patient/${p.id}`, fp('add', { name: { valueString: 'given' }, value: { valueString: 'Jan' } }));
+    expect([patched.status, patched.json.name[0].given]).toEqual([200, ['Jan']]);
+    const v = patched.json.meta.versionId;
+    expect((await call('PATCH', `Patient/${p.id}`, fp('unsupported'))).json.meta.versionId).toBe(v); // unknown operations are ignored
+    expect((await call('PATCH', `Patient/${p.id}`, { resourceType: 'Parameters' })).json.meta.versionId).toBe(v);
+    const pretty = await call('GET', `Patient/${p.id}?_pretty=true`);
+    expect(pretty.text).toBe(JSON.stringify(pretty.json, undefined, 2));
+    const minimal = await call('GET', `Patient/${p.id}`, undefined, { prefer: 'return=minimal' });
+    expect([minimal.status, minimal.text]).toEqual([200, '']);
+    expect((await call('DELETE', `Patient/${p.id}`, undefined, { 'if-match': `W/"${v}"` })).status).toBe(200);
+    expect((await call('DELETE', `Patient/${p.id}`, undefined, { 'if-match': `W/"${v}"` })).status).toBe(412); // deleted: every version is stale
+    expect((await call('DELETE', `Patient/${p.id}`)).status).toBe(200);
+    const validate = (body: object) => call('POST', 'Patient/$validate', body);
+    expect((await validate({ resourceType: 'Parameters', parameter: [{ name: 'resource', resource: { resourceType: 'Patient' } }] })).status).toBe(200);
+    const bad = await validate({ resourceType: 'Parameters', parameter: [{ name: 'resource', resource: { resourceType: 'Patient', name: 'x' } }] });
+    expect([bad.status, bad.json.issue[0].expression]).toEqual([400, ['Patient.name']]);
+    const none = await validate({ resourceType: 'Parameters', parameter: [] });
+    expect([none.status, none.json.issue[0].details.text]).toEqual([400, 'Missing resource parameter']);
   });
 
   it('conditional update (0 creates, 1 updates, more 412) and conditional delete (more 412, 1 deletes, 0 is OK)', async () => {
@@ -659,7 +687,7 @@ describe('store server: Medplum-compatible routes', () => {
 
   it('GET metadata describes this store: types, interactions, search parameters (no composite), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
-    expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json'] });
+    expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
     const rest = m.rest[0];
     expect(rest.interaction.map((i: { code: string }) => i.code)).toEqual(['transaction', 'batch', 'history-system']);
     const obsCap = rest.resource.find((r: { type: string }) => r.type === 'Observation');

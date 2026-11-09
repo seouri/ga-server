@@ -38,6 +38,16 @@ export class IndexFormatError extends Error {}
 export type Row = { type: string; id: string; versionId: string; lastUpdated: string; json: string }; // json '': a delete
 type Meta = NonNullable<Resource['meta']>;
 const now = () => new Date().toISOString();
+const etag = (v: string) => v.replace(/^W\//, '').replace(/"/g, '');
+// Empty strings, arrays and objects dropped, as Medplum stores a resource (identifier: [] is no identifier).
+function prune<T>(v: T): T {
+  if (Array.isArray(v)) { const a = v.map(prune).filter((x) => x !== undefined); return (a.length ? a : undefined) as T; }
+  if (v && typeof v === 'object') {
+    const o = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, prune(x)]).filter(([, x]) => x !== undefined));
+    return (Object.keys(o).length ? o : undefined) as T;
+  }
+  return (v === '' ? undefined : v) as T;
+}
 // Equality for "not modified": everything but the server-set metadata.
 const content = (r: Resource) => ({ ...r, meta: { ...r.meta, versionId: undefined, lastUpdated: undefined, compartment: undefined } });
 
@@ -187,15 +197,16 @@ export class Store {
         if (found.length > 1) throw multipleMatches();
         if (found.length) return { resource: found[0], created: false };
       }
-      return { resource: this.write({ ...r, id }, { versionId: randomUUID(), lastUpdated: now() }), created: true };
+      return { resource: this.write(prune({ ...r, id }), { versionId: randomUUID(), lastUpdated: now() }), created: true };
     });
   }
 
   update(r: Resource, ifMatch?: string): Resource {
+    r = prune(r);
     return this.transaction(() => {
       const old = r.id ? this.readRow(r.resourceType, r.id, true) : undefined;
       if (!old) throw new StoreError(404, [{ text: `Not found: ${r.resourceType}/${r.id}` }]);
-      if (ifMatch && ifMatch.replace(/^W\//, '').replace(/"/g, '') !== old.versionId) throw new StoreError(412, [{ text: 'Precondition Failed' }]);
+      if (ifMatch && etag(ifMatch) !== old.versionId) throw new StoreError(412, [{ text: 'Precondition Failed' }]);
       // The request's meta wins (as Medplum): a write that drops a tag clears it. Server fields are set by write().
       const prev = JSON.parse(old.json) as Resource;
       if (deepEquals(content(r), content(prev))) return prev; // Medplum keeps the version of an unchanged update
@@ -203,9 +214,13 @@ export class Store {
     });
   }
 
-  // Deleting a deleted resource changes nothing (as Medplum); a delete leaves a history row with empty json.
-  delete(type: string, id: string): void {
+  // Deleting a deleted resource changes nothing (as Medplum); a delete leaves a history row with empty json. ifMatch: the
+  // current versionId, else 412 (a deleted resource has none, as Medplum).
+  delete(type: string, id: string, ifMatch?: string): void {
     this.transaction(() => {
+      if (ifMatch && this.readRow(type, id)?.versionId !== etag(ifMatch) && this.prep('select 1 from history where type = ? and id = ? limit 1').get(type, id)) {
+        throw new StoreError(412, [{ text: 'Precondition Failed' }]);
+      }
       const row = this.prep('delete from resources where type = ? and id = ? returning rid').get(type, id) as { rid: number } | undefined;
       if (!row) {
         try { this.readRow(type, id, true); } catch { return; } // gone already

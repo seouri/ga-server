@@ -410,58 +410,58 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/routes.test.ts | FHIR Routes › Get CapabilityStatement authenticated | skipped | platform | auth / SMART config (GA store has one bearer token) |
 | server/src/fhir/routes.test.ts | FHIR Routes › Get versions anonymously | skipped | platform | auth / SMART config (GA store has one bearer token) |
 | server/src/fhir/routes.test.ts | FHIR Routes › Get SMART-on-FHIR configuration | skipped | platform | auth / SMART config (GA store has one bearer token) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Invalid JSON | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Create resource success with %s FHIR JSON response format | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Create resource invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Create resource incorrect resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Create resource invalid content type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource _pretty | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource invalid UUID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource not found | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource minimal | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history invalid UUID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid UUID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid version UUID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version not found | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not modified | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not modified with empty strings | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource invalid | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource wrong content-type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource missing ID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not found | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource with precondition | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Update resource with failed precondition | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource with failed precondition | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource invalid UUID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource not found | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource wrong content type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource invalid result | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource success | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › FHIRPath Patch resource success | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST with multiple includes | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/routes.test.ts | FHIR Routes › Invalid JSON | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Create resource success with %s FHIR JSON response format | ported | existing | standard format only; the legacy run is Medplum project setting legacyFhirJsonResponseFormat |
+| server/src/fhir/routes.test.ts | FHIR Routes › Create resource invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Create resource incorrect resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Create resource invalid content type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource _pretty | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource invalid UUID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource not found | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource minimal | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history invalid UUID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource history invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid UUID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid version UUID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Read resource version not found | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not modified | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not modified with empty strings | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource invalid | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource wrong content-type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource missing ID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource not found | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource with precondition | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Update resource with failed precondition | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource with failed precondition | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource invalid UUID | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Delete resource invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource not found | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource wrong content type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource invalid resource type | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource invalid result | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Patch resource success | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › FHIRPath Patch resource success | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search | ported | existing | Medplum reader/writer pool spies left out (internal) |
+| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST | ported | existing | Medplum reader/writer pool spies left out (internal) |
+| server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search by POST with multiple includes | ported | existing | Medplum reader/writer pool spies left out (internal) |
 | server/src/fhir/routes.test.ts | FHIR Routes › On %s › Search multiple resource types with _type | skipped | type | not yet ported (Task 5) |
 | server/src/fhir/routes.test.ts | FHIR Routes › chainedSearchOnReader only routes chained searches to reader | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › readonlyBatchOnReader only routes read-only batches to reader | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › readonlyBatchOnReader does not break a nested read-only batch inside a transaction | skipped | platform | access policy / project / reader routing |
-| server/src/fhir/routes.test.ts | FHIR Routes › Search invalid resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Search invalid search parameter | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Validate create success | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Validate create failure | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Validate unwraps the resource parameter of a Parameters body | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Validate rejects a Parameters body without a resource parameter | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/routes.test.ts | FHIR Routes › Validate wrong content type | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/routes.test.ts | FHIR Routes › Search invalid resource | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Search invalid search parameter | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Validate create success | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Validate create failure | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Validate unwraps the resource parameter of a Parameters body | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Validate rejects a Parameters body without a resource parameter | ported | existing |  |
+| server/src/fhir/routes.test.ts | FHIR Routes › Validate wrong content type | ported | existing |  |
 | server/src/fhir/routes.test.ts | FHIR Routes › Reindex resource access denied | skipped | platform | reindex job |
 | server/src/fhir/routes.test.ts | FHIR Routes › Resend subscriptions access denied | skipped | platform | access policy / project / reader routing |
 | server/src/fhir/routes.test.ts | FHIR Routes › Resend as project admin | skipped | platform | access policy / project / reader routing |

@@ -8,8 +8,8 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { applyPatch, getSearchParameters } from '@medplum/core';
-import type { Bundle, BundleEntry, OperationOutcome, Resource } from '@medplum/fhirtypes';
+import { applyPatch, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
+import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
@@ -149,7 +149,10 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
     h['last-modified'] = new Date(a.row.lastUpdated).toUTCString();
     if (a.status === 201) h.location = `${base}fhir/R4/${a.row.type}/${a.row.id}`;
   }
-  send(res, a.status, a.json ?? JSON.stringify(a.outcome ?? OK), h);
+  let out = a.json ?? JSON.stringify(a.outcome ?? OK);
+  if (a.status < 300 && /\breturn=minimal\b/.test(header(req, 'prefer') ?? '')) out = ''; // as Medplum, on reads too
+  else if (query.get('_pretty') === 'true') out = JSON.stringify(JSON.parse(out), undefined, 2);
+  send(res, a.status, out, h);
 }
 
 const header = (req: IncomingMessage, name: string): string | undefined => {
@@ -183,7 +186,8 @@ function dispatch(store: Store, r: Req): Answer {
   }
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});
-  if (!TYPE.test(type) || type === 'Binary') throw new HttpError(type === 'Binary' ? 400 : 404, type === 'Binary' ? 'Binary is only served at Binary/<id>, not in a batch' : `Not found: ${type}`);
+  if (type === 'Binary') throw new HttpError(400, 'Binary is only served at Binary/<id>, not in a batch');
+  if (!storedTypes().includes(type)) throw new HttpError(400, 'Unknown resource type'); // Medplum's text
   if (!id) {
     if (method === 'GET') return { status: 200, json: store.searchJson(type, [...query], r.base) };
     if (method === 'POST') {
@@ -196,7 +200,7 @@ function dispatch(store: Store, r: Req): Answer {
   if (method === 'POST' && id === '_search' && !op) return { status: 200, json: store.searchJson(type, [...query], r.base) };
   if (method === 'GET' && id === '_history' && !op) return history(store, r, { type });
   // $validate: a client can check resources before it writes them.
-  if (method === 'POST' && id === '$validate' && !op) { store.validate(resourceOf(r, type)); return { status: 200, outcome: OK }; }
+  if (method === 'POST' && id === '$validate' && !op) { store.validate(resourceOf(validated(r), type)); return { status: 200, outcome: OK }; }
   if (method === 'GET' && type === 'Patient' && op === '$everything' && !vid) return everything(store, id, r);
   if (method === 'GET' && op === '_history') {
     if (!vid) return history(store, r, { type, id });
@@ -217,8 +221,17 @@ function dispatch(store: Store, r: Req): Answer {
     return written(store.update(resolveRefs(store, res), r.ifMatch), 200);
   }
   if (method === 'PATCH') return written(patch(store, type, id, r), 200);
-  if (method === 'DELETE') { store.delete(type, id); return { status: 200, outcome: OK }; }
+  if (method === 'DELETE') { store.delete(type, id, r.ifMatch); return { status: 200, outcome: OK }; }
   throw new HttpError(405, `${method} not allowed`);
+}
+
+// $validate takes the resource, or a Parameters holding it as `resource` (as Medplum).
+function validated(r: Req): Req {
+  const p = r.body as Parameters;
+  if (p?.resourceType !== 'Parameters') return r;
+  const body = p.parameter?.find((x) => x.name === 'resource')?.resource;
+  if (!body) throw new HttpError(400, 'Missing resource parameter'); // Medplum's text
+  return { ...r, body };
 }
 
 // PUT/DELETE Type?query, as Medplum: no match creates (PUT) or does nothing (DELETE), one is updated or deleted, more are 412.
@@ -239,8 +252,8 @@ function conditional(store: Store, r: Req, type: string): Answer {
   });
 }
 
-// JSON Patch (RFC 6902; in a batch, a Binary holding it, as Medplum's client sends it). The result is validated and versioned
-// like an update, as on Medplum.
+// JSON Patch (RFC 6902; in a batch, a Binary holding it, as Medplum's client sends it) or FHIRPath Patch (a Parameters). The
+// result is validated and versioned like an update, as on Medplum.
 function patchOps(body: unknown): unknown {
   const bin = body as { resourceType?: string; contentType?: string; data?: string };
   if (bin?.resourceType !== 'Binary') return body;
@@ -249,10 +262,12 @@ function patchOps(body: unknown): unknown {
 }
 function patch(store: Store, type: string, id: string, r: Req): Resource {
   const ops = patchOps(r.body);
-  if (!Array.isArray(ops)) throw new HttpError(400, 'PATCH takes a JSON Patch (an array of operations): FHIRPath Patch is not supported');
+  const fhirpath = (ops as Parameters)?.resourceType === 'Parameters';
+  if (!fhirpath && !Array.isArray(ops)) throw new HttpError(400, 'PATCH takes a JSON Patch (an array of operations) or a FHIRPath Patch (Parameters)');
   // A urn reference the patch brings in names no stored record (outside a transaction, or one no entry defines). Only the
   // operations are checked: references already stored are not this request's.
-  for (const op of ops as { path?: string; value?: unknown }[]) {
+  if (fhirpath) danglingUrn(ops);
+  else for (const op of ops as { path?: string; value?: unknown }[]) {
     if (typeof op?.value === 'string' && /(^|\/)reference$/.test(op.path ?? '') && URN.test(op.value)) throw new HttpError(400, `Reference ${op.value} matches no entry's fullUrl`);
     danglingUrn(op?.value);
   }
@@ -261,7 +276,11 @@ function patch(store: Store, type: string, id: string, r: Req): Resource {
     if (!row) throw new HttpError(404, 'Not found');
     const res = JSON.parse(row.json) as Resource;
     let err: Error | null | undefined;
-    try { err = applyPatch(res, ops).find(Boolean); } catch (e) { err = e as Error; }
+    try {
+      // FHIRPath Patch: Medplum ignores operations of an unknown type, and a Parameters without any changes nothing.
+      if (fhirpath) fhirpathPatchTypedValue(toTypedValue(res), parseFhirPathPatchParameters(ops as Parameters));
+      else err = applyPatch(res, ops as never, { implicitArrayCreation: true }).find(Boolean);
+    } catch (e) { err = e as Error; }
     if (err) throw new HttpError(400, err.message);
     if (res.resourceType !== type || res.id !== id) throw new HttpError(400, 'Invalid id');
     return store.update(resolveRefs(store, res), r.ifMatch);
@@ -374,7 +393,7 @@ function capability(): string {
   const versioned = ['read', 'vread', 'update', 'patch', 'delete', 'history-instance', 'history-type', 'create', 'search-type'];
   return capabilityJson ??= JSON.stringify({
     resourceType: 'CapabilityStatement', status: 'active', date: '2026-11-08', kind: 'instance', fhirVersion: '4.0.1', format: ['json'],
-    patchFormat: ['application/json-patch+json'], software: { name: 'fhir-sqlite-store' }, implementation: { description: 'FHIR R4 store on SQLite' },
+    patchFormat: ['application/json-patch+json', 'application/fhir+json'], software: { name: 'fhir-sqlite-store' }, implementation: { description: 'FHIR R4 store on SQLite' },
     rest: [{
       mode: 'server',
       interaction: [{ code: 'transaction' }, { code: 'batch' }, { code: 'history-system' }],
