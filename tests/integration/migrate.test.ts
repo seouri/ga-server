@@ -28,7 +28,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
   const { dir, baseUrl, session } = await throwawayConfig();
   const clients: GaConfig[] = []; // each project's GA client empties it afterwards (the old one is gone after --delete-old)
   try {
-    const made = await retryLimited(() => setup(baseUrl, undefined, { projectName: 'ga-test-old' }));
+    const made = await retryLimited(() => setup(baseUrl, { projectName: 'ga-test-old' }));
     clients.push(made);
     await emptyTestProject(await getClient(made)); // an earlier run that stopped half-way
     // The admin logged in to that project: the Super Admin session doesn't see a reused project's memberships.
@@ -48,7 +48,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     // A distinct file: the EHI fixture holds the same PDF as media, and a file is imported once.
     writeFileSync(join(src, 'labs.pdf'), Buffer.concat([readFileSync(join(FIX, 'labs-synthetic.pdf')), Buffer.from('\n%migrate-test\n')]));
     const old = await getClient(legacy);
-    await importPath(old, { ...legacy, ccdaConverter: 'microsoft' }, join(src, 'ccda', 'summary.xml')); // a Microsoft-era record: migrate keeps that converter
+    await importPath(old, legacy, join(src, 'ccda', 'summary.xml'));
     await importEhi(old, legacy, join(src, 'ehi'));
     await importAppleHealth(old, legacy, join(src, 'apple'));
     await importExtracted(old, legacy, [

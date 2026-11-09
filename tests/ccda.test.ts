@@ -1,16 +1,16 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { takeLock } from '../src/lock.ts';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
-import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Practitioner, PractitionerRole, Reference, Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, CareTeam, Composition, Condition, FamilyMemberHistory, Location, MedicationStatement, Observation, Practitioner, PractitionerRole, Reference, Resource } from '@medplum/fhirtypes';
 import { importResources } from '../src/engine.ts';
 import type { SourceInfo } from '../src/identity.ts';
-import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
+import { ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
-import { onStore } from './temp-store.ts';
+import { onStore, tempStore } from './temp-store.ts';
+import { spawn } from 'node:child_process';
 import { isActive, isPlanned } from '../src/current.ts';
 import { labResults, labRow, type LabRow } from '../src/labs.ts';
 import { vitals } from '../src/vitals.ts';
@@ -37,104 +37,6 @@ test('ccdaFiles keeps ClinicalDocument xml and skips other xml', () => {
   expect(ccdaFiles(dir)).toEqual([join(dir, 'sub', 'DOC0001.XML')]);
 });
 
-const xml = `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody>
-  <component><section><entry><substanceAdministration><id root="1.1" extension="m-active"/><statusCode code="active"/></substanceAdministration></entry>
-    <entry><substanceAdministration><id root="1.1" extension="m-aborted"/><statusCode code="aborted"/></substanceAdministration></entry>
-    <entry><substanceAdministration><id root="AB-CD"/><statusCode code="completed"/></substanceAdministration></entry></section></component>
-  <component><section>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-active"/><statusCode code="completed"/></observation></entryRelationship></act></entry>
-    <entry><act><statusCode code="completed"/><entryRelationship><observation><id root="2.2" extension="p-done"/><statusCode code="completed"/></observation></entryRelationship></act></entry>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-status-inactive"/><statusCode code="completed"/>
-      <effectiveTime><low value="2020"/><high value="2021"/></effectiveTime>
-      <entryRelationship typeCode="REFR"><observation><code code="33999-4"/><value code="73425007" displayName="Inactive"/></observation></entryRelationship>
-    </observation></entryRelationship></act></entry>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-high"/><statusCode code="completed"/>
-      <effectiveTime><low value="2020"/><high value="2021"/></effectiveTime></observation></entryRelationship></act></entry>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="2.2" extension="p-open"/><statusCode code="completed"/>
-      <effectiveTime><low value="2020"/><high nullFlavor="UNK"/></effectiveTime></observation></entryRelationship></act></entry>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id nullFlavor="NI"/><statusCode code="completed"/>
-      <entryRelationship typeCode="REFR"><observation><code code="33999-4"/><value code="413322009" displayName="Resolved"/></observation></entryRelationship>
-    </observation></entryRelationship></act></entry>
-  </section></component></structuredBody></component></ClinicalDocument>`;
-const ms = (system: string, value: string): MedicationStatement =>
-  ({ resourceType: 'MedicationStatement', identifier: [{ system, value }], subject: { reference: 'Patient/p' } }) as MedicationStatement;
-const cond = (value: string): Condition => ({ resourceType: 'Condition', identifier: [{ system: 'urn:oid:2.2', value }], subject: { reference: 'Patient/p' } });
-
-test('repair recovers statuses from the source entries', () => {
-  const out = repair(
-    [
-      ms('urn:oid:1.1', 'm-active'),
-      ms('urn:oid:1.1', 'm-aborted'),
-      ms('urn:ietf:rfc:3986', 'urn:uuid:ab-cd'),
-      ms('urn:oid:1.1', 'not-in-xml'),
-      cond('p-active'),
-      cond('p-done'),
-      cond('not-in-xml'),
-      { resourceType: 'Encounter', class: { code: 'AMB' } } as Encounter,
-    ] as Resource[],
-    xml,
-  );
-  expect(out.filter((r) => r.resourceType === 'MedicationStatement').map((r) => (r as MedicationStatement).status)).toEqual([
-    'active',
-    'stopped',
-    'completed',
-    'unknown',
-  ]);
-  const [a, d, n] = out.filter((r) => r.resourceType === 'Condition') as Condition[];
-  expect(a.clinicalStatus?.coding?.[0]?.code).toBe('active');
-  expect(d.clinicalStatus?.coding?.[0]?.code).toBe('resolved');
-  expect(d.verificationStatus?.coding?.[0]?.code).toBe('confirmed');
-  expect(n.clinicalStatus).toBeUndefined();
-  expect((out.find((r) => r.resourceType === 'Encounter') as Encounter).status).toBe('unknown');
-});
-
-test('the Microsoft path drops its whole-document DocumentReference (storeDocument keeps the file); the in-process path keeps note DocumentReferences', async () => {
-  const entry = [{ resource: { resourceType: 'DocumentReference', status: 'current', content: [] } }, { resource: { resourceType: 'Encounter', class: { code: 'AMB' } } }];
-  vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ result: { resourceType: 'Bundle', type: 'batch', entry } }), { status: 200 }));
-  try {
-    const { convertCcdaMs } = await import('../src/ccda.ts');
-    expect((await convertCcdaMs('<ClinicalDocument/>', 'http://converter/')).map((r) => r.resourceType)).toEqual(['Encounter']);
-  } finally {
-    vi.unstubAllGlobals();
-  }
-  expect(convertCcdaLocal(EPIC).resources.filter((r) => r.resourceType === 'DocumentReference')).toHaveLength(2);
-});
-
-test('condition status precedence: status observation > effectiveTime/high > concern act', () => {
-  const out = repair(['p-status-inactive', 'p-high', 'p-open', ''].map(cond) as Resource[], xml) as Condition[];
-  expect(out.map((c) => c.clinicalStatus?.coding?.[0]?.code)).toEqual(['inactive', 'resolved', 'active', undefined]);
-  expect(out[1].verificationStatus?.coding?.[0]?.code).toBe('confirmed');
-});
-
-test('repair names medications from the narrative and labels problem-list vs visit diagnoses', () => {
-  const doc = `<ClinicalDocument xmlns="urn:hl7-org:v3"><component><structuredBody>
-  <component><section><text><list><item><content ID="med1">examplestatin 10 mg tablet</content></item></list></text>
-    <entry><substanceAdministration><id root="9.9" extension="m1"/><statusCode code="active"/>
-      <consumable><manufacturedProduct><manufacturedMaterial><code code="123" codeSystem="2.16.840.1.113883.6.88"><originalText><reference value="#med1"/></originalText></code></manufacturedMaterial></manufacturedProduct></consumable>
-    </substanceAdministration></entry></section></component>
-  <component><section><templateId root="2.16.840.1.113883.10.20.22.2.5.1"/>
-    <entry><act><statusCode code="active"/><entryRelationship><observation><id root="8.8" extension="pl"/></observation></entryRelationship></act></entry></section></component>
-  <component><section><templateId root="2.16.840.1.113883.10.20.22.2.22.1"/>
-    <entry><encounter><entryRelationship><act><entryRelationship><observation><id root="8.8" extension="dx"/></observation></entryRelationship></act></entryRelationship></encounter></entry></section></component>
-  </structuredBody></component></ClinicalDocument>`;
-  const out = repair(
-    [
-      { resourceType: 'Medication', id: 'med-a', code: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.69', code: '0000-0000-00' }] } },
-      { ...ms('urn:oid:9.9', 'm1'), medicationReference: { reference: 'Medication/med-a' } },
-      { resourceType: 'Condition', identifier: [{ system: 'urn:oid:8.8', value: 'pl' }], subject: { reference: 'Patient/p' } },
-      { resourceType: 'Condition', identifier: [{ system: 'urn:oid:8.8', value: 'dx' }], subject: { reference: 'Patient/p' } },
-    ] as Resource[],
-    doc,
-  );
-  const med = out[0] as Medication;
-  expect(med.code?.text).toBe('examplestatin 10 mg tablet');
-  expect(med.code?.coding).toContainEqual({ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '123', display: 'examplestatin 10 mg tablet' });
-  expect(med.code?.coding?.[0].code).toBe('0000-0000-00');
-  const [pl, dx] = out.slice(2) as Condition[];
-  expect(pl.category?.[0].coding?.[0].code).toBe('problem-list-item');
-  expect(dx.category?.[0].coding?.[0].code).toBe('encounter-diagnosis');
-});
-
 test('custodian: own element only, namespace prefix and entities handled, never a later patient name', () => {
   const doc = (custodianXml: string) => `<ClinicalDocument>${custodianXml}<recordTarget><patientRole><patient><name><given>Pat</given></name></patient></patientRole></recordTarget></ClinicalDocument>`;
   expect(custodian(doc('<custodian><assignedCustodian><representedCustodianOrganization><id root="1"/></representedCustodianOrganization></assignedCustodian></custodian>'))).toBeUndefined();
@@ -142,11 +44,6 @@ test('custodian: own element only, namespace prefix and entities handled, never 
   expect(custodian(doc('<x:custodian><x:representedCustodianOrganization><x:name> A &amp; B &#233;</x:name></x:representedCustodianOrganization></x:custodian>'))).toBe('A & B \u00e9');
   // A malformed numeric entity falls back to no custodian (the folder name keys the source), never a throw.
   expect(custodian(doc('<custodian><representedCustodianOrganization><name>A &#99999999;</name></representedCustodianOrganization></custodian>'))).toBeUndefined();
-});
-
-test('convertCcdaMs with the converter not running names the command that starts it', async () => {
-  const { convertCcdaMs } = await import('../src/ccda.ts');
-  await expect(convertCcdaMs('<ClinicalDocument/>', 'http://127.0.0.1:9/')).rejects.toThrow('docker compose --profile ccda up -d fhir-converter');
 });
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
@@ -421,7 +318,7 @@ test('every section of the Epic-style fixture is imported', () => {
   expect(out.notImported).toEqual([]);
 });
 
-const cfgFor = (patientId: string, o: Partial<GaConfig> = {}): GaConfig => ({ patientId, converterUrl: 'http://127.0.0.1:9/', ...o });
+const cfgFor = (patientId: string): GaConfig => ({ patientId });
 const writeDoc = (xml: string) => {
   const f = join(mkdtempSync(join(tmpdir(), 'ga-ccda-')), 'doc.xml');
   writeFileSync(f, xml);
@@ -431,7 +328,7 @@ const writeDoc = (xml: string) => {
 test('a later document repeating an entry updates it', async () => {
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
-    const cfg = cfgFor(pid, { ccdaConverter: 'medplum' });
+    const cfg = cfgFor(pid);
     await importPath(client, cfg, writeDoc(SYNTHETIC), pid);
     // The same document re-issued later: the hyperlipidemia problem (same entry ids) now resolved.
     const later = SYNTHETIC.replaceAll('20240315120000-0500', '20240701120000-0500')
@@ -456,7 +353,7 @@ test('a later document repeating an entry updates it', async () => {
 test('a newer summary that numbers its narrative anchors anew adds only its Composition (id-less entries key alike)', async () => {
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
-    const cfg = cfgFor(pid, { ccdaConverter: 'medplum' });
+    const cfg = cfgFor(pid);
     // An id-less allergy whose text is a narrative anchor (Epic's "no known allergies" entry has no id)
     const xml = EPIC.replace('<text>Example drug allergy</text>', '<text><content ID="al1">Example drug allergy</content></text>')
       .replace(/<id root="1\.2\.840\.114350\.1\.13\.999\.2\.7\.2\.768987(\.1)?" extension="EX-ALLERGY-(OBS-)?1"\/>/g, '')
@@ -513,26 +410,6 @@ test('the Epic-style fixture imports with no record refused, and a re-import cha
     // The CareTeam and the Composition are in the patient's compartment.
     expect(await client.searchResources('CareTeam', { subject: `Patient/${pid}` })).toHaveLength(1);
     expect(await client.searchResources('Composition', { subject: `Patient/${pid}` })).toHaveLength(2);
-  });
-});
-
-test('ccdaConverter picks medplum when the flag is set or the record has no C-CDA records, else microsoft', async () => {
-  await onStore(async ({ client }) => {
-    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
-    expect(await ccdaConverter(cfgFor(pid), client)).toBe('medplum');
-    // Records the new path wrote are not Microsoft-era: two imports in a row both convert in process.
-    await importPath(client, cfgFor(pid), writeDoc(SYNTHETIC), pid);
-    expect(await ccdaConverter(cfgFor(pid), client)).toBe('medplum');
-    // A Microsoft-era C-CDA record: microsoft, unless the flag says medplum.
-    await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', author: [{ display: 'x' }], title: 'x',
-      subject: { reference: `Patient/${pid}` }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
-    expect(await ccdaConverter(cfgFor(pid), client)).toBe('microsoft');
-    expect(await ccdaConverter(cfgFor(pid, { ccdaConverter: 'medplum' }), client)).toBe('medplum');
-    expect(await ccdaConverter(cfgFor('other'), client)).toBe('medplum'); // per patient record
-    // A Microsoft-era Composition stored without a patient also counts.
-    await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', author: [{ display: 'x' }], title: 'x',
-      meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
-    expect(await ccdaConverter(cfgFor('other'), client)).toBe('microsoft');
   });
 });
 
@@ -802,28 +679,6 @@ test('a C-CDA note whose Epic note id is an EHI note GA holds (same Epic org) me
     expect(notes.find((d) => d.id === other.id)?.identifier).toHaveLength(1);
     expect(notes.filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'))).toHaveLength(3);
   });
-});
-
-test('a C-CDA import waiting on the import lock decides its converter once it holds the lock (a replace that finished meanwhile counts)', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ga-ccda-lock-'));
-  vi.stubEnv('GA_CONFIG', join(dir, 'config.json'));
-  try {
-    await onStore(async ({ client }) => {
-      const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
-      // A Microsoft-era Composition: the path is Microsoft until ga ccda replace (holding the lock) removes it.
-      const old = await client.createResource({ resourceType: 'Composition', status: 'final', type: { text: 'x' }, date: '2024-01-01', title: 'x', author: [{ display: 'x' }],
-        subject: { reference: `Patient/${pid}` }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] } } as Composition);
-      const lock = await takeLock(join(dir, 'import.lock'), 0);
-      const running = importPath(client, cfgFor(pid), writeDoc(SYNTHETIC), pid);
-      await new Promise((r) => setTimeout(r, 300));
-      await client.deleteResource('Composition', old.id as string);
-      rmSync(lock as string);
-      const report = await running; // the Microsoft path would fail (no converter at converterUrl)
-      expect(report.notImported).toBeDefined();
-    });
-  } finally {
-    vi.unstubAllEnvs();
-  }
 });
 
 // Note linking by Epic note id is C-CDA <-> EHI only: a portal note and an EHI note with the same id stay two records.
@@ -1131,4 +986,36 @@ test("a portal visit a C-CDA document links keeps its own tags and meta: the new
     await importPath(client, cfgFor(pid), doc('H', '99215'), pid);
     await check();
   });
+});
+
+test('the converter keeps note DocumentReferences (storeDocument keeps the whole file)', () => {
+  expect(convertCcdaLocal(EPIC).resources.filter((r) => r.resourceType === 'DocumentReference')).toHaveLength(2);
+});
+
+// C-CDA converts in process: no converter service. A config from before (converterUrl, "ccdaConverter": "microsoft") still
+// loads, its keys ignored and never rewritten.
+test.each([
+  ['no converter configured', {}],
+  ['a leftover converterUrl and ccdaConverter', { converterUrl: 'http://127.0.0.1:9/', ccdaConverter: 'microsoft' }],
+])('ga import of a C-CDA works with %s', async (_, extra) => {
+  const store = await tempStore(); // the CLI finds its token next to GA_CONFIG
+  try {
+    const pid = (await store.client.createResource({ resourceType: 'Patient' })).id as string;
+    const config = join(store.dir, 'config.json');
+    writeFileSync(config, JSON.stringify({ store: 'sqlite', storeUrl: store.base, patientId: pid, ...extra }));
+    const before = readFileSync(config, 'utf8');
+    // async spawn: the store answers from this process meanwhile
+    const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((ok) => {
+      const c = spawn('node', ['src/cli.ts', 'import', writeDoc(SYNTHETIC)], { env: { PATH: process.env.PATH!, GA_CONFIG: config } });
+      let stdout = '', stderr = '';
+      c.stdout.on('data', (d) => (stdout += d));
+      c.stderr.on('data', (d) => (stderr += d));
+      c.on('close', (status) => ok({ status, stdout, stderr }));
+    });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ invalid: 0, notImported: expect.any(Array) });
+    expect(JSON.parse(r.stdout).created).toBeGreaterThan(0);
+    expect(readFileSync(config, 'utf8')).toBe(before);
+  } finally { await store.close(); }
 });

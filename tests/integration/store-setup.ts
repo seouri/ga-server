@@ -23,11 +23,11 @@ if (process.env.GA_STORE === 'sqlite') {
     child.unref();
     for (const s of [child.stdin, child.stdout] as unknown as { unref(): void }[]) s.unref();
     const storeUrl = `http://127.0.0.1:${port}/`;
-    writeFileSync(cfgPath, JSON.stringify({ store: 'sqlite', storeUrl, converterUrl: process.env.GA_CONVERTER_URL || 'http://localhost:8104/' }), { mode: 0o600 });
+    writeFileSync(cfgPath, JSON.stringify({ store: 'sqlite', storeUrl }), { mode: 0o600 });
     process.env.GA_CONFIG = process.env.GA_INT_STORE_CONFIG = cfgPath;
     process.env.GA_STORE_URL = storeUrl;
     const { setup } = await import('../../src/setup.ts');
-    await setup(undefined, process.env.GA_CONVERTER_URL || 'http://localhost:8104/');
+    await setup();
   }, 60_000);
   // Some files delete GA_CONFIG after a Medplum test project; on the store there is only this one.
   beforeEach(() => { process.env.GA_CONFIG = cfgPath; });

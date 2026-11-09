@@ -31,3 +31,8 @@ test('ga-store and ga-backup-store are in the sqlite profile; nothing requires g
   for (const s of ['ga-sync', 'ga-gateway']) expect(service(s)).toMatch(/ga-store:\n\s+condition: service_started[^\n]*\n\s+required: false/);
   for (const s of ['medplum-server', 'ga-sync', 'ga-gateway', 'ga-backup']) expect(service(s), s).not.toMatch(/profiles:/);
 });
+
+// C-CDA converts in process (vendor/medplum-ccda): no converter service, no ccda profile.
+test('compose has no fhir-converter', () => {
+  expect(compose).not.toMatch(/fhir-converter|profiles: \['ccda'\]/);
+});

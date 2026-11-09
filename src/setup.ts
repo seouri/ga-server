@@ -20,7 +20,6 @@ export const ACCESS_POLICY: AccessPolicy = { resourceType: 'AccessPolicy', name:
 // out: where the config is written (ga migrate writes config.next.json); projectName: tests use throwaway projects.
 export async function setup(
   baseUrl = 'http://localhost:8103/',
-  converterUrl = 'http://localhost:8104/',
   { out = defaultConfigPath(), projectName = PROJECT }: { out?: string; projectName?: string } = {},
 ): Promise<GaConfig> {
   let written: GaConfig | undefined;
@@ -29,7 +28,7 @@ export async function setup(
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new GaError(`cannot read ${out}: fix or move it before ga setup`); // never overwrite keys we could not read
   }
-  if (storeKind(written) === 'sqlite') return setupStore(converterUrl, out, written);
+  if (storeKind(written) === 'sqlite') return setupStore(out, written);
   const path = defaultConfigPath();
   const tryLoad = (f: string) => {
     try {
@@ -93,7 +92,6 @@ export async function setup(
     clientSecret: client.secret as string,
     patientId: patient.id as string,
     projectId,
-    converterUrl,
     adminPassword: rotate ? randomBytes(24).toString('base64url') : password,
   };
   // Saved before the change: if the change fails, the next run falls back to the default and rotates again.
@@ -115,9 +113,9 @@ function writeConfig(out: string, cfg: GaConfig): void {
 
 // GA's own store: no logins, so no project, client or admin password; only the self Patient and the config. Keys already in
 // the config (Medplum's, for a rollback; storeUrl) are kept.
-async function setupStore(converterUrl: string, out: string, stored: GaConfig | undefined): Promise<GaConfig> {
+async function setupStore(out: string, stored: GaConfig | undefined): Promise<GaConfig> {
   const patient = await selfPatient(await getClient({ ...(stored ?? ({} as GaConfig)), store: 'sqlite' }));
-  const cfg: GaConfig = { ...stored, patientId: patient.id as string, converterUrl, store: 'sqlite' };
+  const cfg: GaConfig = { ...stored, patientId: patient.id as string, store: 'sqlite' };
   writeConfig(out, cfg);
   return cfg;
 }

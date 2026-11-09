@@ -11,7 +11,7 @@ test('setup is idempotent, and the GA client reads clinical records but no Medpl
   const empty = async () => emptyTestProject(await getClient(a));
   try {
     await empty(); // an earlier run that stopped half-way
-    const b = await retryLimited(() => setup(baseUrl, a.converterUrl, { projectName: 'ga-test' }));
+    const b = await retryLimited(() => setup(baseUrl, { projectName: 'ga-test' }));
     expect([b.projectId, b.patientId, b.clientId]).toEqual([a.projectId, a.patientId, a.clientId]);
     expect(loadConfig().projectId).toBe(a.projectId);
     const client = await getClient(loadConfig());

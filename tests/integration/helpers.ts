@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { MedplumClient } from '@medplum/core';
 import { defaultConfigPath, type GaConfig, getClient, loadConfig, storeKind } from '../../src/config.ts';
+import { convertCcdaLocal } from '../../src/ccda.ts';
 import { COMPARTMENT } from '../../src/engine.ts';
+import { searchAll } from '../../src/labs.ts';
 import { setup } from '../../src/setup.ts';
 import type { Bundle, DocumentReference, Patient, Resource } from '@medplum/fhirtypes';
 
@@ -22,8 +24,8 @@ export async function compartmentOf(client: MedplumClient, patientId: string): P
 export function childConfig(dir: string, patientId: string): string {
   const real = loadConfig();
   const path = join(dir, 'config.json');
-  const cfg = SQLITE ? { store: 'sqlite', storeUrl: real.storeUrl, patientId, converterUrl: real.converterUrl }
-    : { baseUrl: real.baseUrl, clientId: real.clientId, clientSecret: real.clientSecret, patientId, converterUrl: real.converterUrl };
+  const cfg = SQLITE ? { store: 'sqlite', storeUrl: real.storeUrl, patientId }
+    : { baseUrl: real.baseUrl, clientId: real.clientId, clientSecret: real.clientSecret, patientId };
   if (SQLITE) { mkdirSync(join(dir, 'store'), { recursive: true }); copyFileSync(join(dirname(defaultConfigPath()), 'store', 'token'), join(dir, 'store', 'token')); }
   writeFileSync(path, JSON.stringify(cfg), { mode: 0o600 });
   return path;
@@ -85,7 +87,7 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
   await session.processCode(code as string);
   const dir = mkdtempSync(join(tmpdir(), 'ga-test-'));
   const path = join(dir, 'config.json');
-  writeFileSync(path, JSON.stringify({ baseUrl: real.baseUrl, converterUrl: real.converterUrl, adminPassword: real.adminPassword }), { mode: 0o600 });
+  writeFileSync(path, JSON.stringify({ baseUrl: real.baseUrl, adminPassword: real.adminPassword }), { mode: 0o600 });
   process.env.GA_CONFIG = path;
   return { dir, baseUrl: real.baseUrl as string, session };
 }
@@ -96,7 +98,7 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
 export async function testProject(name = 'ga-test'): Promise<{ dir: string; baseUrl: string; session: MedplumClient; cfg: GaConfig }> {
   if (SQLITE) return { dir: dirname(defaultConfigPath()), baseUrl: loadConfig().storeUrl as string, session: undefined as unknown as MedplumClient, cfg: loadConfig() };
   const t = await throwawayConfig();
-  return { ...t, cfg: await retryLimited(() => setup(t.baseUrl, undefined, { projectName: name })) };
+  return { ...t, cfg: await retryLimited(() => setup(t.baseUrl, { projectName: name })) };
 }
 
 // Everything GA clients wrote into a ga-test* project (records, files, maps, Provenance, logs), read and deleted through
@@ -132,6 +134,16 @@ export async function emptyTestProject(client: MedplumClient): Promise<void> {
         await client.deleteResource(t as 'Patient', r.id as string);
       }
     }
+  }
+}
+
+// Every record a C-CDA fixture import wrote, of the types its conversion makes: found by GA's C-CDA identifier system and the
+// fixture's path (identifier search is global; the owner's records never carry a test fixture's path), so shared records
+// (Practitioner, Organization...) that cleanupTestPatient does not reach go too.
+export async function cleanupCcda(client: MedplumClient, file: string): Promise<void> {
+  const types = new Set(convertCcdaLocal(readFileSync(file, 'utf8')).resources.map((r) => r.resourceType).filter((t) => t !== 'Patient'));
+  for (const t of types) {
+    for (const r of await searchAll(client, t, { identifier: 'urn:ga-server:id:ccda|' })) if (r.meta?.source === file) await client.deleteResource(t, r.id as string);
   }
 }
 

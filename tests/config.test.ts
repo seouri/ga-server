@@ -29,19 +29,19 @@ test('GA_BASE_URL overrides baseUrl (the ga-sync container reaches Medplum by se
 
 test('the store comes from config.store; GA_STORE overrides it; Medplum by default', () => {
   vi.stubEnv('GA_STORE', '');
-  expect(storeKind({ patientId: 'p', converterUrl: 'x', store: 'sqlite' })).toBe('sqlite');
-  expect(storeKind({ patientId: 'p', converterUrl: 'x' })).toBe('medplum');
+  expect(storeKind({ patientId: 'p', store: 'sqlite' })).toBe('sqlite');
+  expect(storeKind({ patientId: 'p' })).toBe('medplum');
   vi.stubEnv('GA_STORE', 'medplum');
-  expect(storeKind({ patientId: 'p', converterUrl: 'x', store: 'sqlite' })).toBe('medplum');
+  expect(storeKind({ patientId: 'p', store: 'sqlite' })).toBe('medplum');
   vi.stubEnv('GA_STORE', 'sqlite');
-  expect(storeKind({ patientId: 'p', converterUrl: 'x' })).toBe('sqlite');
+  expect(storeKind({ patientId: 'p' })).toBe('sqlite');
 });
 
 test('getClient on a config with store: sqlite talks to the store, without GA_STORE', async () => {
   vi.stubEnv('GA_STORE', '');
   await onStore(async ({ dir, base }) => {
     vi.stubEnv('GA_CONFIG', join(dir, 'config.json'));
-    const c = await getClient({ patientId: 'p', converterUrl: 'x', store: 'sqlite', storeUrl: base });
+    const c = await getClient({ patientId: 'p', store: 'sqlite', storeUrl: base });
     expect((await c.createResource({ resourceType: 'Patient' })).id).toBeTruthy();
   });
 });

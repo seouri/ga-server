@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { OperationOutcomeError } from '@medplum/core';
 import type { OperationOutcomeIssue, Resource, ResourceType } from '@medplum/fhirtypes';
 import { expect, test, vi } from 'vitest';
-import { ccdaFiles, convertCcdaMs, importPath } from '../../src/ccda.ts';
+import { ccdaFiles, convertCcdaLocal, importPath } from '../../src/ccda.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { mapMessages, mapNotes } from '../../src/ehi/documents.ts';
 import { ehiContext, importEhi, prepareEhi } from '../../src/ehi/import.ts';
@@ -36,9 +36,12 @@ test.skipIf(!root)('real ccda imports twice without duplicates', async () => {
   const docsPerId = new Map<string, number>();
   const types = new Set<string>();
   for (const f of files) {
-    const rs = await convertCcdaMs(readFileSync(f, 'utf8'), cfg.converterUrl).catch((e) => {
+    let rs: Resource[];
+    try {
+      rs = convertCcdaLocal(readFileSync(f, 'utf8')).resources;
+    } catch (e) {
       throw new Error(`convert failed: ${safe(e)}`);
-    });
+    }
     for (const k of new Set(rs.map((r) => `${r.resourceType}/${r.id}`))) docsPerId.set(k, (docsPerId.get(k) ?? 0) + 1);
     for (const r of rs) types.add(r.resourceType);
   }

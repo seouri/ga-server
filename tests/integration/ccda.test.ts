@@ -4,10 +4,9 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { ccdaConverter, convertCcdaMs, importPath } from '../../src/ccda.ts';
+import { importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
-import { stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
+import { cleanupCcda, cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
 const fileHash = createHash('sha256').update(readFileSync(FIXTURE)).digest('hex');
@@ -16,22 +15,16 @@ let client: MedplumClient;
 let pid: string;
 
 beforeAll(async () => {
-  cfg = { ...loadConfig(), ccdaConverter: 'microsoft' }; // what these tests and their cleanup expect
+  cfg = loadConfig();
   client = await getClient(cfg);
   pid = await createTestPatient(client);
 });
 
 // Stable identifiers are deterministic and identifier search is global: delete everything the fixture produced,
-// including Practitioner/Organization/Medication and the Binary, which $everything doesn't reach.
+// including Practitioner/Organization and the Binary, which $everything doesn't reach.
 afterAll(async () => {
   await cleanupTestMaps(client);
-  for (const r of await convertCcdaMs(readFileSync(FIXTURE, 'utf8'), cfg.converterUrl)) {
-    const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
-    for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
-      // Ownership check: identifier search is global; only delete what this fixture wrote.
-      if (hit.resourceType !== 'Patient' && hit.meta?.source === FIXTURE) await client.deleteResource(hit.resourceType, hit.id as string);
-    }
-  }
+  await cleanupCcda(client, FIXTURE);
   for (const d of await client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' })) {
     if (d.subject?.reference !== `Patient/${pid}`) continue;
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
@@ -69,11 +62,6 @@ test('synthetic ccda imports LDL, BP, med, problem, smoking with GA patient as s
   expect(status).toEqual({ '55822004': 'active', '195967001': 'resolved' });
   // The converter's Patient collapsed onto the GA patient: no second Patient for the fake MRN.
   expect(await client.searchResources('Patient', { identifier: 'FAKE-MRN-0001' }, { cache: 'no-cache' })).toHaveLength(1);
-  // Microsoft-era records keep the next import on the Microsoft converter (Medplum honours _tag with _tag:not).
-  expect(await ccdaConverter({ patientId: pid }, client)).toBe('microsoft');
-  // The patient-scoped search alone finds it (the subject:missing fallback must not be what decides here).
-  const scoped = await client.search('Composition', { subject: `Patient/${pid}`, _tag: 'urn:ga-server:tag|src-ccda', '_tag:not': 'urn:ga-server:tag|ccda-medplum', _count: '1' }, { cache: 'no-cache' });
-  expect(scoped.entry).toHaveLength(1);
 });
 
 test('importing the same ccda twice changes nothing', async () => {

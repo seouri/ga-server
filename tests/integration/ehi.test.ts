@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Condition, DiagnosticReport, Encounter, Immunization, Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { convertCcdaMs, importPath } from '../../src/ccda.ts';
+import { importPath } from '../../src/ccda.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
 import { mapConditions } from '../../src/ehi/conditions.ts';
 import { mapEncounters } from '../../src/ehi/encounters.ts';
@@ -15,8 +15,8 @@ import { importEhi, prepareEhi } from '../../src/ehi/import.ts';
 import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
-import { type SourceInfo, stableIdentifier } from '../../src/identity.ts';
-import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
+import type { SourceInfo } from '../../src/identity.ts';
+import { cleanupCcda, cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 // Synthetic fixtures sharing order 9000001 (C-CDA organizer id under an Epic order root, org number 99).
 const CCDA = join(import.meta.dirname, '..', 'fixtures', 'ccda-synthetic.xml');
@@ -27,7 +27,7 @@ let client: MedplumClient;
 let pid: string;
 
 beforeAll(async () => {
-  cfg = { ...loadConfig(), ccdaConverter: 'microsoft' }; // what these tests and their cleanup expect
+  cfg = loadConfig();
   client = await getClient(cfg);
   pid = await createTestPatient(client);
   await importPath(client, cfg, CCDA, pid);
@@ -36,12 +36,7 @@ beforeAll(async () => {
 // Same cleanup as ccda.test.ts: stable identifiers are global, delete what the fixture wrote (plus the patient compartment).
 afterAll(async () => {
   await cleanupTestMaps(client);
-  for (const r of await convertCcdaMs(readFileSync(CCDA, 'utf8'), cfg.converterUrl)) {
-    const ident = stableIdentifier(r, { kind: 'ccda', file: '', date: '', writer: 'importer' }, '', pid);
-    for (const hit of await client.searchResources(r.resourceType, { identifier: `${ident.system}|${ident.value}` }, { cache: 'no-cache' })) {
-      if (hit.resourceType !== 'Patient' && hit.meta?.source === CCDA) await client.deleteResource(hit.resourceType, hit.id as string);
-    }
-  }
+  await cleanupCcda(client, CCDA);
   for (const d of await client.searchResources('DocumentReference', { identifier: `urn:ga-server:id:file|${fileHash}` }, { cache: 'no-cache' })) {
     if (d.subject?.reference !== `Patient/${pid}`) continue;
     const bin = d.content?.[0]?.attachment?.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];

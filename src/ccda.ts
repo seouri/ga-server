@@ -1,78 +1,30 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, CodeableConcept, Composition, Condition, Encounter, Identifier, Medication, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
+import type { CodeableConcept, Composition, Condition, Identifier, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
 import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, mapTimestampOrBooleanValue, nodeToPlainText, OBSERVATION_VALUE_CONTENT } from '../vendor/medplum-ccda/index.ts';
 import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId, CcdaTimestampOrBoolean } from '../vendor/medplum-ccda/types.ts';
-import { type GaConfig, GaError, isGaNotRunning } from './config.ts';
+import { type GaConfig, GaError } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
-import { TAG } from './identity.ts';
 import { withImportLock } from './lock.ts';
 import { storeDocument } from './document.ts';
 
-export const CONVERTER_DOWN = 'the C-CDA converter is not running: start it with docker compose --profile ccda up -d fhir-converter';
-
-export async function convertCcdaMs(xml: string, converterUrl: string): Promise<Resource[]> {
-  let res: Response;
-  try {
-    res = await fetch(`${converterUrl}convertToFhir?api-version=2024-05-01-preview`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ InputDataFormat: 'Ccda', RootTemplateName: 'CCD', InputDataString: xml }),
-    });
-  } catch (e) {
-    // On demand (compose profile ccda): a refused connection is not "GA is not running".
-    if (isGaNotRunning(e)) throw new GaError(CONVERTER_DOWN);
-    throw e;
-  }
-  // Status only: the converter's error body can echo document content.
-  if (!res.ok) throw new GaError(`converter failed: HTTP ${res.status}`);
-  // Status only, also when the body is not the expected JSON: a parse error would quote it.
-  const result = await res.json().then((b: { result?: Bundle }) => b?.result, () => undefined);
-  if (result?.resourceType !== 'Bundle') throw new GaError(`converter failed: HTTP ${res.status}, unexpected response`);
-  // Its whole-document DocumentReference is dropped: storeDocument keeps the original file.
-  return repair((result.entry ?? []).map((e) => e.resource as Resource).filter((r) => r.resourceType !== 'DocumentReference'), xml);
-}
-
 type X = Record<string, unknown>;
 const arr = <T>(v: T | T[] | undefined): T[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
-export const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
-export const cdaKeys = (n: X): string[] =>
+const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
+const cdaKeys = (n: X): string[] =>
   arr(n.id as X | X[] | undefined)
     .filter((i) => i['@_root'] && !i['@_nullFlavor']) // nullFlavor/empty ids identify nothing
     .map((i) => (i['@_extension'] ? `${norm(String(i['@_root']))}|${i['@_extension']}` : norm(String(i['@_root']))));
-export const fhirKey = (i: Identifier): string | undefined =>
+const fhirKey = (i: Identifier): string | undefined =>
   !i.value ? undefined : i.system === 'urn:ietf:rfc:3986' ? norm(i.value) : `${norm(i.system ?? '')}|${i.value}`;
 
 const attr = (n: unknown, k: string) => (n as X | undefined)?.[`@_${k}`] as string | undefined;
-// Problem Status observation (LOINC 33999-4) value, by SNOMED code or display name.
-const PROBLEM_STATUS: Record<string, string> = {
-  '55561003': 'active',
-  '73425007': 'inactive',
-  '413322009': 'resolved',
-  active: 'active',
-  inactive: 'inactive',
-  resolved: 'resolved',
-};
-const ACT_STATUS: Record<string, string> = { active: 'active', completed: 'resolved', resolved: 'resolved' };
-
-// R11 precedence: status observation > effectiveTime/high present > enclosing concern act statusCode.
-function problemStatus(obs: X, act?: string): string | undefined {
-  const statusObs = arr(obs.entryRelationship as X | X[] | undefined)
-    .flatMap((er) => arr(er.observation as X | X[] | undefined))
-    .find((o) => attr(o.code, 'code') === '33999-4');
-  const v = statusObs?.value;
-  const fromObs = PROBLEM_STATUS[attr(v, 'code') ?? ''] ?? PROBLEM_STATUS[(attr(v, 'displayName') ?? '').toLowerCase()];
-  if (fromObs) return fromObs;
-  if (attr((obs.effectiveTime as X | undefined)?.high, 'value')) return 'resolved';
-  return ACT_STATUS[act ?? ''];
-}
-
 // Text of a narrative node (mixed content), whitespace collapsed.
 const textOf = (n: unknown): string =>
   (typeof n === 'string' || typeof n === 'number' ? String(n)
@@ -84,12 +36,10 @@ const RXNORM_OID = '2.16.840.1.113883.6.88';
 const PROBLEM_SECTION = /^2\.16\.840\.1\.113883\.10\.20\.22\.2\.5(\.1)?$/;
 type MedInfo = { name?: string; rxnorm?: string };
 
-// Per source entry <id>: substanceAdministration status and drug (narrative name, RxNorm), and each observation's
-// problem status (see problemStatus) and whether it sits in the Problems section (problem list) or elsewhere (visit diagnoses).
+// Per source entry <id>: a substanceAdministration's (or its supply's) drug (narrative name, RxNorm), and whether an observation
+// sits in the Problems section (problem list) or elsewhere (visit diagnoses).
 function sourceInfo(xml: string) {
-  const med = new Map<string, string>();
   const drug = new Map<string, MedInfo>();
-  const prob = new Map<string, string>();
   const problemList = new Map<string, boolean>();
   const narrative = new Map<string, string>();
   const root = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true }).parse(xml) as X;
@@ -111,44 +61,32 @@ function sourceInfo(xml: string) {
       rxnorm: attr(mc, 'codeSystem') === RXNORM_OID ? attr(mc, 'code') : undefined,
     };
   };
-  const walk = (o: X, act: string | undefined, inProblems: boolean) => {
+  const walk = (o: X, inProblems: boolean) => {
     for (const [k, v] of Object.entries(o)) {
       if (k.startsWith('@_')) continue;
       for (const c of arr(v)) {
         if (!c || typeof c !== 'object') continue;
         const n = c as X;
-        const code = attr(n.statusCode, 'code');
         const problems = k === 'section' ? arr(n.templateId as X | X[]).some((t) => PROBLEM_SECTION.test(attr(t, 'root') ?? '')) : inProblems;
         if (k === 'substanceAdministration') {
           const info = drugInfo(n.consumable);
-          for (const key of cdaKeys(n)) {
-            if (code && !med.has(key)) med.set(key, code);
-            if ((info.name || info.rxnorm) && !drug.has(key)) drug.set(key, info);
-          }
-          // Its supply orders and dispenses: their own product, else this drug (the Microsoft path shares its Medication).
+          for (const key of cdaKeys(n)) if ((info.name || info.rxnorm) && !drug.has(key)) drug.set(key, info);
+          // Its supply orders and dispenses: their own product, else this drug.
           for (const s of arr(n.entryRelationship as X | X[] | undefined).flatMap((er) => arr(er.supply as X | X[] | undefined))) {
             const own = drugInfo(s.product);
             const sinfo = own.rxnorm && own.rxnorm !== info.rxnorm ? own : { name: info.name ?? own.name, rxnorm: info.rxnorm };
             for (const key of cdaKeys(s)) if ((sinfo.name || sinfo.rxnorm) && !drug.has(key)) drug.set(key, sinfo);
           }
         }
-        if (k === 'observation') {
-          const st = problemStatus(n, act);
-          for (const key of cdaKeys(n)) {
-            if (st && !prob.has(key)) prob.set(key, st);
-            if (!problemList.has(key)) problemList.set(key, problems);
-          }
-        }
-        walk(n, k === 'act' ? code : act, problems);
+        if (k === 'observation') for (const key of cdaKeys(n)) if (!problemList.has(key)) problemList.set(key, problems);
+        walk(n, problems);
       }
     }
   };
-  walk(root, undefined, false);
-  return { med, drug, prob, problemList };
+  walk(root, false);
+  return { drug, problemList };
 }
 
-const MED_STATUS: Record<string, MedicationStatement['status']> = { active: 'active', completed: 'completed', aborted: 'stopped', suspended: 'on-hold' };
-const cc = (system: string, code: string) => ({ coding: [{ system, code }] });
 const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
 const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
@@ -163,7 +101,7 @@ const named = (c: CodeableConcept | undefined, info: MedInfo): CodeableConcept =
   return { ...c, coding, text: info.name ?? c?.text };
 };
 
-// GA's own choices, on either converter's output (not converter fixes): a drug named inline (or in a contained Medication) on a
+// GA's own choices (not converter fixes): a drug named inline (or in a contained Medication) on a
 // statement, order or dispense takes the narrative name and RxNorm; an INT value goes in valueQuantity, unitless (GA's readers: lab
 // rows, content keys, duplicate checks read a number there).
 function gaChoices(r: Resource, drug: Map<string, MedInfo>): Resource {
@@ -180,49 +118,14 @@ function gaChoices(r: Resource, drug: Map<string, MedInfo>): Resource {
   return r;
 }
 
-// The in-process path: GA's choices, and a problem outside the Problems section (a Health Concern) is a visit diagnosis, not a
-// problem-list item, as on the Microsoft path (GA lists problem-list items as current problems). Converter fixes live in the library.
+// GA's choices, and a problem outside the Problems section (a Health Concern) is a visit diagnosis, not a problem-list item (GA
+// lists problem-list items as current problems). Converter fixes live in the library.
 function localChoices(rs: Resource[], xml: string): Resource[] {
   const { drug, problemList } = sourceInfo(xml);
   return rs.map((r) => {
     r = gaChoices(r, drug);
     if (r.resourceType !== 'Condition' || !(r as Condition).category?.some((c) => c.coding?.some((x) => x.code === 'problem-list-item'))) return r;
     return lookup(problemList, r) === false ? { ...r, category: [{ coding: [{ system: CATEGORY, code: 'encounter-diagnosis', display: 'Encounter Diagnosis' }] }] } as Condition : r;
-  });
-}
-
-// The Microsoft path: fixes converter template gaps from the source XML (only neutral values ('unknown') when the source has
-// nothing), and GA's choices.
-export function repair(rs: Resource[], xml: string): Resource[] {
-  const { med, drug, prob, problemList } = sourceInfo(xml);
-  // The converter keeps only the NDC package code: name each Medication from its statement's source entry.
-  const drugOf = new Map<string, MedInfo>();
-  for (const r of rs) {
-    const ref = r.resourceType === 'MedicationStatement' ? (r as MedicationStatement).medicationReference?.reference : undefined;
-    const info = ref && lookup(drug, r);
-    if (ref && info) drugOf.set(ref, info);
-  }
-  return rs.map((r) => {
-    if (r.resourceType === 'Medication') {
-      const info = drugOf.get(`Medication/${r.id}`);
-      return info ? { ...r, code: named((r as Medication).code, info) } : r;
-    }
-    r = gaChoices(r, drug);
-    if (r.resourceType === 'MedicationStatement') {
-      return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
-    }
-    if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
-    if (r.resourceType === 'Condition') {
-      // A Condition linked to its encounter is a visit diagnosis, also when its observation id repeats a problem-list one.
-      const inList = (r as Condition).encounter ? false : lookup(problemList, r);
-      if (inList !== undefined) r = { ...r, category: [cc(CATEGORY, inList ? 'problem-list-item' : 'encounter-diagnosis')] } as Condition;
-      const s = lookup(prob, r);
-      if (!s) return r;
-      const clinicalStatus = cc('http://terminology.hl7.org/CodeSystem/condition-clinical', s);
-      if (s !== 'resolved') return { ...r, clinicalStatus };
-      return { ...r, clinicalStatus, verificationStatus: cc('http://terminology.hl7.org/CodeSystem/condition-ver-status', 'confirmed') };
-    }
-    return r;
   });
 }
 
@@ -248,7 +151,7 @@ export function ccdaDate(xml: string): string {
   return h && tz ? `${day}T${h}:${mi}:${s ?? '00'}${tz.slice(0, 3)}:${tz.slice(3)}` : day;
 }
 
-export const isCcda = (xml: string) => /^﻿?\s*(?:<\?[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*)*<(?:\w+:)?ClinicalDocument[\s/>]/.test(xml);
+const isCcda = (xml: string) => /^﻿?\s*(?:<\?[\s\S]*?\?>\s*|<!--[\s\S]*?-->\s*)*<(?:\w+:)?ClinicalDocument[\s/>]/.test(xml);
 
 export function ccdaFiles(path: string): string[] {
   if (!statSync(path).isDirectory()) return [path];
@@ -258,22 +161,6 @@ export function ccdaFiles(path: string): string[] {
     console.error(`skip ${basename(f)}: not a ClinicalDocument`);
     return false;
   });
-}
-
-// Marks the Composition of each in-process conversion, so its records never count as Microsoft-era ones (ccdaConverter).
-export const LOCAL_TAG = 'ccda-medplum';
-
-// In process unless the record holds C-CDA records the Microsoft converter wrote: those keep their path until `ga ccda replace`
-// (a mix would duplicate them). Each C-CDA import writes one Composition, so one search per import decides.
-export async function ccdaConverter(cfg: Pick<GaConfig, 'patientId' | 'ccdaConverter'>, client: MedplumClient, patientId = cfg.patientId): Promise<'medplum' | 'microsoft'> {
-  if (cfg.ccdaConverter) return cfg.ccdaConverter;
-  // Also a Composition stored without a patient (engine.ts allows C-CDA records so): a miss here would duplicate the record.
-  // Not scoped to this patient, so another patient's could match: that only keeps the Microsoft path, never risks a duplicate.
-  for (const who of [{ subject: `Patient/${patientId}` }, { 'subject:missing': 'true' }]) {
-    const old = await client.search('Composition', { ...who, _tag: `${TAG}|src-ccda`, '_tag:not': `${TAG}|${LOCAL_TAG}`, _count: '1' }, { cache: 'no-cache' });
-    if (old.entry?.length) return 'microsoft';
-  }
-  return 'medplum';
 }
 
 // Clinical statements an entry may hold (CDA R2): each is one record or is named in notImported.
@@ -305,7 +192,7 @@ const hasTemplate = (n: { templateId?: CcdaTemplateId[] }, ...roots: string[]) =
 export const sectionName = (s: CcdaSection) => nodeToPlainText(s.title) || s.code?.['@_displayName'] || root0(s.templateId) || 'untitled';
 // A medication's supply orders and dispenses (entryRelationship/supply) each become a record of their own.
 const supplies = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => e.substanceAdministration ?? []).flatMap((sa) => sa.entryRelationship ?? []).flatMap((er) => er.supply ?? []).length;
-export const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length + supplies(s);
+const statementCount = (s: CcdaSection) => (s.entry ?? []).flatMap((e) => STATEMENTS.flatMap((k) => arr((e as X)[k]))).length + supplies(s);
 
 // Converts in process with the vendored @medplum/ccda. Accounting: every section is on the Composition (its narrative); every
 // entry with no record, visit diagnosis the converter drops, and observation value it cannot read is in notImported, with a reason.
@@ -432,12 +319,11 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       ? { system: mapCcdaSystemToFhir(root), value: docId['@_extension'] }
       : { system: 'urn:ietf:rfc:3986', value: `urn:${/-/.test(root) ? 'uuid' : 'oid'}:${root}` };
   }
-  if (comp) comp.meta = { ...comp.meta, tag: [...(comp.meta?.tag ?? []), { system: TAG, code: LOCAL_TAG }] };
   return { resources: localChoices(resources, xml), notImported };
 }
 
 // Sums rows of one section, template and reason (several documents of one import).
-export function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[] {
+function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[] {
   for (const r of rows) {
     const same = total.find((t) => t.section === r.section && t.templateId === r.templateId && t.reason === r.reason);
     if (same) same.entries += r.entries;
@@ -450,18 +336,15 @@ export async function importPath(client: MedplumClient, cfg: GaConfig, path: str
   const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   const files = ccdaFiles(path);
   if (!files.length) return total;
-  // Decided once, under the one import lock held for every file: this import's own records must not switch the path between
-  // its files, and a `ga ccda replace` that held the lock first has removed the Microsoft-era records by the time this decides.
+  const notImported: NotImported[] = (total.notImported = []);
   return withImportLock(async () => {
-    const local = (await ccdaConverter(cfg, client, patientId)) === 'medplum';
-    if (local) total.notImported = [];
     for (const file of files) {
       const xml = readFileSync(file, 'utf8');
-      const { resources, notImported } = local ? convertCcdaLocal(xml) : { resources: await convertCcdaMs(xml, cfg.converterUrl), notImported: undefined };
+      const converted = convertCcdaLocal(xml);
       const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-      const r = await importResources(client, resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer', ...(local && { local: true }) }, patientId, fileHash);
+      const r = await importResources(client, converted.resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
       addReport(total, r);
-      if (notImported && total.notImported) addNotImported(total.notImported, notImported);
+      addNotImported(notImported, converted.notImported);
     }
     return total;
   });

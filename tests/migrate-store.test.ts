@@ -46,7 +46,7 @@ test('the gate passes a clean report and names each blocking problem', () => {
 test('switchConfig writes "store": "sqlite" atomically, keeping every other key and mode 0600', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ga-mig-'));
   const f = join(dir, 'config.json');
-  const before = { baseUrl: 'http://localhost:8103/', clientId: 'c', clientSecret: 's', patientId: 'p', converterUrl: 'x', projectId: 'pr' };
+  const before = { baseUrl: 'http://localhost:8103/', clientId: 'c', clientSecret: 's', patientId: 'p', projectId: 'pr' };
   writeFileSync(f, JSON.stringify(before), { mode: 0o600 });
   try {
     switchConfig(f);
@@ -178,7 +178,7 @@ test('migrate-store refuses without stopped services: prints the commands, touch
     await expect(migrateStore({
       file: join(dir, 'ga.db'), configFile: cfgFile, reportFile: join(dir, 'report.json'), yes: true, allowSwitch: true, servicesStopped: false,
       services: { stop: async () => { throw new Error('docker: command not found'); }, start: async () => undefined, commands: { stop: 'docker compose stop ga-sync ga-gateway', start: () => 'docker compose up -d' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: (s) => lines.push(s),
+      cfg: { patientId: 'p', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: (s) => lines.push(s),
     })).rejects.toThrow('--services-stopped');
     expect(lines.join('\n')).toContain('docker compose stop ga-sync ga-gateway');
     expect(readFileSync(cfgFile, 'utf8')).toBe('{"patientId":"p"}');
@@ -196,7 +196,7 @@ test('migrate-store --yes refuses to switch until full FHIR spec support: nothin
     await expect(migrateStore({
       file: join(dir, 'ga.db'), configFile: cfgFile, reportFile: join(dir, 'report.json'), yes: true, servicesStopped: false,
       services: { stop: async () => { stopped = true; }, start: async () => undefined, commands: { stop: 's', start: () => 'u' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined,
+      cfg: { patientId: 'p', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined,
     })).rejects.toThrow(SWITCH_REFUSED);
     expect(SWITCH_REFUSED).toContain('Next phase');
     expect(stopped).toBe(false);
@@ -209,11 +209,11 @@ test('migrate-store refuses an install already on its own store', async () => {
   process.env.GA_STORE = 'sqlite';
   try {
     await expect(migrateStore({ file: '/nonexistent/ga.db', configFile: '/nonexistent/config.json', reportFile: '/nonexistent/r.json', yes: true, servicesStopped: true,
-      services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } }, cfg: { patientId: 'p', converterUrl: 'x' }, log: () => undefined,
+      services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } }, cfg: { patientId: 'p' }, log: () => undefined,
     })).rejects.toThrow('already runs on its own store');
   } finally { delete process.env.GA_STORE; }
   await expect(migrateStore({ file: '/nonexistent/ga.db', configFile: '/nonexistent/config.json', reportFile: '/nonexistent/r.json', yes: true, servicesStopped: true,
-    services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } }, cfg: { patientId: 'p', converterUrl: 'x', store: 'sqlite' }, log: () => undefined,
+    services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } }, cfg: { patientId: 'p', store: 'sqlite' }, log: () => undefined,
   })).rejects.toThrow('already runs on its own store');
 });
 
@@ -223,7 +223,7 @@ test('migrate-store --services-stopped refuses while a store still answers, befo
     await expect(migrateStore({
       file: join(dir, 'ga.db'), configFile: join(dir, 'config.json'), reportFile: join(dir, 'report.json'), yes: true, allowSwitch: true, servicesStopped: true,
       services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => true,
+      cfg: { patientId: 'p', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => true,
     })).rejects.toThrow('ga-store is still running');
     expect(existsSync(join(dir, 'ga.db'))).toBe(false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -240,7 +240,7 @@ test('migrate-store refuses a target file that already holds records', async () 
     await expect(migrateStore({
       file, configFile: join(dir, 'config.json'), reportFile: join(dir, 'report.json'), yes: true, allowSwitch: true, servicesStopped: true,
       services: { stop: async () => { stopped = true; }, start: async () => undefined, commands: { stop: 's', start: () => 'u' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => false,
+      cfg: { patientId: 'p', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => false,
     })).rejects.toThrow('already holds records');
     expect(stopped).toBe(false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -268,7 +268,7 @@ test('migrate-store dry run while the switch is gated: copies and checks, prints
     const { switched, report } = await migrateStore({
       file: join(dir, 'store', 'ga.db'), configFile: cfgFile, reportFile: join(dir, 'report.json'), yes: false, servicesStopped: false,
       services: { stop: async () => { calls.push('stop'); }, start: async (sw) => { calls.push(`start:${sw}`); }, commands: { stop: 's', start: () => 'u' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: `http://127.0.0.1:${(medplum.address() as AddressInfo).port}/`, clientId: 'c', clientSecret: 's' }, log: (s) => lines.push(s),
+      cfg: { patientId: 'p', baseUrl: `http://127.0.0.1:${(medplum.address() as AddressInfo).port}/`, clientId: 'c', clientSecret: 's' }, log: (s) => lines.push(s),
     });
     expect(switched).toBe(false);
     expect(report.gate?.pass).toBe(true);
@@ -295,7 +295,7 @@ test('migrate-store on a target in an old index format names GA\'s fix', async (
     await expect(migrateStore({
       file, configFile: join(dir, 'config.json'), reportFile: join(dir, 'report.json'), yes: false, servicesStopped: true,
       services: { stop: async () => undefined, start: async () => undefined, commands: { stop: 's', start: () => 'u' } },
-      cfg: { patientId: 'p', converterUrl: 'x', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => false,
+      cfg: { patientId: 'p', baseUrl: 'http://127.0.0.1:1/', clientId: 'c', clientSecret: 's' }, log: () => undefined, storeUp: async () => false,
     })).rejects.toThrow(/search index format 1.*move it aside and run ga migrate-store$/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

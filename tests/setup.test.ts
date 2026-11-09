@@ -20,27 +20,27 @@ afterEach(async () => {
 
 test('setup on the store creates exactly one self Patient (twice) and writes a config without Medplum credentials', async () => {
   const medplum = 'http://127.0.0.1:9/'; // never contacted: a Medplum call would fail the test
-  const first = await setup(medplum, 'http://localhost:8104/');
-  const again = await setup(medplum, 'http://localhost:8104/');
+  const first = await setup(medplum);
+  const again = await setup(medplum);
   expect(again.patientId).toBe(first.patientId);
   const patients = await store.client.searchResources('Patient', {});
   expect(patients.map((p) => p.id)).toEqual([first.patientId]);
   expect(patients[0].identifier).toEqual([{ system: 'urn:ga-server:id:patient', value: 'self' }]);
   const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
-  expect(cfg).toEqual({ patientId: first.patientId, converterUrl: 'http://localhost:8104/', store: 'sqlite' });
+  expect(cfg).toEqual({ patientId: first.patientId, store: 'sqlite' });
   expect(statSync(join(dir, 'config.json')).mode & 0o777).toBe(0o600);
 });
 
-test('a setup re-run on the store keeps the other config keys (Medplum rollback, storeUrl); only patientId and converterUrl change', async () => {
+test('a setup re-run on the store keeps the other config keys (Medplum rollback, storeUrl); only patientId changes (a leftover converterUrl stays as written)', async () => {
   const before = { baseUrl: 'http://localhost:8103/', clientId: 'c', clientSecret: 's', patientId: 'old', projectId: 'pr', converterUrl: 'http://old:8104/', storeUrl: 'http://store:8120/', adminPassword: 'pw' };
   writeFileSync(join(dir, 'config.json'), JSON.stringify(before));
-  const cfg = await setup('http://127.0.0.1:9/', 'http://localhost:8104/');
-  expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toEqual({ ...before, patientId: cfg.patientId, converterUrl: 'http://localhost:8104/', store: 'sqlite' });
+  const cfg = await setup('http://127.0.0.1:9/');
+  expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toEqual({ ...before, patientId: cfg.patientId, store: 'sqlite' });
   expect(cfg.patientId).not.toBe('old');
 });
 
 test('setup on the store refuses to overwrite a config it cannot parse', async () => {
   writeFileSync(join(dir, 'config.json'), '{"clientSecret": "s",');
-  await expect(setup('http://127.0.0.1:9/', 'http://localhost:8104/')).rejects.toThrow(/cannot read/);
+  await expect(setup('http://127.0.0.1:9/')).rejects.toThrow(/cannot read/);
   expect(readFileSync(join(dir, 'config.json'), 'utf8')).toBe('{"clientSecret": "s",');
 });

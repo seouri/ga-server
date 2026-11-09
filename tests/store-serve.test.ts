@@ -46,7 +46,7 @@ describe('ga store serve options', () => {
     await new Promise((r) => probe.once('listening', r));
     const port = (probe.address() as AddressInfo).port;
     await new Promise((r) => probe.close(r));
-    const cfgPath = join(dir, 'config.json'), cfg = { store: 'sqlite', storeUrl: `http://127.0.0.1:${port}/`, patientId: 'p', converterUrl: 'x' } as GaConfig;
+    const cfgPath = join(dir, 'config.json'), cfg = { store: 'sqlite', storeUrl: `http://127.0.0.1:${port}/`, patientId: 'p' } as GaConfig;
     writeFileSync(cfgPath, JSON.stringify(cfg));
     vi.stubEnv('GA_CONFIG', cfgPath);
     vi.stubEnv('GA_STORE_URL', '');
