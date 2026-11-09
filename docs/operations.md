@@ -52,8 +52,8 @@ GA's own store (development only): after the `.ga` line, `mkdir -p -m 700 .ga/st
 ## Uninstall
 
 ```sh
-docker compose --profile ccda --profile sqlite down     # stops GA; your records stay in the Docker volumes
-docker compose --profile ccda --profile sqlite down -v  # also DELETES all records and stored files (back up first)
+docker compose --profile sqlite down     # stops GA; your records stay in the Docker volumes
+docker compose --profile sqlite down -v  # also DELETES all records and stored files (back up first)
 npm unlink -g ga-server                # removes the ga command
 tailscale funnel reset                 # stops exposing GA to the internet
 ```

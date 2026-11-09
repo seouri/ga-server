@@ -108,15 +108,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # C-CDA to FHIR, only for importing a C-CDA folder: docker compose --profile ccda up -d fhir-converter
-  fhir-converter:
-    image: mcr.microsoft.com/healthcareapis/fhir-converter:1.0.550-preview
-    platform: linux/amd64
-    profiles: ['ccda']
-    restart: unless-stopped
-    ports:
-      - '127.0.0.1:8104:8080'
-
   # GA's own store (not yet for use; Medplum is the default): the one process that opens .ga/store/ga.db, served to the others
   # with the token in .ga/store/token. Off unless the sqlite profile is on (docker compose --profile sqlite up -d); GA uses it
   # when .ga/config.json says "store": "sqlite". Same image, user and mounts as ga-sync; published on the host's loopback for the

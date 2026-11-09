@@ -61,7 +61,7 @@ The server tells Claude that GA is your health record, so plain questions work. 
 > Import ~/Downloads/HealthSummary_<date> into GA.
 ```
 
-Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`), after starting the converter ([Import](#import)). The MCP tools can't import C-CDA themselves.
+Claude reads the PDF or photo itself and saves the results with `ga_import`. GA stores the original file and links every extracted record to it. For a folder of C-CDA XML files, Claude runs the CLI (`node src/cli.ts import <folder>`, or `ga import` after `npm link`). The MCP tools can't import C-CDA themselves.
 
 **Review and tidy**
 
@@ -92,10 +92,10 @@ Codex, Hermes or any MCP client: register a stdio MCP server with command `node 
 
 ## Import
 
-C-CDA needs Microsoft's converter, which runs only when asked: start it with `docker compose --profile ccda up -d fhir-converter` (`ga import` of a C-CDA folder prints this command when it is not running), and stop it afterwards with `docker compose stop fhir-converter` if you like.
+C-CDA converts inside GA (a patched copy of Medplum's converter in `vendor/medplum-ccda`); no extra service. Sections and entries GA could not convert are listed in the import report's `notImported`. Until November 2026 Microsoft's FHIR converter ran as a container for this; a config that still names it (`converterUrl`, `ccdaConverter`) works unchanged.
 
 ```sh
-ga import <folder>             # C-CDA export (folder of XML files; needs the converter, above); re-importing is a no-op
+ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op
 ga import /path/to/ehi-folder --tz America/New_York  # Epic EHI export; --tz = zone of the export's local times
 ga import /path/to/apple_health_export  # unzipped Apple Health export folder (unzip export.zip first)
 
