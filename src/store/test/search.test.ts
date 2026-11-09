@@ -809,6 +809,28 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Patient', `_has:Observation:subject:_filter=${encodeURIComponent('code eq "xyz"')}`)).toEqual([]);
   });
 
+  it('_filter eq and sw through a chain take the last parameter\'s meaning: exact and prefix on a string', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ given: ['Evelyn'] }] });
+    add({ resourceType: 'Patient', id: 'p2', name: [{ given: ['Eve'] }] });
+    obs('o1', { subject: { reference: 'Patient/p1' } });
+    obs('o2', { subject: { reference: 'Patient/p2' } });
+    expect(ids('Observation', '_filter=subject:Patient.given eq Eve')).toEqual(['o2']);
+    expect(ids('Observation', '_filter=subject:Patient.given sw Eve')).toEqual(['o1', 'o2']);
+    expect(ids('Observation', '_filter=subject:Patient._id eq p1')).toEqual(['o1']);
+    expect(ids('Patient', '_filter=_has:Observation:subject:_id eq o2')).toEqual(['p2']);
+  });
+
+  it('ap: a date overlapping the value (no tolerance); a negative number within 10%', () => {
+    add({ resourceType: 'Patient', id: 'd1', birthDate: '2000-01-01' });
+    expect(ids('Patient', 'birthdate=ap2000-01-01')).toEqual(['d1']);
+    expect(ids('Patient', 'birthdate=ap2000-01-02')).toEqual([]);
+    expect(ids('Patient', '_filter=birthdate ap 2000-01-01')).toEqual(['d1']);
+    obs('n1', { valueQuantity: { value: -10, system: UCUM, code: 'Cel' } });
+    expect(ids('Observation', 'value-quantity=ap-10')).toEqual(['n1']);
+    expect(ids('Observation', 'value-quantity=ap-10.5')).toEqual(['n1']);
+    expect(ids('Observation', 'value-quantity=ap-12')).toEqual([]);
+  });
+
   it('_filter operators on numbers and quantities; pr; a bad expression is 400 with Medplum\'s text', () => {
     obs('q1', { valueQuantity: { value: 5, system: UCUM, code: 'mg' } });
     obs('q2', { valueQuantity: { value: 50, system: UCUM, code: 'mg' } });

@@ -352,9 +352,9 @@ function valueSql(type: string, p: SearchParameter, op: string, v: string, i: st
       const [num, sys, unit] = v.split('|');
       const n = Number(num);
       if (num === '' || Number.isNaN(n)) throw badRequest(`Invalid number: ${v}`);
-      const cmp: Record<string, string> = { eq: '= ?', ne: '<> ?', gt: '> ?', lt: '< ?', ge: '>= ?', le: '<= ?', ap: 'between ? * 0.9 and ? * 1.1' };
+      const cmp: Record<string, string> = { eq: '= ?', ne: '<> ?', gt: '> ?', lt: '< ?', ge: '>= ?', le: '<= ?', ap: 'between ? and ?' };
       let c = `${i}.lo ${cmp[op]}`;
-      const args: Arg[] = op === 'ap' ? [n, n] : [n];
+      const args: Arg[] = op === 'ap' ? [Math.min(n * 0.9, n * 1.1), Math.max(n * 0.9, n * 1.1)] : [n]; // a negative n: bounds swap
       if (sys) { c += ` and ${i}.sys = ?`; args.push(sys); }
       if (unit) { c += ` and ${i}.val = ?`; args.push(unit); }
       return [c, args];
@@ -469,7 +469,7 @@ function chainCond(type: string, f: Filter, a: string): Cond {
   if (code !== '_filter' && !param(t, code)) throw badRequest(`Invalid search parameter at end of chain: ${t}?${code}`);
   if (links.length > MAX_CHAIN_LINKS) throw badRequest('Search chains longer than three links are not currently supported');
   // The parser leaves a chained value unparsed (no prefix, modifier in the code): parse it as the last type's own parameter.
-  const filter = f.operator === Operator.EQUALS ? ownFilter(t, last, f.value) : { code: last, operator: f.operator, value: f.value };
+  const filter = f.operator === Operator.EQUALS ? ownFilter(t, last, f.value) : { code: last, operator: filterOp(param(t, code), f.operator), value: f.value };
   const [one] = links;
   // ref._id=x is the reference T/x itself, as Medplum (the target need not exist).
   if (links.length === 1 && !one.reverse && filter.code === '_id' && ([Operator.EQUALS, Operator.EXACT, Operator.NOT, Operator.NOT_EQUALS] as string[]).includes(filter.operator)) {
@@ -534,13 +534,17 @@ function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
   }
   if (e instanceof FhirFilterNegation) { const c = filterExpr(type, e.child, a); return { sql: `not (${c.sql})`, args: c.args }; }
   const c = e as FhirFilterComparison;
-  const p = param(type, c.path);
-  // _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
-  let op: Operator = c.operator;
-  if (op === Operator.EXACT && p?.type !== 'string') op = Operator.EQUALS;
-  else if (op === Operator.STARTS_WITH && p?.type === 'string') op = Operator.EQUALS;
-  const { sql, args } = cond(type, { code: c.path, operator: op, value: c.value }, a);
+  // A chain maps the operator on its last parameter (chainCond), as Medplum.
+  const chain = c.path.startsWith('_has:') || c.path.includes('.');
+  const { sql, args } = cond(type, { code: c.path, operator: chain ? c.operator : filterOp(param(type, c.path), c.operator), value: c.value }, a);
   return { sql, args };
+}
+
+// _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
+function filterOp(p: SearchParameter | undefined, op: Operator): Operator {
+  if (op === Operator.EXACT && p?.type !== 'string') return Operator.EQUALS;
+  if (op === Operator.STARTS_WITH && p?.type === 'string') return Operator.EQUALS;
+  return op;
 }
 
 // ---------- results ----------
