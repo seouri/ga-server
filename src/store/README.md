@@ -72,8 +72,10 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - Every urn fullUrl of a transaction is resolved before its entries run (a create or conditional PUT, each on its own: its one match, else a new id). If an earlier entry changes what a later conditional entry matches and another entry references its urn, the transaction is 400 (Medplum fails that entry and leaves references to its urn pointing at no resource); with no reference the entry runs (Medplum still fails it).
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).
 - A conditional request (update, delete, If-None-Exist, conditional reference) needs a real search criterion: only paging, sorting, shaping or format parameters, or empty values, are 400.
-- `:contains` on a token parameter is 400: R4 defines `:contains` for string and uri parameters only (Medplum accepts it on tokens).
-- Date search follows R4's ranges, as Medplum's opt-in `range-search` project feature does (Medplum without it compares a Period by its start, ignores the prefix of a multi-valued date, and matches a dateTime against a date's day): `eq` needs the search value's range to contain the target's, so a dateTime does not match a date; `gt`/`ge` match a Period that overlaps the range above the value. `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
+- `:contains` on a token parameter is 400: R4 defines `:contains` for string parameters only (Medplum accepts it on tokens).
+- Date prefixes on ranges follow R4, as Medplum's opt-in `range-search` project feature does: `gt`/`ge`/`lt`/`le` match a Period that overlaps the range above or below the value, and apply to every value of a multi-valued date (Medplum without the feature compares a Period by its start and ignores the prefix on a multi-valued date).
+- `eq` with a dateTime against a date never matches: R4 `eq` needs the search value's range to contain the target's, and an instant does not contain a day. Medplum matches the dateTime against the date's day, with or without `range-search`.
+- `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support

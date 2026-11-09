@@ -330,7 +330,7 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
     expect(names(bundle3, obs)).toEqual(['observation3']);
   }));
 
-  // R4 defines :contains for string and uri parameters only and a server SHALL reject a modifier it does not support: the store
+  // R4 defines :contains for string parameters only and a server SHALL reject a modifier it does not support: the store
   // answers 400. Medplum accepts it on a token (order-detail is a token on a string; it matched the whole value only).
   test('differs on purpose: project-scoped Repository w/ %j › ServiceRequest.orderDetail search [server/src/fhir/search.test.ts]', async () => {
     const [medplum, store] = await both(sides, async (s) => {

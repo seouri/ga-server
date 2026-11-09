@@ -194,7 +194,7 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
 
   // R4 eq: "the range of the search value fully contains the range of the target value". A dateTime search value is that
   // instant (to its precision), which does not contain the day 2000-01-01, so the store matches none; Medplum compares a date
-  // parameter to the search value's date.
+  // parameter to the search value's date, with or without its range-search feature (this test is not feature-gated).
   test('differs on purpose: project-scoped Repository w/ %j › birthdate covers all hours: %d (%s) [server/src/fhir/search.test.ts]', async () => {
     const [medplum, store] = await both(sides, async (s) => {
       const out = [];
@@ -479,9 +479,10 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
   test('project-scoped Repository w/ %j › Quantity search › With units [server/src/fhir/search.test.ts]', quantity(`gt80|${UCUM}|kg`, [85, 90]));
   test('project-scoped Repository w/ %j › Quantity search › Approximately [server/src/fhir/search.test.ts]', quantity(`ap80|${UCUM}|kg`, [75, 80, 85]));
 
-  // Medplum's test expects all three to match with its range-search feature (and skips without it). This Medplum, without the
-  // feature, matches a dateTime against the date's day and ignores the prefix of a multi-valued date (lt matches nothing). The
-  // store follows R4: an instant does not contain the day 2028-06-01 (eq), lt2028-06-06 matches; both refuse 2028-06.
+  // Medplum's test expects all three to match with its range-search feature (and skips without it). The instant matches the
+  // day 2028-06-01 on Medplum in both modes; the store follows R4 eq (an instant does not contain a day) and differs from both.
+  // lt2028-06-06 matches on the store as with range-search; this Medplum, without the feature, ignores the prefix of a
+  // multi-valued date (no match). Both refuse 2028-06 (Medplum accepts it only with range-search).
   test('differs on purpose: project-scoped Repository w/ %j › Date array columns match search value %s [server/src/fhir/search.test.ts]', async () => {
     const [medplum, store] = await both(sides, async (s) => {
       const out = [];

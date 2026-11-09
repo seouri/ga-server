@@ -399,6 +399,15 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Patient', '_sort=name')).toEqual(['p1', 'p2']); // "alice zed-smith" < "bob adams"
   });
 
+  it('a name matches by the parts of a word (Zed-Smith, O\'Brien), an address by whole words only, as Medplum', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ given: ['Alice'], family: "Zed-Smith O'Brien" }], address: [{ line: ['12 Fake-Street'] }] });
+    expect(ids('Patient', 'name=smith')).toEqual(['p1']);
+    expect(ids('Patient', 'name=zed')).toEqual(['p1']);
+    expect(ids('Patient', 'name=brien')).toEqual(['p1']);
+    expect(ids('Patient', 'address=fake')).toEqual(['p1']);
+    expect(ids('Patient', 'address=street')).toEqual([]);
+  });
+
   it('ContactPoint tokens are case-insensitive (Medplum); other tokens stay case-sensitive', () => {
     add({ resourceType: 'Practitioner', id: 'r1', telecom: [{ system: 'email', value: 'UPPER@EXAMPLE.COM' }], identifier: [{ value: 'MiXeD' }] });
     expect(ids('Practitioner', 'telecom=uPpeR@ExAmPlE.CoM')).toEqual(['r1']);

@@ -151,10 +151,12 @@ describe('Store index format', () => {
       expect((s.db.prepare('pragma user_version').get() as { user_version: number }).user_version).toBe(INDEX_VERSION);
       s.close();
       new Store(file).close(); // same version: opens
-      const raw = new DatabaseSync(file);
-      raw.exec('pragma user_version = 1');
-      raw.close();
-      expect(() => new Store(file)).toThrow(new RegExp(`search index format 1, this version needs ${INDEX_VERSION}: rebuild`));
+      for (const old of [1, 2]) { // 2: the format before word rows and caseless ContactPoints
+        const raw = new DatabaseSync(file);
+        raw.exec(`pragma user_version = ${old}`);
+        raw.close();
+        expect(() => new Store(file)).toThrow(new RegExp(`search index format ${old}, this version needs ${INDEX_VERSION}: rebuild`));
+      }
       const raw0 = new DatabaseSync(file);
       raw0.exec('pragma user_version = 0'); // a file from before versions, with records
       raw0.close();

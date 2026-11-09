@@ -102,8 +102,12 @@ function rows(r: Resource): Row[] {
         for (const x of v) {
           for (const s of convertToSearchableStrings([x])) {
             out.push([code, s, s.toLowerCase(), null, null]);
-            // Any word of a name or address, as Medplum's word-prefix search of them.
-            if (x.type === 'HumanName' || x.type === 'Address') for (const w of s.toLowerCase().split(/\s+/).slice(1)) out.push([code, WORD, w, null, null]);
+            // Any word of a name or address, as Medplum's word-prefix search of them; a name also by the parts of a word
+            // (Zed-Smith, O'Brien), as Medplum's (Postgres) word split; an address only by whole words, as Medplum.
+            if (x.type !== 'HumanName' && x.type !== 'Address') continue;
+            const words = s.toLowerCase().split(/\s+/);
+            const parts = x.type === 'HumanName' ? words.flatMap((w) => w.split(/[^\p{L}\p{N}]+/u)) : [];
+            for (const w of [...words.slice(1), ...parts]) if (w) out.push([code, WORD, w, null, null]);
           }
         }
         break;
@@ -459,7 +463,8 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   const sizes = new Map<Cond, number>();
   const { driveMax, walkPerRow } = searchTuning;
   let cap = driveMax;
-  // A one-value match lists each rid about once (index order); OR lists and texts (text and display) need distinct.
+  // A one-value match lists each rid about once (index order; a name or address once per matching word, which only over-counts
+  // its size for the driver choice); OR lists and texts (text and display) need distinct.
   const rank = (c: Cond) => (c.multi ? 0 : c.ref ? 2 : 1);
   for (const c of [...conds].sort((x, y) => rank(x) - rank(y))) {
     const n = c.set
@@ -483,7 +488,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   // Names as written (code:not=x), values encoded, as Medplum's links.
   const url = (q: [string, string][]) => `${base}fhir/R4/${type}?${q.map(([k, v]) => `${encodeURIComponent(k).replaceAll('%3A', ':')}=${encodeURIComponent(v)}`).join('&')}`;
   const linkQuery = (set: Record<string, string>) => {
-    const q = query.filter(([k]) => k !== '_offset' && k !== '_cursor' && !(k in set)).map(([k, v]): [string, string] => [k === '_elements' ? '_fields' : k, v]);
+    const q = query.filter(([k]) => k !== '_offset' && k !== '_cursor' && !Object.hasOwn(set, k)).map(([k, v]): [string, string] => [k === '_elements' ? '_fields' : k, v]);
     return url([...q, ...Object.entries(set)]);
   };
   bundle.link = [{ relation: 'self', url: url(query) }];
