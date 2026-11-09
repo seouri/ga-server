@@ -218,7 +218,7 @@ function topoSort(rs: Resource[]): Resource[] {
   return out;
 }
 
-const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
+export const withTag = (r: Resource, code: string): Resource => ({ ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
 
 // R19: coded values compare by their first coding (system|code); a coding-less concept never matches.
 const firstCoding = (o: Observation) => {

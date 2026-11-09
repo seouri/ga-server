@@ -41,7 +41,7 @@ export async function convertCcdaMs(xml: string, converterUrl: string): Promise<
 
 type X = Record<string, unknown>;
 const arr = <T>(v: T | T[] | undefined): T[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
-const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
+export const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
 export const cdaKeys = (n: X): string[] =>
   arr(n.id as X | X[] | undefined)
     .filter((i) => i['@_root'] && !i['@_nullFlavor']) // nullFlavor/empty ids identify nothing

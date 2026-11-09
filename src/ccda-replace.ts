@@ -25,12 +25,13 @@ import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isGone, isNotFound, type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { Extension, Identifier, Resource } from '@medplum/fhirtypes';
+import type { Extension, Identifier, Resource, ResourceType } from '@medplum/fhirtypes';
 import { ccdaDate, convertCcdaLocal, custodian, isCcda, LOCAL_TAG } from './ccda.ts';
-import { compareCcda, matchEntries } from './ccda-compare.ts';
+import { compareCcda, matchEntries, storedXml } from './ccda-compare.ts';
 import { stripConcept } from './concept-apply.ts';
 import { defaultConfigPath, GaError, type GaConfig, setCcdaConverter, storeKind } from './config.ts';
-import { batchKeys, choiceBase, COMPARTMENT, DATA_ABSENT, DUP_OF, importResources } from './engine.ts';
+import { batchKeys, choiceBase, COMPARTMENT, DATA_ABSENT, DUP_OF, importResources, withTag } from './engine.ts';
+import { searchAll } from './labs.ts';
 import { ARRIVED, arrivedAt, hasTag, LAST_SEEN, sha256, SINGULAR_ID, SRC_DATE, TAG, type SourceInfo } from './identity.ts';
 import { withImportLock } from './lock.ts';
 import { walkReferences } from './patient.ts';
@@ -72,7 +73,7 @@ const sum = (m: Record<string, number>) => Object.values(m).reduce((a, b) => a +
 const byType = (m: Record<string, number>) => Object.entries(m).map(([t, n]) => `${t} ${n}`).join(', ') || 'none';
 const BOOK = new Set([SRC_DATE, ARRIVED, DUP_OF, LAST_SEEN]);
 const untag = (r: R, code: string): R => ({ ...r, meta: { ...r.meta, tag: (r.meta?.tag ?? []).filter((t) => !(t.system === TAG && t.code === code)) } });
-const retag = (r: R, code: string): R => (hasTag(r, code) ? r : { ...r, meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: TAG, code }] } });
+const retag = (r: R, code: string): R => (hasTag(r, code) ? r : (withTag(r, code) as R));
 
 // A stored record as its converter gave it, for matchEntries: no GA identifiers, codings or bookkeeping.
 function asConverted(r: R): Resource {
@@ -88,11 +89,7 @@ const pointsAt = (r: Resource, refs: Set<string>): string[] => {
   return hits;
 };
 
-async function all(client: MedplumClient, type: string, q: Record<string, string>): Promise<R[]> {
-  const out: R[] = [];
-  for await (const page of client.searchResourcePages(type as 'Observation', { ...q, _count: '1000' }, { cache: 'no-cache' })) out.push(...(page as R[]));
-  return out;
-}
+const all = (client: MedplumClient, type: string, q: Record<string, string>) => searchAll(client, type as ResourceType, q) as Promise<R[]>;
 
 // Everything in the patient's compartment, GA's reminders and follow-ups (Basic), the patient's RelatedPersons, and every Provenance (record_followup keeps the
 // note or report it quotes there; Provenance has no patient, and GA writes few), one page at a time. AuditEvents are access logs:
@@ -135,12 +132,9 @@ async function missingTargets(client: MedplumClient, pid: string): Promise<numbe
 
 async function storedDocs(client: MedplumClient, pid: string): Promise<Doc[]> {
   const docs: Doc[] = [];
-  const q = { subject: `Patient/${pid}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml' };
-  for (const d of await all(client, 'DocumentReference', q)) {
-    const att = (d as unknown as { content?: { attachment: { url?: string; title?: string } }[] }).content?.[0]?.attachment;
-    const xml = att?.url ? await (await client.download(att.url)).text() : '';
-    const hash = idsOf(d).find((i) => i.system === 'urn:ga-server:id:file')?.value;
-    if (hash && isCcda(xml)) docs.push({ id: d.id as string, hash, title: att?.title ?? '', xml });
+  for await (const { doc, xml } of storedXml(client, pid)) {
+    const hash = idsOf(doc).find((i) => i.system === 'urn:ga-server:id:file')?.value;
+    if (hash && isCcda(xml)) docs.push({ id: doc.id as string, hash, title: doc.content?.[0]?.attachment?.title ?? '', xml });
   }
   return docs;
 }

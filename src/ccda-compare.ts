@@ -1,9 +1,10 @@
 import type { MedplumClient } from '@medplum/core';
-import type { Composition, Identifier, Medication, PractitionerRole, Resource } from '@medplum/fhirtypes';
+import type { Composition, DocumentReference, Identifier, Medication, PractitionerRole, Resource } from '@medplum/fhirtypes';
 import { CVX_URL, convertXmlToCcda, mapFhirSystemToCcda, nodeToPlainText } from '../vendor/medplum-ccda/index.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
-import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, sectionName, statementCount } from './ccda.ts';
+import { addNotImported, cdaKeys, convertCcdaLocal, convertCcdaMs, fhirKey, isCcda, norm, sectionName, statementCount } from './ccda.ts';
 import type { NotImported } from './engine.ts';
+import { searchAll } from './labs.ts';
 
 // `ga ccda compare`: each stored C-CDA document converted both ways, compared entry by entry. Read-only. The report holds
 // counts, resource types, element paths, section names and template ids, never values.
@@ -25,7 +26,6 @@ const keys = (r: Resource): string[] =>
 
 const CODING = new Set(['system', 'version', 'code', 'display', 'userSelected', 'extension']);
 const isCoding = (o: R) => typeof o.code === 'string' && Object.keys(o).every((k) => CODING.has(k));
-const norm = (s: string) => s.replace(/^urn:(oid|uuid):/i, '').toLowerCase();
 // AdministrativeGender: the library's own table maps the v3 OID to the FHIR system, whose codes spell the same genders out.
 const GENDER_SYSTEM = '2.16.840.1.113883.5.1';
 const GENDER: Record<string, string> = { M: 'male', F: 'female', UN: 'unknown' };
@@ -437,6 +437,15 @@ export function compareCcda(xml: string, old: Resource[], neu: Resource[], notIm
   return { losses: [...losses.values()], gains, unaccounted: [...left.values()].filter((r) => r.entries > 0) };
 }
 
+// Every XML file stored for the patient, with its text ('' when it has no file), oldest first.
+export async function* storedXml(client: MedplumClient, patientId: string): AsyncGenerator<{ doc: DocumentReference; xml: string }> {
+  const q = { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml' };
+  for (const doc of (await searchAll(client, 'DocumentReference', q)) as DocumentReference[]) {
+    const url = doc.content?.[0]?.attachment?.url;
+    yield { doc, xml: url ? await (await client.download(url)).text() : '' };
+  }
+}
+
 export async function ccdaCompare(
   client: MedplumClient,
   patientId: string,
@@ -444,42 +453,37 @@ export async function ccdaCompare(
   convertMs: (xml: string, converterUrl: string) => Promise<Resource[]> = convertCcdaMs,
 ): Promise<CompareReport> {
   const report: CompareReport = { documents: 0, skipped: 0, failed: 0, losses: [], gains: {}, unaccounted: [], notImported: [] };
-  const q = { subject: `Patient/${patientId}`, identifier: 'urn:ga-server:id:file|', contenttype: 'application/xml', _sort: '_lastUpdated', _count: '1000' };
-  for await (const page of client.searchResourcePages('DocumentReference', q, { cache: 'no-cache' })) {
-    for (const d of page) {
-      const url = d.content?.[0]?.attachment?.url;
-      const xml = url ? await (await client.download(url)).text() : '';
-      if (!isCcda(xml)) {
-        report.skipped++; // no file, or XML that is not a C-CDA
-        continue;
-      }
-      const old = await convertMs(xml, converterUrl); // CONVERTER_DOWN when the Microsoft converter is not running
-      report.documents++;
-      let r: ReturnType<typeof compareCcda>;
-      try {
-        const local = convertCcdaLocal(xml);
-        r = compareCcda(xml, old, local.resources, local.notImported);
-        addNotImported(report.notImported, local.notImported);
-      } catch {
-        // Counted, never the message (it may quote the document). Every Microsoft record is a loss and the document is
-        // unaccounted: a document the new path cannot convert or compare never passes the gate.
-        report.failed++;
-        const losses = new Map<string, Loss>();
-        for (const x of old) {
-          const l = losses.get(x.resourceType) ?? { type: x.resourceType, path: '(record)', count: 0 };
-          l.count++;
-          losses.set(x.resourceType, l);
-        }
-        r = { losses: [...losses.values()], gains: {}, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] };
-      }
-      for (const l of r.losses) {
-        const same = report.losses.find((x) => x.type === l.type && x.path === l.path && x.explained === l.explained);
-        if (same) same.count += l.count;
-        else report.losses.push({ ...l });
-      }
-      for (const [t, c] of Object.entries(r.gains)) report.gains[t] = (report.gains[t] ?? 0) + c;
-      addNotImported(report.unaccounted, r.unaccounted);
+  for await (const { xml } of storedXml(client, patientId)) {
+    if (!isCcda(xml)) {
+      report.skipped++; // no file, or XML that is not a C-CDA
+      continue;
     }
+    const old = await convertMs(xml, converterUrl); // CONVERTER_DOWN when the Microsoft converter is not running
+    report.documents++;
+    let r: ReturnType<typeof compareCcda>;
+    try {
+      const local = convertCcdaLocal(xml);
+      r = compareCcda(xml, old, local.resources, local.notImported);
+      addNotImported(report.notImported, local.notImported);
+    } catch {
+      // Counted, never the message (it may quote the document). Every Microsoft record is a loss and the document is
+      // unaccounted: a document the new path cannot convert or compare never passes the gate.
+      report.failed++;
+      const losses = new Map<string, Loss>();
+      for (const x of old) {
+        const l = losses.get(x.resourceType) ?? { type: x.resourceType, path: '(record)', count: 0 };
+        l.count++;
+        losses.set(x.resourceType, l);
+      }
+      r = { losses: [...losses.values()], gains: {}, unaccounted: [{ section: '(document)', entries: 1, reason: 'document could not be converted or compared' }] };
+    }
+    for (const l of r.losses) {
+      const same = report.losses.find((x) => x.type === l.type && x.path === l.path && x.explained === l.explained);
+      if (same) same.count += l.count;
+      else report.losses.push({ ...l });
+    }
+    for (const [t, c] of Object.entries(r.gains)) report.gains[t] = (report.gains[t] ?? 0) + c;
+    addNotImported(report.unaccounted, r.unaccounted);
   }
   return report;
 }
