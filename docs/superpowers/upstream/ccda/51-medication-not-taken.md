@@ -34,5 +34,5 @@ Expected (as a MedicationStatement, draft 14): `"status": "not-taken"`. Actual: 
 ## Filing metadata
 
 - PATCHES rows: 51 (`vendor/medplum-ccda/PATCHES.md`)
-- Vendored commit(s): 4710cb1
+- Vendored commit(s): 84a347c
 - If upstream keeps the IG's mood route (MedicationRequest, draft 14), the same negation belongs on `MedicationRequest.doNotPerform`.

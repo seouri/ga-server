@@ -75,7 +75,7 @@ Each draft ends with a `Filing metadata` block (rows, commits, external work, de
 | [13-medication-identifiers.md](13-medication-identifiers.md) | Medication records keep the substanceAdministration id | 13 | 0f0e77e | - | - | issue-first |
 | [14-medication-statement.md](14-medication-statement.md) | A Medication Activity in the Medications section becomes a MedicationStatement | 14 | ff145f5, b31e280 (docs f879df3) | - | 12, 13 | issue-first; may stay a GA patch (upstream may prefer the IG mood route) |
 | [15-medication-supplies.md](15-medication-supplies.md) | A medication's supply orders and dispenses become MedicationRequest and MedicationDispense | 15 | 1677fd3, 4512d3a, 1e31c57 | - | 12, 13, 14 | issue-first |
-| [51-medication-not-taken.md](51-medication-not-taken.md) | A negated medication list entry is not-taken | 51 | 4710cb1 | - | 14 | issue-first |
+| [51-medication-not-taken.md](51-medication-not-taken.md) | A negated medication list entry is not-taken | 51 | 84a347c | - | 14 | issue-first |
 
 ### Wave 6: shared resources and what builds on them (33, then 34, 39, 40, 41, 44; 7 and 42 payers; 46)
 
