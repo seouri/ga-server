@@ -2,7 +2,7 @@
 // limits. Limit = 1.5x the median of 5 runs on the starting code, rounded up to 10 ms (measured -> limit, ms):
 // code+sort 2.9 -> 10; category+date 14.6 -> 30; subject 3.5 -> 10; _has 2.8 -> 10; chain 8.3 -> 20.
 // System search (added with _type, measured then): unsorted 1.2 -> 10; sorted by -_lastUpdated 8.7 -> 20.
-// Two-level chain (added with deeper chains, measured 3.6): limit 1 s, as the task set it.
+// Two-level chain (added with deeper chains): 3.3 -> 10 (the task's outer bound was 1 s).
 // RSS after the run measured 345 MB in a vitest worker (300 MB is not realistic: the 20,000 rows themselves grow it by ~343 MB), so the
 // limit is measured + 25%, 440 MB.
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -48,8 +48,8 @@ const LIMITS: [string, string, number][] = [
   ['Observation', 'subject=Patient/PID&_count=20', 10],
   ['Patient', `_has:Observation:subject:code=${CODES[0]}`, 10],
   ['Observation', 'subject:Patient.birthdate=1980-02-03&_count=20', 20],
-  // A two-level chain through the one Patient to its Organization: every Observation matches (task limit: under 1 s).
-  ['Observation', 'subject:Patient.organization.name=perf&_count=20', 1000],
+  // A two-level chain through the one Patient to its Organization: every Observation matches.
+  ['Observation', 'subject:Patient.organization.name=perf&_count=20', 10],
   // System searches (the type is the _type list): the union of the types, sorted whole per page (search.ts shortcut).
   ['Observation,Condition', '_type=Observation,Condition&_count=20', 10],
   ['Observation,Condition', '_type=Observation,Condition&_sort=-_lastUpdated&_count=20', 20],

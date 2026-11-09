@@ -584,6 +584,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
       ['general-practitioner:Medication.code=x', 'Unable to identify next resource type for search parameter: Patient?general-practitioner'],
       ['_has:Observation:invalid:status=active', 'Invalid search parameter in chain: Observation?invalid'],
       ['_has:Observation:encounter:status=active', 'Invalid reverse chain link: search parameter Observation?encounter does not refer to Patient'],
+      ['_has:Observation:code:status=active', 'Invalid reverse chain link: search parameter Observation?code does not refer to Patient'], // not a reference: no target
       ['_has:Nonsense:subject:status=active', 'Invalid search parameter in chain: Nonsense?subject'],
       ['_has:Observation:status=active', 'Invalid search chain: _has:Observation:status'],
       ['_has:Observation:subject:_has:Provenance:target=x', 'Invalid search chain: _has:Provenance:target'],
@@ -601,6 +602,15 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Questionnaire', '_has:EvidenceVariable:derived-from:identifier=ei')).toEqual(['q1']);
     expect(ids('EvidenceVariable', 'derived-from:Questionnaire.identifier=qi')).toEqual(['e1']);
     expect(ids('EvidenceVariable', 'derived-from:Questionnaire._id=q2')).toEqual([]);
+    // url|version: the resource with that url and version, as _include resolves it.
+    add({ resourceType: 'Questionnaire', id: 'q3', status: 'unknown', url: 'http://example.com/v', version: '2', identifier: [{ value: 'v2' }] });
+    add({ resourceType: 'Questionnaire', id: 'q4', status: 'unknown', url: 'http://example.com/v', version: '3', identifier: [{ value: 'v3' }] });
+    add({ resourceType: 'QuestionnaireResponse', id: 'r2', status: 'completed', questionnaire: 'http://example.com/v|2', identifier: { value: 'rv' } });
+    add({ resourceType: 'QuestionnaireResponse', id: 'r3', status: 'completed', questionnaire: 'http://example.com/v', identifier: { value: 'rb' } });
+    expect(ids('QuestionnaireResponse', 'questionnaire.identifier=v2')).toEqual(['r2', 'r3']);
+    expect(ids('QuestionnaireResponse', 'questionnaire.identifier=v3')).toEqual(['r3']);
+    expect(ids('Questionnaire', '_has:QuestionnaireResponse:questionnaire:identifier=rv')).toEqual(['q3']);
+    expect(ids('Questionnaire', '_has:QuestionnaireResponse:questionnaire:identifier=rb')).toEqual(['q3', 'q4']);
     const text = 'ResearchStudy cannot be chained via canonical reference (EvidenceVariable:derived-from)';
     expect(fail('EvidenceVariable', 'derived-from:ResearchStudy.status=active').message).toBe(text);
     expect(fail('ResearchStudy', '_has:EvidenceVariable:derived-from:_id=foo').message).toBe(text);

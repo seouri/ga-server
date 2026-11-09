@@ -335,8 +335,9 @@ function chainCond(type: string, f: Filter, a: string): Cond {
     if (part.startsWith('_has:')) {
       const [, from, code] = part.split(':');
       const p = param(from, code);
-      if (p?.type !== 'reference') throw badRequest(`Invalid search parameter in chain: ${from}?${code}`);
+      if (!p) throw badRequest(`Invalid search parameter in chain: ${from}?${code}`);
       if (!p.target?.includes(t as never)) throw badRequest(`Invalid reverse chain link: search parameter ${from}?${code} does not refer to ${t}`);
+      if (p.type !== 'reference') throw badRequest(`Invalid search parameter in chain: ${from}?${code}`);
       links.push({ from: t, to: from, code, reverse: true, canonical: canonical(from, p) });
       t = from;
     } else {
@@ -370,14 +371,24 @@ function chainCond(type: string, f: Filter, a: string): Cond {
 
 // Rids of l.from linked by l to the rids `inner` (of l.to). Each probe reads the index by inner's rids (idx_r), or by value (idx_v).
 function linkSet(l: Link, inner: { sql: string; args: Arg[] }): { sql: string; args: Arg[] } {
-  // A canonical link joins on the url of the referenced type, as Medplum (its text).
+  // A canonical link joins on the url of the referenced type, as Medplum (its text); url|version is the resource with that
+  // url and version, as _include resolves it (Medplum matches the raw value, so url|version finds nothing there).
   const [source, target] = l.reverse ? [l.to, l.from] : [l.from, l.to];
   if (l.canonical && !param(target, 'url')) throw badRequest(`${target} cannot be chained via canonical reference (${source}:${l.code})`);
   if (l.canonical && l.reverse) {
-    return { sql: `select u.rid from idx u where u.type = ? and u.code = 'url' and u.val in (select h.val from idx h where h.rid in (${inner.sql}) and h.code = ?)`, args: [l.from, ...inner.args, l.code] };
+    const vals = `select h.val from idx h where h.rid in (${inner.sql}) and h.code = ?`;
+    return {
+      sql: `select u.rid from idx u where u.type = ? and u.code = 'url' and u.val in (${vals}) union select u.rid from (select substr(w.val, 1, instr(w.val, '|') - 1) url, substr(w.val, instr(w.val, '|') + 1) ver from (${vals}) w where instr(w.val, '|') > 0) w
+        join idx u on u.type = ? and u.code = 'url' and u.val = w.url join idx v on v.rid = u.rid and v.code = 'version' and v.val = w.ver`,
+      args: [l.from, ...inner.args, l.code, ...inner.args, l.code, l.from],
+    };
   }
   if (l.canonical) {
-    return { sql: `select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (select u.val from idx u where u.rid in (${inner.sql}) and u.code = 'url')`, args: [l.from, l.code, ...inner.args] };
+    return {
+      sql: `select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (select u.val from idx u where u.rid in (${inner.sql}) and u.code = 'url'
+        union all select u.val || '|' || v.val from idx u join idx v on v.rid = u.rid and v.code = 'version' where u.rid in (${inner.sql}) and u.code = 'url')`,
+      args: [l.from, l.code, ...inner.args, ...inner.args],
+    };
   }
   if (l.reverse) {
     return {
@@ -499,9 +510,11 @@ export function searchJson(prep: Prep, type: string | string[], query: [string, 
 // The driver of a search's filters, as SQL: distinct rids of each candidate set, counted up to the smallest so far (at most
 // driveMax); the smallest drives. References count last: in a one-patient store, subject/patient/_compartment match nearly
 // everything. Probes run smallest first, negations last.
-function plan(prep: Prep, conds: Cond[]): { driver?: Cond; size: number; probesFor: (driven: boolean) => Cond[] } {
+// sorted: the size picks between the driver and a sort-index walk; an unsorted search with one filter needs no count (its set drives).
+function plan(prep: Prep, conds: Cond[], sorted: boolean): { driver?: Cond; size: number; probesFor: (driven: boolean) => Cond[] } {
   const sizes = new Map<Cond, number>();
   const { driveMax } = searchTuning;
+  if (conds.length === 1 && !sorted) return { driver: conds[0].set ? conds[0] : undefined, size: driveMax, probesFor: (driven) => (driven && conds[0].set ? [] : conds) };
   let cap = driveMax;
   // A one-value match lists each rid about once (index order; a name or address once per matching word, which only over-counts
   // its size for the driver choice); OR lists and texts (text and display) need distinct.
@@ -544,7 +557,7 @@ function searchRaw(prep: Prep, typeOrTypes: string | string[], query: [string, s
     return sortKey(type, s.code, !!s.descending, i);
   });
   keys.push({ expr: 'd.rid', desc: false });
-  const plans = conds.map((c) => plan(prep, c));
+  const plans = conds.map((c) => plan(prep, c, !!keys[0].code));
   // One type's matching rows `d`: its driver set (or every rid of the type) with its other filters as probes.
   const part = (i: number, cols: string): { sql: string; args: Arg[] } => {
     const { driver, probesFor } = plans[i];

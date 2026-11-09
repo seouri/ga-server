@@ -82,13 +82,13 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - Date prefixes on ranges follow R4, as Medplum's opt-in `range-search` project feature does: `gt`/`ge`/`lt`/`le` match a Period that overlaps the range above or below the value, and apply to every value of a multi-valued date (Medplum without the feature compares a Period by its start and ignores the prefix on a multi-valued date).
 - `eq` with a dateTime against a date never matches: R4 `eq` needs the search value's range to contain the target's, and an instant does not contain a day. Medplum matches the dateTime against the date's day, with or without `range-search`.
 - `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
-- `_include`/`_revinclude` of a versioned canonical (`url|version`) resolve to the resource with that `url` and `version`, as R4 canonicals mean (Medplum resolves `url|version` to nothing, and a `_revinclude` finds only references to the bare `url`).
+- `_include`/`_revinclude` and chains (`questionnaire.identifier`, `_has:QuestionnaireResponse:questionnaire:…`) through a versioned canonical (`url|version`) resolve to the resource with that `url` and `version`, as R4 canonicals mean (Medplum resolves `url|version` to nothing, and a `_revinclude` or reverse chain finds only references to the bare `url`).
 - `_include`/`_revinclude` naming a parameter that is not a reference is 400, as R4 search.html (Including other resources) defines them on reference parameters (Medplum evaluates it, finds no references and answers 200).
 - An invalid `_include`/`_revinclude` parameter is 400 even when nothing matches (Medplum checks it only when there are matches and answers 200 otherwise).
 - `POST _search` (form body) is the system-level search, as R4 defines it (Medplum 5.2.14 has no such route and answers 400).
 - System-level search pages by cursor, with next links at `fhir/R4?…` (Medplum pages by `_offset` unless sorted by `_lastUpdated` ascending, and its links point at `fhir/R4/MultipleTypes?…` or the path type's URL).
 - `_summary=count` (or `_total`) of a `_type` search counts the matches of every listed type (Medplum 5.2.14's count counts one of them).
-- `meta.compartment` holds Patient compartments only: the store has no projects, so `_compartment:missing=true` finds a record in no patient's compartment (Medplum puts every record in its project's compartment too, so it finds none); Medplum's `meta.accounts` add no compartment.
+- `meta.compartment` holds Patient compartments only: the store has no projects, so `_compartment:missing=true` finds a record in no patient's compartment (as Medplum's own test expects outside a project; inside a Medplum project every record is also in `Project/<id>`'s compartment, so there it finds none); Medplum's `meta.accounts` add no compartment.
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support

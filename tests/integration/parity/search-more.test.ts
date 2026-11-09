@@ -69,6 +69,22 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(result3.entry?.[0]?.resource?.id).toBe(study.id);
   }));
 
+  // R4 canonical url|version names that version: the store's chains resolve it as its _include does; Medplum compares the raw value.
+  test('differs on purpose: a chain through a versioned canonical', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const url = 'http://example.com/' + crypto.randomUUID(), m = marker();
+      const q2 = await s.create({ resourceType: 'Questionnaire', status: 'unknown', url, version: '2', identifier: [{ value: m }] });
+      const r = await s.create({ resourceType: 'QuestionnaireResponse', status: 'completed', questionnaire: `${url}|2`, identifier: { value: m } });
+      const named = { q2, r };
+      return [
+        names(await search(s, `QuestionnaireResponse?questionnaire.identifier=${m}`), named),
+        names(await search(s, `Questionnaire?_has:QuestionnaireResponse:questionnaire:identifier=${m}`), named),
+      ];
+    });
+    expect(medplum).toEqual([[], []]);
+    expect(store).toEqual([['r'], ['q2']]);
+  });
+
   test('project-scoped Repository w/ %j › Rejects too long chained search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const e = await error(s, 'Patient?_has:Observation:subject:encounter:Encounter._has:DiagnosticReport:encounter:result.specimen.parent.collected=2023');
     expect(e).toEqual({ status: 400, text: 'Search chains longer than three links are not currently supported' });
