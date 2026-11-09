@@ -22,7 +22,7 @@ import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { MedplumClient } from '@medplum/core';
+import { isGone, type MedplumClient, OperationOutcomeError } from '@medplum/core';
 import type { Extension, Identifier, Resource } from '@medplum/fhirtypes';
 import { ccdaDate, convertCcdaLocal, custodian, isCcda } from './ccda.ts';
 import { compareCcda, matchEntries } from './ccda-compare.ts';
@@ -106,8 +106,10 @@ async function scan(client: MedplumClient, pid: string, fn: (r: R) => void): Pro
   }
 }
 
-// References from anything scan reads to a record of a scanned type that does not exist (a run that stopped after its last delete
-// no longer knows what it deleted). Targets outside the scan (another patient's, a patient-less record) are read to be sure.
+// References from anything scan reads to a deleted record of a scanned type (a run that stopped after its last delete no longer
+// knows what it deleted). Targets outside the scan (another patient's, a patient-less record) are read to be sure. A target that
+// never existed is not counted: the Microsoft path pointed reports at placeholder results the store refused (no code), long before
+// this command; both stores tell a deleted record (410 gone) from one never written (404).
 async function missingTargets(client: MedplumClient, pid: string): Promise<number> {
   const have = new Set<string>();
   const refs: string[] = [];
@@ -119,7 +121,8 @@ async function missingTargets(client: MedplumClient, pid: string): Promise<numbe
   let missing = 0;
   for (const x of new Set(refs.filter((x) => !have.has(x)))) {
     const [type, id] = x.split('/');
-    if (!(await client.readResource(type as 'Observation', id).catch(() => undefined))) missing += refs.filter((y) => y === x).length;
+    const gone = await client.readResource(type as 'Observation', id).then(() => false, (e) => e instanceof OperationOutcomeError && isGone(e.outcome));
+    if (gone) missing += refs.filter((y) => y === x).length;
   }
   return missing;
 }
@@ -131,14 +134,15 @@ async function storedDocs(client: MedplumClient, pid: string): Promise<Doc[]> {
     const att = (d as unknown as { content?: { attachment: { url?: string; title?: string } }[] }).content?.[0]?.attachment;
     const xml = att?.url ? await (await client.download(att.url)).text() : '';
     const hash = idsOf(d).find((i) => i.system === 'urn:ga-server:id:file')?.value;
-    // its own arrival when it has one, else when it was last written
-    if (hash && isCcda(xml)) docs.push({ id: d.id as string, hash, title: att?.title ?? '', xml, arrived: arrivedAt(d) ?? d.meta?.lastUpdated });
+    // its own arrival only: lastUpdated is not one (a copy into GA's own project rewrote it)
+    if (hash && isCcda(xml)) docs.push({ id: d.id as string, hash, title: att?.title ?? '', xml, arrived: arrivedAt(d) });
   }
   return docs;
 }
 
 // The import, with the old records hidden from every search it makes; every record it writes with a C-CDA identifier gets MARK,
-// and one it creates arrives at its document's import time (at) instead of now.
+// and one it creates arrives at its document's import time (at) instead of now; with none known (the document and its old records
+// came before GA recorded arrivals) it carries no arrival, like the records it replaces, so it never reads as new.
 function hiding(client: MedplumClient, hidden: Set<string>, at: () => string | undefined, created: Record<string, number>): MedplumClient {
   const visible = <T extends Resource>(rs: T[]) => rs.filter((r) => !hidden.has(refOf(r)));
   const mark = (r: R): R => (idsOf(r).some((i) => i.system === CCDA) ? untag(retag(r, MARK), STRIPPED) : r);
@@ -149,8 +153,8 @@ function hiding(client: MedplumClient, hidden: Set<string>, at: () => string | u
     searchResourcePages: async function* (type: any, q: any, o: any) { for await (const page of client.searchResourcePages(type, q, o)) yield visible(page); },
     createResource: async (r: R, o: any) => {
       const when = at();
-      const ext = when ? (r.extension ?? []).map((e) => (e.url === ARRIVED ? { url: ARRIVED, valueInstant: when } : e)) : r.extension;
-      const out = await client.createResource(mark({ ...r, ...(ext && { extension: ext }) }), o);
+      const ext = (r.extension ?? []).flatMap((e) => (e.url !== ARRIVED ? [e] : when ? [{ url: ARRIVED, valueInstant: when }] : []));
+      const out = await client.createResource(mark({ ...r, ...(r.extension && { extension: ext }) }), o);
       if (idsOf(out).some((i) => i.system === CCDA)) add(created, out.resourceType);
       return out;
     },
@@ -212,7 +216,7 @@ async function replace(client: MedplumClient, cfg: GaConfig, o: ReplaceOptions, 
   if (!ms.entry?.length && !unowned.length) {
     if (o.yes) {
       report.dangling = await missingTargets(client, pid);
-      if (report.dangling) throw new GaError(`stopped: ${report.dangling} references point at records that no longer exist; the flag is not set. Restore the backup taken before ga ccda replace --yes, or repoint them`);
+      if (report.dangling) throw new GaError(`stopped: ${report.dangling} references point at deleted records; the flag is not set. Restore the backup taken before ga ccda replace --yes, or repoint them`);
       setCcdaConverter(configFile);
     }
     o.log(`no Microsoft-era C-CDA records${o.yes ? `; ${configFile}: "ccdaConverter": "medplum"` : ''}`);

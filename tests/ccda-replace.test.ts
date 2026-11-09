@@ -390,8 +390,40 @@ test('a rerun after the last delete checks every reference before it sets the fl
     await expect(run(w, true, (s) => { if (s === 'deleted' && ++n === deletes) throw new Error('crash'); })).rejects.toThrow('crash');
     // Written after the crash, pointing at a record the run deleted: the rerun cannot know where it went.
     await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, code: { text: 'x' }, extension: [{ url: 'urn:x', valueReference: { reference: `DiagnosticReport/${old.id}` } }] });
-    await expect(run(w, true)).rejects.toThrow(/1 references point at records that no longer exist/);
+    await expect(run(w, true)).rejects.toThrow(/1 references point at deleted records/);
     expect(flag(w)).toBeUndefined();
+  });
+});
+
+test('a reference to a record that never existed (a Microsoft placeholder never stored) does not stop the rerun that sets the flag', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client);
+    await run(w, true);
+    writeFileSync(w.configFile, JSON.stringify(w.cfg)); // flag unset, as after a crash on the last delete
+    await client.createResource<Basic>({ resourceType: 'Basic', subject: { reference: `Patient/${w.pid}` }, code: { text: 'x' }, extension: [{ url: 'urn:x', valueReference: { reference: 'Observation/0b6e3c3e-0000-4000-8000-000000000000' } }] });
+    expect((await run(w, true)).dangling).toBe(0);
+    expect(flag(w)).toBe('medplum');
+  });
+});
+
+test('records imported before GA kept arrival times: nothing reads as new, and the new records carry no arrival either', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client);
+    // No arrival on the old records or the stored document, whose lastUpdated is today (the owner's record, copied into GA's own project).
+    const docs = await client.searchResources('DocumentReference', { subject: `Patient/${w.pid}`, identifier: 'urn:ga-server:id:file|' });
+    for (const r of [...(await records(client, w.pid)), ...docs]) {
+      const ext = (r as { extension?: { url: string }[] }).extension;
+      if (ext?.some((e) => e.url === ARRIVED)) await client.updateResource({ ...r, extension: ext.filter((e) => e.url !== ARRIVED) } as Resource);
+    }
+    const since = new Date(Date.now() - 86_400_000).toLocaleDateString('en-CA');
+    const look = () => whatsNew(client, w.pid, Promise.resolve([]), { since, fetch: (async () => { throw new Error('offline'); }) as typeof fetch, dir: mkdtempSync(join(tmpdir(), 'ga-wn-')) });
+    const before = await look();
+    await run(w, true);
+    const after = await look();
+    expect(after.tally).toEqual(before.tally);
+    expect(after.items.filter((i) => i.kind !== 'health maintenance')).toEqual([]);
+    const arrived = (await records(client, w.pid)).filter((x) => ccdaIds(x).length && (x as { extension?: { url: string }[] }).extension?.some((e) => e.url === ARRIVED));
+    expect(arrived).toEqual([]);
   });
 });
 
