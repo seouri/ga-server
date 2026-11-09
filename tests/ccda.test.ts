@@ -441,6 +441,22 @@ test('a later document repeating an entry updates it', async () => {
   });
 });
 
+test('a newer summary that numbers its narrative anchors anew adds only its Composition (id-less entries key alike)', async () => {
+  await onStore(async ({ client }) => {
+    const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+    const cfg = cfgFor(pid, { ccdaConverter: 'medplum' });
+    // An id-less allergy whose text is a narrative anchor (Epic's "no known allergies" entry has no id)
+    const xml = EPIC.replace('<text>Example drug allergy</text>', '<text><content ID="al1">Example drug allergy</content></text>')
+      .replace(/<id root="1\.2\.840\.114350\.1\.13\.999\.2\.7\.2\.768987(\.1)?" extension="EX-ALLERGY-(OBS-)?1"\/>/g, '')
+      .replace('<code code="ASSERTION" codeSystem="2.16.840.1.113883.5.4"/>', '<code code="ASSERTION" codeSystem="2.16.840.1.113883.5.4"/><text><reference value="#al1"/></text>');
+    await importPath(client, cfg, writeDoc(xml), pid);
+    expect(await client.searchResources('AllergyIntolerance', { patient: `Patient/${pid}` })).toHaveLength(1);
+    const newer = xml.replace('extension="EPICSTYLE-DOC-1"', 'extension="EPICSTYLE-DOC-2"').replaceAll('ID="', 'ID="n2-').replaceAll('value="#', 'value="#n2-');
+    expect(await importPath(client, cfg, writeDoc(newer), pid)).toMatchObject({ created: 1, invalid: 0, possibleDuplicates: 0 });
+    expect(await client.searchResources('AllergyIntolerance', { patient: `Patient/${pid}` })).toHaveLength(1);
+  });
+});
+
 test('a section title with markup: its note is imported, not refused', async () => {
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;

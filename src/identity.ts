@@ -61,13 +61,19 @@ export function sameDay(a: string, b: string): boolean {
 export const sorted = (_k: string, v: unknown) =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v;
 
-// Content hash for identity: ignores id, meta and references (which point at per-document converter ids).
+// Content hash for identity: ignores id, meta, references (which point at per-document converter ids) and the in-process
+// converter's narrative anchors (a "#id" each Epic export numbers anew: the same entry in two summaries must key alike).
 // Patient-scoped resources (subject/patient) include the GA patient id, because identifier search is global.
 // refs: a reference read as its target's own key (for a record that is its links); without it references are left out.
+const NARRATIVE_REF = 'https://medplum.com/fhir/StructureDefinition/ccda-narrative-reference';
 export function contentHash(r: Resource, patientId = '', refs?: (ref: string) => string | undefined): string {
   const { id: _id, meta: _meta, ...rest } = r;
   const scope = 'subject' in r || 'patient' in r ? patientId : '';
-  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => (k === 'reference' ? (refs && typeof v === 'string' ? refs(v) : undefined) : sorted(k, v)))}`);
+  return sha256(`${r.resourceType}|${scope}|${JSON.stringify(rest, (k, v) => {
+    if (k === 'reference') return refs && typeof v === 'string' ? refs(v) : undefined;
+    if (k === 'extension' && Array.isArray(v)) { const kept = v.filter((e: { url?: string }) => e?.url !== NARRATIVE_REF); return kept.length ? kept : undefined; }
+    return sorted(k, v);
+  })}`);
 }
 
 // Epic docs reuse one entry <id> for several different Observations/Encounters within a single document (real-data
