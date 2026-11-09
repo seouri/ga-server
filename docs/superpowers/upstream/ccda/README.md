@@ -60,6 +60,7 @@ Each draft ends with a `Filing metadata` block (rows, commits, external work, de
 | [38-patient-language-race-text.md](38-patient-language-race-text.md) | Patient language and the US Core race/ethnicity text | 38 | d9cee49 | - | - | issue-first |
 | [47-empty-and-text-names.md](47-empty-and-text-names.md) | Empty and text-only person names | 47, 49, 50 | 6abc9b4, e4315aa, 57bf61d | - | - | issue-first |
 | [53-problem-status.md](53-problem-status.md) | Problem clinical status from the status observation and the end date | 53 | see draft | - | 9, 10 (same function) | issue-first |
+| [54-condition-verification-system.md](54-condition-verification-system.md) | Condition verification status code system | 54 | see draft | - | 53 (same function) | issue-first |
 
 ### Wave 4: narrative text sections (need medplum#11242 merged)
 

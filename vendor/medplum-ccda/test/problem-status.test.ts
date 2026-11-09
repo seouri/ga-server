@@ -46,3 +46,13 @@ test('an encounter indication (RSON) diagnosis takes its status the same way: an
   </section></component>`);
   expect(resourcesOf<Condition>(bundle, 'Condition').map((c) => c.clinicalStatus?.coding?.[0]?.code)).toEqual(['resolved']);
 });
+
+test('a problem\'s verification status is in the condition-ver-status code system', () => {
+  const bundle = convertSections(`<component><section><templateId root="2.16.840.1.113883.10.20.22.2.5.1"/>
+    <code code="11450-4" codeSystem="2.16.840.1.113883.6.1"/><title>Problems</title><text>Problems</text>
+    ${concern('active', problem('P-1', '<low value="2020"/>'))}
+  </section></component>`);
+  expect(resourcesOf<Condition>(bundle, 'Condition')[0].verificationStatus).toEqual({
+    coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: 'confirmed' }],
+  });
+});

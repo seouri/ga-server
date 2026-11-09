@@ -117,7 +117,6 @@ import {
   CLINICAL_CONDITION_CODE_SYSTEM,
   CONDITION_CATEGORY_CODE_SYSTEM,
   CONDITION_VER_STATUS_CODE_SYSTEM,
-  CONDITION_VERIFICATION_CODE_SYSTEM,
   DIAGNOSIS_ROLE_CODE_SYSTEM,
   DIAGNOSTIC_SERVICE_SECTION_CODE_SYSTEM,
   ENCOUNTER_STATUS_MAPPER,
@@ -838,7 +837,7 @@ class CcdaToFhirConverter {
       verificationStatus: {
         coding: [
           {
-            system: CONDITION_VERIFICATION_CODE_SYSTEM,
+            system: CONDITION_VER_STATUS_CODE_SYSTEM,
             code: 'confirmed',
           },
         ],
