@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { AllergyIntolerance, CareTeam, Composition, Condition, Encounter, FamilyMemberHistory, Location, Medication, MedicationStatement, Observation, Practitioner, PractitionerRole, Reference, Resource } from '@medplum/fhirtypes';
+import { importResources } from '../src/engine.ts';
+import type { SourceInfo } from '../src/identity.ts';
 import { ccdaConverter, ccdaDate, ccdaFiles, convertCcdaLocal, custodian, importPath, repair, sectionName } from '../src/ccda.ts';
 import { convertXmlToCcda } from '../vendor/medplum-ccda/index.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -782,6 +784,61 @@ test('a C-CDA note whose Epic note id is an EHI note GA holds (same Epic org) me
     expect(merged.map((d) => d.id)).toEqual([kept.id]); // the same org's note, never the other export's
     expect(notes.find((d) => d.id === other.id)?.identifier).toHaveLength(1);
     expect(notes.filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'))).toHaveLength(3);
+  });
+});
+
+// Note linking by Epic note id is C-CDA <-> EHI only: a portal note and an EHI note with the same id stay two records.
+const NOTE_ROOT = '1.2.840.114350.1.13.999.2.7.2.727879';
+const noteSetup = async (client: MedplumClient) => {
+  const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
+  const sys = 'urn:ga-server:id:ehi:org-999';
+  const ehiSrc = { kind: 'ehi', file: '/x/ehi', date: '2024-01-01T00:00:00Z', writer: 'importer' } as SourceInfo;
+  await importResources(client, [{ resourceType: 'Encounter', id: 'e1', status: 'finished', class: { code: 'AMB', system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode' },
+    subject: { reference: `Patient/${pid}` }, identifier: [{ system: sys, value: 'PAT_ENC|1' }, { system: 'urn:oid:1.2.840.114350.1.13.999.2.7.3.698084.8', value: '1' }] } as Resource], ehiSrc, pid, 'h0');
+  const ehi = (withEpicId: boolean) => importResources(client, [{ resourceType: 'DocumentReference', id: 'n1', status: 'current', subject: { reference: `Patient/${pid}` },
+    identifier: [{ system: sys, value: 'HNO_INFO|555' }, ...(withEpicId ? [{ system: `urn:oid:${NOTE_ROOT}`, value: '555' }] : [])],
+    content: [{ attachment: { contentType: 'text/plain', data: Buffer.from('EHI note text').toString('base64') } }] } as Resource], ehiSrc, pid, 'h1');
+  const at = '2026-11-01T00:00:00Z';
+  const portal = () => importResources(client, [{ resourceType: 'DocumentReference', id: 'p1', status: 'current', subject: { reference: `Patient/${pid}` }, meta: { lastUpdated: '2026-10-01T00:00:00Z' },
+    identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'DocumentReference/p1' }, { system: `urn:oid:${NOTE_ROOT}`, value: '555' }],
+    content: [{ attachment: { contentType: 'text/html', url: 'Binary/abc' } }] } as Resource],
+    { kind: 'smart', file: 'https://h/fhir', date: at, writer: 'importer', dateOf: (r: Resource) => r.meta?.lastUpdated, seenAt: at } as SourceInfo, pid, 'h2');
+  const notes = async () => (await client.searchResources('DocumentReference', { subject: `Patient/${pid}` })).filter((d) => !d.identifier?.some((i) => i.system === 'urn:ga-server:id:file'));
+  const ehiNote = async () => (await notes()).find((d) => d.identifier?.some((i) => i.system === sys));
+  return { pid, ehi, portal, notes, ehiNote };
+};
+
+test('a portal note never merges into an EHI note with the same Epic note id, in either order, old or new EHI notes', async () => {
+  for (const [first, withEpicId] of [['ehi', false], ['ehi', true], ['portal', true]] as const) {
+    await onStore(async ({ client }) => {
+      const n = await noteSetup(client);
+      if (first === 'ehi') await n.ehi(withEpicId);
+      await n.portal();
+      if (first === 'portal') await n.ehi(withEpicId);
+      expect(await n.notes()).toHaveLength(2);
+      const e = await n.ehiNote();
+      expect(e?.content?.[0].attachment.contentType).toBe('text/plain');
+      expect(e?.meta?.tag?.map((t) => t.code)).toContain('src-ehi');
+      expect(e?.identifier?.some((i) => i.system === 'urn:ga-server:id:smart:h')).toBe(false);
+    });
+  }
+});
+
+test('a new EHI export\'s note merges into the C-CDA note with its Epic note id (C-CDA first)', async () => {
+  const xml = `<?xml version="1.0"?><ClinicalDocument xmlns="urn:hl7-org:v3"><id root="2.16.840.1.113883.19.5" extension="NOTE-DOC"/><effectiveTime value="20240210"/>
+    <recordTarget><patientRole><patient><name><given>T</given><family>P</family></name></patient></patientRole></recordTarget>
+    <component><structuredBody><component><section><templateId root="2.16.840.1.113883.10.20.22.2.65"/><code code="11506-3" codeSystem="2.16.840.1.113883.6.1"/>
+    <title>Progress Notes</title><text><paragraph ID="n1">Seen.</paragraph></text>
+    <entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.22.4.202"/><id root="${NOTE_ROOT}" extension="555"/>
+      <code code="34109-9" codeSystem="2.16.840.1.113883.6.1"/><text><reference value="#n1"/></text><statusCode code="completed"/></act></entry>
+    </section></component></structuredBody></component></ClinicalDocument>`;
+  await onStore(async ({ client }) => {
+    const n = await noteSetup(client);
+    await importPath(client, cfgFor(n.pid), writeDoc(xml), n.pid);
+    await n.ehi(true);
+    const [one, ...more] = await n.notes();
+    expect(more).toHaveLength(0);
+    expect(one.identifier?.map((i) => i.system)).toEqual(expect.arrayContaining(['urn:ga-server:id:ehi:org-999', 'urn:ga-server:id:ccda']));
   });
 });
 
