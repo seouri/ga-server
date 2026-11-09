@@ -95,7 +95,8 @@ function rows(r: Resource): Row[] {
       case 'token': {
         // Codes as written (Medplum matches tokens case-sensitively, ContactPoints aside); texts lowercased for :text.
         const lc = caseless(r.resourceType, p);
-        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT || lc ? lower(t.value) : t.value ?? null, null, null]);
+        // Values trimmed, as Medplum indexes them (' 123' is found by 123).
+        for (const t of convertToSearchableTokens(v, { textSearchSystem: TEXT })) out.push([code, t.system ?? null, t.system === TEXT || lc ? lower(t.value?.trim()) : t.value?.trim() ?? null, null, null]);
         break;
       }
       case 'string':
@@ -234,7 +235,7 @@ function cond(type: string, f: Filter, a: string): Cond {
         if (bar < 0) { ors.push('i.val = ? and (i.sys is null or i.sys <> ?)'); va.push(ci(v), TEXT); break; }
         const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
         if (!s) { ors.push('i.val = ? and i.sys is null'); va.push(val); }
-        else if (!val) { ors.push('i.sys = ? and i.val is not null'); va.push(s); }
+        else if (!val) { ors.push('i.sys = ?'); va.push(s); }
         else { ors.push('i.val = ? and i.sys = ?'); va.push(val, s); }
         break;
       }

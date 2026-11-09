@@ -366,39 +366,39 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/references.test.ts | Reference checks › Check references with non-literal reference | skipped | existing | not yet ported (Task 3b) |
 | server/src/fhir/references.test.ts | Reference checks › Check references with reference placeholder | skipped | existing | not yet ported (Task 3b) |
 | server/src/fhir/references.test.ts | Reference checks › Resources with identical references | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › %s with empty value does not throw errors | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Multiple identifiers | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Update identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Implicit exact | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Explicit exact | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › prefix on Patient-identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-telecom | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-email | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-phone | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Not equals | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Search comma separated identifier exact | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Search on system | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Non-array identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Leading whitespace | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › CodeableConcept text | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Identifier value with pipe | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Missing/present › %s :%s %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Condition.code :%s search | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Non-strict mode › Handle malformed system | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Non-strict mode › Handle malformed value | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › Sort by identifier | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › Sort by identifier with multiple values | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by system %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by value %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by system and value %s\|%s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by missing system and value %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code and category by code=%s category=%s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :contains beginning of value %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :contains middle of value %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :text %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :text search for special chars › :text search for %s should match? %s | skipped | existing | not yet ported (Task 3b) (title appears twice in Medplum) |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › %s with empty value does not throw errors | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Multiple identifiers | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Update identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Implicit exact | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Explicit exact | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › prefix on Patient-identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-telecom | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-email | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › :contains › infix on Patient-phone | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Not equals | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Search comma separated identifier exact | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Search on system | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Non-array identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Leading whitespace | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › CodeableConcept text | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Identifier value with pipe | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Missing/present › %s :%s %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › With systemRepo › Condition.code :%s search | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Non-strict mode › Handle malformed system | skipped | platform | Medplum repository option strictMode=false set in-process; HTTP writes are always validated, so the malformed data cannot be written |
+| server/src/fhir/tokens.test.ts | Token-based searches › Non-strict mode › Handle malformed value | skipped | platform | Medplum repository option strictMode=false set in-process; HTTP writes are always validated, so the malformed data cannot be written |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › Sort by identifier | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › Sort by identifier with multiple values | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by system %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by value %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by system and value %s\|%s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code by missing system and value %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code and category by code=%s category=%s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :contains beginning of value %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :contains middle of value %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :text %s | ported | existing |  |
+| server/src/fhir/tokens.test.ts | Token-based searches › Condition.code token queries › code :text search for special chars › :text search for %s should match? %s | ported | existing | title appears twice in Medplum; one port covers both tables |
 | server/src/fhir/tokens.test.ts | Token-based searches › MedicationRequest.code legacy behavior › Formerly "legacy" column implementation search params use `token-column` strategy | skipped | platform | Medplum token column vs legacy implementation |
 | server/src/fhir/tokens.test.ts | Token-based searches › MedicationRequest.code legacy behavior › Search by system only works when using token columns | skipped | platform | Medplum token column vs legacy implementation |
 | server/src/fhir/tokens.test.ts | Token-based searches › MedicationRequest.code legacy behavior › Search by value always works | skipped | platform | Medplum token column vs legacy implementation |

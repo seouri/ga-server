@@ -415,6 +415,14 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Practitioner', 'identifier=mixed')).toEqual([]);
   });
 
+  it('system| matches an identifier with that system and no value; token values are trimmed, as Medplum', () => {
+    add({ resourceType: 'Patient', id: 'p1', identifier: [{ system: 'urn:s' }] });
+    add({ resourceType: 'Patient', id: 'p2', identifier: [{ system: 'urn:s', value: ' v2' }] });
+    expect(ids('Patient', 'identifier=urn:s|')).toEqual(['p1', 'p2']);
+    expect(ids('Patient', 'identifier=v2')).toEqual(['p2']);
+    expect(ids('Patient', 'identifier=urn:s|v2')).toEqual(['p2']);
+  });
+
   it('_revinclude with a target type follows only matches of that type', () => {
     add({ resourceType: 'Task', id: 't1', status: 'completed', intent: 'order' });
     add({ resourceType: 'AuditEvent', id: 'a1', recorded: '2026-01-01T00:00:00Z', type: { code: 'rest' }, agent: [{ requestor: true }], source: { observer: { display: 'x' } }, entity: [{ what: { reference: 'Task/t1' } }] } as Resource);
