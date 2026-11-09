@@ -71,8 +71,10 @@ async function body(req: IncomingMessage): Promise<string> {
   for await (const c of limited(req, JSON_LIMIT)) parts.push(c);
   return Buffer.concat(parts).toString('utf8');
 }
+// As Medplum's JSON body parser: only an object or array, else its text.
 function parse(text: string): any {
-  try { return JSON.parse(text); } catch { throw new HttpError(400, 'Invalid JSON'); }
+  try { const v = JSON.parse(text); if (v && typeof v === 'object') return v; } catch { /* below */ }
+  throw new HttpError(400, 'Content could not be parsed');
 }
 
 // types: the resource types the store accepts (default every R4 resource type).
@@ -202,6 +204,7 @@ function dispatch(store: Store, r: Req): Answer {
     if (method === 'POST') return { status: 200, json: JSON.stringify(batch(store, r.body as Bundle, r.base)) };
     throw new HttpError(405, `${method} not allowed`);
   }
+  if (type[0] === '$') throw new HttpError(404, 'Not found'); // no system-level operations (Medplum's text)
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});
   if (type === 'Binary') throw new HttpError(400, 'Binary is only served at Binary/<id>, not in a batch');
@@ -212,7 +215,7 @@ function dispatch(store: Store, r: Req): Answer {
       const out = store.create(resolveRefs(store, resourceOf(r, type)), r.ifNoneExist, r.id);
       return written(out.resource, out.created ? 201 : 200);
     }
-    if (method === 'PUT' || method === 'DELETE') return conditional(store, r, type);
+    if (method === 'PUT' || method === 'DELETE' || method === 'PATCH') return conditional(store, r, type);
     throw new HttpError(405, `${method} not allowed`);
   }
   if (method === 'POST' && id === '_search' && !op) return { status: 200, json: store.searchJson(type, [...query], r.base) };
@@ -234,8 +237,9 @@ function dispatch(store: Store, r: Req): Answer {
     return { status: 200, json: row.json, row };
   }
   if (method === 'PUT') {
-    const res = resourceOf(r, type);
-    if (res.id !== id) throw new HttpError(400, `Expected ${type}/${id}`);
+    const res = r.body as Resource;
+    if (res?.resourceType !== type) throw new HttpError(400, 'Incorrect resource type'); // Medplum's texts
+    if (res.id !== id) throw new HttpError(400, 'Incorrect resource ID');
     return written(store.update(resolveRefs(store, res), r.ifMatch), 200);
   }
   if (method === 'PATCH') return written(patch(store, type, id, r), 200);
@@ -252,13 +256,19 @@ function validated(r: Req): Req {
   return { ...r, body };
 }
 
-// PUT/DELETE Type?query, as Medplum: no match creates (PUT) or does nothing (DELETE), one is updated or deleted, more are 412.
+// PUT/DELETE/PATCH Type?query, as Medplum: no match creates (PUT), does nothing (DELETE) or is 404 (PATCH), one is updated,
+// deleted or patched (a JSON Patch only), more are 412.
 function conditional(store: Store, r: Req, type: string): Answer {
   const q = r.query.toString();
-  if (!q) throw new HttpError(r.method === 'PUT' ? 400 : 405, `${r.method} ${type} needs a search (conditional ${r.method === 'PUT' ? 'update' : 'delete'})`);
+  if (!q) throw new HttpError(r.method === 'PUT' ? 400 : 405, `${r.method} ${type} needs a search (conditional ${{ PUT: 'update', DELETE: 'delete', PATCH: 'patch' }[r.method]})`);
+  if (r.method === 'PATCH' && !Array.isArray(r.body)) throw new HttpError(400, 'Patch body must be an array'); // Medplum's text
   return store.transaction(() => {
     const found = store.find(type, q);
     if (found.length > 1) throw multipleMatches();
+    if (r.method === 'PATCH') {
+      if (!found.length) throw new HttpError(404, 'Not found');
+      return written(patch(store, type, found[0].id!, r), 200);
+    }
     if (r.method === 'DELETE') { if (found.length) store.delete(type, found[0].id!); return { status: 200, outcome: OK }; }
     const res = resourceOf(r, type);
     if (!found.length) {
@@ -281,7 +291,7 @@ function patchOps(body: unknown): unknown {
 function patch(store: Store, type: string, id: string, r: Req): Resource {
   const ops = patchOps(r.body);
   const fhirpath = (ops as Parameters)?.resourceType === 'Parameters';
-  if (!fhirpath && !Array.isArray(ops)) throw new HttpError(400, 'PATCH takes a JSON Patch (an array of operations) or a FHIRPath Patch (Parameters)');
+  if (!fhirpath && !Array.isArray(ops)) throw new HttpError(400, 'Invalid patch body'); // Medplum's text: a JSON Patch or a FHIRPath Patch (Parameters)
   // A urn reference the patch brings in names no stored record (outside a transaction, or one no entry defines). Only the
   // operations are checked: references already stored are not this request's.
   if (fhirpath) danglingUrn(ops);
@@ -475,7 +485,9 @@ const RANK: Record<string, number> = { DELETE: 0, POST: 1, PUT: 2, PATCH: 2 }; /
 // reference to a urn no entry defines is 400 (Medplum stores it as written). Medplum's transactions are not atomic: a
 // failed entry leaves the others written; this store fails the whole transaction with that entry's status.
 function batch(store: Store, b: Bundle, base: string): Bundle {
-  if (b?.resourceType !== 'Bundle' || (b.type !== 'batch' && b.type !== 'transaction')) throw new HttpError(400, 'Expected a batch or transaction Bundle');
+  // Medplum's texts
+  if (b?.resourceType !== 'Bundle') throw new HttpError(400, 'Not a bundle');
+  if (b.type !== 'batch' && b.type !== 'transaction') throw new HttpError(400, `Unrecognized bundle type: ${b.type}`);
   if (b.entry !== undefined && (!Array.isArray(b.entry) || b.entry.some((e) => !e || typeof e !== 'object' || Array.isArray(e)))) throw new HttpError(400, 'Bundle.entry must be a list of entries');
   const entries = b.entry ?? [];
   const urns = new Map<string, string>(), pre = new Map<number, string>();

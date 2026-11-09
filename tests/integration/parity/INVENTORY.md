@@ -592,24 +592,24 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Returns error on incomplete input | plan-2 | terminology | deferred to plan 2 (terminology) |
 | server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
 | server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET instance endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch success | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch invalid bundle | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID not found | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect resource type | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect ID | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect precondition | skipped | existing | not yet ported (Task 3c) (title appears twice in Medplum) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update with correct precondition | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Delete with precondition | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Search by post | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch success | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch invalid bundle | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID not found | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect resource type | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect ID | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update incorrect precondition | ported | existing | title appears twice in Medplum; one port covers both |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Update with correct precondition | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Delete with precondition | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Search by post | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Search multiple types | skipped | type | not yet ported (Task 5) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update with unparsed query string | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Patch resource | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional PATCH | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional delete | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional update with unparsed query string | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Patch resource | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional PATCH | ported | existing |  |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional delete | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Create resource with query param account | skipped | platform | project/account compartments |
-| fhir-router/src/fhirrouter.test.ts | FHIR Router › Custom system-level operation returns not found | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/fhirrouter.test.ts | FHIR Router › Custom system-level operation returns not found | ported | existing |  |
 | fhir-router/src/batch.test.ts | Batch › Process batch with missing bundle type | skipped | existing | not yet ported (Task 3c) |
 | fhir-router/src/batch.test.ts | Batch › Process batch with invalid bundle type | skipped | existing | not yet ported (Task 3c) |
 | fhir-router/src/batch.test.ts | Batch › Process batch with missing entries | skipped | existing | not yet ported (Task 3c) |

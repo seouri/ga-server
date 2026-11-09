@@ -568,6 +568,26 @@ describe('store server: Medplum-compatible routes', () => {
     expect([none.status, none.json.issue[0].details.text]).toEqual([400, 'Missing resource parameter']);
   });
 
+  it('as Medplum\'s router: its error texts, a body that is not an object, conditional PATCH, a system-level operation is 404', async () => {
+    const text = async (m: string, p: string, body?: unknown, h?: Record<string, string>) => { const r = await call(m, p, body, h); return [r.status, r.json?.issue?.[0]?.details?.text]; };
+    expect(await text('POST', '', { resourceType: 'Patient' })).toEqual([400, 'Not a bundle']);
+    expect(await text('PUT', 'Patient/123', { resourceType: 'ServiceRequest', id: '123' })).toEqual([400, 'Incorrect resource type']);
+    expect(await text('PUT', 'Patient/123', { resourceType: 'Patient', id: '456' })).toEqual([400, 'Incorrect resource ID']);
+    expect(await text('POST', 'Patient', 'not json')).toEqual([400, 'Content could not be parsed']);
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient', gender: 'unknown', identifier: [{ system: 's', value: 'a' }] })).json;
+    const JP = { 'content-type': 'application/json-patch+json' };
+    expect(await text('PATCH', `Patient/${p.id}`, 'null', JP)).toEqual([400, 'Content could not be parsed']);
+    expect(await text('PATCH', `Patient/${p.id}`, { foo: 'bar' }, JP)).toEqual([400, 'Invalid patch body']);
+    await call('POST', 'Patient', { resourceType: 'Patient', gender: 'unknown' });
+    const op = [{ op: 'add', path: '/active', value: true }];
+    expect((await call('PATCH', 'Patient?gender=unknown', op, JP)).status).toBe(412);
+    expect(await text('PATCH', 'Patient?identifier=s|a', { resourceType: 'Parameters' })).toEqual([400, 'Patch body must be an array']);
+    const one = await call('PATCH', 'Patient?identifier=s|a', op, JP);
+    expect([one.status, one.json.id, one.json.active]).toEqual([200, p.id, true]);
+    expect((await call('PATCH', 'Patient?identifier=s|none', op, JP)).status).toBe(404);
+    expect(await text('POST', '$custom-operation', {})).toEqual([404, 'Not found']);
+  });
+
   it('conditional update (0 creates, 1 updates, more 412) and conditional delete (more 412, 1 deletes, 0 is OK)', async () => {
     const idf = [{ system: 's', value: 'x' }];
     const c = await call('PUT', 'Observation?identifier=s|x', ob({ identifier: idf }));
