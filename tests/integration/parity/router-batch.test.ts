@@ -357,9 +357,9 @@ describe.skipIf(SQLITE)('Medplum fhir-router batch.test.ts (parity)', () => {
     expect(r.map((e) => e.status)).toEqual(['201', '201', '201', '201']);
   }));
 
-  // Medplum's in-memory repository creates ServiceRequest/12345 by the PUT and takes an empty code. Here the ServiceRequest
-  // exists first (the store does not create by PUT: updateCreate false; Medplum refuses the id 12345, README: non-UUID ids) and
-  // the report has a code, so both servers run the rewrite of the PUT entry's fullUrl.
+  // Medplum's in-memory repository creates ServiceRequest/12345 by the PUT and takes an empty code. Neither server creates by
+  // PUT (Medplum's server answers 404 for a new UUID id, 400 for 12345), so here the ServiceRequest exists first and the report
+  // has a code: both servers run the rewrite of the PUT entry's fullUrl, and the PUT succeeds.
   test('Batch › Local reference resolution for update [fhir-router/src/batch.test.ts]', () => same(sides, async (s) => {
     const { id } = await s.create({ resourceType: 'ServiceRequest', intent: 'order', status: 'draft', subject: { display: 'Test Patient' } });
     const r = await statuses(s, 'transaction', [
@@ -367,6 +367,7 @@ describe.skipIf(SQLITE)('Medplum fhir-router batch.test.ts (parity)', () => {
         resource: { id, resourceType: 'ServiceRequest', intent: 'order', status: 'active', subject: { display: 'Test Patient' } } },
       { request: { method: 'POST', url: 'DiagnosticReport' }, resource: { resourceType: 'DiagnosticReport', code: { text: 'test' }, status: 'amended', basedOn: [{ reference: 'urn:uuid:f1228716-b33c-420d-89ab-46fac9ebcc8b' }] } },
     ]);
+    expect(r.map((e) => e.status)).toEqual(['200', '201']);
     expect(r[1].resource.basedOn[0].reference).toBe('ServiceRequest/' + id);
   }));
 
