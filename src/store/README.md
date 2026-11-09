@@ -72,6 +72,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - Every urn fullUrl of a transaction is resolved before its entries run (a create or conditional PUT, each on its own: its one match, else a new id). If an earlier entry changes what a later conditional entry matches and another entry references its urn, the transaction is 400 (Medplum fails that entry and leaves references to its urn pointing at no resource); with no reference the entry runs (Medplum still fails it).
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).
 - A conditional request (update, delete, If-None-Exist, conditional reference) needs a real search criterion: only paging, sorting, shaping or format parameters, or empty values, are 400.
+- `:contains` on a token parameter is 400: R4 defines `:contains` for string and uri parameters only (Medplum accepts it on tokens).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support

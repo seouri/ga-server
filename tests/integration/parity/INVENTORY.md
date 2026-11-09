@@ -9,9 +9,9 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 
 | file | title | status | feature | note |
 | --- | --- | --- | --- | --- |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search total | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search count=0 | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search offset max | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search total | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search count=0 | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search offset max | skipped | platform | Medplum server config (maxSearchOffset) set in-process; the HTTP side cannot change it |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › clampEstimateCount: offset = %p, %p estimated, %p returned => %p | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › returns estimate and accurate with forceAccurate | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › returns estimate without forceAccurate when below threshold | skipped | platform | getCount / estimate-count internals |
@@ -27,63 +27,63 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › does not short-circuit when rowCount > pageSize | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › does not short-circuit when rowCount is undefined | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _summary | skipped | summary | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _elements | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search next link | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search previous link | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for Communications by Encounter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for Communications by ServiceRequest | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for QuestionnaireResponse by Questionnaire | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for token in array | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.id | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.meta.lastUpdated | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.identifier | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.name | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.given | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.address | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.postalCode | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.telecom | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.email | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.birthDate | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter and sort on same search parameter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search birthDate after delete | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search identifier after delete | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › String filter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › String filter with escaped commas | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id with %s=%s | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _elements | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search next link | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search previous link | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for Communications by Encounter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for Communications by ServiceRequest | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for QuestionnaireResponse by Questionnaire | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search for token in array | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.id | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.meta.lastUpdated | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.identifier | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.name | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.given | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.address | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.postalCode | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.telecom | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.email | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search sort by Patient.birthDate | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter and sort on same search parameter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search birthDate after delete | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search identifier after delete | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › String filter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › String filter with escaped commas | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id with %s=%s | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _compartment presence | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id presence | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by chained _id | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id presence | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by chained _id | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by _compartment:_id | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Forward filter by _compartment.name | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained filter with _compartment as middle link | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Empty _id | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _id | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Empty _id | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _id | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _compartment | skipped | chain | not yet ported (Task 6) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference string _compartment | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle_lastUpdated value %s, isValid? %s | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle non-string value | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle string with null bytes | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by Coding | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by CodeableConcept | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by Quantity.value | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › ServiceRequest.orderDetail search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Comma separated value | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token not equals | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token not equals matches missing value | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token array not equals | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Null token array not equals | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Missing | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Missing with logical (identifier) references | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Starts after | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Boolean search | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Boolean not equals matches missing value | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Not equals with comma separated values | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _id equals with comma separated values | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Error on invalid search parameter | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient search without resource type | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Subject search without resource type | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle_lastUpdated value %s, isValid? %s | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle non-string value | skipped | platform | repository API only: an object filter value; HTTP query values are always strings |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle string with null bytes | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by Coding | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by CodeableConcept | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by Quantity.value | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › ServiceRequest.orderDetail search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Comma separated value | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token not equals | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token not equals matches missing value | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token array not equals | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Null token array not equals | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Missing | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Missing with logical (identifier) references | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Starts after | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Boolean search | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Boolean not equals matches missing value | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Not equals with comma separated values | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _id equals with comma separated values | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Error on invalid search parameter | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient search without resource type | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Subject search without resource type | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on array columns using reference tables | skipped | existing | not yet ported (Task 3a) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on single columns using reference tables | skipped | existing | not yet ported (Task 3a) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search sort order | skipped | existing | not yet ported (Task 3a) |

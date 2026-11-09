@@ -3,9 +3,7 @@
 import type { Appointment, Bundle, Practitioner, Slot } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { SQLITE } from '../helpers.ts';
-import { names, paritySides, q, same, search, type Side } from './harness.ts';
-
-const ref = (r: { resourceType: string; id: string }) => ({ reference: `${r.resourceType}/${r.id}` });
+import { names, paritySides, q, ref, same, search, type Side } from './harness.ts';
 
 describe.skipIf(SQLITE)('Medplum Custom Search Parameters (parity)', () => {
   let sides: [Side, Side], close: () => Promise<void>;

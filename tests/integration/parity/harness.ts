@@ -39,10 +39,11 @@ export async function same<T>(sides: [Side, Side], fn: (s: Side) => Promise<T>):
   const r = await both(sides, async (s) => {
     try { return await fn(s); } catch (e) { if (e instanceof Error) e.message = `[${s.name}] ${e.message}`; throw e; }
   });
-  expect(shape(r[1], sides[1].base)).toEqual(shape(r[0], sides[0].base));
+  if (r[0] !== undefined || r[1] !== undefined) expect(shape(r[1], sides[1].base)).toEqual(shape(r[0], sides[0].base));
   return r;
 }
 
+export const ref = (r: { resourceType: string; id: string }): { reference: string } => ({ reference: `${r.resourceType}/${r.id}` });
 // A query path from params, each value encoded.
 export const q = (type: string, ...params: [string, string][]): string => `${type}?${new URLSearchParams(params)}`;
 // GET a search; anything but 200 throws with the body.

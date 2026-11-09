@@ -338,4 +338,54 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(fail('Nonsense', 'url=x').status).toBe(400);
     expect(run('ValueSet', 'url=x').entry ?? []).toHaveLength(0); // every R4 type by default
   });
+
+  it('links as Medplum: self always; first, next and previous only on a non-empty page; _count=0 keeps self', () => {
+    obs('l1'); obs('l2'); obs('l3');
+    const rels = (q: string) => run('Observation', q).link?.map((l) => l.relation);
+    expect(rels('_count=1')).toEqual(['self', 'first', 'next']);
+    expect(rels('_count=0')).toEqual(['self']);
+    expect(rels('_count=1&_offset=1')).toEqual(['self', 'first', 'next', 'previous']);
+    expect(rels('_count=5')).toEqual(['self', 'first']);
+    expect(rels('status=amended')).toEqual(['self']);
+    const b = run('Observation', '_count=1&_offset=2&status=final');
+    expect(new URL(b.link!.find((l) => l.relation === 'previous')!.url!).search).toBe('?_count=1&status=final&_offset=1');
+    expect(new URL(b.link!.find((l) => l.relation === 'first')!.url!).search).toBe('?_count=1&status=final');
+  });
+
+  it('_elements keeps the primitive extension of a kept element (_birthDate)', () => {
+    add({ resourceType: 'Patient', id: 'p1', birthDate: '2000-01-01', _birthDate: { extension: [{ url: 'urn:x', valueString: 'y' }] }, gender: 'male' } as Resource);
+    expect(run('Patient', '_elements=birthDate').entry![0].resource).toMatchObject({ birthDate: '2000-01-01', _birthDate: { extension: [{ url: 'urn:x', valueString: 'y' }] } });
+  });
+
+  it('a chained _id matches the reference itself, as Medplum (the target need not exist)', () => {
+    add({ resourceType: 'Patient', id: 'p1', managingOrganization: { reference: 'Organization/o1' } });
+    expect(ids('Patient', 'organization._id=o1')).toEqual(['p1']);
+  });
+
+  it('_has parses its inner parameter as the other type\'s own (modifier, prefix)', () => {
+    add({ resourceType: 'Patient', id: 'p1' });
+    add({ resourceType: 'Patient', id: 'p2' });
+    obs('o1', { subject: { reference: 'Patient/p1' }, valueQuantity: { value: 101, system: UCUM, code: '[degF]' } });
+    expect(ids('Patient', '_has:Observation:subject:value-quantity=gt100')).toEqual(['p1']);
+    expect(ids('Patient', '_has:Observation:subject:value-quantity=gt200')).toEqual([]);
+    expect(ids('Patient', '_has:Observation:subject:_id:missing=false')).toEqual(['p1']);
+  });
+
+  it('token :contains is 400: R4 defines :contains for strings and uris only (Medplum accepts it)', () => {
+    obs('t1', { code: { text: 'LDL Cholesterol' } });
+    expect(fail('Observation', 'code:contains=chol').status).toBe(400);
+    expect(fail('ServiceRequest', 'order-detail:contains=x').message).toMatch(/:contains/);
+  });
+
+  it('dateTime search values with minutes only are accepted (Medplum\'s date format)', () => {
+    obs('d1', { effectiveDateTime: '2024-01-01T10:00:00Z' });
+    expect(ids('Observation', 'date=gt2024-01-01T09:59')).toEqual(['d1']);
+    expect(ids('Observation', 'date=lt2024-01-01T09:59Z')).toEqual([]);
+    expect(fail('Observation', 'date=lt2024-01-01T09:59:00-15:00').status).toBe(400);
+  });
+
+  it('error texts as Medplum: unknown parameter, null bytes', () => {
+    expect(fail('ServiceRequest', 'basedOn=ServiceRequest/123').message).toBe('Unknown search parameter: basedOn');
+    expect(fail('Patient', '_id=foo\u0000bar').message).toBe('Search filter value cannot contain null bytes');
+  });
 });

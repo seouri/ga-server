@@ -164,7 +164,7 @@ function cond(type: string, f: Filter, a: string): Cond {
   const [code, mod] = f.code.split(':');
   if (mod) throw badRequest(`Unsupported search modifier: ${f.code}`);
   const p = param(type, code);
-  if (!p) throw badRequest(`Unknown search parameter: ${code} (${type})`);
+  if (!p) throw badRequest(`Unknown search parameter: ${code}`);
   if (p.type === 'composite' || p.type === 'special') throw badRequest(`Unsupported search parameter type ${p.type}: ${code}`);
   const op = f.operator;
   if (op === Operator.MISSING || op === Operator.PRESENT) {
@@ -255,10 +255,15 @@ function cond(type: string, f: Filter, a: string): Cond {
 
 const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+// Medplum's date search values: an R4 date or dateTime with year, month and day, seconds optional, ' ' for 'T', offsets to ±14:00.
+const DATE_VALUE = /^(\d(\d(\d[1-9]|[1-9]0)|[1-9]00)|[1-9]000)-(0[1-9]|1[0-2])-(0[1-9]|[1-2]\d|3[0-1])([T ]([01]\d|2[0-3])(:[0-5]\d(:([0-5]\d|60))?(\.\d{1,9})?)?)?(Z|[+-]((0\d|1[0-3]):[0-5]\d|14:00)?)?$/;
+
 // Date prefixes over a [lo, hi] range (a Period with no end is a point at its start): eq means the search day contains the
 // value (FHIR; Medplum), ap that they overlap. A search value is a full date or a dateTime: Medplum refuses 2024 and 2024-05.
 function dateCond(op: string, v: string, lo: string, hi: string): [string, string[]] {
-  const fp = /^\d{4}-\d\d-\d\d$/.test(v) ? dayRange(v) : /^\d{4}-\d\d-\d\dT/.test(v) ? convertToSearchableDates([{ type: 'dateTime', value: v }])[0] : undefined;
+  if (!DATE_VALUE.test(v)) throw badRequest(`Invalid date value: ${v}`);
+  const t = v.replace(' ', 'T').replace(/T(\d\d:\d\d)(?!:)/, 'T$1:00'); // seconds, which convertToSearchableDates needs
+  const fp = /^\d{4}-\d\d-\d\d$/.test(t) ? dayRange(t) : t.includes('T') ? convertToSearchableDates([{ type: 'dateTime', value: t }])[0] : undefined;
   const s = utc(fp?.start), e = utc(fp?.end ?? fp?.start);
   if (!s || !e || Number.isNaN(Date.parse(s))) throw badRequest(`Invalid date value: ${v}`); // Medplum's text
   const sql: Record<string, [string, string[]]> = {
@@ -282,7 +287,8 @@ function hasCond(type: string, f: Filter, a: string): Cond {
   if (!t || !ref || !rest.length) throw badRequest(`Invalid _has: ${f.code}`);
   if (param(t, ref)?.type !== 'reference') throw badRequest(`Unknown search parameter: ${ref} (${t})`);
   if (rest[0] === '_has') throw badRequest(`Unsupported _has deeper than one level: ${f.code}`);
-  const inner = matching(t, { code: rest.join(':'), operator: f.operator, value: f.value });
+  // The parser leaves the inner parameter unparsed (its modifier in the code, its prefix in the value): parse it as t's own.
+  const inner = matching(t, f.operator === Operator.EQUALS ? ownFilter(t, rest.join(':'), f.value) : { code: rest.join(':'), operator: f.operator, value: f.value });
   return {
     sql: `${a}.rid in (select x.rid from resources x where x.type = ? and x.id in (select substr(h.val, ?) from idx h where h.type = ? and h.code = ? and h.val >= ? and h.val < ? and h.rid in (${inner.sql})))`,
     args: [type, type.length + 2, t, ref, `${type}/`, `${type}/￿`, ...inner.args],
@@ -300,17 +306,27 @@ function chainCond(type: string, f: Filter, a: string): Cond {
   const targets = (tt ? [tt] : p.target ?? []).filter((t) => param(t, tail.split(':')[0]));
   if (!targets.length) throw badRequest(`Unsupported chain: no target of ${code} has parameter ${tail}`);
   const args: Arg[] = [type, code];
+  // ref._id=x is the reference T/x itself, as Medplum (the target need not exist).
+  if (tail === '_id' && f.operator === Operator.EQUALS) {
+    const vals = targets.flatMap((t) => splitSearchOnComma(f.value).map((v) => `${t}/${v}`));
+    return { sql: `${a}.rid in (select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (${qs(vals.length)}))`, args: [...args, ...vals] };
+  }
   const refs = targets.map((t) => {
     // The parser leaves a chained value unparsed (no prefix): parse it as the target's own parameter, as Medplum does.
-    let own: Filter | undefined;
-    if (f.operator === Operator.EQUALS) {
-      try { own = parseSearchRequest(`${t}?${new URLSearchParams([[tail, f.value]])}`).filters?.[0]; } catch (e) { throw badRequest(e instanceof Error ? e.message : String(e)); }
-    }
-    const inner = matching(t, own ?? { code: tail, operator: f.operator, value: f.value });
+    const inner = matching(t, f.operator === Operator.EQUALS ? ownFilter(t, tail, f.value) : { code: tail, operator: f.operator, value: f.value });
     args.push(`${t}/`, ...inner.args);
     return `select ? || x.id from resources x where x.rid in (${inner.sql})`;
   });
   return { sql: `${a}.rid in (select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (${refs.join(' union all ')}))`, args };
+}
+
+// `code=value` parsed as a search parameter of `type` (modifier and prefix).
+function ownFilter(type: string, code: string, value: string): Filter {
+  try {
+    return parseSearchRequest(`${type}?${new URLSearchParams([[code, value]])}`).filters?.[0] ?? { code, operator: Operator.EQUALS, value };
+  } catch (e) {
+    throw badRequest(e instanceof Error ? e.message : String(e));
+  }
 }
 
 function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
@@ -335,7 +351,9 @@ function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
 function elements(r: Resource, fields: string[]): Resource {
   const required = Object.entries(tryGetDataType(r.resourceType)?.elements ?? {}).filter(([, e]) => e.min > 0).map(([k]) => k.replace('[x]', ''));
   const keep = new Set(['resourceType', 'id', 'meta', ...required, ...fields.map((f) => f.split('.')[0])]);
-  const out = Object.fromEntries(Object.entries(r).filter(([k]) => keep.has(k) || [...keep].some((f) => k.startsWith(f) && /^[A-Z]/.test(k.slice(f.length))))) as Resource;
+  const kept = (k: string) => keep.has(k) || [...keep].some((f) => k.startsWith(f) && /^[A-Z]/.test(k.slice(f.length)));
+  // _birthDate: the extensions of a kept primitive.
+  const out = Object.fromEntries(Object.entries(r).filter(([k]) => kept(k.startsWith('_') ? k.slice(1) : k))) as Resource;
   out.meta = { ...r.meta, tag: [...(r.meta?.tag ?? []), { system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' }] };
   return out;
 }
@@ -406,6 +424,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   if (!getSearchParameters(type)) throw badRequest(`Unknown search parameter: resource type ${type} is not stored`);
   const summary = query.find(([k]) => k === '_summary')?.[1];
   if (summary && summary !== 'count' && summary !== 'false') throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
+  if (query.some(([, v]) => v.includes('\0'))) throw badRequest('Search filter value cannot contain null bytes'); // Medplum's text
   let req: SearchRequest;
   try {
     req = parseSearchRequest(`${type}?${new URLSearchParams(normalize(type, query).filter(([k]) => !IGNORED.has(k)))}`);
@@ -443,6 +462,13 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
     bundle.total = (prep(`select count(*) n from ${src}${probes.map((c) => ` and ${c.sql}`).join('')}`)
       .get(...(driver ? driver.set!.args : [type]), ...probes.flatMap((c) => c.args)) as { n: number }).n;
   }
+  // Links as Medplum's: self always; first, next and previous on a non-empty page. Medplum's links carry _elements as _fields.
+  const linkQuery = (set: Record<string, string>) => {
+    const u = new URLSearchParams(query.filter(([k]) => k !== '_offset' && k !== '_cursor').map(([k, v]) => [k === '_elements' ? '_fields' : k, v]));
+    for (const [k, v] of Object.entries(set)) u.set(k, v);
+    return `${base}fhir/R4/${type}?${u}`;
+  };
+  bundle.link = [{ relation: 'self', url: `${base}fhir/R4/${type}?${new URLSearchParams(query)}` }];
   if (count === 0) return bundle;
 
   const offset = req.cursor ? 0 : req.offset ?? 0;
@@ -526,15 +552,12 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
       .all(inc.resourceType, inc.searchParam, ...matches.map((m) => `${type}/${m.id}`)) as { type: string; id: string; json: string }[]);
   }
   bundle.entry = entry;
-
-  bundle.link = [{ relation: 'self', url: `${base}fhir/R4/${type}?${new URLSearchParams(query)}` }];
+  if (!page.length) return bundle;
+  bundle.link.push({ relation: 'first', url: linkQuery({}) });
   if (more) {
-    // Medplum's next links carry _elements as _fields.
-    const next = new URLSearchParams(query.filter(([k]) => k !== '_offset' && k !== '_cursor').map(([k, v]) => [k === '_elements' ? '_fields' : k, v]));
-    next.set('_count', String(count));
     const lastRow = page[page.length - 1];
-    next.set('_cursor', encodeCursor(keys.map((_, i) => lastRow[`k${i}`])));
-    bundle.link.push({ relation: 'next', url: `${base}fhir/R4/${type}?${next}` });
+    bundle.link.push({ relation: 'next', url: linkQuery({ _count: String(count), _cursor: encodeCursor(keys.map((_, i) => lastRow[`k${i}`])) }) });
   }
+  if (offset) bundle.link.push({ relation: 'previous', url: linkQuery(offset > count ? { _offset: String(offset - count) } : {}) });
   return bundle;
 }
