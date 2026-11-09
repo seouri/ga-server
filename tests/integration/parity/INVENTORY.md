@@ -662,20 +662,20 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/batch.test.ts | Batch › Transaction resource type tracking › Gathers resource types from transaction entries | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
 | fhir-router/src/batch.test.ts | Batch › Transaction resource type tracking › De-duplicates repeated resource types | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
 | fhir-router/src/batch.test.ts | Batch › Transaction resource type tracking › Skips system-level entries with no resource type | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Search entries are tagged with mode "match" | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include resolves a literal reference | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include does not throw on a dangling reference | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include with a target type filters by that type | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include deduplicates resources referenced more than once | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include does not re-include a resource already in the match set | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves reverse references | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude with a target type filters the base resources | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Search entries are tagged with mode "match" | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include resolves a literal reference | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include does not throw on a dangling reference | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include with a target type filters by that type | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include deduplicates resources referenced more than once | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include does not re-include a resource already in the match set | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves reverse references | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude with a target type filters the base resources | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include:iterate follows a chain of references | skipped | include | not yet ported (Task 4) |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include without :iterate does not recurse | skipped | include | not yet ported (Task 4) |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include resolves canonical references by exact URL | skipped | include | not yet ported (Task 4) |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves canonical references | skipped | include | not yet ported (Task 4) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Empty match set skips include processing | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest | ported | existing |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Empty match set skips include processing | ported | existing |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | plan-3 | graphql | deferred to plan 3 (GraphQL) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Syntax error | plan-3 | graphql | deferred to plan 3 (GraphQL) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection forbidden | plan-3 | graphql | deferred to plan 3 (GraphQL) |
