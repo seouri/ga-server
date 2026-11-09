@@ -610,50 +610,50 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Conditional delete | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Create resource with query param account | skipped | platform | project/account compartments |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Custom system-level operation returns not found | ported | existing |  |
-| fhir-router/src/batch.test.ts | Batch › Process batch with missing bundle type | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch with invalid bundle type | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch with missing entries | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch success | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create success | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create missing resource | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create missing resourceType | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create ignore http fullUrl | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create does not rewrite identifier | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create ifNoneExist success | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch create ifNoneExist multiple matches | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Use ifNoneExist result in other reference | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch update | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch update missing resource | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch patch | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch patch Parameters | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch FHIRPath patch | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch FHIRPath patch rewrites local references | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch FHIRPath PATCH with matching If-Match succeeds | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch FHIRPath PATCH with stale If-Match fails with 412 | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch PUT with stale If-Match fails with 412 | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Transaction PATCH with stale If-Match fails the whole transaction | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › JSONPath error messages | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › JSONPatch error messages | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch patch invalid url | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch patch missing resource | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch patch wrong patch type | skipped | existing | not yet ported (Task 3c) (title appears twice in Medplum) |
-| fhir-router/src/batch.test.ts | Batch › Process batch delete | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch delete invalid URL | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch missing request | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch missing request.method | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch unsupported request.method | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch missing request.url | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch not found | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process batch read history | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Conditional interactions | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/batch.test.ts | Batch › Process batch with missing bundle type | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch with invalid bundle type | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch with missing entries | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch success | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create success | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create missing resource | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create missing resourceType | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create ignore http fullUrl | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create does not rewrite identifier | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create ifNoneExist success | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch create ifNoneExist multiple matches | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Use ifNoneExist result in other reference | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch update | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch update missing resource | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch patch | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch patch Parameters | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch FHIRPath patch | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch FHIRPath patch rewrites local references | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch FHIRPath PATCH with matching If-Match succeeds | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch FHIRPath PATCH with stale If-Match fails with 412 | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Batch PUT with stale If-Match fails with 412 | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › If-Match preconditions › Transaction PATCH with stale If-Match fails the whole transaction | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › JSONPath error messages | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › JSONPatch error messages | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch patch invalid url | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch patch missing resource | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch patch wrong patch type | ported | existing | title appears twice in Medplum; one port covers both |
+| fhir-router/src/batch.test.ts | Batch › Process batch delete | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch delete invalid URL | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch missing request | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch missing request.method | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch unsupported request.method | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch missing request.url | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch not found | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process batch read history | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Conditional interactions | ported | existing |  |
 | fhir-router/src/batch.test.ts | Batch › Dispatches batch telemetry once across transaction retries | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
-| fhir-router/src/batch.test.ts | Batch › Process Transactions › Embedded urn:uuid | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process Transactions › Encoded urn:uuid | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Process Transactions › Transaction update after create | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Valid null | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Concurrent conditional create in transactions | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › Local reference resolution for update | skipped | existing | not yet ported (Task 3c) |
-| fhir-router/src/batch.test.ts | Batch › No self-assigned ID in upsert | skipped | existing | not yet ported (Task 3c) |
+| fhir-router/src/batch.test.ts | Batch › Process Transactions › Embedded urn:uuid | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process Transactions › Encoded urn:uuid | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Process Transactions › Transaction update after create | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Valid null | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Concurrent conditional create in transactions | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › Local reference resolution for update | ported | existing |  |
+| fhir-router/src/batch.test.ts | Batch › No self-assigned ID in upsert | ported | existing |  |
 | fhir-router/src/batch.test.ts | Batch › Re-entrant processing › Full run matches one-shot processBatch behavior | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
 | fhir-router/src/batch.test.ts | Batch › Re-entrant processing › Placeholder references survive serialize -> fromState -> resume | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |
 | fhir-router/src/batch.test.ts | Batch › Re-entrant processing › Resume does not reprocess already-completed entries | skipped | platform | Medplum batch internals (re-entrant state, telemetry) |

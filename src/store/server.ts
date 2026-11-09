@@ -1,5 +1,5 @@
 // The store over local HTTP in Medplum's REST shape (/fhir/R4/<Type>[/<id>[/_history[/<vid>]]], _search, PATCH, conditional
-// PUT/DELETE, history, Patient/$everything, metadata, Binary, batch and transaction),
+// PUT/PATCH/DELETE, history, Patient/$everything, metadata, Binary, batch and transaction),
 // so a MedplumClient in another process reads and writes it. The one process that owns the SQLite file runs this.
 // Every request but GET /healthz needs `Authorization: Bearer <token>` (the token file, created on first serve).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -181,7 +181,7 @@ const header = (req: IncomingMessage, name: string): string | undefined => {
 };
 
 // One request (HTTP or a batch entry): its body parsed; id: a transaction's pre-assigned id for a POST.
-type Req = { method: string; parts: string[]; query: URLSearchParams; body: unknown; ifMatch?: string; ifNoneExist?: string; base: string; id?: string };
+type Req = { method: string; parts: string[]; query: URLSearchParams; body: unknown; ifMatch?: string; ifNoneExist?: string; base: string; id?: string; entry?: boolean };
 // Its answer: a resource or Bundle as JSON text, or an OperationOutcome; row (one resource's version) gives ETag, Last-Modified,
 // Location (201) and a batch entry's location.
 type Answer = { status: number; json?: string; outcome?: OperationOutcome; row?: Pick<Row, 'type' | 'id' | 'versionId' | 'lastUpdated'> };
@@ -272,7 +272,7 @@ function conditional(store: Store, r: Req, type: string): Answer {
     if (r.method === 'DELETE') { if (found.length) store.delete(type, found[0].id!); return { status: 200, outcome: OK }; }
     const res = resourceOf(r, type);
     if (!found.length) {
-      if (res.id) throw new HttpError(400, 'Cannot perform create as update with client-assigned ID');
+      if (res.id) throw new HttpError(400, r.entry ? 'Cannot provide ID for create by update' : 'Cannot perform create as update with client-assigned ID'); // Medplum's texts
       return written(store.create(resolveRefs(store, res), undefined, r.id).resource, 201);
     }
     if (res.id && res.id !== found[0].id) throw new HttpError(400, 'Resource ID did not match resolved ID');
@@ -280,16 +280,32 @@ function conditional(store: Store, r: Req, type: string): Answer {
   });
 }
 
-// JSON Patch (RFC 6902; in a batch, a Binary holding it, as Medplum's client sends it) or FHIRPath Patch (a Parameters). The
-// result is validated and versioned like an update, as on Medplum.
-function patchOps(body: unknown): unknown {
-  const bin = body as { resourceType?: string; contentType?: string; data?: string };
-  if (bin?.resourceType !== 'Binary') return body;
-  if (bin.contentType !== 'application/json-patch+json') throw new HttpError(400, 'A PATCH Binary must hold a JSON Patch (application/json-patch+json)');
-  return parse(Buffer.from(bin.data ?? '', 'base64').toString('utf8'));
+// A batch PATCH entry's patch, as Medplum's batch reads it (and its texts): a Binary holding a JSON Patch in base64 (as Medplum's
+// client sends it), a FHIRPath Patch (a Parameters with `type` parts) as is, or a JSON Patch written as a Parameters (`op` parts,
+// values as JSON in valueString).
+function entryPatch(res: Resource | undefined): unknown {
+  let ops: unknown;
+  if (res?.resourceType === 'Binary') {
+    if (!res.data) throw new HttpError(400, 'Missing entry.resource.data');
+    try { ops = JSON.parse(Buffer.from(res.data, 'base64').toString('utf8')); } catch { throw new HttpError(400, 'Content could not be parsed'); }
+  } else if (res?.resourceType === 'Parameters') {
+    if (res.parameter?.some((p) => p.name === 'operation' && p.part?.some((x) => x.name === 'type'))) return res;
+    ops = res.parameter?.filter((p) => p.name === 'operation').map((p) => {
+      const part = (name: string) => p.part?.find((x) => x.name === name);
+      const op = part('op')?.valueCode;
+      if (!op) throw new HttpError(400, 'PATCH Parameters missing op');
+      const value = part('value')?.valueString;
+      let parsed: unknown;
+      try { parsed = value === undefined ? undefined : JSON.parse(value); } catch { throw new HttpError(400, `Invalid JSON in PATCH value: ${value}`); }
+      return { op, path: part('path')?.valueString, ...(['copy', 'move'].includes(op) && { from: part('from')?.valueString }), ...(['add', 'replace', 'test'].includes(op) && { value: parsed }) };
+    });
+  } else throw new HttpError(400, 'Patch entry must include a Binary or Parameters resource');
+  if (!Array.isArray(ops)) throw new HttpError(400, 'Decoded PATCH body must be an array');
+  return ops;
 }
+// JSON Patch (RFC 6902) or FHIRPath Patch (a Parameters). The result is validated and versioned like an update, as on Medplum.
 function patch(store: Store, type: string, id: string, r: Req): Resource {
-  const ops = patchOps(r.body);
+  const ops = r.body;
   const fhirpath = (ops as Parameters)?.resourceType === 'Parameters';
   if (!fhirpath && !Array.isArray(ops)) throw new HttpError(400, 'Invalid patch body'); // Medplum's text: a JSON Patch or a FHIRPath Patch (Parameters)
   // A urn reference the patch brings in names no stored record (outside a transaction, or one no entry defines). Only the
@@ -489,7 +505,8 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
   if (b?.resourceType !== 'Bundle') throw new HttpError(400, 'Not a bundle');
   if (b.type !== 'batch' && b.type !== 'transaction') throw new HttpError(400, `Unrecognized bundle type: ${b.type}`);
   if (b.entry !== undefined && (!Array.isArray(b.entry) || b.entry.some((e) => !e || typeof e !== 'object' || Array.isArray(e)))) throw new HttpError(400, 'Bundle.entry must be a list of entries');
-  const entries = b.entry ?? [];
+  if (!b.entry?.length) throw new HttpError(400, 'Missing bundle entries');
+  const entries = b.entry;
   const urns = new Map<string, string>(), pre = new Map<number, string>();
   // Every defined urn replaced, whole urns only (urn:oid:1.2.3 never rewrites inside urn:oid:1.2.3.4); the pattern is rebuilt
   // only when a urn was added (once per transaction after the pre-pass, unless a GET defines one).
@@ -497,31 +514,37 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
   const rewrite = <T>(v: T): T => {
     if (!urns.size) return v;
     if (urns.size !== reSize) {
-      re = new RegExp(`(?:${[...urns.keys()].sort((x, y) => y.length - x.length).map(esc).join('|')})(?![\\w.-])`, 'g');
+      // Each urn also URL-encoded (`urn%3Auuid%3A...`, as in a search string), as Medplum.
+      re = new RegExp(`(?:${[...urns.keys()].flatMap((u) => [u, u.replaceAll(':', '%3A')]).sort((x, y) => y.length - x.length).map(esc).join('|')})(?![\\w.-])`, 'g');
       reSize = urns.size;
     }
-    return JSON.parse(JSON.stringify(v).replace(re!, (m) => urns.get(m)!));
+    return JSON.parse(JSON.stringify(v).replace(re!, (m) => urns.get(m.replaceAll('%3A', ':'))!));
   };
   // Whether any entry's body (a PATCH's operations decoded) holds this whole urn, as rewrite would replace it.
   const referenced = (urn: string): boolean => {
     const at = new RegExp(`${esc(urn)}(?![\\w.-])`);
-    return entries.some((x) => { try { return at.test(JSON.stringify(x.request?.method === 'PATCH' ? patchOps(x.resource) : x.resource) ?? ''); } catch { return false; } });
+    return entries.some((x) => { try { return at.test(JSON.stringify(x.request?.method === 'PATCH' ? entryPatch(x.resource) : x.resource) ?? ''); } catch { return false; } });
   };
   const run = (i: number): BundleEntry => {
     const e = entries[i];
     const { method = '', url = '', ifMatch, ifNoneExist } = e.request ?? {};
-    // A PATCH entry's operations are base64 in a Binary: decoded first, so urns inside them are rewritten too.
-    const body = method === 'PATCH' ? patchOps(e.resource) : e.resource;
-    const res = body && rewrite(body);
-    if (res && method !== 'PATCH') danglingUrn(res); // patch() checks its operations
+    // Medplum's texts; an entry no route serves (a method, a path, an instance of an unknown type) is 404, as Medplum's batch.
+    if (!method) throw new HttpError(400, 'Missing Bundle entry request method');
+    if (!url) throw new HttpError(400, 'Missing Bundle entry request URL');
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new HttpError(404, `Not found: ${method} ${url}`);
     const q = url.indexOf('?'), path = q < 0 ? url : url.slice(0, q);
     const nested = method === 'POST' && (path === '' || path === '/'); // a bundle in an entry, as Medplum runs it
     const parts = nested ? [] : path.split('/');
-    if (!nested && (!parts[0] || parts.length > 4 || /^[a-z]+:/i.test(url))) throw new HttpError(400, `Unsupported entry url: ${url}`);
+    if (!nested && (!parts[0] || /^[a-z]+:/i.test(url))) throw new HttpError(400, `Unsupported entry url: ${url}`);
+    if (!nested && (parts.length > 4 || (parts.length > 1 && TYPE.test(parts[0]) && !storedTypes().includes(parts[0])) || (method === 'PATCH' && parts.length > 2))) throw new HttpError(404, `Not found: ${path}`);
+    // A PATCH entry's operations (base64 in a Binary, or a Parameters) are read first, so urns inside them are rewritten too.
+    const body = method === 'PATCH' ? entryPatch(e.resource) : e.resource;
+    const res = body && rewrite(body);
+    if (res && method !== 'PATCH') danglingUrn(res); // patch() checks its operations
     const bin = method === 'POST' && e.resource ? staged.get(e.resource) : undefined;
     const a: Answer = bin
       ? { status: 201, json: JSON.stringify({ resourceType: 'Binary', ...bin }), row: { type: 'Binary', id: bin.id, versionId: '', lastUpdated: '' } }
-      : dispatch(store, { method, parts, query: new URLSearchParams(q < 0 ? '' : url.slice(q + 1)), body: res, ifMatch, ifNoneExist, base, id: pre.get(i) });
+      : dispatch(store, { method, parts, query: new URLSearchParams(q < 0 ? '' : url.slice(q + 1)), body: res, ifMatch, ifNoneExist, base, id: pre.get(i), entry: true });
     if (e.fullUrl && URN.test(e.fullUrl) && a.row) {
       const at = `${a.row.type}/${a.row.id}`, want = urns.get(e.fullUrl);
       // An earlier entry of the transaction changed what this one matched, and entries point at the planned id.

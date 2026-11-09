@@ -55,9 +55,9 @@ Every request except `GET /healthz` needs `Authorization: Bearer <token>` (compa
 Under `/fhir/R4/`:
 
 - `GET|POST <Type>` (search; `POST <Type>/_search` with a form body), `GET <Type>/<id>`, `PUT <Type>/<id>` (`If-Match` → 412 on another version), `PATCH <Type>/<id>` (JSON Patch, or FHIRPath Patch as a Parameters), `DELETE <Type>/<id>` (`If-Match`); `POST <Type>` (`If-None-Exist`).
-- Conditional `PUT <Type>?query` and `DELETE <Type>?query`.
+- Conditional `PUT <Type>?query`, `PATCH <Type>?query` (JSON Patch) and `DELETE <Type>?query`.
 - History: `<Type>/<id>/_history[/<vid>]`, `<Type>/_history`, `_history` (`_count`, `_since`).
-- `POST /` batch and transaction bundles (urn rewriting, conditional references, GET/POST/PUT/PATCH/DELETE entries, `POST Binary` entries with base64 `data` (top-level entries; a failed transaction keeps none), a nested bundle as a `POST /` entry).
+- `POST /` batch and transaction bundles (urn rewriting, also URL-encoded inside strings; conditional references; GET/POST/PUT/PATCH/DELETE entries, a PATCH entry's patch as a base64 JSON Patch `Binary` or a `Parameters` (FHIRPath Patch, or JSON Patch as `op` parts); `POST Binary` entries with base64 `data` (top-level entries; a failed transaction keeps none), a nested bundle as a `POST /` entry).
 - `Patient/<id>/$everything` (`_count`, `_offset`, `_since`, `_type`, `start` and `end` by Medplum's care dates); `<Type>/$validate`.
 - `Binary`: `POST` and `PUT Binary/<id>` stream the raw body to disk (`Content-Encoding` gzip or deflate decoded), `GET Binary/<id>` streams it back, `DELETE`.
 - `GET metadata`: a CapabilityStatement of what this store supports.

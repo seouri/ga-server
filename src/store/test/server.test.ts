@@ -588,6 +588,40 @@ describe('store server: Medplum-compatible routes', () => {
     expect(await text('POST', '$custom-operation', {})).toEqual([404, 'Not found']);
   });
 
+  it('as Medplum\'s batch: its entry error texts and statuses, PATCH entry bodies, URL-encoded urns rewritten in strings', async () => {
+    expect((await call('POST', '', { resourceType: 'Bundle', type: 'batch' })).json.issue[0].details.text).toBe('Missing bundle entries');
+    expect((await call('POST', '', { resourceType: 'Bundle', type: 'batch', entry: [] })).status).toBe(400);
+    expect((await call('POST', '', { resourceType: 'Bundle', type: 'xyz' })).json.issue[0].details.text).toBe('Unrecognized bundle type: xyz');
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient', gender: 'unknown' })).json;
+    const bin = (ops: unknown) => ({ resourceType: 'Binary', contentType: 'application/json-patch+json', data: Buffer.from(JSON.stringify(ops)).toString('base64') });
+    const op = (...part: object[]) => ({ name: 'operation', part });
+    const url = `Patient/${p.id}`;
+    const r = await tx('batch', [
+      {}, { request: { url: 'Patient' } }, { request: { method: 'POST' } }, { request: { method: 'XXX', url: 'Patient' } },
+      { request: { method: 'DELETE', url: 'Patientx/12' } }, { request: { method: 'POST', url: 'Patientx' }, resource: { resourceType: 'Patientx' } }, { request: { method: 'GET', url: 'x/x/x/x/x' } }, { request: { method: 'PATCH', url: 'Patient/1/$everything' } },
+      { request: { method: 'PATCH', url } }, { request: { method: 'PATCH', url }, resource: { resourceType: 'Patient' } }, { request: { method: 'PATCH', url }, resource: { resourceType: 'Binary' } },
+      { request: { method: 'PATCH', url }, resource: bin(null) }, { request: { method: 'PATCH', url }, resource: bin({ foo: 'bar' }) }, { request: { method: 'PATCH', url }, resource: { resourceType: 'Parameters' } },
+      { request: { method: 'PATCH', url }, resource: { resourceType: 'Parameters', parameter: [
+        op({ name: 'op', valueCode: 'add' }, { name: 'path', valueString: '/name' }, { name: 'value', valueString: '[{"given":["Dave"],"family":"Smith"}]' }),
+        op({ name: 'op', valueCode: 'copy' }, { name: 'from', valueString: '/name/0/family' }, { name: 'path', valueString: '/name/0/given/-' }),
+        op({ name: 'op', valueCode: 'remove' }, { name: 'path', valueString: '/gender' })] } },
+      { request: { method: 'PUT', url: 'Patient?_id=00000000-0000-4000-8000-000000000000' }, resource: { resourceType: 'Patient', id: '00000000-0000-4000-8000-000000000000' } },
+    ] as BundleEntry[]);
+    expect(r.json.entry.map((e: BundleEntry) => [e.response?.status, e.response?.outcome?.issue?.[0]?.details?.text])).toEqual([
+      ['400', 'Missing Bundle entry request method'], ['400', 'Missing Bundle entry request method'], ['400', 'Missing Bundle entry request URL'], ['404', 'Not found: XXX Patient'],
+      ['404', 'Not found: Patientx/12'], ['400', 'Unknown resource type'], ['404', 'Not found: x/x/x/x/x'], ['404', 'Not found: Patient/1/$everything'],
+      ...[1, 2].map(() => ['400', 'Patch entry must include a Binary or Parameters resource']), ['400', 'Missing entry.resource.data'],
+      ...[1, 2, 3].map(() => ['400', 'Decoded PATCH body must be an array']), ['200', 'All OK'], ['400', 'Cannot provide ID for create by update'],
+    ]);
+    expect([r.json.entry[14].resource.name, r.json.entry[14].resource.gender]).toEqual([[{ given: ['Dave', 'Smith'], family: 'Smith' }], undefined]);
+    const Q = 'urn:uuid:e95d01cf-60ae-43f7-a8fc-0500a8b045bb';
+    const t = await tx('transaction', [
+      { fullUrl: Q, request: { method: 'POST', url: 'Questionnaire' }, resource: { resourceType: 'Questionnaire', status: 'active' } },
+      { request: { method: 'POST', url: 'Basic' }, resource: { resourceType: 'Basic', code: { text: `QuestionnaireResponse?questionnaire=${Q.replaceAll(':', '%3A')}` } } },
+    ]);
+    expect(t.json.entry[1].resource.code.text).toBe(`QuestionnaireResponse?questionnaire=Questionnaire/${t.json.entry[0].resource.id}`);
+  });
+
   it('conditional update (0 creates, 1 updates, more 412) and conditional delete (more 412, 1 deletes, 0 is OK)', async () => {
     const idf = [{ system: 's', value: 'x' }];
     const c = await call('PUT', 'Observation?identifier=s|x', ob({ identifier: idf }));
