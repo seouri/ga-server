@@ -851,8 +851,8 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     return [bundle1.total, bundle2.total, names(bundle2, { task1, task2 })];
   }));
 
-  // Medplum's test.each, checked as it does: a 400 whose text contains the expected words. _deleted is Medplum's soft-delete
-  // parameter; the store keeps no deleted records and defines no such parameter, so it answers "Unknown search parameter".
+  // Medplum's test.each, checked as it does: a 400 whose text contains the expected words. The _deleted cases are a
+  // deliberate difference, tested below.
   const invalid: [string, string][] = [
     ['Patient?_id:in=123', 'Invalid modifier'], ['Patient?_id:not-in=123', 'Invalid modifier'], ['Patient?_id:text=123', 'Invalid modifier'],
     ['Patient?_id:above=123', 'Invalid modifier'], ['Patient?_id:below=123', 'Invalid modifier'], ['Patient?_id:of-type=123', 'Invalid modifier'],
@@ -870,35 +870,67 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
   ];
   test('systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const out = [];
-    for (const [path, expected] of invalid) {
+    for (const [path, expected] of invalid.filter(([p]) => !p.includes('_deleted'))) {
       const e = await error(s, path);
-      const want = s.name === 'store' && path.includes('_deleted') ? 'Unknown search parameter: _deleted' : expected;
-      expect([path, e.status, e.text?.includes(want)], e.text).toEqual([path, 400, true]);
+      expect([path, e.status, e.text?.includes(expected)], e.text).toEqual([path, 400, true]);
       out.push([path, e.status]);
     }
     return out;
   }));
 
-  // FHIR R4 defines these and the store implements them; Medplum 5.2.14 refuses :of-type and composite parameters (400) and
-  // treats a uri's :below/:above as plain equality (a parent or child url finds nothing).
+  // The deliberate differences below share the title of the Medplum test whose list they extend; one per README bullet.
+  const outcome = async (s: Side, path: string, named: Record<string, { id?: string }>) => {
+    const g = await s.call('GET', path);
+    return g.status === 200 ? names(g.json, named).filter((n) => n !== '?') : `${g.status} ${g.json?.issue?.[0]?.details?.text}`;
+  };
+
+  // README: :of-type and composite parameters work as R4 defines them; Medplum 5.2.14 refuses both.
   test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
     const V2 = 'http://terminology.hl7.org/CodeSystem/v2-0203';
     const [medplum, store] = await both(sides, async (s) => {
       const u = crypto.randomUUID();
       const patient = await s.create({ resourceType: 'Patient', identifier: [{ type: { coding: [{ system: V2, code: 'MR' }] }, system: 'http://example.com/mrn', value: u }] } as Patient);
       const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: LOINC, code: u }] }, valueQuantity: { value: 250, system: UCUM, code: 'mg/dL' } });
+      return [await outcome(s, `Patient?identifier:of-type=${V2}|MR|${u}`, { patient }), await outcome(s, `Observation?code-value-quantity=${LOINC}|${u}$gt200`, { obs })];
+    });
+    expect(medplum).toEqual(['400 Invalid modifier :of-type for Patient-identifier', '400 Unrecognized search parameter type: composite']);
+    expect(store).toEqual([['patient'], ['obs']]);
+  });
+
+  // README: a uri's :below and :above match by path segment; Medplum ignores both and matches the value only.
+  test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const u = crypto.randomUUID();
       const questionnaire = await s.create({ resourceType: 'Questionnaire', status: 'active', url: `http://example.com/fhir/Questionnaire/${u}` });
-      const out: Record<string, unknown> = {};
-      for (const [k, path] of [
-        ['of-type', `Patient?identifier:of-type=${V2}|MR|${u}`], ['composite', `Observation?code-value-quantity=${LOINC}|${u}$gt200`],
-        ['below', `Questionnaire?url:below=http://example.com/fhir/Questionnaire`], ['above', `Questionnaire?url:above=http://example.com/fhir/Questionnaire/${u}/_history/1`],
-      ]) {
-        const g = await s.call('GET', path);
-        out[k] = g.status === 200 ? names(g.json, { patient, obs, questionnaire }).filter((n) => n !== '?') : `${g.status} ${g.json?.issue?.[0]?.details?.text}`;
-      }
+      return [
+        await outcome(s, `Questionnaire?url:below=http://example.com/fhir/Questionnaire/${u}`, { questionnaire }),
+        await outcome(s, `Questionnaire?url:below=http://example.com/fhir/Questionnaire`, { questionnaire }),
+        await outcome(s, `Questionnaire?url:above=http://example.com/fhir/Questionnaire/${u}/_history/1`, { questionnaire }),
+      ];
+    });
+    expect(medplum).toEqual([['questionnaire'], [], []]);
+    expect(store).toEqual([['questionnaire'], ['questionnaire'], ['questionnaire']]);
+  });
+
+  // README: :identifier on references only, :of-type on Identifier tokens only, :above/:below on uris only; elsewhere the
+  // store is 400 (R4: a server SHALL reject a modifier it does not support) where Medplum ignores the modifier and answers 200.
+  test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
+    const paths = ['Patient?name:identifier=x', 'Patient?name:above=x', 'Observation?subject:of-type=x', 'Observation?subject:above=x',
+      'Questionnaire?url:contains=x', 'Questionnaire?url:of-type=x'];
+    const [medplum, store] = await both(sides, async (s) => {
+      const out = [];
+      for (const path of paths) out.push((await error(s, path)).status);
       return out;
     });
-    expect(medplum).toEqual({ 'of-type': '400 Invalid modifier :of-type for Patient-identifier', composite: '400 Unrecognized search parameter type: composite', below: [], above: [] });
-    expect(store).toEqual({ 'of-type': ['patient'], composite: ['obs'], below: ['questionnaire'], above: ['questionnaire'] });
+    expect(medplum).toEqual(paths.map(() => 200));
+    expect(store).toEqual(paths.map(() => 400));
+  });
+
+  // README: no _deleted parameter (the store keeps no deleted records, Medplum's soft delete): an unknown parameter.
+  test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
+    const paths = invalid.filter(([p]) => p.includes('_deleted')).map(([p]) => p);
+    const [medplum, store] = await both(sides, async (s) => Promise.all(paths.map(async (p) => { const e = await error(s, p); return `${e.status} ${e.text}`; })));
+    expect(medplum).toEqual(['400 Invalid modifier :in for _deleted', '400 Invalid modifier :not-in for _deleted']);
+    expect(store).toEqual(['400 Unknown search parameter: _deleted', '400 Unknown search parameter: _deleted']);
   });
 });

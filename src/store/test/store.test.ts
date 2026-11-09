@@ -166,7 +166,7 @@ describe('Store index format', () => {
       expect((s.db.prepare('pragma user_version').get() as { user_version: number }).user_version).toBe(INDEX_VERSION);
       s.close();
       new Store(file).close(); // same version: opens
-      for (const old of [1, 2]) { // 2: the format before word rows and caseless ContactPoints
+      for (const old of [1, 2, 3]) { // 2: before word rows and caseless ContactPoints; 3: before composite, :identifier and :of-type rows
         const raw = new DatabaseSync(file);
         raw.exec(`pragma user_version = ${old}`);
         raw.close();

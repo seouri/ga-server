@@ -32,7 +32,7 @@ export class StoreError extends OperationOutcomeError {
 export const multipleMatches = () => new StoreError(412, [], { resourceType: 'OperationOutcome', id: 'multiple-matches',
   issue: [{ severity: 'error', code: 'multiple-matches', details: { text: 'Multiple resources found matching condition' } }] });
 
-export const INDEX_VERSION = 3;
+export const INDEX_VERSION = 4;
 // The file was written in another search index format: it must be rebuilt (re-imported) before this version can open it.
 export class IndexFormatError extends Error {}
 export type Row = { type: string; id: string; versionId: string; lastUpdated: string; json: string }; // json '': a delete

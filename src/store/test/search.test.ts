@@ -693,6 +693,9 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(fail('Observation', 'code-value-quantity=2093-3').message).toMatch(/code-value-quantity.*\$/);
     expect(fail('Observation', 'code-value-quantity:exact=a$1').message).toBe('Invalid modifier :exact for code-value-quantity');
     expect(fail('Observation', '_sort=code-value-quantity').status).toBe(400);
+    // A component takes its own type's prefixes: sa and eb are for dates only.
+    expect(fail('Observation', 'code-value-quantity=2093-3$sa1').message).toBe('Invalid operator sa for value-quantity');
+    expect(fail('Observation', 'code-value-quantity=2093-3$eb9').message).toBe('Invalid operator eb for value-quantity');
   });
 
   it('composite pairs components from the same repetition', () => {
@@ -719,6 +722,8 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Questionnaire', 'context-type-value=focus$y')).toEqual([]);
     // ResearchStudy's progress-status composites name components R4 does not define.
     expect(fail('ResearchStudy', 'progress-status-state-actual=a$true').message).toMatch(/progress-status-state-actual/);
+    add({ resourceType: 'ResearchStudy', id: 'r1', status: 'active', progressStatus: [{ state: { coding: [{ code: 'a' }] } }] } as Resource);
+    expect(fail('ResearchStudy', 'progress-status-state-actual:missing=true').message).toMatch(/progress-status-state-actual/);
   });
 
   it('error texts as Medplum for modifiers: Invalid modifier, :missing must be true or false; _id takes eq, ne, :not, :exact', () => {

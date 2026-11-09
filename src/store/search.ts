@@ -139,13 +139,20 @@ const COMPONENT_FIX: Record<string, string[]> = { 'DocumentReference-relationshi
 
 // A composite's components: each one's own parameter (by its definition url, on the same type) and its expression relative
 // to a repetition of the composite's. undefined when a definition is not on the type (ResearchStudy's progress-status-*).
-export function components(type: string, p: SearchParameter): { p: SearchParameter; expr: FhirPathAtom }[] | undefined {
+type Component = { p: SearchParameter; expr: FhirPathAtom };
+const componentCache = new Map<string, Component[] | undefined>();
+export function components(type: string, p: SearchParameter): Component[] | undefined {
+  const key = `${type} ${p.code}`;
+  if (!componentCache.has(key)) componentCache.set(key, findComponents(type, p));
+  return componentCache.get(key);
+}
+function findComponents(type: string, p: SearchParameter): Component[] | undefined {
   const params = Object.values(getSearchParameters(type) ?? {});
   const out = (p.component ?? []).map((c, k) => {
     const cp = params.find((x) => x.url === c.definition);
     return cp && { p: cp, expr: path(COMPONENT_FIX[p.id ?? '']?.[k] ?? c.expression) };
   });
-  return out.length && out.every((c) => c) ? out as { p: SearchParameter; expr: FhirPathAtom }[] : undefined;
+  return out.length && out.every((c) => c) ? out as Component[] : undefined;
 }
 
 function rows(r: Resource): { rows: Row[]; comps: CompRow[] } {
@@ -266,6 +273,7 @@ function cond(type: string, f: Filter, a: string): Cond {
   if (!p) throw badRequest(`Unknown search parameter: ${code}`);
   if (p.type === 'special') throw badRequest(`Unsupported search parameter type ${p.type}: ${code}`);
   const op = f.operator;
+  if (p.type === 'composite' && !components(type, p)) throw badRequest(`Unsupported composite search parameter ${code}: its components are not defined on ${type}`);
   if (op === Operator.MISSING || op === Operator.PRESENT) {
     if (f.value !== 'true' && f.value !== 'false') throw badRequest(`Search filter ':${op}' must have a value of 'true' or 'false'`); // Medplum's text
     const present = (op === Operator.MISSING) === (f.value === 'false');
@@ -358,15 +366,16 @@ function valueSql(type: string, p: SearchParameter, op: string, v: string, i: st
 // code=a$b[,a$b]: a repetition of the composite whose components match their values, each by its own type (an ordered
 // type takes a prefix). The components of one repetition share (rid, code, grp) in comp.
 function compositeCond(type: string, p: SearchParameter, value: string, a: string): Cond {
-  const cs = components(type, p);
-  if (!cs) throw badRequest(`Unsupported composite search parameter ${p.code}: its components are not defined on ${type}`);
+  const cs = components(type, p)!; // cond checked it
   const ors: string[] = [], va: Arg[] = [];
   for (const v of splitSearchOnComma(value)) {
     const parts = v.split('$');
     if (parts.length !== cs.length) throw badRequest(`Invalid ${p.code} value ${v}: want ${cs.length} values separated by $`);
     ors.push(parts.map((x, k) => {
       const ordered = ['date', 'number', 'quantity'].includes(cs[k].p.type) && PREFIXES.includes(x.slice(0, 2));
-      const [c, ca] = valueSql(type, cs[k].p, ordered ? x.slice(0, 2) : Operator.EQUALS, ordered ? x.slice(2) : x, `c${k}`);
+      const op = ordered ? x.slice(0, 2) : Operator.EQUALS;
+      if (!ALLOWED[cs[k].p.type]?.includes(op)) throw refuse(op, cs[k].p.code); // a component's own type's prefixes (sa, eb: dates)
+      const [c, ca] = valueSql(type, cs[k].p, op, ordered ? x.slice(2) : x, `c${k}`);
       va.push(...ca);
       return `(${c})`;
     }).join(' and '));
