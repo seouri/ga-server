@@ -67,8 +67,11 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,
     };
-    const none = kind === 'allergies' && e ? noKnown(r) : undefined;
+    // A "no known allergies" statement, active or with no clinical status, is no allergy
+    const none = kind === 'allergies' && (e || unstated) ? noKnown(r) : undefined;
     if (none) Object.assign(row, { name: none, currency: 'none known', reason: 'a "no known allergies" statement in the record, not an allergy' });
+    // A refuted allergy is never current (isActive); with include "all" it reads as what it says
+    else if (kind === 'allergies' && r.verificationStatus?.coding?.some((c: Any) => c.code === 'refuted')) Object.assign(row, { name: `Not allergic to ${row.name ?? 'the substance'}`, reason: 'refuted: the record says the person is not allergic' });
     const cc = kind === 'medications' ? medCode(res, meds).cc : r.code;
     const name = (none ?? concept(cc))?.toLowerCase().replace(/\s+/g, ' ').trim();
     const dupKeys = kind === 'medications' ? medKeys(cc, res) : name ? [`name:${name}`] : [];

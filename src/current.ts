@@ -13,7 +13,7 @@ export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi']);
 // A portal's medication list confirms (or not) medications of either type: C-CDA writes MedicationStatement, EHI and portals MedicationRequest.
 const kind = (type: string) => (type === 'MedicationStatement' ? 'MedicationRequest' : type);
 
-type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] } };
+type R = Resource & { status?: string; clinicalStatus?: { coding?: { code?: string }[] }; verificationStatus?: { coding?: { code?: string }[] } };
 const extDate = (r: Resource, url: string): number | undefined => {
   const v = (r as { extension?: { url: string; valueDateTime?: string }[] }).extension?.find((e) => e.url === url)?.valueDateTime;
   const t = v ? Date.parse(v) : NaN;
@@ -44,10 +44,13 @@ export function currencyContext(resources: Resource[], endpoints: Endpoint[], ne
 const NOT_TAKEN = new Set(['plan', 'proposal']);
 export const isPlanned = (r: Resource): boolean =>
   r.resourceType === 'MedicationRequest' && NOT_TAKEN.has(r.intent) && !!r.meta?.tag?.some((t) => t.system === TAG && t.code === 'src-ccda');
-// Active medication, problem or allergy: the records the currency rule covers.
+// Active medication, problem or allergy: the records the currency rule covers. A refuted or entered-in-error problem or allergy
+// ("not allergic to penicillin") is never active, whatever its clinical status, from any source.
+const NOT_SO = new Set(['refuted', 'entered-in-error']);
 export function isActive(r: Resource): boolean {
   const a = r as R;
   if (isPlanned(r)) return false;
+  if (a.verificationStatus?.coding?.some((c) => NOT_SO.has(c.code as string))) return false;
   return DATED.has(r.resourceType) && (a.status === 'active' || !!a.clinicalStatus?.coding?.some((c) => c.code === 'active'));
 }
 

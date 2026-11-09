@@ -43,6 +43,25 @@ test('allergies: a "no known allergies" statement is one row saying so (currency
   expect(listRows([...rs, ...all], currencyContext([...rs, ...all], []), 'allergies').map((r) => r.name)).toEqual(['Penicillin', 'No known allergies']);
 });
 
+test('a refuted allergy or problem (clinical status active, any source) is never current; with include all it reads "Not allergic to"', () => {
+  const tag = (code: string) => ({ meta: { tag: [{ system: 'urn:ga-server:tag', code }] } });
+  const refuted = { verificationStatus: { coding: [{ code: 'refuted' }] }, clinicalStatus: { coding: [{ code: 'active' }] } };
+  const rs = [
+    { resourceType: 'AllergyIntolerance', id: 'e', code: { text: 'Penicillin' }, ...refuted, ...tag('src-ehi') },
+    { resourceType: 'AllergyIntolerance', id: 'c', code: { text: 'Peanut' }, ...refuted, ...tag('src-ccda') },
+    { resourceType: 'Condition', id: 'd', code: { text: 'Asthma' }, category: [{ coding: [{ code: 'problem-list-item' }] }], ...refuted },
+  ] as Resource[];
+  const c = currencyContext(rs, []);
+  expect(listRows(rs, c, 'allergies')).toEqual([]);
+  expect(listRows(rs, c, 'problems')).toEqual([]);
+  expect(listRows(rs, c, 'allergies', 'all').map((r) => `${r.name}|${r.currency}`).sort()).toEqual(['Not allergic to Peanut|inactive', 'Not allergic to Penicillin|inactive']);
+});
+
+test('a "no known allergies" statement with no clinical status is still that, never an allergy', () => {
+  const rs = [{ resourceType: 'AllergyIntolerance', id: 'n', code: { coding: [{ system: 'http://snomed.info/sct', code: '716186003' }] } }] as Resource[];
+  expect(listRows(rs, currencyContext(rs, []), 'allergies')).toMatchObject([{ name: 'No known allergies', currency: 'none known' }]);
+});
+
 test('one row per item across sources; best currency wins, inactive never hides active', () => {
   const stamp = (d: string) => ({ extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: d }] });
   const rx = { coding: [{ system: 'http://www.nlm.nih.gov/research/umls/rxnorm', code: '617310' }], text: 'atorvastatin 40 mg tablet' };
