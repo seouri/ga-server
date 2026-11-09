@@ -103,7 +103,8 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
 
 // Every covered record and the currency context, fetched once. eps: the patient's source Endpoints (read once, also for the stale-source warning).
 export async function loadLists(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<{ all: Resource[]; ctx: Ctx }> {
-  const all = (type: string, q: string[][]) => collect(client, type as 'Observation', new URLSearchParams([...q, ['_count', '1000']]), (r: Resource) => r, Infinity).then((x) => x.rows);
+  // A page may hold at most 1000 entries, includes counted (Medplum and GA's store refuse more): 500 matches leave room for their Medications.
+  const all = (type: string, q: string[][]) => collect(client, type as 'Observation', new URLSearchParams([...q, ['_count', q.some(([k]) => k === '_include') ? '500' : '1000']]), (r: Resource) => r, Infinity).then((x) => x.rows);
   const subject = ['subject', `Patient/${patientId}`];
   const [ms, mr, cond, alg, newest] = await Promise.all([
     all('MedicationStatement', [subject, ['_include', 'MedicationStatement:medication']]),

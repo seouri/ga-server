@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest';
 import type { Resource } from '@medplum/fhirtypes';
 import { currencyContext } from '../src/current.ts';
-import { listRows } from '../src/lists.ts';
+import { listRows, loadLists } from '../src/lists.ts';
+import type { MedplumClient } from '@medplum/core';
+import { NEWEST_IMPORT } from '../src/identity.ts';
 
 const T1 = '2026-11-01T00:00:00Z';
 const T0 = '2026-10-01T00:00:00Z';
@@ -103,4 +105,14 @@ test('medications: a C-CDA planned or proposed MedicationRequest is not current 
   expect(all.filter((r) => r.currency === 'planned').map((r) => r.id).sort()).toEqual(['plan', 'prop']);
   expect(all.filter((r) => r.currency === 'planned').map((r) => r.reason)).toEqual([expect.stringMatching(/planned/), expect.stringMatching(/planned/)]);
   expect(all.map((r) => r.currency).indexOf('planned')).toBeGreaterThan(all.map((r) => r.currency).lastIndexOf('current'));
+});
+
+// Medplum and GA's store refuse a page over 1000 entries, includes counted: a search with _include asks for at most 500 matches.
+test('loadLists: searches with _include ask for at most 500 per page', async () => {
+  const asked: [string, URLSearchParams][] = [];
+  const client = { search: async (t: string, q: URLSearchParams) => { asked.push([t, q]); return { resourceType: 'Bundle', entry: [] }; },
+    readResource: async () => ({ resourceType: 'Patient', extension: [{ url: NEWEST_IMPORT, valueDateTime: T0 }] }) } as unknown as MedplumClient;
+  await loadLists(client, 'p1', []);
+  for (const [t, q] of asked) expect([t, q.get('_count')]).toEqual([t, q.has('_include') ? '500' : '1000']);
+  expect(asked.filter(([, q]) => q.has('_include')).length).toBe(2);
 });
