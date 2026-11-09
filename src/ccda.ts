@@ -151,15 +151,50 @@ const MED_STATUS: Record<string, MedicationStatement['status']> = { active: 'act
 const cc = (system: string, code: string) => ({ coding: [{ system, code }] });
 const CATEGORY = 'http://terminology.hl7.org/CodeSystem/condition-category';
 
-// Fixes converter template gaps from the source XML; only neutral values ('unknown') when the source has nothing.
+const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
+  [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []]
+    .flat()
+    .map((i) => fhirKey(i))
+    .map((k) => (k ? m.get(k) : undefined))
+    .find((v) => v !== undefined);
+const named = (c: CodeableConcept | undefined, info: MedInfo): CodeableConcept => {
+  const coding = [...(c?.coding ?? [])];
+  if (info.rxnorm && !coding.some((x) => x.system === RXNORM && x.code === info.rxnorm)) coding.push({ system: RXNORM, code: info.rxnorm, display: info.name });
+  return { ...c, coding, text: info.name ?? c?.text };
+};
+
+// GA's own choices, on either converter's output (not converter fixes): a drug named inline (or in a contained Medication) on a
+// statement, order or dispense takes the narrative name and RxNorm; an INT value goes in valueQuantity, unitless (GA's readers: lab
+// rows, content keys, duplicate checks read a number there).
+function gaChoices(r: Resource, drug: Map<string, MedInfo>): Resource {
+  const info = ['MedicationStatement', 'MedicationRequest', 'MedicationDispense'].includes(r.resourceType) && lookup(drug, r);
+  if (info) {
+    const m = r as MedicationStatement;
+    if (m.medicationCodeableConcept) r = { ...m, medicationCodeableConcept: named(m.medicationCodeableConcept, info) } as Resource;
+    if (m.contained) r = { ...r, contained: m.contained.map((c) => (c.resourceType === 'Medication' ? { ...c, code: named(c.code, info) } : c)) } as Resource;
+  }
+  if (r.resourceType === 'Observation' && (r as Observation).valueInteger !== undefined) {
+    const { valueInteger, ...o } = r as Observation;
+    return { ...o, valueQuantity: { value: valueInteger } } as Observation;
+  }
+  return r;
+}
+
+// The in-process path: GA's choices, and a problem outside the Problems section (a Health Concern) is a visit diagnosis, not a
+// problem-list item, as on the Microsoft path (GA lists problem-list items as current problems). Converter fixes live in the library.
+function localChoices(rs: Resource[], xml: string): Resource[] {
+  const { drug, problemList } = sourceInfo(xml);
+  return rs.map((r) => {
+    r = gaChoices(r, drug);
+    if (r.resourceType !== 'Condition' || !(r as Condition).category?.some((c) => c.coding?.some((x) => x.code === 'problem-list-item'))) return r;
+    return lookup(problemList, r) === false ? { ...r, category: [{ coding: [{ system: CATEGORY, code: 'encounter-diagnosis', display: 'Encounter Diagnosis' }] }] } as Condition : r;
+  });
+}
+
+// The Microsoft path: fixes converter template gaps from the source XML (only neutral values ('unknown') when the source has
+// nothing), and GA's choices.
 export function repair(rs: Resource[], xml: string): Resource[] {
   const { med, drug, prob, problemList } = sourceInfo(xml);
-  const lookup = <T>(m: Map<string, T>, r: Resource): T | undefined =>
-    [(r as { identifier?: Identifier | Identifier[] }).identifier ?? []]
-      .flat()
-      .map((i) => fhirKey(i))
-      .map((k) => (k ? m.get(k) : undefined))
-      .find((v) => v !== undefined);
   // The converter keeps only the NDC package code: name each Medication from its statement's source entry.
   const drugOf = new Map<string, MedInfo>();
   for (const r of rs) {
@@ -167,33 +202,16 @@ export function repair(rs: Resource[], xml: string): Resource[] {
     const info = ref && lookup(drug, r);
     if (ref && info) drugOf.set(ref, info);
   }
-  const named = (c: CodeableConcept | undefined, info: MedInfo): CodeableConcept => {
-    const coding = [...(c?.coding ?? [])];
-    if (info.rxnorm && !coding.some((x) => x.system === RXNORM && x.code === info.rxnorm)) coding.push({ system: RXNORM, code: info.rxnorm, display: info.name });
-    return { ...c, coding, text: info.name ?? c?.text };
-  };
   return rs.map((r) => {
     if (r.resourceType === 'Medication') {
       const info = drugOf.get(`Medication/${r.id}`);
       return info ? { ...r, code: named((r as Medication).code, info) } : r;
     }
-    // The in-process path names the drug inline (or in a contained Medication) on statements, orders and dispenses: the same narrative name and RxNorm.
-    const info = ['MedicationStatement', 'MedicationRequest', 'MedicationDispense'].includes(r.resourceType) && lookup(drug, r);
-    if (info) {
-      const m = r as MedicationStatement;
-      if (m.medicationCodeableConcept) r = { ...m, medicationCodeableConcept: named(m.medicationCodeableConcept, info) } as Resource;
-      if (m.contained) r = { ...r, contained: m.contained.map((c) => (c.resourceType === 'Medication' ? { ...c, code: named(c.code, info) } : c)) } as Resource;
-    }
-    // not-taken comes from negationInd (the library, PATCHES row 51), which statusCode never overrides.
-    if (r.resourceType === 'MedicationStatement' && r.status !== 'not-taken') {
+    r = gaChoices(r, drug);
+    if (r.resourceType === 'MedicationStatement') {
       return { ...r, status: MED_STATUS[lookup(med, r) ?? ''] ?? (r.status || 'unknown') };
     }
     if (r.resourceType === 'Encounter') return { ...r, status: (r as Encounter).status || 'unknown' };
-    // GA's readers (lab rows, content keys, duplicate checks) read a number from valueQuantity: an INT value goes there, unitless, as on the Microsoft path.
-    if (r.resourceType === 'Observation' && (r as Observation).valueInteger !== undefined) {
-      const { valueInteger, ...o } = r as Observation;
-      return { ...o, valueQuantity: { value: valueInteger } } as Observation;
-    }
     if (r.resourceType === 'Condition') {
       // A Condition linked to its encounter is a visit diagnosis, also when its observation id repeats a problem-list one.
       const inList = (r as Condition).encounter ? false : lookup(problemList, r);
@@ -419,7 +437,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       : { system: 'urn:ietf:rfc:3986', value: `urn:${/-/.test(root) ? 'uuid' : 'oid'}:${root}` };
   }
   if (comp) comp.meta = { ...comp.meta, tag: [...(comp.meta?.tag ?? []), { system: TAG, code: LOCAL_TAG }] };
-  return { resources: repair(resources, xml), notImported };
+  return { resources: localChoices(resources, xml), notImported };
 }
 
 // Sums rows of one section, template and reason (several documents of one import).

@@ -231,7 +231,7 @@ test('the Epic-style fixture converts (template order) and lists what it cannot 
   const types = out.resources.map((r) => r.resourceType);
   expect(types).toContain('MedicationStatement'); // Epic lists Medications' entries-optional root first: no throw
   const [cond] = out.resources.filter((r) => r.resourceType === 'Condition') as Condition[];
-  expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item'); // repair, by the problem observation id
+  expect(cond.category?.[0].coding?.[0].code).toBe('problem-list-item');
   // The document id keys the Composition, so a re-issued document updates it instead of adding a second one.
   expect((out.resources.find((r) => r.resourceType === 'Composition') as Composition).identifier).toEqual({ system: 'urn:oid:1.2.840.114350.1.13.999.2.7.8.688883.900001', value: 'EPICSTYLE-DOC-1' });
 });
@@ -245,7 +245,7 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   const dx = (out.resources.filter((r) => r.resourceType === 'Condition') as Condition[]).filter((c) => c.category?.[0].coding?.[0].code === 'encounter-diagnosis');
   expect(dx.map((c) => c.identifier?.[0].value)).toEqual(['EX-VISITDX-1', 'EX-VISITDX-2']);
   expect(dx.map((c) => c.encounter?.reference)).toEqual([`Encounter/${enc.id}`, `Encounter/${enc.id}`]);
-  expect(dx.map((c) => c.clinicalStatus?.coding?.[0].code)).toEqual(['resolved', 'resolved']); // repair: the diagnosis act is completed
+  expect(dx.map((c) => c.clinicalStatus?.coding?.[0].code)).toEqual(['resolved', 'resolved']); // the diagnosis act is completed (library, PATCHES row 53)
   expect(out.notImported.filter((n) => n.section === 'Encounters')).toEqual([]);
   // A visit diagnosis reusing a problem-list observation id stays a visit diagnosis; the problem stays on the list.
   const reused = convertCcdaLocal(EPIC.replace('768076.2" extension="EX-VISITDX-1"', '768076.1" extension="EX-PROBLEM-1"'));
@@ -256,6 +256,15 @@ test('encounter diagnoses become Conditions linked to their encounter', () => {
   expect(convertCcdaLocal(comp).notImported.filter((n) => n.section === 'Encounters')).toEqual([
     { section: 'Encounters', templateId: '2.16.840.1.113883.10.20.22.4.80', entries: 1, reason: 'encounter diagnosis not converted' },
   ]);
+});
+
+test('a Health Concern is a visit diagnosis, not a problem-list item, so it is not a current problem (as on the Microsoft path)', () => {
+  const doc = SYNTHETIC.replace('<templateId root="2.16.840.1.113883.10.20.22.2.5.1" extension="2015-08-01"/>\n          <code code="11450-4" codeSystem="2.16.840.1.113883.6.1" displayName="Problem list"/>',
+    '<templateId root="2.16.840.1.113883.10.20.22.2.58" extension="2015-08-01"/>\n          <code code="75310-3" codeSystem="2.16.840.1.113883.6.1" displayName="Health concerns document"/>');
+  expect(doc).not.toBe(SYNTHETIC);
+  const conds = convertCcdaLocal(doc).resources.filter((r) => r.resourceType === 'Condition') as Condition[];
+  expect(conds.length).toBeGreaterThan(0);
+  for (const c of conds) expect(c.category?.flatMap((x) => x.coding?.map((y) => y.code))).toEqual(['encounter-diagnosis']);
 });
 
 test('a TS or BL value that does not parse is named; one in another case or with a nullFlavor is converted', () => {
