@@ -268,11 +268,11 @@ describe.skipIf(SQLITE)('Medplum repo.test.ts (parity)', () => {
     expect(patient2.id).toBe(patient1.id);
   }));
 
-  // Both refuse it: Medplum ids must be UUIDs (400 Invalid id); the store has no Patient/123 (404). R4 allows the id.
-  test('FHIR Repo › Malformed client assigned ID [server/src/fhir/repo.test.ts]', () => same(sides, async (s) => {
-    const g = await s.call('PUT', 'Patient/123', { resourceType: 'Patient', id: '123' });
-    expect(g.status).toBe(s.name === 'medplum' ? 400 : 404);
-  }));
+  // Medplum ids must be UUIDs (400 Invalid id); R4 allows the id 123, so the store looks it up and finds no Patient/123 (404).
+  test('differs on purpose: FHIR Repo › Malformed client assigned ID [server/src/fhir/repo.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => (await s.call('PUT', 'Patient/123', { resourceType: 'Patient', id: '123' })).status);
+    expect([medplum, store]).toEqual([400, 404]);
+  });
 
   test('FHIR Repo › Conditional update [server/src/fhir/repo.test.ts]', () => same(sides, async (s) => {
     const mrn = crypto.randomUUID();

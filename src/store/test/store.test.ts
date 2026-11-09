@@ -49,6 +49,15 @@ describe('Store core', () => {
     expect(store.history({ type: 'Observation', id: v1.id! })).toHaveLength(1);
   });
 
+  it('empty values are dropped as Medplum drops them: an empty array item becomes null, so a parallel _x array stays aligned', () => {
+    const ext = { extension: [{ url: 'urn:x', valueString: 'e' }] };
+    const p = store.create({ resourceType: 'Patient', identifier: [], name: [{ given: ['', 'Bob'], _given: [ext, null] }] } as unknown as Resource).resource as Patient & { name: { _given?: unknown[] }[] };
+    expect(p.identifier).toBeUndefined();
+    expect([p.name[0].given, p.name[0]._given]).toEqual([[null, 'Bob'], [ext, null]]);
+    const q = store.create({ resourceType: 'Patient', name: [{ given: ['A', 'B'], _given: [{}, ext] }] } as unknown as Resource).resource as Patient & { name: { _given?: unknown[] }[] };
+    expect(q.name[0]._given).toEqual([null, ext]);
+  });
+
   it('a submitted meta.deleted (Medplum\'s own field) is dropped on create and update, as Medplum', () => {
     const v1 = store.create({ ...obs(), meta: { deleted: true } } as Resource).resource;
     expect(v1.meta).not.toHaveProperty('deleted');

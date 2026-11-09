@@ -486,6 +486,24 @@ describe('store server: Medplum-compatible routes', () => {
     const ids = async (q: string) => (await call('GET', `Patient/${p.id}/$everything?${q}`)).json.entry.map((e: BundleEntry) => e.resource!.id).sort();
     expect(await ids('start=2020-01-01&end=2040-01-01')).toEqual([p.id, mid.id, undated.id].sort());
     expect(await ids('end=2020-01-01')).toEqual([p.id, early.id, undated.id].sort());
+    // Includes come from the page before the care-date filter, as Medplum adds them before filtering.
+    const pr = (await call('POST', 'Practitioner', { resourceType: 'Practitioner' })).json;
+    const late = (await call('POST', 'Observation', ob({ subject: P(p.id), issued: '2030-01-01T00:00:00Z', performer: [{ reference: `Practitioner/${pr.id}` }] }))).json;
+    const got = await ids('end=2020-01-01');
+    expect(got).toContain(pr.id);
+    expect(got).not.toContain(late.id);
+  });
+
+  it('a transaction that fails after a POST Binary entry leaves no Binary; a Bundle that is not a batch stages none', async () => {
+    const files = () => (existsSync(join(dir, 'binary')) ? readdirSync(join(dir, 'binary')) : []);
+    const bin = { request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'SGk=' } } as BundleEntry;
+    const r = await tx('transaction', [bin, { request: { method: 'POST', url: 'Observation' }, resource: { resourceType: 'Observation' } as Resource }]);
+    expect(r.status).toBe(400);
+    expect(files()).toEqual([]);
+    expect((await call('POST', '', { resourceType: 'Bundle', type: 'searchset', entry: [bin] })).status).toBe(400);
+    expect(files()).toEqual([]);
+    expect((await tx('batch', [bin])).json.entry[0].response.status).toBe('201');
+    expect(files()).toHaveLength(1);
   });
 
   it('as Medplum: a Binary body in gzip or deflate is decoded, another Content-Encoding is 400', async () => {
@@ -760,6 +778,11 @@ describe('serve.ts command line and maxBinaryBytes', () => {
       const headers = { authorization: `Bearer ${readFileSync(join(dir, 'token'), 'utf8').trim()}`, 'content-type': 'application/octet-stream' };
       expect((await fetch(`${base}Binary`, { method: 'POST', headers, body: new Uint8Array(1024) })).status).toBe(201);
       expect((await fetch(`${base}Binary`, { method: 'POST', headers, body: new Uint8Array(1025) })).status).toBe(413);
+      // Raw bytes count too: empty gzip members decode to nothing, so only the raw count stops them (streamed, no length).
+      const empties = Buffer.concat(Array.from({ length: 100 }, () => gzipSync('')));
+      const stream = new ReadableStream({ start(c) { c.enqueue(empties); c.close(); } });
+      const gz = await fetch(`${base}Binary`, { method: 'POST', headers: { ...headers, 'content-encoding': 'gzip' }, body: stream, duplex: 'half' } as RequestInit);
+      expect(gz.status).toBe(413);
       const patient = JSON.stringify({ resourceType: 'Patient', name: [{ text: 'x'.repeat(4096) }] });
       expect((await fetch(`${base}Patient`, { method: 'POST', headers: { ...headers, 'content-type': 'application/fhir+json' }, body: patient })).status).toBe(201);
     } finally { s.closeAllConnections(); await new Promise((r) => s.close(r)); rmSync(dir, { recursive: true, force: true }); }

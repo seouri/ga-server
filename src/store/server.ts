@@ -54,12 +54,15 @@ async function* limited(req: AsyncIterable<Buffer>, limit: number): AsyncGenerat
     yield chunk;
   }
 }
-// A Binary body, decoded from gzip or deflate (as Medplum); the limit applies to the decoded bytes.
+// A Binary body, decoded from gzip or deflate (as Medplum); the limit applies to the raw and the decoded bytes.
 async function* binaryBody(req: IncomingMessage, limit: number): AsyncGenerator<Uint8Array> {
   const enc = (header(req, 'content-encoding') ?? 'identity').toLowerCase();
   if (enc === 'identity') { yield* limited(req, limit); return; }
   if (enc !== 'gzip' && enc !== 'deflate') throw new HttpError(400, 'Unsupported content encoding'); // Medplum's text
-  try { yield* limited(req.pipe(enc === 'gzip' ? createGunzip() : createInflate()), limit); } catch (e) {
+  // Both the raw and the decoded bytes count (empty gzip members decode to nothing).
+  const dec = enc === 'gzip' ? createGunzip() : createInflate();
+  Readable.from(limited(req, limit)).on('error', (e) => dec.destroy(e)).pipe(dec);
+  try { yield* limited(dec, limit); } catch (e) {
     throw e instanceof HttpError ? e : new HttpError(400, `Invalid ${enc} body`, true);
   }
 }
@@ -152,8 +155,12 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
     if (id === '_search') for (const [k, v] of new URLSearchParams(text)) query.append(k, v);
     else json = parse(text);
   }
-  if (!type && method === 'POST') await stageBinaries(store, json);
-  const a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base });
+  const staged = !type && method === 'POST' ? await stageBinaries(store, json) : [];
+  let a: Answer;
+  try { a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base }); } catch (e) {
+    for (const id of staged) store.deleteBinary(id); // a failed transaction keeps none of its Binaries
+    throw e;
+  }
   const h: Record<string, string> = {};
   if (a.row) {
     h.etag = `W/"${a.row.versionId}"`;
@@ -268,7 +275,7 @@ function conditional(store: Store, r: Req, type: string): Answer {
 function patchOps(body: unknown): unknown {
   const bin = body as { resourceType?: string; contentType?: string; data?: string };
   if (bin?.resourceType !== 'Binary') return body;
-  if (bin.contentType !== 'application/json-patch+json') throw new HttpError(400, 'PATCH takes a JSON Patch: FHIRPath Patch is not supported');
+  if (bin.contentType !== 'application/json-patch+json') throw new HttpError(400, 'A PATCH Binary must hold a JSON Patch (application/json-patch+json)');
   return parse(Buffer.from(bin.data ?? '', 'base64').toString('utf8'));
 }
 function patch(store: Store, type: string, id: string, r: Req): Resource {
@@ -370,7 +377,7 @@ const instant = (v: unknown): string | undefined => { const t = typeof v === 'st
 // Patient/<id>/$everything as Medplum answers it: the Patient and its compartment ordered by lastUpdated (_type keeps the
 // Patient, _since filters by lastUpdated), _count 1000 by default with _offset pages, then per page the records its entries
 // reference that are in no Patient compartment (Practitioner, Medication, Organization...) as includes. start/end keep a
-// page's records whose care date is in [start, end) or that have none (as Medplum, after paging).
+// page's records whose care date is in [start, end) or that have none (as Medplum, after paging and after the includes).
 function everything(store: Store, pid: string, r: Req): Answer {
   queryOf(r, ['_count', '_offset', '_since', '_type', 'start', 'end']);
   const [start, end] = ['start', 'end'].map((k) => {
@@ -387,11 +394,12 @@ function everything(store: Store, pid: string, r: Req): Answer {
   const rows = store.db.prepare(`select r.type, r.id, r.json from idx i join resources r on r.rid = i.rid join sortkeys s on s.rid = i.rid and s.code = '_lastUpdated'
     where i.type in (${types.map(() => '?').join(', ')}) and i.code = '_compartment' and i.val = ?${from ? ' and s.lo >= ?' : ''} order by s.lo, i.rid limit ? offset ?`)
     .all(...types, P, ...(from ? [from] : []), count + 1, offset) as { type: string; id: string; json: string }[];
-  const page = rows.slice(0, count).map((x) => JSON.parse(x.json) as Resource).filter((x) => {
+  const all = rows.slice(0, count).map((x) => JSON.parse(x.json) as Resource);
+  const page = all.filter((x) => {
     const at = CARE_DATE[x.resourceType] && instant(evalFhirPathTyped(CARE_DATE[x.resourceType], [toTypedValue(x)])[0]?.value);
     return !at || ((!start || at >= start) && (!end || at < end));
   });
-  const seen = new Set(page.map((x) => `${x.resourceType}/${x.id}`));
+  const seen = new Set(all.map((x) => `${x.resourceType}/${x.id}`));
   const included: Resource[] = [];
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) { v.forEach(walk); return; }
@@ -408,7 +416,7 @@ function everything(store: Store, pid: string, r: Req): Answer {
       if (res && !res.meta?.compartment?.some((c) => c.reference?.startsWith('Patient/'))) included.push(res);
     }
   };
-  page.forEach(walk);
+  all.forEach(walk); // includes before the care-date filter, as Medplum
   const entry = [...page.map((x) => ({ x, mode: 'match' as const })), ...included.map((x) => ({ x, mode: 'include' as const }))]
     .map(({ x, mode }) => ({ fullUrl: `${r.base}fhir/R4/${x.resourceType}/${x.id}`, search: { mode }, resource: x }));
   return { status: 200, json: JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry, link: links(r.base, `Patient/${pid}/$everything`, r, count, offset, count > 0 && rows.length > count) }) };
@@ -438,18 +446,23 @@ function capability(): string {
   });
 }
 
-// A batch's POST Binary entries (base64 data, as Medplum's clients send them) are written before the batch runs: binaries are
-// files written outside SQLite transactions (a transaction that fails after leaves the Binary, as a failed put does).
+// A batch's or transaction's top-level POST Binary entries (base64 data, as Medplum's clients send them) are written before it
+// runs (binaries are files, written outside SQLite transactions); the caller deletes them when a transaction fails. Returns their ids.
 const staged = new WeakMap<object, { id: string; contentType: string }>();
-async function stageBinaries(store: Store, b: unknown): Promise<void> {
-  const entries = (b as Bundle)?.entry;
-  if (!Array.isArray(entries)) return; // batch() answers a malformed bundle
-  for (const e of entries) {
+async function stageBinaries(store: Store, b: unknown): Promise<string[]> {
+  const bundle = b as Bundle, ids: string[] = [];
+  if (bundle?.resourceType !== 'Bundle' || (bundle.type !== 'batch' && bundle.type !== 'transaction') || !Array.isArray(bundle.entry)) return ids; // batch() answers it
+  for (const e of bundle.entry) {
     const r = e?.resource as { resourceType?: string; contentType?: string; data?: unknown } | undefined;
     if (e?.request?.method !== 'POST' || e.request.url !== 'Binary' || r?.resourceType !== 'Binary' || typeof r.data !== 'string' || !r.contentType) continue;
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) continue; // not base64: the entry answers 400
-    staged.set(r, { ...(await store.putBinaryStream(r.contentType, [Buffer.from(r.data, 'base64')])), contentType: r.contentType });
+    try {
+      const { id } = await store.putBinaryStream(r.contentType, [Buffer.from(r.data, 'base64')]);
+      staged.set(r, { id, contentType: r.contentType });
+      ids.push(id);
+    } catch (err) { for (const id of ids) store.deleteBinary(id); throw err; }
   }
+  return ids;
 }
 
 const URN = /^urn:(uuid|oid):/;

@@ -9,7 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import {
   OperationOutcomeError, convertToSearchableReferences, deepEquals, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
-  toTypedValue, validateResource,
+  stringify, toTypedValue, validateResource,
 } from '@medplum/core';
 import type { Bundle, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, loadDefinitions } from './definitions.ts';
@@ -39,15 +39,9 @@ export type Row = { type: string; id: string; versionId: string; lastUpdated: st
 type Meta = NonNullable<Resource['meta']>;
 const now = () => new Date().toISOString();
 const etag = (v: string) => v.replace(/^W\//, '').replace(/"/g, '');
-// Empty strings, arrays and objects dropped, as Medplum stores a resource (identifier: [] is no identifier).
-function prune<T>(v: T): T {
-  if (Array.isArray(v)) { const a = v.map(prune).filter((x) => x !== undefined); return (a.length ? a : undefined) as T; }
-  if (v && typeof v === 'object') {
-    const o = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, prune(x)]).filter(([, x]) => x !== undefined));
-    return (Object.keys(o).length ? o : undefined) as T;
-  }
-  return (v === '' ? undefined : v) as T;
-}
+// Empty strings, arrays and objects dropped by Medplum's own stringify (identifier: [] is no identifier; an empty array item
+// becomes null, so a parallel _x array stays aligned).
+const prune = <T>(v: T): T => JSON.parse(stringify(v));
 // Equality for "not modified": everything but the server-set metadata.
 const content = (r: Resource) => ({ ...r, meta: { ...r.meta, versionId: undefined, lastUpdated: undefined, compartment: undefined } });
 

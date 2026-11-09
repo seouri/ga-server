@@ -243,13 +243,16 @@ describe.skipIf(SQLITE)('Medplum batch.test.ts and binary.test.ts (parity)', () 
 
   // PUT Patient with no criteria: Medplum's test project is empty (400, create-as-update with a client id); the shared
   // ga-test-parity project holds Patients, so Medplum answers 412 (several match). The store refuses a conditional PUT without
-  // criteria (400). Nothing is created either way.
-  test('Batch and Transaction processing › Batch create as update with client-assigned ID [server/src/fhir/batch.test.ts]', () => same(sides, async (s) => {
-    const id = crypto.randomUUID();
-    const res = await tx(s, 'batch', [{ request: { method: 'PUT', url: 'Patient' }, resource: { resourceType: 'Patient', id } }]);
-    expect([res.status, statuses(res.json)]).toEqual([200, [s.name === 'medplum' ? '412' : '400']]);
-    expect((await s.call('GET', `Patient/${id}`)).status).toBe(404);
-  }));
+  // criteria (400; README: a conditional request needs a real search criterion). Nothing is created either way.
+  test('differs on purpose: Batch and Transaction processing › Batch create as update with client-assigned ID [server/src/fhir/batch.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const id = crypto.randomUUID();
+      const res = await tx(s, 'batch', [{ request: { method: 'PUT', url: 'Patient' }, resource: { resourceType: 'Patient', id } }]);
+      return [res.status, statuses(res.json), (await s.call('GET', `Patient/${id}`)).status];
+    });
+    expect(medplum).toEqual([200, ['412'], 404]);
+    expect(store).toEqual([200, ['400'], 404]);
+  });
 
   // Medplum's values, made per run (its project is per test file, this one is shared).
   test('Batch and Transaction processing › Repeated batch of related upserts [server/src/fhir/batch.test.ts]', () => same(sides, async (s) => {

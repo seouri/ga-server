@@ -328,7 +328,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/repo.test.ts | FHIR Repo › constructor and clone add the synthetic R4 project only once to shared context | skipped | platform | project/_project |
 | server/src/fhir/binary.test.ts | Binary › Create and read binary | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Read binary not found | ported | existing |  |
-| server/src/fhir/binary.test.ts | Binary › Read binary without stored content | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Read binary without stored content | skipped | existing | not in plan 1: Binary as FHIR JSON (securityContext, a Binary without content), decide in plan 4 |
 | server/src/fhir/binary.test.ts | Binary › Update and read binary | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Binary CORS | skipped | platform | CORS (Medplum server middleware) |
 | server/src/fhir/binary.test.ts | Binary › Unsupported content encoding | ported | existing |  |
@@ -336,8 +336,8 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/binary.test.ts | Binary › GZIP | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Update with GZIP | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Upload binary in batch | ported | existing |  |
-| server/src/fhir/binary.test.ts | Binary › Update JSON | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
-| server/src/fhir/binary.test.ts | Binary › Invalid Binary JSON | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Update JSON | skipped | existing | not in plan 1: Binary as FHIR JSON (securityContext, a Binary without content), decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Invalid Binary JSON | skipped | existing | not in plan 1: Binary as FHIR JSON (securityContext, a Binary without content), decide in plan 4 |
 | server/src/fhir/binary.test.ts | Binary › Handle non-binary JSON | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Error for disallowed file type | skipped | platform | Medplum's upload policy (blocked file extensions and executable content types) |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Default statement | ported | existing |  |
@@ -478,7 +478,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads current and versioned Binary attachments | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads string and Buffer stream chunks into a Buffer | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Returns undefined and destroys the stream when the max byte count is exceeded | skipped | platform | inline attachments setting / Medplum helper |
-| server/src/fhir/operations/patienteverything.test.ts | searchPatientCompartment › Successfully paginates through resource types | skipped | platform | inline attachments setting / Medplum helper |
+| server/src/fhir/operations/patienteverything.test.ts | searchPatientCompartment › Successfully paginates through resource types | ported | existing | the helper's paging over HTTP ($everything _count/_offset) |
 | server/src/fhir/operations/expand.test.ts | Expand › No ValueSet URL | plan-2 | terminology | deferred to plan 2 (terminology) |
 | server/src/fhir/operations/expand.test.ts | Expand › ValueSet not found | plan-2 | terminology | deferred to plan 2 (terminology) |
 | server/src/fhir/operations/expand.test.ts | Expand › No logical definition | plan-2 | terminology | deferred to plan 2 (terminology) |

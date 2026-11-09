@@ -86,4 +86,25 @@ describe.skipIf(SQLITE)('Medplum metadata, references and $everything tests (par
     expect(seenIds).toEqual(expectedIds);
     return seenIds.size;
   }));
+
+  // searchPatientCompartment is Medplum's helper behind $everything: the same paging over HTTP, one match per page by _offset.
+  test('searchPatientCompartment › Successfully paginates through resource types [server/src/fhir/operations/patienteverything.test.ts]', () => same(sides, async (s) => {
+    const organization = await s.create({ resourceType: 'Organization' });
+    const practitioner = await s.create({ resourceType: 'Practitioner' });
+    const patient = await s.create({ resourceType: 'Patient', name: [{ given: ['Alice'], family: 'Smith' }],
+      address: [{ use: 'home', line: ['123 Main St'], city: 'Anywhere', state: 'CA', postalCode: '90210' }],
+      telecom: [{ system: 'phone', value: '555-555-5555' }, { system: 'email', value: 'alice@example.com' }], managingOrganization: ref(organization) });
+    const observation = await s.create({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: LOINC, code: '12345-6' }] }, subject: ref(patient), performer: [ref(practitioner), ref(organization)] });
+    const condition = await s.create({ resourceType: 'Condition', code: { coding: [{ system: LOINC, code: '12345-6' }] }, asserter: ref(patient), subject: ref(patient), recorder: ref(practitioner) });
+    const results: string[] = [];
+    for (let offset = 0; offset < 100;) {
+      const b = (await s.call('GET', `Patient/${patient.id}/$everything?_count=1&_offset=${offset}`)).json as Bundle;
+      const matches = (b.entry ?? []).filter((e) => e.search?.mode === 'match');
+      if (!matches.length) break;
+      results.push(...matches.map((e) => `${e.resource?.resourceType}/${e.resource?.id}`));
+      offset += matches.length;
+    }
+    expect(results.sort()).toEqual([patient, observation, condition].map((r) => `${r.resourceType}/${r.id}`).sort());
+    return results.length;
+  }));
 });
