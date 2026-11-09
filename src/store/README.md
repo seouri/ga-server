@@ -71,6 +71,8 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - A reference to a `urn:uuid`/`urn:oid` no entry defines is 400 (Medplum stores it as written); `urn:oid` fullUrls are rewritten like `urn:uuid`.
 - Every urn fullUrl of a transaction is resolved before its entries run (a create or conditional PUT, each on its own: its one match, else a new id). If an earlier entry changes what a later conditional entry matches and another entry references its urn, the transaction is 400 (Medplum fails that entry and leaves references to its urn pointing at no resource); with no reference the entry runs (Medplum still fails it).
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).
+- Ids are case-sensitive, as R4 defines them: `Patient/<ID IN UPPER CASE>` is another (missing) record (Medplum's uuid column folds case and finds the record).
+- A negative `_count` or `_offset` is 400 (Medplum clamps it to its default).
 - A conditional request (update, delete, If-None-Exist, conditional reference) needs a real search criterion: only paging, sorting, shaping or format parameters, or empty values, are 400.
 - `:contains` and `:exact` on a token parameter are 400: R4 defines them for string parameters only (Medplum accepts both on tokens; `:exact` as plain equality).
 - A token search without a modifier matches codes, not a CodeableConcept's `text` (that is `:text`, as R4 defines it; Medplum also matches the text by plain equality).

@@ -240,63 +240,63 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/repo.test.ts | FHIR Repo › setMode routes reads to reader until writer promotion › on creates | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › setMode routes reads to reader until writer promotion › on updates | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › getSearchProjectIds | skipped | platform | project/_project |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with undefined id | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with blank id | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with invalid id | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read Binary requires access to securityContext | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with undefined id | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with blank id | skipped | platform | over HTTP an empty id is the type search (Patient/), not a read |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read resource with invalid id | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read Binary requires access to securityContext | skipped | platform | access policy |
 | server/src/fhir/repo.test.ts | FHIR Repo › Write Binary rejects Binary securityContext | skipped | platform | access policy |
 | server/src/fhir/repo.test.ts | FHIR Repo › Read invalid resource with `checkCacheOnly` set | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › Read AuditEvent after update | skipped | platform | Medplum AuditEvent logging |
 | server/src/fhir/repo.test.ts | FHIR Repo › Does not cache reads from the reader | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › Only caches on read when cacheResourcesOnWrite is disabled | skipped | platform | Medplum cache and reader/writer routing |
-| server/src/fhir/repo.test.ts | FHIR Repo › Repo read malformed reference | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read references with various reference shapes | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Repo read malformed reference | skipped | platform | readReference is the repository API (the reference is parsed in-process); no HTTP route |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read references with various reference shapes | skipped | platform | readReferences is the repository API (the reference is parsed in-process); no HTTP route |
 | server/src/fhir/repo.test.ts | FHIR Repo › Logs mixed cache access for readReferences across split resource types | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › Logs mixed SQL access for multi-type search across split resource types | skipped | platform | Medplum cache and reader/writer routing |
 | server/src/fhir/repo.test.ts | FHIR Repo › Includes numResults in search AuditEvent entity detail | skipped | platform | Medplum AuditEvent logging |
-| server/src/fhir/repo.test.ts | FHIR Repo › Logs mixed transaction access across repo and system repo | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read history › options: %s | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read history › with config.maxSearchOffset | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update patient | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update patient remove meta.profile | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Logs mixed transaction access across repo and system repo | skipped | platform | Medplum logging |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read history › options: %s | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read history › with config.maxSearchOffset | skipped | platform | Medplum server config (maxSearchOffset) set in-process; the HTTP side cannot change it |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update patient | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update patient remove meta.profile | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › meta.project preserved after attempting to remove it | skipped | platform | project/_project |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update patient no changes | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update patient multiple names | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient with custom ID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient with no author | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update patient no changes | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update patient multiple names | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient with custom ID | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient with no author | skipped | platform | login/author (GA store has no users) |
 | server/src/fhir/repo.test.ts | FHIR Repo › Create Patient as system ignores submitted meta.author | skipped | platform | login/author (GA store has no users) |
 | server/src/fhir/repo.test.ts | FHIR Repo › Super Admin update ignores submitted meta.author | skipped | platform | access policy |
-| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient ignores submitted meta.deleted | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update Patient ignores submitted meta.deleted | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Create Patient ignores submitted meta.deleted | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update Patient ignores submitted meta.deleted | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › Create Patient as ClientApplication with no author | skipped | platform | login/author (GA store has no users) |
 | server/src/fhir/repo.test.ts | FHIR Repo › Create Patient as Practitioner with no author | skipped | platform | login/author (GA store has no users) |
 | server/src/fhir/repo.test.ts | FHIR Repo › Create Patient as Practitioner on behalf of author | skipped | platform | login/author (GA store has no users) |
 | server/src/fhir/repo.test.ts | FHIR Repo › Skip background jobs when configured | skipped | platform | background jobs |
-| server/src/fhir/repo.test.ts | FHIR Repo › Create resource with lastUpdated | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Create ResearchDefinition with long description (%s) | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with lastUpdated | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with missing id | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with matching versionId | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with different versionId | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with matching versionId | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with different versionId | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Delete resource with ifMatch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with implicit array creation | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with FHIRPath Patch body | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with empty FHIRPath Patch body | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with invalid FHIRPath Patch body | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Create resource with lastUpdated | skipped | platform | systemRepo-only: a custom meta.lastUpdated on create; over HTTP the server sets it |
+| server/src/fhir/repo.test.ts | FHIR Repo › Create ResearchDefinition with long description (%s) | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with lastUpdated | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with missing id | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with matching versionId | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Update resource with different versionId | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with matching versionId | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with different versionId | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Delete resource with ifMatch | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with implicit array creation | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with FHIRPath Patch body | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with empty FHIRPath Patch body | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Patch resource with invalid FHIRPath Patch body | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › Compartment permissions | skipped | platform | access policy |
-| server/src/fhir/repo.test.ts | FHIR Repo › Read history after delete | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › readVersion returns an unshared resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Restore deleted resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Delete Binary | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Read history after delete | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › readVersion returns an unshared resource | skipped | platform | in-process object identity of repository results |
+| server/src/fhir/repo.test.ts | FHIR Repo › Restore deleted resource | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Delete Binary | skipped | existing | the store's Binaries have no versions or history (store-compat.test.ts header); decide in plan 4 |
 | server/src/fhir/repo.test.ts | FHIR Repo › Reindex resource as non-admin | skipped | platform | reindex job |
 | server/src/fhir/repo.test.ts | FHIR Repo › Reindex resource not found | skipped | platform | reindex job |
 | server/src/fhir/repo.test.ts | FHIR Repo › Reindex mixed resource types not allowed | skipped | platform | reindex job |
 | server/src/fhir/repo.test.ts | FHIR Repo › Reindex resource errors logged | skipped | platform | reindex job |
-| server/src/fhir/repo.test.ts | FHIR Repo › Remove property | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Delete Questionnaire.subjectType | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Empty objects | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Remove property | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Delete Questionnaire.subjectType | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Empty objects | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › expungeResource and expungeResources › $name › expungeResource in own project | skipped | platform | expunge/purge admin operation |
 | server/src/fhir/repo.test.ts | FHIR Repo › expungeResource and expungeResources › $name › expungeResources in own project | skipped | platform | expunge/purge admin operation |
 | server/src/fhir/repo.test.ts | FHIR Repo › expungeResource and expungeResources › $name › expungeResource in another project | skipped | platform | expunge/purge admin operation |
@@ -309,20 +309,20 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/repo.test.ts | FHIR Repo › Expunge too many IDs | skipped | platform | expunge/purge admin operation |
 | server/src/fhir/repo.test.ts | FHIR Repo › Purge forbidden | skipped | platform | access policy |
 | server/src/fhir/repo.test.ts | FHIR Repo › Purge Login | skipped | platform | expunge/purge admin operation |
-| server/src/fhir/repo.test.ts | FHIR Repo › Malformed client assigned ID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Conditional update | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Double DELETE | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution failure | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution multiple matches | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Malformed client assigned ID | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Conditional update | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Double DELETE | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution failure | ported | existing |  |
+| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution multiple matches | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference resolution requires a project | skipped | platform | project/_project |
-| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference replaced before validation | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Conditional reference replaced before validation | ported | existing |  |
 | server/src/fhir/repo.test.ts | FHIR Repo › Prevents setting Project compartments | skipped | platform | project/_project |
 | server/src/fhir/repo.test.ts | FHIR Repo › Super admin can edit User.meta.project | skipped | platform | access policy |
 | server/src/fhir/repo.test.ts | FHIR Repo › Super admin can edit Subscription.meta.project | skipped | platform | access policy |
 | server/src/fhir/repo.test.ts | FHIR Repo › Handles resources with many entries stored in lookup table | skipped | platform | SQL storage internals |
 | server/src/fhir/repo.test.ts | FHIR Repo › __version column | skipped | platform | SQL storage internals |
-| server/src/fhir/repo.test.ts | FHIR Repo › Legacy UUID support -- non-conformant IDs that match UUID form are accepted | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/repo.test.ts | FHIR Repo › Legacy UUID support -- non-conformant IDs that match UUID form are accepted | skipped | platform | assignedId repository option and expunge |
 | server/src/fhir/repo.test.ts | FHIR Repo › Project.exportedResourceType | skipped | platform | project/_project |
 | server/src/fhir/repo.test.ts | FHIR Repo › Project.exportedResourceType allows resources in primary project | skipped | platform | project/_project |
 | server/src/fhir/repo.test.ts | FHIR Repo › constructor and clone add the synthetic R4 project only once to shared context | skipped | platform | project/_project |

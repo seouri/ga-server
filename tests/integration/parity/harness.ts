@@ -20,7 +20,7 @@ export type Side = {
 export const PARITY_TYPES = ['Observation', 'Condition', 'Patient', 'Basic', 'ResearchStudy', 'Practitioner', 'Organization', 'Appointment', 'Slot',
   'ImagingStudy', 'DiagnosticReport', 'Flag', 'PractitionerRole', 'Coverage', 'CoverageEligibilityRequest', 'Encounter', 'Communication', 'ServiceRequest',
   'Questionnaire', 'QuestionnaireResponse', 'Location', 'HealthcareService', 'AuditEvent', 'AllergyIntolerance', 'CareTeam', 'Provenance', 'Task', 'Goal',
-  'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle', 'SpecimenDefinition'];
+  'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle', 'SpecimenDefinition', 'ResearchDefinition'];
 const PROJECT = 'ga-test-parity';
 
 export async function guardProject(me: { project: { name?: string } }): Promise<void> {

@@ -266,7 +266,8 @@ export class Store {
   }
 
   private write(r: Resource, stamp: Pick<Meta, 'versionId' | 'lastUpdated'>): Resource {
-    const { compartment: _c, ...meta } = r.meta ?? {};
+    // meta.deleted is Medplum's tombstone flag, not R4: a submitted one is dropped, as Medplum does.
+    const { compartment: _c, deleted: _d, ...meta } = (r.meta ?? {}) as Meta & { deleted?: boolean };
     const out = { ...r, meta: { ...meta, ...stamp } } as Resource;
     const compartment = this.compartment(out);
     if (compartment.length) out.meta!.compartment = compartment.map((reference) => ({ reference }));

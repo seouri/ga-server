@@ -49,6 +49,12 @@ describe('Store core', () => {
     expect(store.history({ type: 'Observation', id: v1.id! })).toHaveLength(1);
   });
 
+  it('a submitted meta.deleted (Medplum\'s own field) is dropped on create and update, as Medplum', () => {
+    const v1 = store.create({ ...obs(), meta: { deleted: true } } as Resource).resource;
+    expect(v1.meta).not.toHaveProperty('deleted');
+    expect(store.update({ ...v1, status: 'amended', meta: { ...v1.meta, deleted: true } } as Resource).meta).not.toHaveProperty('deleted');
+  });
+
   it('update takes the request meta: dropping a tag clears it', () => {
     const v1 = store.create(obs({ meta: { tag: [{ code: 'possible-duplicate' }] } })).resource;
     const { tag: _t, ...meta } = v1.meta!;
