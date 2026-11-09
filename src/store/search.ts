@@ -537,8 +537,7 @@ function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
   const c = e as FhirFilterComparison;
   // A chain maps the operator on its last parameter (chainCond), as Medplum.
   const chain = c.path.startsWith('_has:') || c.path.includes('.');
-  const { sql, args } = cond(type, { code: c.path, operator: chain ? c.operator : filterOp(param(type, c.path), c.operator), value: c.value }, a);
-  return { sql, args };
+  return cond(type, { code: c.path, operator: chain ? c.operator : filterOp(param(type, c.path), c.operator), value: c.value }, a);
 }
 
 // _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
@@ -805,10 +804,7 @@ const canonical = (type: string, p: SearchParameter): boolean => getSearchParame
 // MAX_INCLUDE_DEPTH rounds is refused. Canonical parameters resolve by url (url|version: that version, as R4 canonicals).
 function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEntry[], base: string): void {
   if (!req.include && !req.revInclude) return;
-  for (const inc of req.include ?? []) {
-    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
-  }
-  for (const inc of req.revInclude ?? []) {
+  for (const inc of [...(req.include ?? []), ...(req.revInclude ?? [])]) {
     if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
   }
   const seen = new Set(matches.map((m) => `${m.type}/${m.id}`));
