@@ -97,7 +97,8 @@ const all = (client: MedplumClient, type: string, q: Record<string, string>) => 
 const SCANNED = [...Object.entries(COMPARTMENT), ['Basic', 'subject'], ['RelatedPerson', 'patient'], ['Provenance', '']];
 async function scan(client: MedplumClient, pid: string, fn: (r: R) => void): Promise<void> {
   for (const [type, field] of SCANNED) {
-    for await (const page of client.searchResourcePages(type as 'Observation', { ...(field && { [field]: `Patient/${pid}` }), _count: '1000' }, { cache: 'no-cache' })) {
+    // _sort=_lastUpdated makes Medplum page by cursor (it caps _offset at 10000; Apple Health alone holds more Observations).
+    for await (const page of client.searchResourcePages(type as 'Observation', { ...(field && { [field]: `Patient/${pid}` }), _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
       for (const r of page) fn(r as R);
     }
   }

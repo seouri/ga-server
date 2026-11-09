@@ -404,7 +404,7 @@ export async function importResources(
   const orgOf = (ids: Identifier[]) => ids.map((i) => EPIC_ORG.exec(i.system ?? '')?.[1]).filter((n): n is string => !!n);
   const readNoteSystems = async () => {
     const systems = new Map<string, Set<string>>();
-    for await (const page of client.searchResourcePages('DocumentReference', { subject: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' })) {
+    for await (const page of client.searchResourcePages('DocumentReference', { subject: `Patient/${patientId}`, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) {
       for (const d of page) for (const i of d.identifier ?? []) if (i.system?.startsWith('urn:ga-server:id:ehi:') && i.value?.startsWith('HNO_INFO|')) systems.set(i.system, new Set());
     }
     for (const [system, orgs] of systems) {

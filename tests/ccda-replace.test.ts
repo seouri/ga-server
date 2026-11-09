@@ -103,6 +103,17 @@ test('dry run changes nothing', async () => {
   });
 });
 
+// Medplum caps _offset paging at 10000 results (Apple Health alone holds more Observations): every paged search must page by cursor.
+test('every paged search of the replace sorts by _lastUpdated (Medplum pages those by cursor, past its 10000 offset cap)', async () => {
+  await onStore(async ({ client }) => {
+    const w = await world(client, { ehiVisit: true });
+    const pages = vi.spyOn(client, 'searchResourcePages');
+    await run(w, true);
+    expect(pages).toHaveBeenCalled();
+    for (const [, q] of pages.mock.calls) expect((q as Record<string, string>)._sort, JSON.stringify(q)).toBe('_lastUpdated');
+  });
+});
+
 test('re-import after replace is a no-op; the corrected values land', async () => {
   await onStore(async ({ client }) => {
     const w = await world(client);
