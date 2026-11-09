@@ -2,7 +2,8 @@
 // the owner's project) and against a temp store with every R4 type. Ported Medplum tests run through both().
 import { randomUUID } from 'node:crypto';
 import { MedplumClient } from '@medplum/core';
-import type { Resource } from '@medplum/fhirtypes';
+import type { Bundle, Resource } from '@medplum/fhirtypes';
+import { expect } from 'vitest';
 import { bearer } from '../../../src/config.ts';
 import { setup } from '../../../src/setup.ts';
 import { tempStore } from '../../temp-store.ts';
@@ -16,7 +17,10 @@ export type Side = {
 };
 
 // Types the ported tests create, swept before a run (a crashed run leaves records). Later tasks extend it.
-export const PARITY_TYPES = ['Observation', 'Condition', 'Patient', 'Basic', 'ResearchStudy'];
+export const PARITY_TYPES = ['Observation', 'Condition', 'Patient', 'Basic', 'ResearchStudy', 'Practitioner', 'Organization', 'Appointment', 'Slot',
+  'ImagingStudy', 'DiagnosticReport', 'Flag', 'PractitionerRole', 'Coverage', 'CoverageEligibilityRequest', 'Encounter', 'Communication', 'ServiceRequest',
+  'Questionnaire', 'QuestionnaireResponse', 'Location', 'HealthcareService', 'AuditEvent', 'AllergyIntolerance', 'CareTeam', 'Provenance', 'Task', 'Goal',
+  'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle'];
 const PROJECT = 'ga-test-parity';
 
 export async function guardProject(me: { project: { name?: string } }): Promise<void> {
@@ -30,6 +34,34 @@ export const shape = (x: unknown, base: string): unknown => JSON.parse(JSON.stri
 
 export const marker = (): string => `parity-${randomUUID()}`;
 export const both = async <T>(sides: [Side, Side], fn: (s: Side) => Promise<T>): Promise<[T, T]> => [await fn(sides[0]), await fn(sides[1])];
+// both() (a failure names its side), then the two results must have the same shape.
+export async function same<T>(sides: [Side, Side], fn: (s: Side) => Promise<T>): Promise<[T, T]> {
+  const r = await both(sides, async (s) => {
+    try { return await fn(s); } catch (e) { if (e instanceof Error) e.message = `[${s.name}] ${e.message}`; throw e; }
+  });
+  expect(shape(r[1], sides[1].base)).toEqual(shape(r[0], sides[0].base));
+  return r;
+}
+
+// A query path from params, each value encoded.
+export const q = (type: string, ...params: [string, string][]): string => `${type}?${new URLSearchParams(params)}`;
+// GET a search; anything but 200 throws with the body.
+export async function search(s: Side, path: string): Promise<Bundle> {
+  const g = await s.call('GET', path);
+  if (g.status !== 200) throw new Error(`${s.name} GET ${path}: ${g.status} ${g.text}`);
+  return g.json;
+}
+// A searchset's entries by the names of the records the test created (`include:` before an included one, `?` for others),
+// comparable across sides.
+export const names = (b: Bundle, named: Record<string, { id?: string }>): string[] => (b.entry ?? []).map((e) => {
+  const n = Object.keys(named).find((k) => named[k].id === e.resource?.id) ?? '?';
+  return e.search?.mode === 'include' ? `include:${n}` : n;
+});
+// The issue text of an error answer, with its status.
+export async function error(s: Side, path: string): Promise<{ status: number; text?: string }> {
+  const g = await s.call('GET', path);
+  return { status: g.status, text: g.json?.issue?.[0]?.details?.text };
+}
 
 function side(name: Side['name'], base: string, token: () => string, created?: string[]): Side {
   const s: Side = {
@@ -61,14 +93,15 @@ export async function paritySides(): Promise<{ sides: [Side, Side]; close(): Pro
   const admin = new MedplumClient({ baseUrl: t.baseUrl });
   const { code } = await retryLimited(() => admin.startLogin({ email: 'admin@example.com', password: cfg.adminPassword as string, projectId: cfg.projectId }));
   await admin.processCode(code as string);
-  const me = (await admin.get('auth/me', { cache: 'no-cache' })) as { project: { name?: string } };
+  const me = (await admin.get('auth/me', { cache: 'no-cache' })) as { project: { name?: string }; membership?: { profile?: { reference?: string } } };
   await guardProject(me);
   // Delete what an earlier (crashed) run left: the project is this harness's alone and Medplum sets no meta.author for this login,
-  // so every record of the types goes, except GA setup's self Patient (setup keeps finding it).
+  // so every record of the types goes, except GA setup's self Patient (setup keeps finding it) and the admin's own profile Practitioner.
   for (const type of PARITY_TYPES) {
     for (;;) {
       const rs = (await admin.searchResources(type as 'Basic', { _count: '1000' }, { cache: 'no-cache' }))
-        .filter((r) => !(type === 'Patient' && (r as { identifier?: { value?: string }[] }).identifier?.some((i) => i.value === 'self')));
+        .filter((r) => !(type === 'Patient' && (r as { identifier?: { value?: string }[] }).identifier?.some((i) => i.value === 'self'))
+          && `${type}/${r.id}` !== me.membership?.profile?.reference);
       if (!rs.length) break;
       for (const r of rs) await admin.deleteResource(type as 'Basic', r.id as string);
     }

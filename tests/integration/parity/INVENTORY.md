@@ -196,15 +196,15 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | systemRepo › Reverse chained search with _filter | skipped | filter | not yet ported (Task 8) |
 | server/src/fhir/search.test.ts | systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s | skipped | existing | not yet ported (Task 3a) |
 | server/src/fhir/search.test.ts | parseChainedParameter › reverse chained search with prefix operators | skipped | platform | parseChainedParameter unit test |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Appointment.end | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Slot.end | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by DiagnosticReport.study | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Flag.category | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Appointment.end | ported | existing |  |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Slot.end | ported | existing |  |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by DiagnosticReport.study | ported | existing |  |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by Flag.category | ported | existing |  |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search by AsyncJob.type and AsyncJob.status | skipped | platform | Medplum-only resource type / project |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for Practitioner by qualification-code | skipped | existing | not yet ported (Task 3a) |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for PractitionerRole by network | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for Practitioner by qualification-code | ported | existing |  |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for PractitionerRole by network | ported | existing |  |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for Login by project | skipped | platform | Medplum-only resource type / project |
-| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for CoverageEligibilityRequest by coverage | skipped | existing | not yet ported (Task 3a) |
+| server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for CoverageEligibilityRequest by coverage | ported | existing |  |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch success | skipped | existing | not yet ported (Task 3b) |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › FHIRPath Patch in batch | skipped | existing | not yet ported (Task 3b) |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction success | skipped | existing | not yet ported (Task 3b) |
