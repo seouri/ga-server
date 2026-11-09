@@ -337,12 +337,13 @@ test('an older EHI source only adds its identifier to the linked record; re-impo
   expect(await importResources(client, [e], ehiSrc('2026-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 1 });
 });
 
-test('a C-CDA batch with two different Encounters sharing one CSN stores both; re-import is a no-op', async () => {
+// The converter makes one Encounter per visit id: two in one batch are copies of one visit (engine mergeCopies), never two visits.
+test('a C-CDA batch with two Encounters sharing one CSN stores one visit; re-import is a no-op', async () => {
   const csn = { system: CSN_OID, value: uid('csn') };
   const batch = [enc([csn], 'finished'), enc([csn], 'cancelled')];
-  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 2 });
+  expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 1 });
   expect(await importResources(client, batch, ccda('2024-01-01'), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 0, skipped: 2 });
-  expect(await byId('Encounter', csn.system, csn.value)).toHaveLength(2);
+  expect(await byId('Encounter', csn.system, csn.value)).toHaveLength(1);
 });
 
 test('a patient-compartment resource without a subject does not link to another patient record', async () => {
