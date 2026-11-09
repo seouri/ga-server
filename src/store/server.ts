@@ -125,7 +125,8 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   if (len > (type === 'Binary' ? binaryLimit : JSON_LIMIT)) throw new HttpError(413, 'Request body too large');
   if (parts.length > 4) throw new HttpError(404, `Not found: ${url.pathname}`);
 
-  if (type === 'Binary') {
+  // Binary?_type=A is a search of A, as Medplum (a search with _type ignores its path type).
+  if (type === 'Binary' && !(method === 'GET' && !id && url.searchParams.has('_type'))) {
     const contentType = req.headers['content-type'] ?? 'application/octet-stream';
     if (method === 'POST' && !id) {
       const { id: bid } = await store.putBinaryStream(contentType, binaryBody(req, binaryLimit));
@@ -175,9 +176,10 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   send(res, a.status, out, h);
 }
 
-// GET [base]?_type=A,B: a search across the listed types (Medplum's texts for no types, an unknown type and Binary).
+// GET [base]?_type=A,B: a search across the listed types (Medplum's texts for no types, an unknown type and Binary). As Medplum,
+// the last _type counts, and <Type>?_type=A,B is the same search (the path type is ignored).
 function systemSearch(store: Store, r: Req): Answer {
-  const types = r.query.get('_type')?.split(',');
+  const types = r.query.getAll('_type').at(-1)?.split(',');
   if (!types) throw new HttpError(400, 'No types specified');
   for (const t of types) {
     if (!t) throw new HttpError(400, 'Resource type is null');
@@ -221,6 +223,7 @@ function dispatch(store: Store, r: Req): Answer {
   if (type[0] === '$') throw new HttpError(404, `Not found: ${type}`); // no system-level operations
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});
+  if (r.query.has('_type') && ((method === 'GET' && !id) || (method === 'POST' && id === '_search' && !op))) return systemSearch(store, r);
   if (type === 'Binary') throw new HttpError(400, 'Binary is only served at Binary/<id>, not in a batch');
   if (!storedTypes().includes(type)) throw new HttpError(400, 'Unknown resource type'); // Medplum's text
   if (!id) {

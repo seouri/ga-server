@@ -170,8 +170,8 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › narrowed fields | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Multiple types | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Error on cursor and offset | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination dedupes across page boundaries | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination | ported | existing |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination dedupes across page boundaries | skipped | platform | needs a client-set meta.lastUpdated (ties across a page boundary), which an HTTP create does not keep |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › Cursor pagination with multiple resource types from _type | ported | type |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › searchByReference › V1 cursor is not parsed as V2 | skipped | platform | Repository.searchByReference, a Medplum method with no HTTP route |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference search bare-id prefix derivation › Single-target reference param: bare uuid matches (DeviceRequest.encounter) | ported | existing |  |

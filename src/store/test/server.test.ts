@@ -762,7 +762,20 @@ describe('store server: Medplum-compatible routes', () => {
     expect(await err('?_type=Patient,Binary')).toEqual([400, 'Cannot search on Binary resource type']);
     expect(await err('?_type=Patient,Observation&_sort=birthdate')).toEqual([400, 'Unknown search parameter: birthdate']);
     expect((await call('GET', '?_type=Patient,Observation&_sort=-_lastUpdated')).status).toBe(200);
-    expect(await err('Patient?_type=Observation')).toEqual([400, '_type is not supported on a type-level search']);
+  });
+
+  it('as Medplum: <Type>?_type=A is the search of A (Binary too), the last _type counts, a repeated type is one', async () => {
+    const p = (await call('POST', 'Patient', { resourceType: 'Patient' })).json;
+    const o = (await call('POST', 'Observation', ob({ subject: P(p.id) }))).json;
+    const ids = async (q: string) => { const r = await call('GET', q); expect(r.status).toBe(200); return r.json.entry.map((e: BundleEntry) => e.resource!.id); };
+    const c = `_compartment=Patient/${p.id}`;
+    expect(await ids(`Patient?_type=Observation&${c}`)).toEqual([o.id]);
+    expect(await ids(`Binary?_type=Observation&${c}`)).toEqual([o.id]);
+    expect((await call('POST', 'Patient/_search', `_type=Observation&${c}`, { 'content-type': 'application/x-www-form-urlencoded' })).json.entry.map((e: BundleEntry) => e.resource!.id)).toEqual([o.id]);
+    expect(await ids(`?_type=Patient&_type=Observation&${c}`)).toEqual([o.id]);
+    expect(await ids(`?_type=Nope&_type=Patient&${c}`)).toEqual([p.id]);
+    expect((await call('GET', `?_type=Patient&_type=Nope`)).status).toBe(400);
+    expect(await ids(`?_type=Patient,Patient&${c}`)).toEqual([p.id]);
   });
 
   it('_type cursor pages have no repeats and no gaps across types', async () => {

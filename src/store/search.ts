@@ -559,7 +559,9 @@ function searchRaw(prep: Prep, typeOrTypes: string | string[], query: [string, s
     return prep(sql).all(...args, count + 1, offset) as Record<string, Arg>[];
   };
   let found: Record<string, Arg>[] | undefined;
-  if (union) found = run(false); // the walks read one type's sort index
+  // shortcut: a system search sorts its whole union on every page (the walks read one type's sort index); fine for a personal
+  // record, upgrade to a k-way merge of per-type index walks when a store searches large types without a selective filter.
+  if (union) found = run(false);
   else if (keys[0].code && size >= driveMax) found = run(true);
   else if (keys[0].code && walkPerRow * (count + 1 + offset) < size) {
     // A small page from a large set: walk the first rows of the sort index and keep the result only if it is provably the

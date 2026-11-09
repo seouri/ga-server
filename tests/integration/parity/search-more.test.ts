@@ -451,9 +451,9 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
       eq: Array(10).fill(0), ne: Array(10).fill(1), lt: [0, 0, 1, 1, 1, 0, 0, 1, 1, 1], gt: [1, 1, 1, 0, 0, 1, 1, 1, 0, 0] });
   });
 
-  // Medplum's {resourceType: 'Patient', types: [...]} search goes to the system URL ?_type=...: R4 defines _type on system (and
-  // compartment) searches, and the store refuses it on a type-level one (README, deliberate differences); Medplum takes both.
-  // Next links: Medplum's are .../MultipleTypes?..._offset= or _cursor=, the store's ...R4?..._cursor=; each side follows its own.
+  // Medplum's {resourceType: 'Patient', types: [...]} search is Patient?_type=...: both servers search the _type list and ignore
+  // the path type. Next links: Medplum's are .../Patient?..._offset= or _cursor=, the store's ...R4?..._cursor=; each side
+  // follows its own.
   const next = (b: Bundle) => b.link?.find((l) => l.relation === 'next')?.url;
   const follow = async (s: Side, path: string) => {
     const ids: string[] = [], sizes: number[] = [], links: string[] = [];
@@ -472,20 +472,21 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
   test('project-scoped Repository w/ %j › Multiple resource types with _type [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const patient = await s.create({ resourceType: 'Patient' });
     const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
-    const bundle = await search(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}`);
+    const bundle = await search(s, `Patient?_type=Patient,Observation&_compartment=Patient/${patient.id}`);
     expect(bundle.entry?.length).toBe(2);
     expect(has(bundle, patient)).toBeTruthy();
     expect(has(bundle, obs)).toBeTruthy();
   }));
 
-  test('project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+  // README, deliberate differences: the store pages a system search by cursor; the set, order and page sizes are the same.
+  test('differs on purpose: project-scoped Repository w/ %j › Multiple resource types with _type uses offset pagination across combined results [server/src/fhir/search.test.ts]', () => both(sides, async (s) => {
     const patient = await s.create({ resourceType: 'Patient' });
     const expectedIds = [patient.id];
     for (let i = 0; i < 4; i++) expectedIds.push((await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) })).id);
-    const { ids, sizes, links } = await follow(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_id&_count=2`);
+    const { ids, sizes, links } = await follow(s, `Patient?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_id&_count=2`);
     for (const l of links) {
       expect(new URL(l).searchParams.get('_type')).toBe('Patient,Observation');
-      expect(l).toContain(nextKind(s)); // Medplum pages by offset here, the store by cursor: no repeats, no gaps either way
+      expect(l).toContain(nextKind(s)); // each side's own: Medplum pages by offset here, the store by cursor
     }
     expect(sizes).toStrictEqual([2, 2, 1]);
     expect([...ids].sort()).toEqual([...expectedIds].sort());
@@ -496,7 +497,7 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     const patient = await s.create({ resourceType: 'Patient' });
     const expectedIds = [patient.id];
     for (let i = 0; i < 49; i++) expectedIds.push((await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'cursor_type_test' }, subject: ref(patient) })).id);
-    const { ids, links } = await follow(s, `?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_lastUpdated&_count=20`);
+    const { ids, links } = await follow(s, `Patient?_type=Patient,Observation&_compartment=Patient/${patient.id}&_sort=_lastUpdated&_count=20`);
     for (const l of links) {
       expect(new URL(l).searchParams.get('_type')).toBe('Patient,Observation');
       expect(l).toContain('_cursor=');
@@ -504,6 +505,77 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(ids.length).toBe(50);
     expect([...ids].sort()).toEqual([...expectedIds].sort());
     expect(ids).toEqual(expectedIds); // created in order, so _lastUpdated order
+  }));
+
+  // Beyond Medplum's tests: _type checked against Medplum's answers.
+  test('_type: a parameter one type lacks is 400 with Medplum\'s text', () => same(sides, async (s) => error(s, '?_type=Patient,Observation&code=x')));
+
+  test('_type: the last _type counts, a type listed twice is one', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
+    const named = { patient, obs };
+    const c = `_compartment=Patient/${patient.id}`;
+    return [
+      names(await search(s, `?_type=Patient&_type=Observation&${c}`), named),
+      names(await search(s, `?_type=Nope&_type=Patient&${c}`), named),
+      await error(s, `?_type=Patient&_type=Nope&${c}`),
+      names(await search(s, `?_type=Patient,Patient&${c}`), named),
+    ];
+  }));
+
+  test('_type with _include and _revinclude', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const obs = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
+    const cond = await s.create({ resourceType: 'Condition', subject: ref(patient) });
+    const named = { patient, obs, cond };
+    return [
+      names(await search(s, `?_type=Observation,Condition&subject=Patient/${patient.id}&_include=Observation:subject&_sort=_lastUpdated`), named),
+      names(await search(s, `?_type=Patient&_id=${patient.id}&_revinclude=Observation:subject&_revinclude=Condition:subject`), named),
+    ];
+  }));
+
+  test('_type with _summary, _elements and _total', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient), valueString: 'x' });
+    await s.create({ resourceType: 'Condition', subject: ref(patient), note: [{ text: 'x' }] });
+    const c = `_type=Observation,Condition&_compartment=Patient/${patient.id}&_sort=_lastUpdated`;
+    const keys = (b: Bundle) => b.entry?.map((e) => Object.keys(e.resource!).filter((k) => k !== 'meta').sort());
+    const tags = (b: Bundle) => b.entry?.map((e) => e.resource!.meta?.tag?.map((t) => t.code));
+    const elements = await search(s, `?${c}&_elements=subject&_total=accurate`);
+    const summary = await search(s, `?${c}&_summary=true`);
+    return [elements.total, keys(elements), tags(elements), keys(summary), tags(summary)];
+  }));
+
+  // README, deliberate differences: R4's POST [base]/_search is the system search; Medplum 5.2.14 has no such route.
+  test('differs on purpose: POST _search at the system level', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const patient = await s.create({ resourceType: 'Patient' });
+      const g = await s.call('POST', '_search', `_type=Patient,Observation&_compartment=Patient/${patient.id}`, { 'content-type': 'application/x-www-form-urlencoded' });
+      return { status: g.status, text: g.json?.issue?.[0]?.details?.text, ids: g.json?.entry?.map((e: { resource: { id: string } }) => e.resource.id), patient: patient.id };
+    });
+    expect([medplum.status, medplum.text]).toEqual([400, 'Incorrect resource type: expected _search, but found <EMPTY>']);
+    expect([store.status, store.ids]).toEqual([200, [store.patient]]);
+  });
+
+  // README, deliberate differences: _summary=count counts every listed type (Medplum's count of a _type search counts one).
+  test('differs on purpose: _type with _summary=count', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const patient = await s.create({ resourceType: 'Patient' });
+      await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
+      await s.create({ resourceType: 'Condition', subject: ref(patient) });
+      return (await search(s, `?_type=Observation,Condition&_compartment=Patient/${patient.id}&_summary=count`)).total;
+    });
+    expect(medplum).toBe(1);
+    expect(store).toBe(2);
+  });
+
+  // Medplum's code=cursor_test matches the code's text by plain equality (the store needs :text; README): a coded marker here.
+  test('project-scoped Repository w/ %j › searchByReference › Cursor pagination [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const code = marker();
+    for (let i = 0; i < 50; i++) await s.create({ resourceType: 'Task', status: 'accepted', intent: 'order', code: { coding: [{ code }] } });
+    const { ids, links } = await follow(s, `Task?code=${code}&_sort=_lastUpdated`);
+    for (const l of links) expect(l.includes('_cursor')).toBe(true);
+    expect(ids.length).toBe(50);
   }));
 
   test('project-scoped Repository w/ %j › Binary search not allowed [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
