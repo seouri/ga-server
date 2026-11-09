@@ -63,7 +63,7 @@ Under `/fhir/R4/`:
 - `GET metadata`: a CapabilityStatement of what this store supports.
 - `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.
 
-Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), one-level chains and `_has`, `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
+Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), chains and reverse chains (`_has`), mixed and nested up to Medplum's limit of three links, through canonical references and `_compartment` too (a link with several target types names one, `subject:Patient.name`, as Medplum), `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
 
 ## Deliberate differences from Medplum
 
@@ -88,6 +88,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - `POST _search` (form body) is the system-level search, as R4 defines it (Medplum 5.2.14 has no such route and answers 400).
 - System-level search pages by cursor, with next links at `fhir/R4?…` (Medplum pages by `_offset` unless sorted by `_lastUpdated` ascending, and its links point at `fhir/R4/MultipleTypes?…` or the path type's URL).
 - `_summary=count` (or `_total`) of a `_type` search counts the matches of every listed type (Medplum 5.2.14's count counts one of them).
+- `meta.compartment` holds Patient compartments only: the store has no projects, so `_compartment:missing=true` finds a record in no patient's compartment (Medplum puts every record in its project's compartment too, so it finds none); Medplum's `meta.accounts` add no compartment.
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support
@@ -95,7 +96,6 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
 
 - Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
-- Chains deeper than one level; reverse chains (`_has`) beyond one level.
 - Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
 - `_contained`, `_text`, `_content`, and `_include=*` (Medplum 5.2.14 refuses it too; plan 4 decides).
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.

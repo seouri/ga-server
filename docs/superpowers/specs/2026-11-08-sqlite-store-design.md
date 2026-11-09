@@ -80,7 +80,6 @@ The store behaves like Medplum for what a FHIR client does with records. These a
 
 - `_summary=true`, `_summary=data`, `_summary=text` (`_summary=count` works; `_summary=false` is accepted and changes nothing, as on Medplum).
 - Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
-- Chains deeper than one level; reverse chains (`_has`) beyond one level.
 - `_contained`, `_text`, `_content`, `_include:iterate`, `_revinclude:iterate` and `_include=*`.
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
 

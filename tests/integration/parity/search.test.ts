@@ -1,4 +1,5 @@
-// Medplum 5.2.14 packages/server/src/fhir/search.test.ts, first part (to "Subject search without resource type"), ported side by
+// Medplum 5.2.14 packages/server/src/fhir/search.test.ts, first part (to "Chained search on single columns using reference
+// tables"; Medplum's _compartment tests are at the end here), ported side by
 // side (see harness.ts); search-more.test.ts has the rest. Medplum's SearchRequest objects become the query strings
 // parseSearchRequest reads back into them; NOT_EQUALS on a token, reference or _id has no HTTP prefix and is :not.
 // Medplum's project is shared by the file (Medplum gives each describe one), so searches filter on values the test created.
@@ -528,5 +529,85 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
     const observation = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patient) });
     const searchResult = await search(s, `Observation?subject=${patient.id}`);
     expect(searchResult.entry?.[0]?.resource?.id).toBe(observation.id);
+  }));
+
+  // Medplum's _compartment tests put records in Organization compartments through meta.accounts (Medplum's project accounts,
+  // not R4; the store has none). The ports use the Patient compartment instead: an Observation's subject and performer.
+  const twoPatients = async (s: Side) => {
+    const patientA = await s.create({ resourceType: 'Patient', name: [{ family: crypto.randomUUID() }] });
+    const patientB = await s.create({ resourceType: 'Patient', name: [{ family: crypto.randomUUID() }] });
+    const observation = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, subject: ref(patientB), performer: [ref(patientA)] });
+    return { patientA, patientB, observation };
+  };
+
+  // Medplum puts every record in its project's compartment (meta.compartment Project/<id>), so :missing=true matches nothing
+  // there; the store has no projects, so a record in no patient's compartment has no _compartment.
+  test('differs on purpose: project-scoped Repository w/ %j › Filter by _compartment presence [server/src/fhir/search.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const identifier = crypto.randomUUID();
+      const patient = await s.create({ resourceType: 'Patient' });
+      const withCompartment = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, identifier: [{ value: identifier }], subject: ref(patient) });
+      const withoutCompartment = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'test' }, identifier: [{ value: identifier }] });
+      const named = { withCompartment, withoutCompartment };
+      return {
+        present: names(await search(s, `Observation?identifier=${identifier}&_compartment:missing=false`), named).sort(),
+        missing: names(await search(s, `Observation?identifier=${identifier}&_compartment:missing=true`), named),
+      };
+    });
+    expect(medplum).toEqual({ present: ['withCompartment', 'withoutCompartment'], missing: [] });
+    expect(store).toEqual({ present: ['withCompartment'], missing: ['withoutCompartment'] });
+  });
+
+  test('project-scoped Repository w/ %j › Reverse filter by _compartment:_id [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const { patientA, patientB, observation } = await twoPatients(s);
+    const searchResult = await search(s, `Patient?_has:Observation:_compartment:_id=${observation.id}`);
+    // Both compartment Patients returned
+    expect(searchResult.entry?.map((e) => e.resource?.id).sort()).toEqual([patientA.id, patientB.id].sort());
+  }));
+
+  test('project-scoped Repository w/ %j › Forward filter by _compartment.name [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    // Both Patients considered, but only one matches
+    const { patientA, observation } = await twoPatients(s);
+    const searchResult = await search(s, `Observation?_compartment:Patient.name=${(patientA as Patient).name![0].family}`);
+    expect(searchResult.entry?.map((e) => e.resource?.id)).toEqual([observation.id]);
+  }));
+
+  // Medplum's middle link is a Patient's Organization compartment; here an Observation's Patient compartment.
+  test('project-scoped Repository w/ %j › Chained filter with _compartment as middle link [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const { patientB, observation } = await twoPatients(s);
+    const report = await s.create({ resourceType: 'DiagnosticReport', status: 'final', code: { text: 'test' }, result: [ref(observation)] });
+    const searchResult = await search(s, `DiagnosticReport?result._compartment:Patient.name=${(patientB as Patient).name![0].family!.substring(0, 8)}`);
+    expect(searchResult.entry?.map((e) => e.resource?.id)).toEqual([report.id]);
+  }));
+
+  test('project-scoped Repository w/ %j › Non UUID _compartment [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    expect((await search(s, 'Patient?_compartment=x')).entry?.length ?? 0).toBe(0);
+  }));
+
+  test('project-scoped Repository w/ %j › Reference string _compartment [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const patient = await s.create({ resourceType: 'Patient' });
+    const searchResult1 = await search(s, `Patient?_compartment=Patient/${patient.id}`);
+    expect(searchResult1.entry?.length).toBe(1);
+    expect(has(searchResult1, patient)).toBe(true);
+  }));
+
+  test('project-scoped Repository w/ %j › Chained search on array columns using reference tables [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const pcp = await s.create({ resourceType: 'Practitioner' });
+    const patient = await s.create({ resourceType: 'Patient', generalPractitioner: [ref(pcp)] });
+    const code = crypto.randomUUID();
+    const categorySystem = 'http://example.com/care-team-category';
+    await s.create({ resourceType: 'CareTeam', category: [{ coding: [{ system: categorySystem, code, display: 'Public health-focused care team' }] }], participant: [{ member: ref(pcp) }] });
+    const searchResult = await search(s, `Patient?general-practitioner:Practitioner._has:CareTeam:participant:category=${categorySystem}|${code}`);
+    expect(searchResult.entry?.[0]?.resource?.id).toBe(patient.id);
+  }));
+
+  test('project-scoped Repository w/ %j › Chained search on single columns using reference tables [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const code = crypto.randomUUID();
+    const patient = await s.create({ resourceType: 'Patient' });
+    const encounter = await s.create({ resourceType: 'Encounter', status: 'finished', class: { system: 'http://example.com/appt-type', code } });
+    const observation = await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'Throat culture' }, subject: ref(patient), encounter: ref(encounter) });
+    await s.create({ resourceType: 'DiagnosticReport', status: 'final', code: { text: 'Strep test' }, encounter: ref(encounter), result: [ref(observation)] });
+    const result = await search(s, `Patient?_has:Observation:subject:encounter:Encounter.class=${code}`);
+    expect(result.entry?.[0]?.resource?.id).toBe(patient.id);
   }));
 });

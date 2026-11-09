@@ -180,8 +180,7 @@ function cond(type: string, f: Filter, a: string): Cond {
     try { e = parseFilterParameter(f.value); } catch (err) { throw badRequest(`Invalid _filter: ${err instanceof Error ? err.message : String(err)}`); }
     return filterExpr(type, e, a);
   }
-  if (f.code.startsWith('_has:')) return hasCond(type, f, a);
-  if (f.code.includes('.')) return chainCond(type, f, a);
+  if (f.code.startsWith('_has:') || f.code.includes('.')) return chainCond(type, f, a);
   const [code, mod] = f.code.split(':');
   if (mod) throw badRequest(`Unsupported search modifier: ${f.code}`);
   const p = param(type, code);
@@ -303,43 +302,90 @@ function matching(type: string, f: Filter): { sql: string; args: Arg[] } {
   return c.set ?? { sql: `select ${t}.rid from ${allOf(t)} and ${c.sql}`, args: [type, ...c.args] };
 }
 
-// _has:Type:refParam:param=value: resources referenced (by refParam) from a Type matching param=value.
-function hasCond(type: string, f: Filter, a: string): Cond {
-  const [, t, ref, ...rest] = f.code.split(':');
-  if (!t || !ref || !rest.length) throw badRequest(`Invalid _has: ${f.code}`);
-  if (param(t, ref)?.type !== 'reference') throw badRequest(`Unknown search parameter: ${ref} (${t})`);
-  if (rest[0] === '_has') throw badRequest(`Unsupported _has deeper than one level: ${f.code}`);
-  // The parser leaves the inner parameter unparsed (its modifier in the code, its prefix in the value): parse it as t's own.
-  const inner = matching(t, f.operator === Operator.EQUALS ? ownFilter(t, rest.join(':'), f.value) : { code: rest.join(':'), operator: f.operator, value: f.value });
-  return {
-    sql: `${a}.rid in (select x.rid from resources x where x.type = ? and x.id in (select substr(h.val, ?) from idx h where h.type = ? and h.code = ? and h.val >= ? and h.val < ? and h.rid in (${inner.sql})))`,
-    args: [type, type.length + 2, t, ref, `${type}/`, `${type}/￿`, ...inner.args],
-  };
+// Medplum's longest chain (buildChainedSearch in packages/server/src/fhir/search.ts, 5.2.14); a _has counts as a link.
+const MAX_CHAIN_LINKS = 3;
+type Link = { from: string; to: string; code: string; reverse: boolean; canonical: boolean };
+
+// A chain's parts as Medplum's splitChainedSearch: each `_has:Type:ref`, else what lies between dots; the last is the parameter.
+function splitChain(chain: string): string[] {
+  const parts: string[] = [];
+  while (chain) {
+    if (chain.startsWith('_has:')) {
+      const t = chain.indexOf(':', 5), c = chain.indexOf(':', t + 1);
+      if (t < 0 || t >= c) throw badRequest(`Invalid search chain: ${chain}`);
+      parts.push(chain.slice(0, c));
+      chain = chain.slice(c + 1);
+    } else {
+      const dot = chain.indexOf('.') < 0 ? chain.length : chain.indexOf('.');
+      parts.push(chain.slice(0, dot));
+      chain = chain.slice(dot + 1);
+    }
+  }
+  return parts;
 }
 
-// One-level chain: refParam[:Type].param=value. Without a type, every target type that has `param`.
+// A chain (ref[:Type].…) or reverse chain (_has:Type:ref:…), mixed and nested up to Medplum's limit, parsed and checked as
+// Medplum's parseChainedParameter (its texts). Built from the last parameter outward, so each link reads the index by the
+// rids of the link after it: a chain is driven by its most selective end, never a scan of what references the one Patient.
 function chainCond(type: string, f: Filter, a: string): Cond {
-  const parts = f.code.split('.');
-  if (parts.length > 2) throw badRequest(`Unsupported chain deeper than one level: ${f.code}`);
-  const [head, tail] = parts;
-  const [code, tt] = head.split(':');
-  const p = param(type, code);
-  if (p?.type !== 'reference') throw badRequest(`Unsupported chain on ${code} (${type}): not a reference parameter`);
-  const targets = (tt ? [tt] : p.target ?? []).filter((t) => param(t, tail.split(':')[0]));
-  if (!targets.length) throw badRequest(`Unsupported chain: no target of ${code} has parameter ${tail}`);
-  const args: Arg[] = [type, code];
-  // ref._id=x is the reference T/x itself, as Medplum (the target need not exist).
-  if (tail === '_id' && f.operator === Operator.EQUALS) {
-    const vals = targets.flatMap((t) => splitSearchOnComma(f.value).map((v) => `${t}/${v}`));
-    return { sql: `${a}.rid in (select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (${qs(vals.length)}))`, args: [...args, ...vals] };
+  const parts = splitChain(f.code);
+  const links: Link[] = [];
+  let t = type;
+  for (const part of parts.slice(0, -1)) {
+    if (part.startsWith('_has:')) {
+      const [, from, code] = part.split(':');
+      const p = param(from, code);
+      if (p?.type !== 'reference') throw badRequest(`Invalid search parameter in chain: ${from}?${code}`);
+      if (!p.target?.includes(t as never)) throw badRequest(`Invalid reverse chain link: search parameter ${from}?${code} does not refer to ${t}`);
+      links.push({ from: t, to: from, code, reverse: true, canonical: canonical(from, p) });
+      t = from;
+    } else {
+      const [code, mod] = part.split(':');
+      const p = param(t, code);
+      if (!p) throw badRequest(`Invalid search parameter in chain: ${t}?${code}`);
+      const to = p.target?.length === 1 ? p.target[0] : p.target?.find((x) => x === mod);
+      if (!to) throw badRequest(`Unable to identify next resource type for search parameter: ${t}?${code}`);
+      if (p.type !== 'reference') throw badRequest(`Invalid search parameter in chain: ${t}?${code}`);
+      links.push({ from: t, to, code, reverse: false, canonical: canonical(t, p) });
+      t = to;
+    }
   }
-  const refs = targets.map((t) => {
-    // The parser leaves a chained value unparsed (no prefix): parse it as the target's own parameter, as Medplum does.
-    const inner = matching(t, f.operator === Operator.EQUALS ? ownFilter(t, tail, f.value) : { code: tail, operator: f.operator, value: f.value });
-    args.push(`${t}/`, ...inner.args);
-    return `select ? || x.id from resources x where x.rid in (${inner.sql})`;
-  });
-  return { sql: `${a}.rid in (select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (${refs.join(' union all ')}))`, args };
+  const last = parts[parts.length - 1];
+  if (last.startsWith('_has:')) throw badRequest('Unterminated chained search');
+  const code = last.split(':')[0];
+  if (code !== '_filter' && !param(t, code)) throw badRequest(`Invalid search parameter at end of chain: ${t}?${code}`);
+  if (links.length > MAX_CHAIN_LINKS) throw badRequest('Search chains longer than three links are not currently supported');
+  // The parser leaves a chained value unparsed (no prefix, modifier in the code): parse it as the last type's own parameter.
+  const filter = f.operator === Operator.EQUALS ? ownFilter(t, last, f.value) : { code: last, operator: f.operator, value: f.value };
+  const [one] = links;
+  // ref._id=x is the reference T/x itself, as Medplum (the target need not exist).
+  if (links.length === 1 && !one.reverse && filter.code === '_id' && ([Operator.EQUALS, Operator.EXACT, Operator.NOT, Operator.NOT_EQUALS] as string[]).includes(filter.operator)) {
+    const value = splitSearchOnComma(filter.value).map((v) => `${one.to}/${v}`).join(',');
+    return cond(type, { code: one.code, operator: filter.operator === Operator.EXACT ? Operator.EQUALS : filter.operator, value }, a);
+  }
+  let set = matching(t, filter);
+  for (const l of links.reverse()) set = linkSet(l, set);
+  return { sql: `${a}.rid in (${set.sql})`, args: set.args, set, ref: true };
+}
+
+// Rids of l.from linked by l to the rids `inner` (of l.to). Each probe reads the index by inner's rids (idx_r), or by value (idx_v).
+function linkSet(l: Link, inner: { sql: string; args: Arg[] }): { sql: string; args: Arg[] } {
+  // A canonical link joins on the url of the referenced type, as Medplum (its text).
+  const [source, target] = l.reverse ? [l.to, l.from] : [l.from, l.to];
+  if (l.canonical && !param(target, 'url')) throw badRequest(`${target} cannot be chained via canonical reference (${source}:${l.code})`);
+  if (l.canonical && l.reverse) {
+    return { sql: `select u.rid from idx u where u.type = ? and u.code = 'url' and u.val in (select h.val from idx h where h.rid in (${inner.sql}) and h.code = ?)`, args: [l.from, ...inner.args, l.code] };
+  }
+  if (l.canonical) {
+    return { sql: `select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (select u.val from idx u where u.rid in (${inner.sql}) and u.code = 'url')`, args: [l.from, l.code, ...inner.args] };
+  }
+  if (l.reverse) {
+    return {
+      sql: `select x.rid from resources x where x.type = ? and x.id in (select substr(h.val, ?) from idx h where h.rid in (${inner.sql}) and h.code = ? and h.val >= ? and h.val < ?)`,
+      args: [l.from, l.from.length + 2, ...inner.args, l.code, `${l.from}/`, `${l.from}/\uffff`],
+    };
+  }
+  return { sql: `select ci.rid from idx ci where ci.type = ? and ci.code = ? and ci.val in (select ? || x.id from resources x where x.rid in (${inner.sql}))`, args: [l.from, l.code, `${l.to}/`, ...inner.args] };
 }
 
 // `code=value` parsed as a search parameter of `type` (modifier and prefix).

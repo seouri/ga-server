@@ -160,12 +160,12 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(b.entry!.map((e) => [e.resource!.id, e.search!.mode])).toEqual([['o1', 'match'], ['o2', 'match'], ['pv1', 'include']]);
   });
 
-  it('one-level chain: subject.name=Doe', () => {
+  it('one-level chain: patient.name=Doe', () => {
     add({ resourceType: 'Patient', id: 'p1', name: [{ family: 'Doe' }] });
     add({ resourceType: 'Patient', id: 'p2', name: [{ family: 'Roe' }] });
     obs('c1', { subject: { reference: 'Patient/p1' } });
     obs('c2', { subject: { reference: 'Patient/p2' } });
-    expect(ids('Observation', 'subject.name=Doe')).toEqual(['c1']);
+    expect(ids('Observation', 'patient.name=Doe')).toEqual(['c1']);
     expect(ids('Observation', 'subject:Patient.name=roe')).toEqual(['c2']);
   });
 
@@ -325,11 +325,9 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     obs('x1');
     expect(fail('Observation', 'code:in=http://vs').status).toBe(400);
     expect(fail('Observation', 'code:in=http://vs').message).toMatch(/:in/);
-    expect(fail('Observation', 'subject.organization.name=x').message).toMatch(/chain/i);
     expect(fail('Observation', `code-value-quantity=${LOINC}|1$gt5`).message).toMatch(/composite/i);
     expect(fail('Observation', 'code:below=x').message).toMatch(/:below/);
-    for (const q of ['_summary=nonsense', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x',
-      '_has:Observation:subject:_has:Observation:subject:code=x']) expect(fail('Observation', q).status, q).toBe(400);
+    for (const q of ['_summary=nonsense', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x']) expect(fail('Observation', q).status, q).toBe(400);
     expect(run('Observation', '_summary=false').entry).toHaveLength(1); // a no-op, as Medplum
     const u = fail('Observation', 'nonsense=1');
     expect(u.status).toBe(400);
@@ -535,5 +533,93 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   it('_include=* is 400, as Medplum 5.2.14', () => {
     expect(fail('Observation', '_include=*').status).toBe(400);
     expect(fail('Observation', '_include=Observation:*').message).toBe("'*' is not supported as a value for search inclusion parameters");
+  });
+
+  it('two-level chain: Observation?subject:Patient.organization.name=…', () => {
+    add({ resourceType: 'Organization', id: 'g1', name: 'Alpha Clinic' });
+    add({ resourceType: 'Organization', id: 'g2', name: 'Beta Clinic' });
+    add({ resourceType: 'Patient', id: 'p1', managingOrganization: { reference: 'Organization/g1' } });
+    add({ resourceType: 'Patient', id: 'p2', managingOrganization: { reference: 'Organization/g2' } });
+    obs('o1', { subject: { reference: 'Patient/p1' } });
+    obs('o2', { subject: { reference: 'Patient/p2' } });
+    expect(ids('Observation', 'subject:Patient.organization.name=alpha')).toEqual(['o1']);
+    expect(ids('Observation', 'patient.organization.name:exact=Beta Clinic')).toEqual(['o2']); // a modifier on the last parameter
+    expect(ids('Observation', 'patient.organization.name:exact=beta clinic')).toEqual([]);
+    expect(ids('Observation', 'patient.organization.name=alpha&status=final')).toEqual(['o1']);
+    // Three links answer; Medplum's limit is three.
+    add({ resourceType: 'DiagnosticReport', id: 'd1', status: 'final', code: { text: 'x' }, result: [{ reference: 'Observation/o2' }] });
+    expect(ids('DiagnosticReport', 'result.patient.organization.name=beta')).toEqual(['d1']);
+  });
+
+  it('nested _has: Patient?_has:Observation:subject:_has:Provenance:target:agent=…', () => {
+    add({ resourceType: 'Patient', id: 'p1' });
+    add({ resourceType: 'Patient', id: 'p2' });
+    obs('o1', { subject: { reference: 'Patient/p1' } });
+    obs('o2', { subject: { reference: 'Patient/p2' } });
+    const prov = (id: string, target: string, who: string) => add({ resourceType: 'Provenance', id, target: [{ reference: target }], recorded: '2024-01-01T00:00:00Z', agent: [{ who: { reference: who } }] });
+    prov('v1', 'Observation/o2', 'Practitioner/x');
+    prov('v2', 'Observation/o1', 'Practitioner/y');
+    expect(ids('Patient', '_has:Observation:subject:_has:Provenance:target:agent=Practitioner/x')).toEqual(['p2']);
+    // _has inside a chain, and a chain inside _has.
+    add({ resourceType: 'Practitioner', id: 'x' });
+    add({ resourceType: 'Patient', id: 'p3', generalPractitioner: [{ reference: 'Practitioner/x' }] });
+    expect(ids('Patient', 'general-practitioner:Practitioner._has:Provenance:agent:target:Observation.subject=Patient/p2')).toEqual(['p3']);
+    expect(ids('Patient', '_has:Observation:subject:_has:Provenance:target:agent:Practitioner._id=x')).toEqual(['p2']);
+  });
+
+  it('chain longer than Medplum\'s maximum is 400', () => {
+    add({ resourceType: 'Patient', id: 'p1' });
+    const long = 'Search chains longer than three links are not currently supported';
+    const e = fail('DiagnosticReport', 'result.has-member:Observation.has-member:Observation.has-member:Observation.code=x');
+    expect([e.status, e.message]).toEqual([400, long]);
+    expect(fail('Patient', '_has:Observation:subject:encounter:Encounter._has:DiagnosticReport:encounter:result.specimen.parent.collected=2023').message).toBe(long);
+    expect(ids('DiagnosticReport', 'result.has-member:Observation.has-member:Observation.code=x')).toEqual([]); // three links
+  });
+
+  it('invalid chains are 400 with Medplum\'s texts', () => {
+    for (const [q, text] of [
+      ['organization.invalid.name=Kaiser', 'Invalid search parameter in chain: Organization?invalid'],
+      ['organization.invalid=true', 'Invalid search parameter at end of chain: Organization?invalid'],
+      ['general-practitioner.qualification-period=2023', 'Unable to identify next resource type for search parameter: Patient?general-practitioner'],
+      ['general-practitioner:Medication.code=x', 'Unable to identify next resource type for search parameter: Patient?general-practitioner'],
+      ['_has:Observation:invalid:status=active', 'Invalid search parameter in chain: Observation?invalid'],
+      ['_has:Observation:encounter:status=active', 'Invalid reverse chain link: search parameter Observation?encounter does not refer to Patient'],
+      ['_has:Nonsense:subject:status=active', 'Invalid search parameter in chain: Nonsense?subject'],
+      ['_has:Observation:status=active', 'Invalid search chain: _has:Observation:status'],
+      ['_has:Observation:subject:_has:Provenance:target=x', 'Invalid search chain: _has:Provenance:target'],
+      ['organization._has:Patient:organization:_has:Observation:subject=x', 'Invalid search chain: _has:Observation:subject'],
+    ]) expect([fail('Patient', q).status, fail('Patient', q).message], q).toEqual([400, text]);
+    // Several targets and no type: Medplum cannot tell the next type.
+    expect(fail('Observation', 'subject.name=x').message).toBe('Unable to identify next resource type for search parameter: Observation?subject');
+  });
+
+  it('chains through canonical references, forward and reverse', () => {
+    add({ resourceType: 'Questionnaire', id: 'q1', status: 'unknown', url: 'http://example.com/q1', identifier: [{ value: 'qi' }] });
+    add({ resourceType: 'Questionnaire', id: 'q2', status: 'unknown', url: 'http://example.com/q2' });
+    add({ resourceType: 'EvidenceVariable', id: 'e1', status: 'unknown', characteristic: [{ definitionReference: { reference: 'Group/g' } }], relatedArtifact: [{ type: 'derived-from', resource: 'http://example.com/q1' }], identifier: [{ value: 'ei' }] } as Resource);
+    add({ resourceType: 'ResearchStudy', id: 'r1', status: 'active', protocol: [{ reference: 'PlanDefinition/x' }] });
+    expect(ids('Questionnaire', '_has:EvidenceVariable:derived-from:identifier=ei')).toEqual(['q1']);
+    expect(ids('EvidenceVariable', 'derived-from:Questionnaire.identifier=qi')).toEqual(['e1']);
+    expect(ids('EvidenceVariable', 'derived-from:Questionnaire._id=q2')).toEqual([]);
+    const text = 'ResearchStudy cannot be chained via canonical reference (EvidenceVariable:derived-from)';
+    expect(fail('EvidenceVariable', 'derived-from:ResearchStudy.status=active').message).toBe(text);
+    expect(fail('ResearchStudy', '_has:EvidenceVariable:derived-from:_id=foo').message).toBe(text);
+  });
+
+  it('_compartment=Patient/<id> and _compartment.name', () => {
+    add({ resourceType: 'Patient', id: 'p1', name: [{ family: 'Alpha' }] });
+    add({ resourceType: 'Patient', id: 'p2', name: [{ family: 'Beta' }] });
+    obs('o1', { subject: { reference: 'Patient/p1' }, performer: [{ reference: 'Patient/p2' }] });
+    obs('o2', { subject: { reference: 'Patient/p2' } });
+    obs('o3');
+    expect(ids('Observation', '_compartment=Patient/p2')).toEqual(['o1', 'o2']);
+    expect(ids('Patient', '_compartment=p1')).toEqual(['p1']);
+    expect(ids('Patient', '_compartment=x')).toEqual([]);
+    expect(ids('Observation', '_compartment:missing=true')).toEqual(['o3']);
+    expect(ids('Observation', '_compartment:missing=false')).toEqual(['o1', 'o2']);
+    expect(ids('Observation', '_compartment:Patient.name=alpha')).toEqual(['o1']);
+    expect(ids('Patient', '_has:Observation:_compartment:_id=o1')).toEqual(['p1', 'p2']);
+    add({ resourceType: 'DiagnosticReport', id: 'd1', status: 'final', code: { text: 'x' }, result: [{ reference: 'Observation/o2' }] });
+    expect(ids('DiagnosticReport', 'result._compartment:Patient.name=bet')).toEqual(['d1']); // _compartment as a middle link
   });
 });

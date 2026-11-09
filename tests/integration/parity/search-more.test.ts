@@ -35,6 +35,79 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(result.entry?.map((e) => e.resource?.id)).toEqual(patientIds);
   }));
 
+  // The shared project holds other linked Patients: the result is narrowed to the ones this test made, in the order returned.
+  test('project-scoped Repository w/ %j › Chained search with negated filter [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const link1 = await s.create({ resourceType: 'Patient', identifier: [{ value: crypto.randomUUID() }] });
+    const link2 = await s.create({ resourceType: 'Patient', identifier: [{ value: crypto.randomUUID() }] });
+    const patientIds: string[] = [];
+    for (let i = 1; i < 10; i++) {
+      const middlePatient = await s.create({ resourceType: 'Patient', link: [{ type: 'seealso', other: ref(link1) }, { type: 'seealso', other: ref(link2) }] });
+      const patient = await s.create({ resourceType: 'Patient', birthDate: '1994-11-0' + i, link: [{ type: 'seealso', other: ref(middlePatient) }] });
+      patientIds.unshift(patient.id);
+    }
+    const result = await search(s, `Patient?link:Patient.link:Patient.identifier:not=${crypto.randomUUID()}&_sort=-birthdate&_count=1000`);
+    const mine = result.entry?.filter((e) => patientIds.includes(e.resource!.id!)) ?? [];
+    expect(mine.map((e) => (e.resource as Patient).birthDate)).toEqual(['09', '08', '07', '06', '05', '04', '03', '02', '01'].map((d) => `1994-11-${d}`));
+    expect(mine.map((e) => e.resource?.id)).toEqual(patientIds);
+  }));
+
+  test('project-scoped Repository w/ %j › Chained search on canonical reference [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const url = 'http://example.com/' + crypto.randomUUID();
+    const q = crypto.randomUUID();
+    const questionnaire = await s.create({ resourceType: 'Questionnaire', status: 'unknown', url, identifier: [{ value: q }] });
+    const ev = crypto.randomUUID();
+    const evidenceVariable = await s.create({ resourceType: 'EvidenceVariable', status: 'unknown', relatedArtifact: [{ type: 'derived-from', resource: url }], identifier: [{ value: ev }] } as never) as { id: string };
+    const result = await search(s, `Questionnaire?_has:EvidenceVariable:derived-from:identifier=${ev}`);
+    expect(result.entry).toHaveLength(1);
+    expect(result.entry?.[0]?.resource?.id).toBe(questionnaire.id);
+    const result2 = await search(s, `EvidenceVariable?derived-from:Questionnaire.identifier=${q}`);
+    expect(result2.entry).toHaveLength(1);
+    expect(result2.entry?.[0]?.resource?.id).toBe(evidenceVariable.id);
+    const study = await s.create({ resourceType: 'ResearchStudy', status: 'active', outcomeMeasure: [{ reference: ref(evidenceVariable as { resourceType: string; id: string }) }] } as never) as { id: string };
+    const result3 = await search(s, `ResearchStudy?outcome-measure-reference:EvidenceVariable.derived-from:Questionnaire.identifier=${q}`);
+    expect(result3.entry).toHaveLength(1);
+    expect(result3.entry?.[0]?.resource?.id).toBe(study.id);
+  }));
+
+  test('project-scoped Repository w/ %j › Rejects too long chained search [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const e = await error(s, 'Patient?_has:Observation:subject:encounter:Encounter._has:DiagnosticReport:encounter:result.specimen.parent.collected=2023');
+    expect(e).toEqual({ status: 400, text: 'Search chains longer than three links are not currently supported' });
+    return e;
+  }));
+
+  test('project-scoped Repository w/ %j › Invalid chained search parameters: %s [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const out = [];
+    for (const [searchString, errorMsg] of [
+      ['Patient?organization.invalid.name=Kaiser', 'Invalid search parameter in chain: Organization?invalid'],
+      ['Patient?organization.invalid=true', 'Invalid search parameter at end of chain: Organization?invalid'],
+      ['Patient?general-practitioner.qualification-period=2023', 'Unable to identify next resource type for search parameter: Patient?general-practitioner'],
+      ['Patient?_has:Observation:invalid:status=active', 'Invalid search parameter in chain: Observation?invalid'],
+      ['Patient?_has:Observation:encounter:status=active', 'Invalid reverse chain link: search parameter Observation?encounter does not refer to Patient'],
+      ['Patient?_has:Observation:status=active', 'Invalid search chain: _has:Observation:status'],
+    ]) {
+      const e = await error(s, searchString);
+      expect(e, searchString).toEqual({ status: 400, text: errorMsg });
+      out.push(e);
+    }
+    return out;
+  }));
+
+  test('project-scoped Repository w/ %j › Chained search with modifier [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const code = crypto.randomUUID();
+    const patient = await s.create({ resourceType: 'Patient' });
+    const encounter = await s.create({ resourceType: 'Encounter', status: 'finished', class: { system: 'http://example.com/appt-type', code } });
+    await s.create({ resourceType: 'Observation', status: 'final', code: { text: 'Throat culture' }, subject: ref(patient), encounter: ref(encounter) });
+    const result = await search(s, `Patient?_has:Observation:subject:encounter:Encounter.class=${code}&_has:Observation:subject:encounter:Encounter.status:not=cancelled`);
+    expect(result.entry?.[0]?.resource?.id).toBe(patient.id);
+  }));
+
+  test('project-scoped Repository w/ %j › Invalid canonical chained search link [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const text = 'ResearchStudy cannot be chained via canonical reference (EvidenceVariable:derived-from)';
+    const out = [await error(s, 'EvidenceVariable?derived-from:ResearchStudy.status=active'), await error(s, 'ResearchStudy?_has:EvidenceVariable:derived-from:_id=foo')];
+    expect(out).toEqual([{ status: 400, text }, { status: 400, text }]);
+    return out;
+  }));
+
   test('project-scoped Repository w/ %j › Chained search deduplication [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const code = crypto.randomUUID(), code2 = crypto.randomUUID();
     const patient = await s.create({ resourceType: 'Patient' });

@@ -51,17 +51,17 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › String filter with escaped commas | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _id with %s=%s | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _compartment presence | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by _compartment presence | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Filter by chained _id presence | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by chained _id | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by _compartment:_id | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Forward filter by _compartment.name | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained filter with _compartment as middle link | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse filter by _compartment:_id | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Forward filter by _compartment.name | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained filter with _compartment as middle link | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Empty _id | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _id | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _compartment | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference string _compartment | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Non UUID _compartment | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reference string _compartment | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle_lastUpdated value %s, isValid? %s | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle non-string value | skipped | platform | repository API only: an object filter value; HTTP query values are always strings |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Handle string with null bytes | ported | existing |  |
@@ -84,17 +84,17 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Error on invalid search parameter | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Patient search without resource type | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Subject search without resource type | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on array columns using reference tables | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on single columns using reference tables | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on array columns using reference tables | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on single columns using reference tables | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search sort order | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with negated filter | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on canonical reference | skipped | chain | not yet ported (Task 6) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Rejects too long chained search | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with negated filter | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search on canonical reference | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Rejects too long chained search | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Rejects chained search through disabled type: %s | skipped | platform | disableChainedSearch (Medplum config) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Allows chained search not using disabled reference table: %s | skipped | platform | disableChainedSearch (Medplum config) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › disableChainedSearch › Chained search works again after reindex | skipped | platform | disableChainedSearch (Medplum config) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid chained search parameters: %s | skipped | chain | not yet ported (Task 6): a two-level chain case and the chain error texts |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with modifier | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid chained search parameters: %s | ported | chain |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search with modifier | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search deduplication | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token search deduplication | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references success | ported | existing |  |
@@ -182,7 +182,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Basic | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › With units | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Quantity search › Approximately | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid canonical chained search link | skipped | chain | not yet ported (Task 6) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Invalid canonical chained search link | ported | chain |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Date array columns match search value %s | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › discourage sequential scans › config.fhirSearchDiscourageSeqScan | skipped | platform | SQL planner internals (discourage sequential scans) |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › discourage sequential scans › config.fhirSearchMinLimit | skipped | platform | SQL planner internals (discourage sequential scans) |
