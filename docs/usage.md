@@ -92,7 +92,7 @@ Codex, Hermes or any MCP client: register a stdio MCP server with command `node 
 
 ## Import
 
-C-CDA converts inside GA (a patched copy of Medplum's converter in `vendor/medplum-ccda`); no extra service. Sections and entries GA could not convert are listed in the import report's `notImported`. Until November 2026 Microsoft's FHIR converter ran as a container for this; a config that still names it (`converterUrl`, `ccdaConverter`) works unchanged.
+C-CDA converts inside GA (a patched copy of Medplum's converter in `vendor/medplum-ccda`); no extra service. Sections and entries GA could not convert are listed in the import report's `notImported`. Until November 2026 Microsoft's FHIR converter ran as a container for this; a config that still names it (`converterUrl`, `ccdaConverter`) works unchanged. After updating, run `docker compose up -d --remove-orphans` once to remove the old converter container.
 
 ```sh
 ga import <folder>             # C-CDA export (folder of XML files); re-importing is a no-op

@@ -6,7 +6,9 @@ import { countingFetch } from './perf.ts';
 
 export class GaError extends Error {}
 
-// A config from before C-CDA converted in process may still hold converterUrl and ccdaConverter: they are ignored, never rewritten.
+// A config from before C-CDA converted in process may still hold converterUrl and ccdaConverter: they are ignored (imports never
+// rewrite them; ga setup or ga migrate may drop them). Rolling GA back to before this change after they were dropped would make the old
+// converter auto-detection pick the Microsoft path and duplicate C-CDA records: restore ccdaConverter "medplum" first.
 export type GaConfig = {
   // Medplum only: absent from a config written by ga setup on the SQLite store.
   baseUrl?: string;
