@@ -17,7 +17,7 @@ import {
   FhirFilterComparison, FhirFilterConnective, FhirFilterNegation, OperationOutcomeError, Operator, convertToSearchableDates,
   convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
   convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameterDetails, getSearchParameters,
-  parseFilterParameter, parseSearchRequest, splitSearchOnComma, toTypedValue, tryGetDataType,
+  parseFilterParameter, parseSearchRequest, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
   type Filter, type FhirFilterExpression, type SearchRequest,
 } from '@medplum/core';
 import type { Bundle, Resource, SearchParameter } from '@medplum/fhirtypes';
@@ -380,6 +380,14 @@ function elements(r: Resource, fields: string[]): Resource {
   return out;
 }
 
+// _summary, as Medplum: true keeps the type's summary elements, data drops text, text keeps text and the mandatory elements;
+// id and meta always, tagged SUBSETTED (subsetResource).
+export function summarize(r: Resource, mode: 'true' | 'data' | 'text'): Resource {
+  const t = tryGetDataType(r.resourceType);
+  const keep = mode === 'data' ? Object.keys(r).filter((k) => k !== 'text') : mode === 'text' ? ['text', ...t?.mandatoryProperties ?? []] : [...t?.summaryProperties ?? []];
+  return subsetResource(r, keep)!;
+}
+
 // A sort key over the candidate row `d`: `code` set when it is a sortkeys column (indexed), else an expression.
 type SortKey = { expr: string; desc: boolean; code?: string };
 
@@ -445,7 +453,7 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   aliasN = 0; // same query, same SQL text (statement cache)
   if (!getSearchParameters(type)) throw badRequest(`Unknown search parameter: resource type ${type} is not stored`);
   const summary = query.find(([k]) => k === '_summary')?.[1];
-  if (summary && summary !== 'count' && summary !== 'false') throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
+  if (summary && !['count', 'false', 'true', 'data', 'text'].includes(summary)) throw badRequest(`Unsupported _summary=${summary}`); // false: everything, as Medplum
   if (query.some(([, v]) => v.includes('\0'))) throw badRequest('Search filter value cannot contain null bytes'); // Medplum's text
   let req: SearchRequest;
   try {
@@ -541,40 +549,15 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   const page = found.slice(0, count);
   const last = `k${keys.length - 1}`;
   const rids = page.map((x) => x[last] as number);
-  const byRid = new Map<number, { id: string; json: string }>();
+  const byRid = new Map<number, { rid: number; id: string; json: string }>();
   for (const x of rids.length ? prep(`select rid, id, json from resources where rid in (${qs(rids.length)})`).all(...rids) as { rid: number; id: string; json: string }[] : []) byRid.set(x.rid, x);
   const matches = rids.map((rid) => byRid.get(rid)!);
 
   const entry: RawEntry[] = matches.map((m) => ({
-    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match', json: req.fields ? JSON.stringify(elements(JSON.parse(m.json) as Resource, req.fields)) : m.json,
+    fullUrl: `${base}fhir/R4/${type}/${m.id}`, mode: 'match',
+    json: req.fields ? JSON.stringify(elements(JSON.parse(m.json) as Resource, req.fields)) : req.summary ? JSON.stringify(summarize(JSON.parse(m.json) as Resource, req.summary)) : m.json,
   }));
-  const have = new Set(matches.map((m) => `${type}/${m.id}`));
-  const include = (list: { type: string; id: string; json: string }[]) => {
-    for (const x of list) {
-      const ref = `${x.type}/${x.id}`;
-      if (have.has(ref)) continue;
-      have.add(ref);
-      entry.push({ fullUrl: `${base}fhir/R4/${ref}`, mode: 'include', json: x.json });
-    }
-  };
-  for (const inc of req.include ?? []) {
-    if (inc.modifier === 'iterate') throw badRequest('Unsupported _include:iterate');
-    if (param(type, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
-    if (!rids.length) continue;
-    const refs = prep(`select distinct val from idx where rid in (${qs(rids.length)}) and code = ? order by rowid`).all(...rids, inc.searchParam) as { val: string }[];
-    for (const { val } of refs) {
-      const [t, id, extra] = val.split('/');
-      if (!t || !id || extra !== undefined || (inc.targetType && inc.targetType !== t)) continue;
-      include(prep('select type, id, json from resources where type = ? and id = ?').all(t, id) as { type: string; id: string; json: string }[]);
-    }
-  }
-  for (const inc of req.revInclude ?? []) {
-    if (inc.modifier === 'iterate') throw badRequest('Unsupported _revinclude:iterate');
-    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _revinclude parameter: ${inc.resourceType}:${inc.searchParam}`);
-    if (!matches.length || (inc.targetType && inc.targetType !== type)) continue;
-    include(prep(`select r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(matches.length)})) order by r.rid`)
-      .all(inc.resourceType, inc.searchParam, ...matches.map((m) => `${type}/${m.id}`)) as { type: string; id: string; json: string }[]);
-  }
+  includes(prep, req, matches.map((m) => ({ ...m, type })), entry, base);
   bundle.entry = entry;
   if (!page.length) return bundle;
   bundle.link.push({ relation: 'first', url: linkQuery({}) });
@@ -584,4 +567,70 @@ function searchRaw(prep: Prep, type: string, query: [string, string][], base: st
   }
   if (offset) bundle.link.push({ relation: 'previous', url: linkQuery(offset > count ? { _offset: String(offset - count) } : {}) });
   return bundle;
+}
+
+type Found = { rid: number; type: string; id: string; json: string };
+// Medplum's limits on _(rev)include (DEFAULT_MAX_INCLUDE_DEPTH and DEFAULT_MAX_SEARCH_COUNT in
+// packages/fhir-router/src/search-include.ts and packages/core/src/search/search.ts, 5.2.14).
+const MAX_INCLUDE_DEPTH = 5, MAX_INCLUDE_ENTRIES = 1000;
+const canonical = (type: string, p: SearchParameter): boolean => getSearchParameterDetails(type, p).type === SearchParameterType.CANONICAL;
+
+// _include and _revinclude, as Medplum's getExtraEntries: the first round applies every one to the matches, each later round
+// only the :iterate ones to everything the round before found (seen or not); a round still finding something after
+// MAX_INCLUDE_DEPTH rounds is refused. Canonical parameters resolve by url (url|version: that version, as R4 canonicals).
+function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEntry[], base: string): void {
+  if (!req.include && !req.revInclude) return;
+  for (const inc of req.include ?? []) {
+    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
+  }
+  for (const inc of req.revInclude ?? []) {
+    if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Unknown _revinclude parameter: ${inc.resourceType}:${inc.searchParam}`);
+  }
+  const seen = new Set(matches.map((m) => `${m.type}/${m.id}`));
+  const read = (sql: string, ...args: Arg[]) => prep(sql).all(...args) as Found[];
+  const byUrl = (t: string, url: string): Found[] => {
+    const bar = url.lastIndexOf('|');
+    const [u, v] = bar < 0 ? [url, undefined] : [url.slice(0, bar), url.slice(bar + 1)];
+    return read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select rid from idx where type = ? and code = 'url' and val = ?)${v === undefined ? ''
+      : ` and r.rid in (select rid from idx where type = ? and code = 'version' and val = ?)`} order by r.rid`, t, u, ...(v === undefined ? [] : [t, v]));
+  };
+  let frontier = matches, iterateOnly = false;
+  for (let depth = 0; frontier.length; depth++) {
+    if (depth >= MAX_INCLUDE_DEPTH || entry.length > MAX_INCLUDE_ENTRIES) throw badRequest(`Search with _(rev)include reached query scope limit: depth=${depth}, results=${entry.length}`); // Medplum's text
+    const found: Found[] = [];
+    const rids = frontier.map((f) => f.rid);
+    for (const inc of req.include ?? []) {
+      if (iterateOnly && inc.modifier !== Operator.ITERATE) continue;
+      const p = param(inc.resourceType, inc.searchParam)!;
+      const vals = read(`select distinct val from idx where rid in (${qs(rids.length)}) and type = ? and code = ? order by rowid`, ...rids, inc.resourceType, inc.searchParam) as unknown as { val: string }[];
+      if (canonical(inc.resourceType, p)) {
+        for (const t of (p.target ?? []).filter((t) => !inc.targetType || t === inc.targetType)) for (const { val } of vals) found.push(...byUrl(t, val));
+        continue;
+      }
+      for (const { val } of vals) {
+        const [t, id, extra] = val.split('/');
+        if (!t || !id || extra !== undefined || (inc.targetType && inc.targetType !== t)) continue;
+        found.push(...read('select rid, type, id, json from resources where type = ? and id = ?', t, id));
+      }
+    }
+    for (const inc of req.revInclude ?? []) {
+      if (iterateOnly && inc.modifier !== Operator.ITERATE) continue;
+      const of = frontier.filter((f) => !inc.targetType || f.type === inc.targetType);
+      const refs = canonical(inc.resourceType, param(inc.resourceType, inc.searchParam)!)
+        ? of.flatMap((f) => { const r = JSON.parse(f.json) as { url?: string; version?: string }; return r.url ? [r.url, ...(r.version ? [`${r.url}|${r.version}`] : [])] : []; })
+        : of.map((f) => `${f.type}/${f.id}`);
+      if (!refs.length) continue;
+      found.push(...read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(refs.length)})) order by r.rid`,
+        inc.resourceType, inc.searchParam, ...refs));
+    }
+    const next = new Map<string, Found>();
+    for (const x of found) {
+      const ref = `${x.type}/${x.id}`;
+      next.set(ref, x);
+      if (!seen.has(ref)) entry.push({ fullUrl: `${base}fhir/R4/${ref}`, mode: 'include', json: x.json });
+      seen.add(ref);
+    }
+    frontier = [...next.values()];
+    iterateOnly = true;
+  }
 }

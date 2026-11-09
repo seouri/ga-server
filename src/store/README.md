@@ -63,7 +63,7 @@ Under `/fhir/R4/`:
 - `GET metadata`: a CapabilityStatement of what this store supports.
 - `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.
 
-Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), one-level chains and `_has`, `_include`/`_revinclude`, `_sort`, `_count`, `_elements`, `_summary=count`, `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
+Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), one-level chains and `_has`, `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
 
 ## Deliberate differences from Medplum
 
@@ -82,17 +82,17 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - Date prefixes on ranges follow R4, as Medplum's opt-in `range-search` project feature does: `gt`/`ge`/`lt`/`le` match a Period that overlaps the range above or below the value, and apply to every value of a multi-valued date (Medplum without the feature compares a Period by its start and ignores the prefix on a multi-valued date).
 - `eq` with a dateTime against a date never matches: R4 `eq` needs the search value's range to contain the target's, and an instant does not contain a day. Medplum matches the dateTime against the date's day, with or without `range-search`.
 - `MeasureReport.period` is a date parameter like any other (Medplum trials overlap ranges there: `eq`/`ne` as overlap, `lt`/`gt` against the far end of the search value).
+- `_include`/`_revinclude` of a versioned canonical (`url|version`) resolve to the resource with that `url` and `version`, as R4 canonicals mean (Medplum resolves `url|version` to nothing, and a `_revinclude` finds only references to the bare `url`).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.
 
 ## Next phase: full FHIR spec support
 
 Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
 
-- `_summary=true`, `_summary=data`, `_summary=text` (`_summary=count` works; `_summary=false` is accepted and changes nothing).
 - Composite and special search parameters; the modifiers `:above`, `:below`, `:in`, `:not-in`, `:of-type`.
 - Chains deeper than one level; reverse chains (`_has`) beyond one level.
 - Date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature).
-- `_contained`, `_text`, `_content`, `_include:iterate`, `_revinclude:iterate` and `_include=*`.
+- `_contained`, `_text`, `_content`, and `_include=*` (Medplum 5.2.14 refuses it too; plan 4 decides).
 - GraphQL; terminology operations (`$expand`, `$lookup`, `$validate-code`); every operation besides `$validate` and `Patient/$everything`.
 - FHIR R4 only (the definitions ship R4); one patient-compartment definition (Patient).
 

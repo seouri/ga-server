@@ -84,6 +84,42 @@ describe.skipIf(SQLITE)('Medplum fhir-router search-include.test.ts (parity)', (
     expect(tagged(await search(s, `Patient?identifier=${m}&_revinclude=Observation:subject:Group`), { p }, 'include')).toEqual([]);
   }));
 
+  test('MemoryRepository _include/_revinclude › _include:iterate follows a chain of references [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
+    const m = marker();
+    const p = await patient(s, m);
+    const e = await s.create({ resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, subject: ref(p) });
+    await observation(s, m, { encounter: ref(e) });
+    expect(tagged(await search(s, `Observation?identifier=${m}&_include=Observation:encounter&_include:iterate=Encounter:subject`), { p, e }, 'include')).toEqual(['e', 'p']);
+  }));
+
+  test('MemoryRepository _include/_revinclude › _include without :iterate does not recurse [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
+    const m = marker();
+    const p = await patient(s, m);
+    const e = await s.create({ resourceType: 'Encounter', status: 'finished', class: { code: 'AMB' }, subject: ref(p) });
+    await observation(s, m, { encounter: ref(e) });
+    expect(tagged(await search(s, `Observation?identifier=${m}&_include=Observation:encounter&_include=Encounter:subject`), { p, e }, 'include')).toEqual(['e']);
+  }));
+
+  // Canonical urls carry the marker (Medplum's fixed http://example.com/q would collide in the shared project);
+  // QuestionnaireResponse.identifier is one Identifier, not a list.
+  test('MemoryRepository _include/_revinclude › _include resolves canonical references by exact URL [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
+    const m = marker();
+    const url = `http://example.com/${m}`;
+    const q1 = await s.create({ resourceType: 'Questionnaire', status: 'active', url });
+    await s.create({ resourceType: 'Questionnaire', status: 'active', url: `${url}-extra` }); // shares a URL prefix with the target; must not be included
+    await s.create({ resourceType: 'QuestionnaireResponse', status: 'completed', questionnaire: url, identifier: { system: 'urn:parity', value: m } });
+    expect(tagged(await search(s, `QuestionnaireResponse?identifier=${m}&_include=QuestionnaireResponse:questionnaire`), { q1 }, 'include')).toEqual(['q1']);
+  }));
+
+  test('MemoryRepository _include/_revinclude › _revinclude resolves canonical references [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
+    const m = marker();
+    const url = `http://example.com/${m}`;
+    const q1 = await s.create({ resourceType: 'Questionnaire', status: 'active', url, identifier: id(m) });
+    const r = await s.create({ resourceType: 'QuestionnaireResponse', status: 'completed', questionnaire: url });
+    const bundle = await search(s, `Questionnaire?identifier=${m}&_revinclude=QuestionnaireResponse:questionnaire`);
+    expect([tagged(bundle, { q1, r }, 'match'), tagged(bundle, { q1, r }, 'include')]).toEqual([['q1'], ['r']]);
+  }));
+
   test('MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest [fhir-router/src/search-include.test.ts]', () => same(sides, async (s) => {
     await patient(s, marker());
     expect((await error(s, 'Patient?_include=Patient:bogus')).status).toBe(400);

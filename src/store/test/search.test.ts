@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Bundle, Observation, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { Store, StoreError } from '../store.ts';
 import { searchTuning } from '../search.ts';
 
@@ -328,9 +328,8 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(fail('Observation', 'subject.organization.name=x').message).toMatch(/chain/i);
     expect(fail('Observation', `code-value-quantity=${LOINC}|1$gt5`).message).toMatch(/composite/i);
     expect(fail('Observation', 'code:below=x').message).toMatch(/:below/);
-    expect(fail('Observation', '_summary=true').message).toMatch(/_summary/);
-    for (const q of ['_summary=data', '_summary=text', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x',
-      '_include=*', '_include:iterate=Observation:subject', '_has:Observation:subject:_has:Observation:subject:code=x']) expect(fail('Observation', q).status, q).toBe(400);
+    for (const q of ['_summary=nonsense', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x',
+      '_has:Observation:subject:_has:Observation:subject:code=x']) expect(fail('Observation', q).status, q).toBe(400);
     expect(run('Observation', '_summary=false').entry).toHaveLength(1); // a no-op, as Medplum
     const u = fail('Observation', 'nonsense=1');
     expect(u.status).toBe(400);
@@ -451,5 +450,85 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   it('error texts as Medplum: unknown sort parameter, invalid _include', () => {
     expect(fail('Patient', '_sort=xyz').message).toBe('Unknown search parameter: xyz');
     expect(fail('ServiceRequest', '_include=ServiceRequest:xyz').message).toBe('Invalid include parameter: ServiceRequest:xyz');
+  });
+
+  const SUBSETTED = { system: 'http://hl7.org/fhir/v3/ObservationValue', code: 'SUBSETTED' };
+  const pt = { resourceType: 'Patient', id: 'p1', text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml">x</div>' }, name: [{ family: 'Doe' }],
+    birthDate: '2000-01-01', multipleBirthInteger: 2, photo: [{ url: 'http://x/p.png' }] } satisfies Patient;
+  const one = (type: string, q: string) => run(type, q).entry![0].resource as Resource & Record<string, unknown>;
+
+  it('_summary=true keeps summary elements only', () => {
+    add(pt);
+    const r = one('Patient', '_summary=true');
+    expect(Object.keys(r).sort()).toEqual(['birthDate', 'id', 'meta', 'name', 'resourceType']);
+    expect(r.meta?.tag).toEqual([SUBSETTED]);
+  });
+
+  it('_summary=data drops text only', () => {
+    add(pt);
+    const r = one('Patient', '_summary=data');
+    expect(Object.keys(r).sort()).toEqual(['birthDate', 'id', 'meta', 'multipleBirthInteger', 'name', 'photo', 'resourceType']);
+    expect(r.meta?.tag).toEqual([SUBSETTED]);
+  });
+
+  it('_summary=text keeps text, id, meta and mandatory elements', () => {
+    obs('o1', { text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml">x</div>' }, valueString: 'v', subject: { reference: 'Patient/p1' } });
+    expect(Object.keys(one('Observation', '_summary=text')).sort()).toEqual(['code', 'id', 'meta', 'resourceType', 'status', 'text']);
+    expect(Object.keys(one('Observation', '_summary=text&_elements=subject')).sort()).toEqual(['code', 'id', 'meta', 'resourceType', 'status', 'subject']); // _elements wins, as Medplum
+    add({ resourceType: 'Patient', id: 'p1' });
+    expect((run('Observation', '_summary=true&_include=Observation:subject').entry![1].resource!.meta?.tag)).toBeUndefined(); // includes are whole
+  });
+
+  const chain = (n: number) => { for (let i = n; i >= 1; i--) add({ resourceType: 'Patient', id: `l${i}`, ...(i < n && { link: [{ type: 'replaces', other: { reference: `Patient/l${i + 1}` } }] }) }); };
+  const incs = (type: string, q: string) => (run(type, q).entry ?? []).filter((e) => e.search?.mode === 'include').map((e) => `${e.resource!.resourceType}/${e.resource!.id}`);
+
+  it('_include:iterate follows includes of included resources up to Medplum\'s depth', () => {
+    add({ resourceType: 'Patient', id: 'p1' });
+    add({ resourceType: 'Encounter', id: 'e1', status: 'finished', class: { code: 'AMB' }, subject: { reference: 'Patient/p1' } });
+    obs('o1', { encounter: { reference: 'Encounter/e1' } });
+    expect(incs('Observation', '_include=Observation:encounter&_include:iterate=Encounter:subject')).toEqual(['Encounter/e1', 'Patient/p1']);
+    expect(incs('Observation', '_include=Observation:encounter&_include=Encounter:subject')).toEqual(['Encounter/e1']); // no :iterate, no second round
+    expect(incs('Observation', '_include=Observation:encounter&_include:iterate=Observation:subject')).toEqual(['Encounter/e1']); // an Encounter has no Observation rows
+    // l1 → l2 → … : five rounds that each find something is Medplum's limit.
+    chain(5);
+    expect(incs('Patient', '_id=l1&_include:iterate=Patient:link')).toEqual(['Patient/l2', 'Patient/l3', 'Patient/l4', 'Patient/l5']);
+    chain(6);
+    const e = fail('Patient', '_id=l1&_include:iterate=Patient:link');
+    expect([e.status, e.message]).toEqual([400, 'Search with _(rev)include reached query scope limit: depth=5, results=6']);
+  });
+
+  it('_revinclude:iterate', () => {
+    add({ resourceType: 'Patient', id: 'p1' });
+    add({ resourceType: 'Patient', id: 'l1', link: [{ type: 'replaced-by', other: { reference: 'Patient/p1' } }] });
+    add({ resourceType: 'Patient', id: 'l2', link: [{ type: 'replaced-by', other: { reference: 'Patient/l1' } }] }); // reached only by iterating Patient:link
+    obs('o1', { subject: { reference: 'Patient/p1' } });
+    obs('o2', { hasMember: [{ reference: 'Observation/o1' }] });
+    obs('o3', { subject: { reference: 'Patient/l1' } });
+    expect(incs('Patient', '_id=p1&_revinclude=Patient:link&_revinclude:iterate=Observation:subject&_revinclude:iterate=Observation:has-member').sort())
+      .toEqual(['Observation/o1', 'Observation/o2', 'Observation/o3', 'Patient/l1']);
+  });
+
+  it('_include on a canonical reference (Questionnaire from QuestionnaireResponse), and _revinclude back', () => {
+    add({ resourceType: 'Questionnaire', id: 'q1', status: 'active', url: 'http://example.com/q' });
+    add({ resourceType: 'Questionnaire', id: 'q2', status: 'active', url: 'http://example.com/q-extra' });
+    add({ resourceType: 'Questionnaire', id: 'q3', status: 'active', url: 'http://example.com/v', version: '2' });
+    add({ resourceType: 'Questionnaire', id: 'q4', status: 'active', url: 'http://example.com/v', version: '3' });
+    add({ resourceType: 'QuestionnaireResponse', id: 'r1', status: 'completed', questionnaire: 'http://example.com/q' });
+    add({ resourceType: 'QuestionnaireResponse', id: 'r2', status: 'completed', questionnaire: 'http://example.com/v|2' });
+    expect(incs('QuestionnaireResponse', '_id=r1&_include=QuestionnaireResponse:questionnaire')).toEqual(['Questionnaire/q1']);
+    // url|version: the Questionnaire with that url and version (R4 canonical; Medplum resolves none).
+    expect(incs('QuestionnaireResponse', '_id=r2&_include=QuestionnaireResponse:questionnaire')).toEqual(['Questionnaire/q3']);
+    expect(incs('QuestionnaireResponse', '_id=r1&_include=QuestionnaireResponse:questionnaire:PlanDefinition')).toEqual([]);
+    expect(incs('Questionnaire', '_id=q1&_revinclude=QuestionnaireResponse:questionnaire')).toEqual(['QuestionnaireResponse/r1']);
+    expect(incs('Questionnaire', '_id=q3,q4&_revinclude=QuestionnaireResponse:questionnaire')).toEqual(['QuestionnaireResponse/r2']);
+    add({ resourceType: 'ActivityDefinition', id: 'a1', status: 'active', url: 'http://example.com/a1' });
+    add({ resourceType: 'ActivityDefinition', id: 'a2', status: 'active', url: 'http://example.com/a2' });
+    add({ resourceType: 'PlanDefinition', id: 'pd', status: 'active', action: [{ definitionCanonical: 'http://example.com/a1' }, { definitionUri: 'http://example.com/a2' }] });
+    expect(incs('PlanDefinition', '_include=PlanDefinition:definition')).toEqual(['ActivityDefinition/a1', 'ActivityDefinition/a2']);
+  });
+
+  it('_include=* is 400, as Medplum 5.2.14', () => {
+    expect(fail('Observation', '_include=*').status).toBe(400);
+    expect(fail('Observation', '_include=Observation:*').message).toBe("'*' is not supported as a value for search inclusion parameters");
   });
 });

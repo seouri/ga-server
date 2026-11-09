@@ -26,7 +26,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › does not short-circuit when cursor is present | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › does not short-circuit when rowCount > pageSize | skipped | platform | getCount / estimate-count internals |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › getCount › does not short-circuit when rowCount is undefined | skipped | platform | getCount / estimate-count internals |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _summary | skipped | summary | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _summary | ported | summary |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search _elements | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search next link | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Search previous link | ported | existing |  |
@@ -98,19 +98,19 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search deduplication | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Token search deduplication | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references success | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include canonical success | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include PlanDefinition mixed types | skipped | include | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include canonical success | ported | include |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include PlanDefinition mixed types | ported | include |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include references invalid search param | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include Provenance | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include canonical | skipped | include | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include canonical | ported | include |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Reverse include on denied type | skipped | platform | access policy |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Chained search through denied type | skipped | platform | access policy |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include:iterate | skipped | include | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include:iterate | ported | include |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include with target type | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude with target type | ported | existing |  |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude:iterate | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include depth limit | skipped | include | not yet ported (Task 4) |
-| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on empty search results | skipped | include | not yet ported (Task 4) |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _revinclude:iterate | ported | include |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include depth limit | ported | include |  |
+| server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on empty search results | ported | include |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › _include on page boundary | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › Include with invalid reference | ported | existing |  |
 | server/src/fhir/search.test.ts | project-scoped Repository w/ %j › DiagnosticReport category with system | ported | existing |  |
@@ -670,10 +670,10 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include does not re-include a resource already in the match set | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves reverse references | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude with a target type filters the base resources | ported | existing |  |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include:iterate follows a chain of references | skipped | include | not yet ported (Task 4) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include without :iterate does not recurse | skipped | include | not yet ported (Task 4) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include resolves canonical references by exact URL | skipped | include | not yet ported (Task 4) |
-| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves canonical references | skipped | include | not yet ported (Task 4) |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include:iterate follows a chain of references | ported | include |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include without :iterate does not recurse | ported | include |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _include resolves canonical references by exact URL | ported | include |  |
+| fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves canonical references | ported | include |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Empty match set skips include processing | ported | existing |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | plan-3 | graphql | deferred to plan 3 (GraphQL) |

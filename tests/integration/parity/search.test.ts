@@ -58,6 +58,39 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 1)', () => {
     return result;
   }));
 
+  // Medplum's patient, its names and addresses made neutral; _summary on a read is ignored by both (Medplum's read route has none).
+  test('project-scoped Repository w/ %j › Search _summary [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const resource = await s.create<Patient>({
+      resourceType: 'Patient',
+      meta: { profile: ['http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient'], tag: [{ system: 'http://example.com/', code: 'test' }] },
+      text: { status: 'generated', div: '<div xmlns="http://www.w3.org/1999/xhtml"></div>' },
+      identifier: [{ use: 'usual', type: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v2-0203', code: 'MR', display: 'Medical Record Number' }], text: 'Medical Record Number' }, system: 'http://example.org', value: marker() }],
+      active: true,
+      name: [{ use: 'old', family: 'Doe', given: ['Jane', 'V.'], period: { start: '2016-12-06', end: '2020-07-22' } }, { family: 'Roe', given: ['Jane', 'V.'], suffix: ['PharmD'], period: { start: '2020-07-22' } }],
+      telecom: [{ system: 'phone', value: '555-555-5555', use: 'home' }, { system: 'email', value: 'jane@example.com' }],
+      gender: 'female', birthDate: '1987-02-20', multipleBirthInteger: 2,
+      address: [{ use: 'old', line: ['1 Example St'], city: 'Example', state: 'OK', postalCode: '00001', country: 'US', period: { start: '2016-12-06', end: '2020-07-22' } },
+        { line: ['2 Example St'], city: 'Example', state: 'OK', postalCode: '00002', country: 'US', period: { start: '2020-07-22' } }],
+    });
+    const get = async (summary: string) => {
+      const results = await search(s, q('Patient', ['_id', resource.id], ['_summary', summary]));
+      expect(results.entry).toHaveLength(1);
+      return results.entry?.[0]?.resource as Patient;
+    };
+    const tags = [{ system: 'http://example.com/', code: 'test' }, SUBSET_TAG];
+    const textResult = await get('text');
+    expect(textResult).toEqual({ resourceType: 'Patient', id: resource.id, meta: expect.objectContaining({ profile: resource.meta?.profile, tag: tags }), text: resource.text });
+    const { text: _1, meta: _m, ...dataExpected } = resource;
+    const dataResult = await get('data');
+    expect(dataResult).toEqual({ ...dataExpected, meta: expect.objectContaining({ tag: tags }) });
+    const { multipleBirthInteger: _2, ...summaryExpected } = dataExpected;
+    const summaryResult = await get('true');
+    expect(summaryResult).toEqual({ ...summaryExpected, meta: expect.objectContaining({ tag: tags }) });
+    const read = (await s.call('GET', `Patient/${resource.id}?_summary=true`)).json as Patient;
+    expect(read.text).toEqual(resource.text);
+    return [textResult, dataResult, summaryResult, read];
+  }));
+
   test('project-scoped Repository w/ %j › Search next link [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const family = marker();
     for (let i = 0; i < 2; i++) await s.create({ resourceType: 'Patient', name: [{ family }] });

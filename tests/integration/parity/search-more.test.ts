@@ -59,6 +59,26 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     expect(names(bundle, { order, patient })).toEqual(['order', 'include:patient']);
   }));
 
+  test('project-scoped Repository w/ %j › Include canonical success [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const canonicalURL = 'http://example.com/fhir/Questionnaire/PHQ-9/' + crypto.randomUUID();
+    const questionnaire = await s.create({ resourceType: 'Questionnaire', status: 'active', url: canonicalURL });
+    const response = await s.create({ resourceType: 'QuestionnaireResponse', status: 'in-progress', questionnaire: canonicalURL });
+    const bundle = await search(s, `QuestionnaireResponse?_include=QuestionnaireResponse:questionnaire&_total=accurate&_id=${response.id}`);
+    expect(bundle.total).toBe(1);
+    expect(names(bundle, { response, questionnaire })).toEqual(['response', 'include:questionnaire']);
+  }));
+
+  test('project-scoped Repository w/ %j › Include PlanDefinition mixed types [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const canonical = 'http://example.com/fhir/R4/ActivityDefinition/' + crypto.randomUUID();
+    const uri = 'http://example.com/fhir/R4/ActivityDefinition/' + crypto.randomUUID();
+    const plan = await s.create({ resourceType: 'PlanDefinition', status: 'active', action: [{ definitionCanonical: canonical }, { definitionUri: uri }] });
+    const activity1 = await s.create({ resourceType: 'ActivityDefinition', status: 'active', url: canonical });
+    const activity2 = await s.create({ resourceType: 'ActivityDefinition', status: 'active', url: uri });
+    const bundle = await search(s, `PlanDefinition?_include=PlanDefinition:definition&_total=accurate&_id=${plan.id}`);
+    expect(bundle.total).toBe(1);
+    expect(names(bundle, { plan, activity1, activity2 })).toEqual(['plan', 'include:activity1', 'include:activity2']);
+  }));
+
   test('project-scoped Repository w/ %j › Include references invalid search param [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const e = await error(s, 'ServiceRequest?_include=ServiceRequest:xyz');
     expect(e).toEqual({ status: 400, text: 'Invalid include parameter: ServiceRequest:xyz' });
@@ -85,6 +105,34 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     agent: [{ requestor: true }], source: { observer: { display: 'test' } }, entity: entity.map((reference) => ({ what: { reference } })),
   });
 
+  test('project-scoped Repository w/ %j › Reverse include canonical [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const canonicalURL = 'http://example.com/fhir/Questionnaire/PHQ-9/' + crypto.randomUUID();
+    const questionnaire = await s.create({ resourceType: 'Questionnaire', status: 'active', url: canonicalURL });
+    const response = await s.create({ resourceType: 'QuestionnaireResponse', status: 'in-progress', questionnaire: canonicalURL });
+    const bundle = await search(s, `Questionnaire?_revinclude=QuestionnaireResponse:questionnaire&_total=accurate&_id=${questionnaire.id}`);
+    expect(bundle.total).toBe(1);
+    expect(names(bundle, { questionnaire, response })).toEqual(['questionnaire', 'include:response']);
+  }));
+
+  test('project-scoped Repository w/ %j › _include:iterate [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    // patient → linked1 → linked3 → (org2, practitioner2); patient → linked2 → practitioner2; patient → org1, practitioner1.
+    // org2 is left out: Patient:organization has no :iterate.
+    const id = marker();
+    const org1 = await s.create({ resourceType: 'Organization', name: 'org1' });
+    const org2 = await s.create({ resourceType: 'Organization', name: 'org2' });
+    const practitioner1 = await s.create({ resourceType: 'Practitioner' });
+    const practitioner2 = await s.create({ resourceType: 'Practitioner' });
+    const linked3 = await s.create({ resourceType: 'Patient', managingOrganization: ref(org2), generalPractitioner: [ref(practitioner2)] });
+    const linked1 = await s.create({ resourceType: 'Patient', link: [{ other: ref(linked3), type: 'replaces' }] });
+    const linked2 = await s.create({ resourceType: 'Patient', generalPractitioner: [ref(practitioner2)] });
+    const patient = await s.create({ resourceType: 'Patient', identifier: [{ value: id }], link: [{ other: ref(linked1), type: 'replaces' }, { other: ref(linked2), type: 'replaces' }],
+      managingOrganization: ref(org1), generalPractitioner: [ref(practitioner1)] });
+    const bundle = await search(s, `Patient?identifier=${id}&_include=Patient:organization&_include:iterate=Patient:link&_include:iterate=Patient:general-practitioner`);
+    const got = names(bundle, { patient, linked1, linked2, linked3, org1, org2, practitioner1, practitioner2 }).sort();
+    expect(got).toEqual(['include:linked1', 'include:linked2', 'include:linked3', 'include:org1', 'include:practitioner1', 'include:practitioner2', 'patient']);
+    return got;
+  }));
+
   test('project-scoped Repository w/ %j › _include with target type [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const task = await s.create({ resourceType: 'Task', status: 'completed', intent: 'order' });
     const referencedAuditEvent = await auditEvent(s);
@@ -104,6 +152,39 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     const notMatched = await search(s, `Task?identifier=${identifier}&_revinclude=AuditEvent:entity:Patient`);
     expect(notMatched.entry?.filter((e) => e.search?.mode === 'include')).toHaveLength(0);
     return [names(matched, { task, audit }).sort(), names(notMatched, { task, audit })];
+  }));
+
+  test('project-scoped Repository w/ %j › _revinclude:iterate [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    // patient ← linked1 ← linked3 (left out: Patient:link has no :iterate); patient ← linked2 ← observation3;
+    // patient ← observation1 ← observation2 (has-member) ← observation4.
+    const id = marker();
+    const patient = await s.create({ resourceType: 'Patient', identifier: [{ value: id }] });
+    const linked1 = await s.create({ resourceType: 'Patient', link: [{ other: ref(patient), type: 'replaced-by' }] });
+    const linked2 = await s.create({ resourceType: 'Patient', link: [{ other: ref(patient), type: 'replaced-by' }] });
+    await s.create({ resourceType: 'Patient', link: [{ other: ref(linked1), type: 'replaced-by' }] });
+    const obs = (extra: object) => s.create({ resourceType: 'Observation', status: 'final', code: { coding: [{ system: LOINC, code: 'fake' }] }, ...extra });
+    const observation1 = await obs({ subject: ref(patient) });
+    const observation2 = await obs({ subject: { display: 'Someone' }, hasMember: [ref(observation1)] });
+    const observation3 = await obs({ subject: ref(linked2) });
+    const observation4 = await obs({ subject: { display: 'Someone' }, hasMember: [ref(observation2)] });
+    const bundle = await search(s, `Patient?identifier=${id}&_revinclude=Patient:link&_revinclude:iterate=Observation:subject&_revinclude:iterate=Observation:has-member`);
+    const got = names(bundle, { patient, linked1, linked2, observation1, observation2, observation3, observation4 }).sort();
+    expect(got).toEqual(['include:linked1', 'include:linked2', 'include:observation1', 'include:observation2', 'include:observation3', 'include:observation4', 'patient']);
+    return got;
+  }));
+
+  test('project-scoped Repository w/ %j › _include depth limit [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    // root → linked1 → … → linked6: a sixth round of Patient:link is past Medplum's limit (5).
+    const id = marker();
+    let next = await s.create<Patient>({ resourceType: 'Patient' });
+    for (let i = 0; i < 5; i++) next = await s.create<Patient>({ resourceType: 'Patient', link: [{ other: ref(next), type: 'replaces' }] });
+    await s.create({ resourceType: 'Patient', identifier: [{ value: id }], link: [{ other: ref(next), type: 'replaces' }] });
+    return error(s, `Patient?identifier=${id}&_include:iterate=Patient:link`);
+  }));
+
+  test('project-scoped Repository w/ %j › _include on empty search results [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
+    const bundle = await search(s, `Patient?identifier=${marker()}&_include:iterate=Patient:link`);
+    expect([bundle.resourceType, bundle.type, bundle.entry ?? [], bundle.total]).toEqual(['Bundle', 'searchset', [], undefined]);
   }));
 
   test('project-scoped Repository w/ %j › _include on page boundary [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
