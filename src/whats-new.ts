@@ -131,7 +131,8 @@ export function medicationItems(arrived: Resource[], all: Resource[], since: str
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
     const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
-    if (isPlanned(r) || !keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
+    // not-taken (e.g. a no-medications entry) and entered-in-error are no medication the person started
+    if (isPlanned(r) || status === 'not-taken' || status === 'entered-in-error' || !keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
     keys.forEach((k) => seen.add(k));
     const rx = keys.find((k) => k.startsWith('rx:'));
     return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date, detail: { rxnorm: rx?.slice(3), status }, source: sourceOf(r), id: r.id }];

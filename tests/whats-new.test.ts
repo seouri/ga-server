@@ -96,6 +96,13 @@ test('medicationItems: new only when no earlier record shares the code or name',
   expect(medicationItems([newN], [oldN, newN], since, '2026-11-07')).toEqual([]);
 });
 
+test('medicationItems: a drug not taken (a no-medications entry) or entered in error is never a new medication', () => {
+  const since = '2026-11-01T00:00:00Z';
+  const recent = (id: string, status: string) => med(id, { status, medicationCodeableConcept: { coding: [{ system: RX, code: id }], text: id }, effectiveDateTime: '2026-11-02', ...arrivedExt('2026-11-02T00:00:00Z') });
+  const rs = [recent('1', 'not-taken'), recent('2', 'entered-in-error'), recent('3', 'active')];
+  expect(medicationItems(rs, rs, since, '2026-11-07').map((i) => i.title)).toEqual(['3']);
+});
+
 const item = (topic: string, status: string, extra: object = {}) => ({ topic, name: topic, kind: 'screening', status, importance: 'high', evidence: [], ...extra }) as Item;
 
 test('followUpItems: overdue or due soon engine items not held back by nextMention', () => {
