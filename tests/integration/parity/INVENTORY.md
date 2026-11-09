@@ -205,33 +205,33 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for PractitionerRole by network | ported | existing |  |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for Login by project | skipped | platform | Medplum-only resource type / project |
 | server/src/fhir/search-params.test.ts | Medplum Custom Search Parameters › Search for CoverageEligibilityRequest by coverage | ported | existing |  |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch success | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › FHIRPath Patch in batch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction success | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction rollback | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Create batch wrong content type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional create in transaction | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional update in transaction | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction bundle with ifMatch version checking | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction bundle with ifMatch fails on version mismatch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch FHIRPath PATCH with stale ifMatch fails and does not modify resource | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch DELETE with ifMatch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch FHIRPath PATCH with current ifMatch succeeds and persists | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction PATCH with stale ifMatch rolls back the whole transaction | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional update (create-as-update) in transaction | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Resolved intra-Bundle reference cycle with referential integrity validation | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Failed referential integrity check in transaction Bundle | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional reference resolution | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Process batch create ifNoneExist invalid resource type | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch create as update with client-assigned ID | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Repeated batch of related upserts | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch success | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › FHIRPath Patch in batch | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction success | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction rollback | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Create batch wrong content type | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional create in transaction | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional update in transaction | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction bundle with ifMatch version checking | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction bundle with ifMatch fails on version mismatch | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch FHIRPath PATCH with stale ifMatch fails and does not modify resource | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch DELETE with ifMatch | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch FHIRPath PATCH with current ifMatch succeeds and persists | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction PATCH with stale ifMatch rolls back the whole transaction | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional update (create-as-update) in transaction | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Resolved intra-Bundle reference cycle with referential integrity validation | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Failed referential integrity check in transaction Bundle | skipped | platform | Medplum checkReferencesOnWrite project setting (the store does not check that references resolve) |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Conditional reference resolution | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Process batch create ifNoneExist invalid resource type | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Batch create as update with client-assigned ID | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Repeated batch of related upserts | ported | existing |  |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Async batch | skipped | platform | async batch job |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Async batch does not retry on failure | skipped | platform | async batch job |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Async batch resumes after graceful shutdown | skipped | platform | async batch job |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Async batch makes partial results available when cancelled | skipped | platform | async batch job |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Transaction bundle account propagation | skipped | platform | project/account compartments |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › Nested transaction in batch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/batch.test.ts | Batch and Transaction processing › _include regression test | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › Nested transaction in batch | ported | existing |  |
+| server/src/fhir/batch.test.ts | Batch and Transaction processing › _include regression test | ported | existing |  |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Rate limited during batch execution | skipped | platform | rate limits |
 | server/src/fhir/batch.test.ts | Batch and Transaction processing › Async batch sleeps over rate limit | skipped | platform | async batch job |
 | server/src/fhir/batch.test.ts | Transaction bundle SERIALIZABLE retry › does not silently drop writes on serialization failure | skipped | platform | Medplum database isolation internals |
@@ -326,20 +326,20 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/repo.test.ts | FHIR Repo › Project.exportedResourceType | skipped | platform | project/_project |
 | server/src/fhir/repo.test.ts | FHIR Repo › Project.exportedResourceType allows resources in primary project | skipped | platform | project/_project |
 | server/src/fhir/repo.test.ts | FHIR Repo › constructor and clone add the synthetic R4 project only once to shared context | skipped | platform | project/_project |
-| server/src/fhir/binary.test.ts | Binary › Create and read binary | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Read binary not found | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Read binary without stored content | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Update and read binary | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/binary.test.ts | Binary › Create and read binary | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Read binary not found | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Read binary without stored content | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Update and read binary | ported | existing |  |
 | server/src/fhir/binary.test.ts | Binary › Binary CORS | skipped | platform | CORS (Medplum server middleware) |
-| server/src/fhir/binary.test.ts | Binary › Unsupported content encoding | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Deflate | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › GZIP | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Update with GZIP | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Upload binary in batch | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Update JSON | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Invalid Binary JSON | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Handle non-binary JSON | skipped | existing | not yet ported (Task 3b) |
-| server/src/fhir/binary.test.ts | Binary › Error for disallowed file type | skipped | existing | not yet ported (Task 3b) |
+| server/src/fhir/binary.test.ts | Binary › Unsupported content encoding | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Deflate | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › GZIP | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Update with GZIP | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Upload binary in batch | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Update JSON | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Invalid Binary JSON | skipped | existing | the store's Binaries hold bytes and a content type only, no FHIR Binary JSON (securityContext, a Binary without content); decide in plan 4 |
+| server/src/fhir/binary.test.ts | Binary › Handle non-binary JSON | ported | existing |  |
+| server/src/fhir/binary.test.ts | Binary › Error for disallowed file type | skipped | platform | Medplum's upload policy (blocked file extensions and executable content types) |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Default statement | skipped | existing | not yet ported (Task 3b) |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Include resource types | skipped | platform | Medplum CapabilityStatement build options |
 | server/src/fhir/metadata.test.ts | CapabilityStatement › Exclude resource types | skipped | platform | Medplum CapabilityStatement build options |

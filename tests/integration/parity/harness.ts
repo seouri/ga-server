@@ -20,7 +20,7 @@ export type Side = {
 export const PARITY_TYPES = ['Observation', 'Condition', 'Patient', 'Basic', 'ResearchStudy', 'Practitioner', 'Organization', 'Appointment', 'Slot',
   'ImagingStudy', 'DiagnosticReport', 'Flag', 'PractitionerRole', 'Coverage', 'CoverageEligibilityRequest', 'Encounter', 'Communication', 'ServiceRequest',
   'Questionnaire', 'QuestionnaireResponse', 'Location', 'HealthcareService', 'AuditEvent', 'AllergyIntolerance', 'CareTeam', 'Provenance', 'Task', 'Goal',
-  'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle', 'SpecimenDefinition', 'ResearchDefinition'];
+  'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle', 'SpecimenDefinition', 'ResearchDefinition', 'RelatedPerson', 'DocumentReference'];
 const PROJECT = 'ga-test-parity';
 
 export async function guardProject(me: { project: { name?: string } }): Promise<void> {
@@ -70,7 +70,7 @@ function side(name: Side['name'], base: string, token: () => string, created?: s
     async call(method, path, body, headers = {}) {
       const r = await bearer(token())(`${base}fhir/R4/${path}`, {
         method, headers: { 'content-type': 'application/fhir+json', accept: 'application/fhir+json', ...headers },
-        body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+        body: body === undefined ? undefined : typeof body === 'string' || body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body),
       });
       const text = await r.text();
       let json: unknown;

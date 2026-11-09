@@ -7,6 +7,7 @@ import { chmodSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } f
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
+import { createGunzip, createInflate } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { applyPatch, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
 import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from '@medplum/fhirtypes';
@@ -45,12 +46,21 @@ export function storeToken(file: string): string {
 }
 
 // The request body, at most `limit` bytes (else 413), as one buffer or as a stream for Binary.
-async function* limited(req: IncomingMessage, limit: number): AsyncGenerator<Uint8Array> {
+async function* limited(req: AsyncIterable<Buffer>, limit: number): AsyncGenerator<Uint8Array> {
   let n = 0;
-  for await (const chunk of req as AsyncIterable<Buffer>) {
+  for await (const chunk of req) {
     n += chunk.length;
     if (n > limit) throw new HttpError(413, 'Request body too large', true);
     yield chunk;
+  }
+}
+// A Binary body, decoded from gzip or deflate (as Medplum); the limit applies to the decoded bytes.
+async function* binaryBody(req: IncomingMessage, limit: number): AsyncGenerator<Uint8Array> {
+  const enc = (header(req, 'content-encoding') ?? 'identity').toLowerCase();
+  if (enc === 'identity') { yield* limited(req, limit); return; }
+  if (enc !== 'gzip' && enc !== 'deflate') throw new HttpError(400, 'Unsupported content encoding'); // Medplum's text
+  try { yield* limited(req.pipe(enc === 'gzip' ? createGunzip() : createInflate()), limit); } catch (e) {
+    throw e instanceof HttpError ? e : new HttpError(400, `Invalid ${enc} body`, true);
   }
 }
 async function body(req: IncomingMessage): Promise<string> {
@@ -113,12 +123,12 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   if (type === 'Binary') {
     const contentType = req.headers['content-type'] ?? 'application/octet-stream';
     if (method === 'POST' && !id) {
-      const { id: bid } = await store.putBinaryStream(contentType, limited(req, binaryLimit));
+      const { id: bid } = await store.putBinaryStream(contentType, binaryBody(req, binaryLimit));
       return send(res, 201, JSON.stringify({ resourceType: 'Binary', id: bid, contentType }), { location: `${base}fhir/R4/Binary/${bid}` });
     }
     // Medplum replaces the bytes and keeps the Binary's id (binaries here have no versions, so no ETag either way).
     if (method === 'PUT' && id && !op) {
-      await store.putBinaryStream(contentType, limited(req, binaryLimit), id, true);
+      await store.putBinaryStream(contentType, binaryBody(req, binaryLimit), id, true);
       return send(res, 200, JSON.stringify({ resourceType: 'Binary', id, contentType }));
     }
     if (method === 'GET' && id && !op) {
@@ -142,6 +152,7 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
     if (id === '_search') for (const [k, v] of new URLSearchParams(text)) query.append(k, v);
     else json = parse(text);
   }
+  if (!type && method === 'POST') await stageBinaries(store, json);
   const a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base });
   const h: Record<string, string> = {};
   if (a.row) {
@@ -410,6 +421,20 @@ function capability(): string {
   });
 }
 
+// A batch's POST Binary entries (base64 data, as Medplum's clients send them) are written before the batch runs: binaries are
+// files written outside SQLite transactions (a transaction that fails after leaves the Binary, as a failed put does).
+const staged = new WeakMap<object, { id: string; contentType: string }>();
+async function stageBinaries(store: Store, b: unknown): Promise<void> {
+  const entries = (b as Bundle)?.entry;
+  if (!Array.isArray(entries)) return; // batch() answers a malformed bundle
+  for (const e of entries) {
+    const r = e?.resource as { resourceType?: string; contentType?: string; data?: unknown } | undefined;
+    if (e?.request?.method !== 'POST' || e.request.url !== 'Binary' || r?.resourceType !== 'Binary' || typeof r.data !== 'string' || !r.contentType) continue;
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(r.data)) continue; // not base64: the entry answers 400
+    staged.set(r, { ...(await store.putBinaryStream(r.contentType, [Buffer.from(r.data, 'base64')])), contentType: r.contentType });
+  }
+}
+
 const URN = /^urn:(uuid|oid):/;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const RANK: Record<string, number> = { DELETE: 0, POST: 1, PUT: 2, PATCH: 2 }; // then GET
@@ -448,9 +473,13 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
     const res = body && rewrite(body);
     if (res && method !== 'PATCH') danglingUrn(res); // patch() checks its operations
     const q = url.indexOf('?'), path = q < 0 ? url : url.slice(0, q);
-    const parts = path.split('/');
-    if (!parts[0] || parts.length > 4 || /^[a-z]+:/i.test(url)) throw new HttpError(400, `Unsupported entry url: ${url}`);
-    const a = dispatch(store, { method, parts, query: new URLSearchParams(q < 0 ? '' : url.slice(q + 1)), body: res, ifMatch, ifNoneExist, base, id: pre.get(i) });
+    const nested = method === 'POST' && (path === '' || path === '/'); // a bundle in an entry, as Medplum runs it
+    const parts = nested ? [] : path.split('/');
+    if (!nested && (!parts[0] || parts.length > 4 || /^[a-z]+:/i.test(url))) throw new HttpError(400, `Unsupported entry url: ${url}`);
+    const bin = method === 'POST' && e.resource ? staged.get(e.resource) : undefined;
+    const a: Answer = bin
+      ? { status: 201, json: JSON.stringify({ resourceType: 'Binary', ...bin }), row: { type: 'Binary', id: bin.id, versionId: '', lastUpdated: '' } }
+      : dispatch(store, { method, parts, query: new URLSearchParams(q < 0 ? '' : url.slice(q + 1)), body: res, ifMatch, ifNoneExist, base, id: pre.get(i) });
     if (e.fullUrl && URN.test(e.fullUrl) && a.row) {
       const at = `${a.row.type}/${a.row.id}`, want = urns.get(e.fullUrl);
       // An earlier entry of the transaction changed what this one matched, and entries point at the planned id.
@@ -483,6 +512,8 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
       for (const i of order.filter((i) => rank(i) > 0)) {
         const { fullUrl, request } = entries[i];
         if (!fullUrl || !URN.test(fullUrl)) continue;
+        const bin = request?.method === 'POST' && entries[i].resource ? staged.get(entries[i].resource!) : undefined;
+        if (bin) { urns.set(fullUrl, `Binary/${bin.id}`); continue; }
         const url = request?.url ?? '', q = url.indexOf('?');
         const [type, id, extra] = (q < 0 ? url : url.slice(0, q)).split('/');
         const search = id ? undefined : request?.method === 'POST' && q < 0 ? request.ifNoneExist ?? '' : request?.method === 'PUT' && q > 0 ? url.slice(q + 1) : undefined;

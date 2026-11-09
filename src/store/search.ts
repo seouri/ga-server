@@ -438,7 +438,7 @@ type RawBundle = { total?: number; entry?: RawEntry[]; link?: Bundle['link'] };
 export function searchJson(prep: Prep, type: string, query: [string, string][], base: string): string {
   const raw = searchRaw(prep, type, query, base);
   const entry = raw.entry?.map((e) => `{"fullUrl":${JSON.stringify(e.fullUrl)},"search":{"mode":"${e.mode}"},"resource":${e.json}}`).join(',');
-  return `{"resourceType":"Bundle","type":"searchset"${raw.total !== undefined ? `,"total":${raw.total}` : ''}${entry !== undefined ? `,"entry":[${entry}]` : ''}${raw.link ? `,"link":${JSON.stringify(raw.link)}` : ''}}`;
+  return `{"resourceType":"Bundle","type":"searchset"${raw.total !== undefined ? `,"total":${raw.total}` : ''}${entry ? `,"entry":[${entry}]` : ''}${raw.link ? `,"link":${JSON.stringify(raw.link)}` : ''}}`;
 }
 
 function searchRaw(prep: Prep, type: string, query: [string, string][], base: string): RawBundle {

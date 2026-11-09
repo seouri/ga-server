@@ -54,20 +54,20 @@ Every request except `GET /healthz` needs `Authorization: Bearer <token>` (compa
 
 Under `/fhir/R4/`:
 
-- `GET|POST <Type>` (search; `POST <Type>/_search` with a form body), `GET <Type>/<id>`, `PUT <Type>/<id>` (`If-Match` → 412 on another version), `PATCH <Type>/<id>` (JSON Patch), `DELETE <Type>/<id>`; `POST <Type>` (`If-None-Exist`).
+- `GET|POST <Type>` (search; `POST <Type>/_search` with a form body), `GET <Type>/<id>`, `PUT <Type>/<id>` (`If-Match` → 412 on another version), `PATCH <Type>/<id>` (JSON Patch, or FHIRPath Patch as a Parameters), `DELETE <Type>/<id>` (`If-Match`); `POST <Type>` (`If-None-Exist`).
 - Conditional `PUT <Type>?query` and `DELETE <Type>?query`.
 - History: `<Type>/<id>/_history[/<vid>]`, `<Type>/_history`, `_history` (`_count`, `_since`).
-- `POST /` batch and transaction bundles (urn rewriting, conditional references, GET/POST/PUT/PATCH/DELETE entries).
+- `POST /` batch and transaction bundles (urn rewriting, conditional references, GET/POST/PUT/PATCH/DELETE entries, `POST Binary` entries with base64 `data`, a nested bundle as a `POST /` entry).
 - `Patient/<id>/$everything` (`_count`, `_offset`, `_since`, `_type`); `<Type>/$validate`.
-- `Binary`: `POST` and `PUT Binary/<id>` stream the raw body to disk, `GET Binary/<id>` streams it back, `DELETE`.
+- `Binary`: `POST` and `PUT Binary/<id>` stream the raw body to disk (`Content-Encoding` gzip or deflate decoded), `GET Binary/<id>` streams it back, `DELETE`.
 - `GET metadata`: a CapabilityStatement of what this store supports.
-- `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes.
+- `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.
 
 Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not` and reference type modifiers (`subject:Patient`), one-level chains and `_has`, `_include`/`_revinclude`, `_sort`, `_count`, `_elements`, `_summary=count`, `_total`, `_filter`), paged by cursor. Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
 
 ## Deliberate differences from Medplum
 
-- Transactions are all or nothing: a failing entry fails the whole transaction with its status (Medplum keeps the entries before it and answers 200).
+- Transactions are all or nothing: a failing entry fails the whole transaction with its status, as Medplum's tests expect with its `transaction-bundles` project feature (without the feature, Medplum keeps the other entries and answers 200 with the failed entry's status).
 - A reference to a `urn:uuid`/`urn:oid` no entry defines is 400 (Medplum stores it as written); `urn:oid` fullUrls are rewritten like `urn:uuid`.
 - Every urn fullUrl of a transaction is resolved before its entries run (a create or conditional PUT, each on its own: its one match, else a new id). If an earlier entry changes what a later conditional entry matches and another entry references its urn, the transaction is 400 (Medplum fails that entry and leaves references to its urn pointing at no resource); with no reference the entry runs (Medplum still fails it).
 - PUT or PATCH of a deleted record is 410 (Medplum brings it back).

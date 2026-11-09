@@ -12,6 +12,7 @@ import type { Bundle, BundleEntry, Observation, Patient, Resource } from '@medpl
 import { serveStore, storeToken } from '../server.ts';
 import { parseServeArgs } from '../serve.ts';
 import { request as httpRequest } from 'node:http';
+import { deflateSync, gzipSync } from 'node:zlib';
 import { Store } from '../store.ts';
 
 const obs = (code: string, value: number, date: string): Observation => ({
@@ -369,7 +370,7 @@ describe('store server: Medplum-compatible routes', () => {
     ]);
     expect([moved.status, moved.json.issue[0].details.text]).toEqual([400, expect.stringMatching(/^urn:uuid:b2 resolved to Patient\/.* an earlier entry changed its match$/)]);
     expect(await count()).toBe(before);
-    expect((await call('GET', 'Patient?identifier=s|w')).json.entry).toHaveLength(0);
+    expect((await call('GET', 'Patient?identifier=s|w')).json.entry).toBeUndefined();
   });
 
   it('a batch or transaction whose entry is not a list of objects is 400', async () => {
@@ -475,6 +476,39 @@ describe('store server: Medplum-compatible routes', () => {
     expect((await call('GET', `Observation/${o.id}`)).json.status).toBe('amended');
     await call('DELETE', `Observation/${o.id}`);
     expect((await call('PATCH', `Observation/${o.id}`, [], jp)).status).toBe(410);
+  });
+
+  it('as Medplum: a Binary body in gzip or deflate is decoded, another Content-Encoding is 400', async () => {
+    const bin = (method: string, path: string, body: BodyInit, enc?: string) => fetch(`${base}fhir/R4/${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain', ...(enc ? { 'content-encoding': enc } : {}) }, body });
+    const read = async (id: string) => (await fetch(`${base}fhir/R4/Binary/${id}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text();
+    const g = await (await bin('POST', 'Binary', gzipSync('one'), 'gzip')).json() as { id: string };
+    expect(await read(g.id)).toBe('one');
+    const d = await (await bin('POST', 'Binary', deflateSync('two'), 'deflate')).json() as { id: string };
+    expect(await read(d.id)).toBe('two');
+    expect((await bin('PUT', `Binary/${d.id}`, gzipSync('three'), 'GZIP')).status).toBe(200);
+    expect(await read(d.id)).toBe('three');
+    const bad = await bin('POST', 'Binary', 'x', 'fake');
+    expect([bad.status, ((await bad.json()) as { issue: { details: { text: string } }[] }).issue[0].details.text]).toEqual([400, 'Unsupported content encoding']);
+  });
+
+  it('as Medplum: a batch entry POST Binary stores its base64 data (a transaction rewrites its urn); POST / in a batch runs a nested bundle', async () => {
+    const urn = 'urn:uuid:a0010b42-02ea-411c-a314-9ec144f6c2b8';
+    const r = await tx('transaction', [
+      { fullUrl: urn, request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'SGVsbG8gV29ybGQh' } },
+      { request: { method: 'POST', url: 'DocumentReference' }, resource: { resourceType: 'DocumentReference', status: 'current', content: [{ attachment: { contentType: 'text/plain', url: urn } }] } as Resource },
+    ]);
+    expect(r.json.entry.map((e: BundleEntry) => e.response!.status)).toEqual(['201', '201']);
+    const id = r.json.entry[0].resource.id;
+    expect(r.json.entry[0].resource).toEqual({ resourceType: 'Binary', id, contentType: 'text/plain' });
+    expect(r.json.entry[1].resource.content[0].attachment.url).toBe(`Binary/${id}`);
+    expect(await (await fetch(`${base}fhir/R4/Binary/${id}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text()).toBe('Hello World!');
+    const nested = await tx('batch', [{ request: { method: 'POST', url: '/' }, resource: { resourceType: 'Bundle', type: 'transaction', entry: [
+      { request: { method: 'POST', url: 'Organization' }, resource: { resourceType: 'Organization', name: { bad: 1 } } as unknown as Resource },
+      { request: { method: 'POST', url: 'Organization' }, resource: { resourceType: 'Organization', name: 'ok' } }] } }]);
+    expect(nested.json.entry[0].response.status).toBe('400');
+    expect((await call('GET', 'Organization?name=ok')).json.entry).toBeUndefined();
+    const ok = await tx('batch', [{ request: { method: 'POST', url: '/' }, resource: { resourceType: 'Bundle', type: 'batch', entry: [{ request: { method: 'POST', url: 'Organization' }, resource: { resourceType: 'Organization', name: 'ok' } }] } }]);
+    expect([ok.json.entry[0].response.status, ok.json.entry[0].resource.entry[0].response.status]).toEqual(['200', '201']);
   });
 
   it('as Medplum: unknown types 400, DELETE If-Match, FHIRPath Patch, _pretty, Prefer return=minimal, empty values dropped, $validate of a Parameters body', async () => {

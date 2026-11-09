@@ -415,6 +415,10 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Practitioner', 'identifier=mixed')).toEqual([]);
   });
 
+  it('an empty searchset has no entry, as Medplum', () => {
+    expect(run('Observation', 'code=none')).not.toHaveProperty('entry');
+  });
+
   it('system| matches an identifier with that system and no value; token values are trimmed, as Medplum', () => {
     add({ resourceType: 'Patient', id: 'p1', identifier: [{ system: 'urn:s' }] });
     add({ resourceType: 'Patient', id: 'p2', identifier: [{ system: 'urn:s', value: ' v2' }] });
