@@ -19,14 +19,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { bearer, getClient } from '../../src/config.ts';
 import { cleanupTestPatient, createTestPatient, restoreConfig, SQLITE, testProject } from './helpers.ts';
 import { tempStore, type TempStore } from '../temp-store.ts';
+import { shape } from './parity/harness.ts';
 
 type Got = { status: number; headers: Headers; json: any; text: string };
 type Side = { name: 'medplum' | 'store'; base: string; pid: string; call(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<Got> };
-
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
-// Same shape: uuids and base URLs blanked, Medplum's tracing extension and meta dropped.
-const shape = (x: unknown, base: string): unknown => JSON.parse(JSON.stringify(x, (k, v) => (k === 'meta' || (k === 'extension' && JSON.stringify(v).includes('tracing')) ? undefined : v))
-  .replaceAll(base, 'BASE/').replace(UUID, 'ID'));
 
 let medplum: MedplumClient, store: TempStore | undefined;
 const sides: Side[] = [];
