@@ -85,7 +85,7 @@ Expected FHIR:
 - Not mapped (follow-up): the policy holder's own name and address (would need a RelatedPerson for `policyHolder`/`subscriber`) and the guarantor (FHIR `Account.guarantor`).
 - Test: `payers-section.test.ts` (two policies: full primary, minimal secondary).
 
-## Amendment (PATCHES row 43): the payer is an Organization
+## Amendment: the payer is an Organization
 
 Each payer performer becomes an `Organization` (identifier from the assigned entity's id; name, address and telecom from its
 representedOrganization, else the assigned entity's own) and `Coverage.payor` references it with the name as display, instead of

@@ -22,13 +22,13 @@ Expected: no `name`; `name: [{ text: "Pat Doe, MD" }]`. Actual: `name: [{}]` bot
 - `ccda-to-fhir.ts`: `mapCcdaNameToFhirHumanName` returns `{ text }` for a text-only name and nothing for a name with no parts; `mapCcdaNameArrayFhirHumanNameArray` returns undefined for an empty list.
 - Test `patient-demographics.test.ts`.
 
-## Amendment (PATCHES row 49)
+## Amendment: text kept with the other name parts
 
 The text is kept with the name's other parts: `<name use="L">Pat Doe</name>` gives `{ use: "official", text: "Pat Doe" }`,
 `<name><prefix>Dr.</prefix>Pat Doe<suffix>MD</suffix></name>` gives prefix, suffix and text, and loose text beside a family or
 given name is kept as text.
 
-## Amendment (PATCHES row 50)
+## Amendment: loose name text keeps its spaces
 
 fast-xml-parser trims and concatenates mixed-content text pieces, so `Dr. <given>John</given> Smith` reads as "Dr.Smith". The fix
 marks the loose text pieces of a name with parts before parsing and joins them with single spaces: text "Dr. Smith".

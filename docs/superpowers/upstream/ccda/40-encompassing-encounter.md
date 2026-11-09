@@ -26,13 +26,13 @@ Expected: `Composition.encounter` pointing at an Encounter with identifier `V1`,
 - `types.ts`: `Ccda.componentOf`, `CcdaEncompassingEncounter`; `xml.ts`: `encounterParticipant` is an array.
 - Test `encompassing-encounter.test.ts`.
 
-## Amendment (PATCHES row 45): the reused Encounter gains the header's details
+## Amendment: the reused Encounter gains the header's details
 
 When an Encounters-section entry has the encompassing encounter's id, that Encounter gains the header's period (when it has
 none), every header participant, and the facility as a Location unless one of its locations already has the facility's id.
 Nothing the header states is dropped. Tests in `encompassing-encounter.test.ts`.
 
-## Amendment (PATCHES row 48)
+## Amendment: the facility Location is kept, participants not repeated
 
 The header facility's Location is always created and merged by identifier with an entry Location of the same id (so its name
 and address are kept); only a duplicate `Encounter.location` entry is skipped. Header participants the Encounter already has
