@@ -125,6 +125,18 @@ test('a job waiting for the import lock keeps running without spending attempts'
   expect(calls).toBe(5);
 }, 120_000);
 
+test('a busy lock after a committed batch leaves attempts at 0', async () => {
+  const a = await store();
+  const run = async (d: string, id: string) => {
+    const path = join(d, 'imports', id, 'job.json');
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), lastBatch: 0, attempts: 0 })); // a batch committed
+    throw new GaError(IMPORT_BUSY);
+  };
+  const job = startJob(a.dir, upload(a.dir, zip), { patientId: a.pid, run, busyRetryMs: 60_000 });
+  await new Promise((r) => setTimeout(r, 50));
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 0, message: expect.stringContaining('import lock') });
+});
+
 test('a worker that runs out of memory is retried and the gateway answers meanwhile; three in a row fail the job and keep root', async () => {
   const a = await store();
   const server = createGateway({

@@ -108,7 +108,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
           save(dir, { ...now, message });
           continue;
         }
-        save(dir, { ...now, attempts: now.attempts - 1, message: 'waiting for the import lock: another import or sync is running' });
+        save(dir, { ...now, attempts: Math.max(0, now.attempts - 1), message: 'waiting for the import lock: another import or sync is running' });
         setTimeout(() => supervise(dir, id, opts), opts.busyRetryMs ?? BUSY_RETRY_MS).unref();
         return;
       }
