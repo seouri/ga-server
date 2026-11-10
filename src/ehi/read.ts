@@ -34,22 +34,25 @@ export class EhiTables {
   private *lines(file: string): Generator<{ text: string; start: number; end: number }> {
     const fd = openSync(file, 'r');
     try {
-      let buf = Buffer.alloc(0);
+      let buf = Buffer.allocUnsafe(this.chunk); // reused: each line is decoded into its own string
+      let len = 0; // bytes in buf
       let at = 0; // file offset of buf[0]
       for (;;) {
-        const chunk = Buffer.alloc(this.chunk);
-        const n = readSync(fd, chunk, 0, this.chunk, at + buf.length);
-        buf = buf.length ? Buffer.concat([buf, chunk.subarray(0, n)]) : chunk.subarray(0, n);
+        if (len === buf.length) buf = Buffer.concat([buf, Buffer.allocUnsafe(buf.length)]); // a line longer than the buffer
+        const n = readSync(fd, buf, len, buf.length - len, at + len);
+        len += n;
+        const data = buf.subarray(0, len);
         let from = 0;
-        for (let i = buf.indexOf(CRLF); i >= 0; i = buf.indexOf(CRLF, from)) {
-          yield { text: buf.toString('utf8', from, i), start: at + from, end: at + i + 2 };
+        for (let i = data.indexOf(CRLF); i >= 0; i = data.indexOf(CRLF, from)) {
+          yield { text: data.toString('utf8', from, i), start: at + from, end: at + i + 2 };
           from = i + 2;
         }
         if (!n) {
-          if (from < buf.length) yield { text: buf.toString('utf8', from), start: at + from, end: at + buf.length };
+          if (from < len) yield { text: data.toString('utf8', from), start: at + from, end: at + len };
           return;
         }
-        buf = buf.subarray(from);
+        buf.copy(buf, 0, from, len);
+        len -= from;
         at += from;
       }
     } finally { closeSync(fd); }
@@ -114,9 +117,14 @@ export class EhiTables {
 }
 // Epic's TSVs are unquoted (checked on a real export: every row has the header's width). Fields are literal: split on tab,
 // rows on CRLF only, so quotes and a bare LF inside a field survive.
+// A row holds its non-empty cells; the empty ones read '' from a shared blank row (tables are wide and mostly empty).
+const blanks = new WeakMap<string[], Row>();
 const toRow = (header: string[], line: string): Row => {
-  const cells = line.split('\t');
-  return Object.fromEntries(header.map((h, i) => [h, cells[i] ?? '']));
+  let blank = blanks.get(header);
+  if (!blank) blanks.set(header, (blank = Object.fromEntries(header.map((h) => [h, '']))));
+  const row: Row = Object.create(blank);
+  line.split('\t').forEach((v, i) => { if (v && i < header.length) row[header[i]] = v; });
+  return row;
 };
 
 const ESC: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };

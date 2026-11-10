@@ -25,7 +25,7 @@ import { EhiTables, exportInfo } from './read.ts';
 const ARCHIVE = 'urn:ga-server:id:ehi-archive';
 const PATIENT: Resource = { resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }; // no PATIENT mapper: collapses onto the GA patient
 // A batch of notes or messages also ends at about this much JSON, so a batch of long notes stays small.
-const BATCH_BYTES = 4 << 20;
+const BATCH_BYTES = 1 << 20;
 
 export async function ehiContext(client: MedplumClient, dir: string, patientId: string, timeZone?: string): Promise<EhiCtx> {
   return { ...exportInfo(dir, timeZone), epicOrgNumber: await epicOrgNumber(client, patientId) };

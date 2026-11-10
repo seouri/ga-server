@@ -32,7 +32,7 @@ describe('EHI reader', () => {
     return new EhiTables(d, 5);
   };
   it('streams rows across chunks: a split CRLF or character, an LF in a field, a last row without CRLF', () => {
-    const rows = [...table('1\tthe patient\u2019s\r\n2\ta\nb\r\n\r\n3\tlast').rows('T')];
+    const rows = Array.from(table('1\tthe patient\u2019s\r\n2\ta\nb\r\n\r\n3\tlast').rows('T'), (r) => ({ K: r.K, V: r.V })); // an empty cell reads ''
     expect(rows).toEqual([{ K: '1', V: 'the patient\u2019s' }, { K: '2', V: 'a\nb' }, { K: '', V: '' }, { K: '3', V: 'last' }]);
   });
 
@@ -42,7 +42,7 @@ describe('EHI reader', () => {
     expect([...ix.keys()]).toEqual(['a', 'b']);
     expect(ix.get('a')).toHaveLength(4); // two [start, end) runs: rows 1-2, and row 4
     expect(t.read('T', ix.get('a')!).map((r) => r.V)).toEqual(['1', '2', '4']);
-    expect(t.read('T', ix.get('b')!)).toEqual([{ K: 'b', V: '3' }]);
+    expect(t.read('T', ix.get('b')!).map((r) => [r.K, r.V])).toEqual([['b', '3']]);
     expect([...table('').index('T', (r) => r.K).keys()]).toEqual([]);
   });
 
