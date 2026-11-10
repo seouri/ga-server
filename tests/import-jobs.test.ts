@@ -142,7 +142,7 @@ test('a worker that runs out of memory is retried and the gateway answers meanwh
     }
     const j = jobStatus(a.dir, job.id)!;
     expect(j).toMatchObject({ status: 'failed', attempts: 3 });
-    expect(j.message).toMatch(/memory/i);
+    expect(j.message).toBe("too large to import within this server's import memory (8 MB); import it with `ga import` on a computer with more memory");
     expect(answered).toBeGreaterThan(0);
   } finally { server.close(); }
 }, 120_000);

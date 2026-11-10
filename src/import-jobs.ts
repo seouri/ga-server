@@ -122,7 +122,10 @@ export const inWorker = (resourceLimits = WORKER_LIMITS): Run => (dir, id) =>
     const w = new Worker(new URL(import.meta.url), { workerData: { importJob: { dir, id } }, resourceLimits, execArgv: [] });
     const thread = w.threadId;
     let error: Error | undefined;
-    w.on('error', (e) => (error = e as Error));
+    // Out of memory says what to do instead: retrying the same file on this server gets no further.
+    w.on('error', (e) => (error = (e as NodeJS.ErrnoException).code === 'ERR_WORKER_OUT_OF_MEMORY'
+      ? new Error(`too large to import within this server's import memory (${resourceLimits.maxOldGenerationSizeMb} MB); import it with \`ga import\` on a computer with more memory`)
+      : (e as Error)));
     w.on('exit', (code) => {
       freeThreadLock(thread);
       if (error || code) no(error ?? new Error(`the import stopped (exit ${code})`));
