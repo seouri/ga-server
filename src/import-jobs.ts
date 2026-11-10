@@ -3,7 +3,7 @@
 // each committed batch, so a retry or a gateway restart (resumeJobs) carries on from there with the same report.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
 import type { MedplumClient } from '@medplum/core';
 import { BATCH, type Pending } from './apple/import.ts';
@@ -11,7 +11,7 @@ import { type GaConfig, getClient, loadConfig } from './config.ts';
 import { addReport, type ImportReport } from './engine.ts';
 import { detectKind, importAny, type ImportKind } from './import.ts';
 import { IMPORT_WORKER_HEAP_MB, IMPORT_WORKER_YOUNG_MB } from './limits.ts';
-import { freeThreadLock } from './lock.ts';
+import { freeThreadLock, IMPORT_BUSY } from './lock.ts';
 import { unzipSafe } from './gateway/uploads.ts';
 
 type Report = ImportReport & { unchanged?: number };
@@ -54,34 +54,40 @@ function save(dir: string, j: JobRecord): JobRecord {
   return j;
 }
 
-// Writes the record and moves the upload into the job's folder (out of reach of the 24-hour upload sweep). Not started.
+// Writes the record, then moves the upload into the job's folder under a fixed name (out of reach of the 24-hour upload
+// sweep, never colliding with job.json or root). Not started.
 export function recordJob(dir: string, upload: string, opts: { tz?: string; patientId?: string; batchSize?: number } = {}): JobRecord {
   const id = randomBytes(9).toString('base64url');
   mkdirSync(jobDir(dir, id), { recursive: true, mode: 0o700 });
-  const moved = join(jobDir(dir, id), basename(upload));
-  renameSync(upload, moved);
-  return save(dir, {
-    id, upload: moved, tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    batchSize: opts.batchSize ?? BATCH, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
+  const j = save(dir, {
+    id, upload: join(jobDir(dir, id), `upload${extname(upload)}`), tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, batchSize: opts.batchSize ?? BATCH, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
   });
+  renameSync(upload, j.upload);
+  return j;
 }
 
-export function startJob(dir: string, upload: string, opts: { tz?: string; patientId?: string; batchSize?: number; run?: Run } = {}): JobRecord {
+type Supervision = { run?: Run; busyRetryMs?: number };
+export function startJob(dir: string, upload: string, opts: { tz?: string; patientId?: string; batchSize?: number } & Supervision = {}): JobRecord {
   const j = recordJob(dir, upload, opts);
-  supervise(dir, j.id, opts.run ?? inWorker());
+  supervise(dir, j.id, opts);
   return j;
 }
 
 // At gateway start: every job still running gets its attempts again. Returns how many.
-export function resumeJobs(dir: string, run: Run = inWorker()): number {
+export function resumeJobs(dir: string, opts: Supervision = {}): number {
   const running = listJobs(dir).filter((j) => j.status === 'running');
-  for (const j of running) supervise(dir, j.id, run);
+  for (const j of running) supervise(dir, j.id, opts);
   return running.length;
 }
 
-// One job at a time; each attempt is counted before it starts, so a gateway crash mid-attempt counts too.
+// One job at a time; each attempt is counted before it starts, so a gateway crash mid-attempt counts too. An attempt that
+// found the import lock held (a long sync or CLI import, or a lock a dead container left until its 2-hour age) is not
+// counted: the job waits busyRetryMs off the queue and tries again.
+const BUSY_RETRY_MS = 5 * 60_000;
 let queue = Promise.resolve();
-function supervise(dir: string, id: string, run: Run): void {
+function supervise(dir: string, id: string, opts: Supervision): void {
+  const run = opts.run ?? inWorker();
   queue = queue.then(async () => {
     for (;;) {
       const j = jobStatus(dir, id);
@@ -91,7 +97,15 @@ function supervise(dir: string, id: string, run: Run): void {
       try {
         await run(dir, id);
       } catch (e) {
-        save(dir, { ...jobStatus(dir, id)!, message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        const now = jobStatus(dir, id)!;
+        if (message !== IMPORT_BUSY) {
+          save(dir, { ...now, message });
+          continue;
+        }
+        save(dir, { ...now, attempts: now.attempts - 1, message: 'waiting for the import lock: another import or sync is running' });
+        setTimeout(() => supervise(dir, id, opts), opts.busyRetryMs ?? BUSY_RETRY_MS).unref();
+        return;
       }
     }
   }).catch(() => {}); // a broken record must not stop the queue
@@ -120,17 +134,18 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
   const into = join(jobDir(dir, id), 'root');
   if (!j.root) {
     rmSync(into, { recursive: true, force: true }); // a crash mid-unzip
-    const zip = /\.zip$/i.test(j.upload);
-    j = save(dir, { ...j, root: zip ? await unzipSafe(j.upload, into) : j.upload });
-    if (zip) rmSync(j.upload, { force: true });
+    j = save(dir, { ...j, root: /\.zip$/i.test(j.upload) ? await unzipSafe(j.upload, into) : j.upload });
   }
+  if (/\.zip$/i.test(j.upload)) rmSync(j.upload, { force: true }); // unzipped: the folder is enough to resume
   j = save(dir, { ...j, kind: detectKind(j.root!) });
   const cfg = deps.cfg ?? loadConfig();
   const client = deps.client ?? (await getClient(cfg));
   const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {
     tz: j.tz, timeZone: j.timeZone, batchSize: j.batchSize, skipThrough: j.lastBatch, redo: j.pending,
     beforeWrite: (pending) => { j = save(dir, { ...j!, pending }); },
-    onArchived: (archived) => { j = save(dir, { archived, ...j! }); }, // an earlier attempt's outcome wins
+    // An earlier attempt's outcome wins. shortcut: a crash between the archive upload and this save reads 'already-present' on
+    // the retry; derive it from the archive's own record if that matters.
+    onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
     onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0 }); },
   });
   // The counts are the checkpoint's (every batch once); the rest (skips, seconds) is this attempt's.

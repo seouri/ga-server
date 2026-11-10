@@ -2,32 +2,32 @@ import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
-import { addReport, importResources, type ImportReport } from '../engine.ts';
+import { addReport, COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
 import { sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
 import { appleBatches, type Batch } from './batches.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
-// Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id) and the search param naming the patient.
-const TYPES: [string, string][] = [['Observation', 'subject'], ['DocumentReference', 'subject']];
+// Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id).
+const FILTERED = new Set(['Observation', 'DocumentReference']);
 
 const projection = (r: Record<string, unknown>) =>
   JSON.stringify({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }, sorted);
 const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
-// What GA already holds from Apple Health for this patient among these resources: first identifier -> projection. One
-// search per type and chunk of identifiers (a chunk's URL stays near 4 KB).
+// What GA already holds from Apple Health for this patient among these resources (every type but the Patient): first
+// identifier -> projection. One search per type and chunk of identifiers (a chunk's URL stays near 4 KB).
 const CHUNK = 40;
 export async function existing(client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  for (const [type, param] of TYPES) {
+  for (const type of new Set(resources.map((r) => r.resourceType).filter((t) => t !== 'Patient'))) {
     const ids = [...new Set(resources.filter((r) => r.resourceType === type).map((r) => firstId(r as never)))];
     for (let i = 0; i < ids.length; i += CHUNK) {
       for await (const page of client.searchResourcePages(type as 'Observation', {
-        [param]: `Patient/${patientId}`, _tag: TAGGED, identifier: ids.slice(i, i + CHUNK).join(','), _count: '1000',
-        _elements: 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod',
+        [COMPARTMENT[type]]: `Patient/${patientId}`, _tag: TAGGED, identifier: ids.slice(i, i + CHUNK).join(','), _count: '1000',
+        _elements: FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier',
       }, { cache: 'no-cache' })) {
         for (const r of page) out.set(firstId(r as never), projection(r as never));
       }
@@ -77,21 +77,26 @@ export async function importAppleHealth(
         const have = await existing(client, patientId, resources);
         const redo = opts.redo?.index === index ? { created: new Set(opts.redo.created), updated: new Set(opts.redo.updated) } : undefined;
         const p: Pending = { index, created: [], updated: [] };
-        let same = 0, created = 0, updated = 0;
+        let kept = 0, created = 0, updated = 0;
         const rest = resources.filter((r) => {
-          if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
-          const id = firstId(r as never), had = have.get(id);
-          if (had !== projection(r as never)) {
-            (had === undefined ? p.created : p.updated).push(id);
+          if (r.resourceType === 'Patient') return true;
+          const id = firstId(r as never), had = have.get(id), same = had === projection(r as never);
+          // A redo: what the crashed attempt wrote counts as its engine counted it (created or updated).
+          // shortcut: a record that attempt's engine counted as merged, a possible duplicate or a conflict counts as created or
+          // updated here (Ruling 10); a non-filtered type (the allergy) it updated counts as the engine's skip. Records stay exact.
+          if (redo?.created.has(id) && had !== undefined) created++;
+          else if (redo?.updated.has(id) && same) updated++;
+          else if (FILTERED.has(r.resourceType) && same) kept++;
+          else {
+            if (had === undefined) p.created.push(id);
+            else if (FILTERED.has(r.resourceType)) p.updated.push(id);
             return true;
           }
-          // shortcut: what a crashed attempt wrote counts as created/updated, never merged or flagged; exact for Apple's own records.
-          if (redo?.created.has(id)) created++; else if (redo?.updated.has(id)) updated++; else same++;
           return false;
         });
         if (!redo) await opts.beforeWrite?.(p); // a redo keeps the first attempt's lists
         const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
-        return { ...written, created: written.created + created, updated: written.updated + updated, unchanged: same };
+        return { ...written, created: written.created + created, updated: written.updated + updated, unchanged: kept };
       });
       addReport(total, report);
       unchanged += report.unchanged;

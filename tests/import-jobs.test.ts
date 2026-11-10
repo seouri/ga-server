@@ -9,7 +9,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { createGateway } from '../src/gateway/server.ts';
-import { inWorker, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
+import { unzipSafe } from '../src/gateway/uploads.ts';
+import { GaError } from '../src/config.ts';
+import { inWorker, type JobRecord, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
+import { IMPORT_BUSY } from '../src/lock.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
 import { appleZip, crash, report, settled, snapshot, upload } from './import-jobs-helpers.ts';
 import { type TempStore, tempStore } from './temp-store.ts';
@@ -46,7 +49,7 @@ test('startJob records the job and the worker imports it to done', async () => {
   const done = await settled(a.dir, job.id);
   expect(done).toMatchObject({ status: 'done', attempts: 0, kind: 'apple' }); // reset by each committed batch
   expect(existsSync(join(a.dir, 'imports', job.id, 'root'))).toBe(false); // removed on success
-  expect(existsSync(join(a.dir, 'imports', job.id, 'export.zip'))).toBe(false); // the zip went after the unzip
+  expect(existsSync(join(a.dir, 'imports', job.id, 'upload.zip'))).toBe(false); // the zip went after the unzip
   // The same export imported directly into another store.
   const b = await store();
   const job2 = startJob(b.dir, upload(b.dir, zip), { patientId: b.pid, batchSize: 1_000_000 });
@@ -59,7 +62,7 @@ test('startJob records the job and the worker imports it to done', async () => {
 test('resume after a crash inside batch 3 writes each record once and reports like an uninterrupted run', async () => {
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50 }); // recorded, not run here
-  await crash(a.config, a.dir, job.id, 2);
+  await crash(a.config, a.dir, job.id, { at: 2, creates: 1 });
   const mid = jobStatus(a.dir, job.id)!;
   expect(mid).toMatchObject({ status: 'running', lastBatch: 2, pending: { index: 3 } });
   expect(resumeJobs(a.dir)).toBe(1);
@@ -71,6 +74,42 @@ test('resume after a crash inside batch 3 writes each record once and reports li
   expect(report(done.report)).toEqual(report(whole.report));
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
+
+// The same check as above for a crash at other points of a batch: each resumed job equals an uninterrupted run.
+async function resumesExactly(kill: Parameters<typeof crash>[3], check: (mid: JobRecord) => void) {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50 });
+  await crash(a.config, a.dir, job.id, kill);
+  check(jobStatus(a.dir, job.id)!);
+  expect(resumeJobs(a.dir)).toBe(1);
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const b = await store();
+  const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, zip), { patientId: b.pid, batchSize: 50 }).id);
+  expect(report(done.report)).toEqual(report(whole.report));
+  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
+}
+
+test('a crash right after the batch writes the allergy reports like an uninterrupted run', () =>
+  resumesExactly({ type: 'AllergyIntolerance' }, (mid) => expect(mid.pending?.created.some((i) => i.startsWith('urn:ga-server:id:apple-health|'))).toBe(true)), 300_000);
+
+test('a crash after batch 3 is fully written but before its checkpoint reports like an uninterrupted run', () =>
+  resumesExactly({ at: 2, unlock: true }, (mid) => expect(mid).toMatchObject({ lastBatch: 2, pending: { index: 3 } })), 300_000);
+
+test('a job waiting for the import lock keeps running without spending attempts', async () => {
+  const a = await store();
+  let calls = 0;
+  const run = async (d: string, id: string) => {
+    if (++calls <= 4) throw new GaError(IMPORT_BUSY);
+    await runJob(d, id);
+  };
+  const job = startJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50, run, busyRetryMs: 50 });
+  await new Promise((r) => setTimeout(r, 20));
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', message: expect.stringContaining('import lock') });
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  expect(calls).toBe(5);
+}, 120_000);
 
 test('a worker that runs out of memory is retried and the gateway answers meanwhile; three in a row fail the job and keep root', async () => {
   const a = await store();
@@ -109,7 +148,7 @@ test('a job that made progress gets three fresh attempts after it', async () => 
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50 });
   const path = join(a.dir, 'imports', job.id, 'job.json');
   writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), attempts: 2 })); // two attempts already failed
-  await crash(a.config, a.dir, job.id, 2);
+  await crash(a.config, a.dir, job.id, { at: 2, creates: 1 });
   expect(jobStatus(a.dir, job.id)!.attempts).toBe(0); // batches 0-2 committed: the count starts again
   expect(resumeJobs(a.dir)).toBe(1);
   expect((await settled(a.dir, job.id)).status).toBe('done');
@@ -138,7 +177,7 @@ test('an EHI export and a C-CDA zip run as jobs and resume to the same records',
   for (const [src, tz, creates] of [[join(FX, 'ehi'), 'America/New_York', 10], [join(FX, 'zips', 'ccda.zip'), undefined, 3]] as const) {
     const a = await store();
     const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid, tz });
-    await crash(a.config, a.dir, job.id, -1, creates);
+    await crash(a.config, a.dir, job.id, { at: -1, creates });
     expect(resumeJobs(a.dir)).toBe(1);
     const done = await settled(a.dir, job.id);
     expect(done.status, done.message).toBe('done');
@@ -156,3 +195,14 @@ test('runJob in the calling thread (ga import-job) imports a recorded job', asyn
   await runJob(a.dir, job.id);
   expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'done', lastBatch: expect.any(Number) });
 }, 120_000);
+
+test('a crash between the unzip and the zip delete: the next attempt deletes the zip', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const path = join(a.dir, 'imports', job.id, 'job.json');
+  const root = await unzipSafe(job.upload, join(a.dir, 'imports', job.id, 'root'));
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), root }));
+  expect(job.upload).toBe(join(a.dir, 'imports', job.id, 'upload.zip')); // a fixed name: never job.json or root
+  await runJob(a.dir, job.id, { importAny: async () => ({}), client: {} as MedplumClient, cfg: { patientId: a.pid } as never });
+  expect(existsSync(job.upload)).toBe(false);
+});

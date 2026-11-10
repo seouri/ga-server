@@ -45,11 +45,14 @@ export async function snapshot(client: MedplumClient, pid: string): Promise<stri
 }
 export const report = (r: unknown) => { const { seconds: _s, ...rest } = r as { seconds?: number }; return rest; };
 
-// A job run in a CLI child that SIGKILLs itself right after its first create once lastBatch is `at` (the gateway crashing mid-batch).
-export async function crash(config: string, dir: string, id: string, at: number, creates = 1): Promise<void> {
-  const c = spawn('node', ['--import', join(import.meta.dirname, 'import-job-crash.ts'), join(import.meta.dirname, '..', 'src', 'cli.ts'), 'import-job', id], {
-    env: { PATH: process.env.PATH!, GA_CONFIG: config, GA_TEST_JOB: join(dir, 'imports', id, 'job.json'), GA_TEST_KILL_AT: String(at), GA_TEST_KILL_CREATES: String(creates) },
-  });
+// A job attempt in a CLI child that SIGKILLs itself at a chosen point (a gateway crash): see tests/import-job-crash.ts.
+export async function crash(config: string, dir: string, id: string, kill: { at?: number; creates?: number; type?: string; unlock?: boolean }): Promise<void> {
+  const env: Record<string, string> = { PATH: process.env.PATH!, GA_CONFIG: config, GA_TEST_JOB: join(dir, 'imports', id, 'job.json') };
+  if (kill.at !== undefined) env.GA_TEST_KILL_AT = String(kill.at);
+  if (kill.creates) env.GA_TEST_KILL_CREATES = String(kill.creates);
+  if (kill.type) env.GA_TEST_KILL_TYPE = kill.type;
+  if (kill.unlock) env.GA_TEST_KILL_UNLOCK = '1';
+  const c = spawn('node', ['--import', join(import.meta.dirname, 'import-job-crash.ts'), join(import.meta.dirname, '..', 'src', 'cli.ts'), 'import-job', id], { env });
   let err = '';
   c.stderr.on('data', (d) => (err += d));
   const sig = await new Promise((ok) => c.on('close', (_code, s) => ok(s)));

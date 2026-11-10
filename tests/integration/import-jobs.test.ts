@@ -27,7 +27,7 @@ test.skipIf(SQLITE)('a job killed inside batch 3 resumes on Medplum like an unin
   try {
     await emptyTestProject(client);
     const job = recordJob(gw, upload(gw, zip), { patientId: pid, batchSize: 50 });
-    await crash(defaultConfigPath(), gw, job.id, 2);
+    await crash(defaultConfigPath(), gw, job.id, { at: 2, creates: 1 });
     expect(resumeJobs(gw)).toBe(1);
     const done = await settled(gw, job.id, 600_000);
     expect(done.status, done.message).toBe('done');
