@@ -14,7 +14,10 @@ fi
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo "Node 26 (with npm) is not installed: https://nodejs.org/en/download"
   missing=1
-elif [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 26 ]; then
+elif ! major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null); then
+  echo "Node is installed but does not start (run node -v to see why); with Homebrew: brew update && brew upgrade node, else reinstall from https://nodejs.org/en/download"
+  missing=1
+elif [ "$major" -lt 26 ]; then
   echo "Node $(node -v) is too old; GA needs Node 26 or newer: https://nodejs.org/en/download"
   missing=1
 fi
