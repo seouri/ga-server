@@ -17,7 +17,7 @@ GA keeps your record in Medplum, a FHIR server with Postgres, which `./setup.sh`
 | Chat-app uploads (kept 24 hours) and import jobs | `.ga/gateway/uploads/`, `.ga/gateway/imports/<id>/` |
 | Performance log: tool name, app, timing, size, request count per call (no arguments or records; 30 days; `ga perf`) | `.ga/perf.jsonl` |
 
-Each `import_file` job (an export uploaded from a chat app) has a folder `.ga/gateway/imports/<id>/`: `job.json` (status, last batch, report) and, until the job is done, the upload and its unzipped copy (`root/`). A running job picks up from its last batch when `ga-gateway` restarts. Safe to delete: a done job's folder (only `job.json` is left), and a failed job's folder once you have read its message (`import_status`), which frees the upload and the unzipped export (both are also in the nightly `dot-ga.tgz` until then). Never delete a running job's folder.
+Each `import_file` job (an export uploaded from a chat app) has a folder `.ga/gateway/imports/<id>/`: `job.json` (status, last batch, report) and, while the job runs, the upload and its unzipped copy (`root/`), removed when it ends, done or failed. A running job picks up from its last batch when `ga-gateway` restarts. Safe to delete: a done or failed job's folder (only `job.json` is left). Never delete a running job's folder.
 
 On Linux, if your user id is not 1000, put `UID=` and `GID=` lines in `.env` with the numbers `id -u` and `id -g` print: the GA services run as that user so files under `.ga` stay yours (macOS Docker Desktop maps ownership on its own).
 

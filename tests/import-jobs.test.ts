@@ -1,6 +1,6 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -137,7 +137,7 @@ test('a busy lock after a committed batch leaves attempts at 0', async () => {
   expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 0, message: expect.stringContaining('import lock') });
 });
 
-test('a worker that runs out of memory is retried and the gateway answers meanwhile; three in a row fail the job and keep root', async () => {
+test('a worker that runs out of memory is retried and the gateway answers meanwhile; three in a row fail the job and free its disk', async () => {
   const a = await store();
   const server = createGateway({
     dir: a.dir, tools: () => new McpServer({ name: 'f', version: '0' }), completeLogin: async () => ({}),
@@ -157,16 +157,18 @@ test('a worker that runs out of memory is retried and the gateway answers meanwh
     expect(j).toMatchObject({ status: 'failed', attempts: 3 });
     expect(j.message).toBe("too large to import within this server's import memory (8 MB); import it with `ga import` on a computer with more memory");
     expect(answered).toBeGreaterThan(0);
+    expect(readdirSync(join(a.dir, 'imports', job.id))).toEqual(['job.json']); // failed: nothing resumes it
   } finally { server.close(); }
 }, 120_000);
 
-test('three failed attempts mark the job failed with the last error and keep root', async () => {
+test('three failed attempts mark the job failed with the last error and remove its upload and unzipped export', async () => {
   const a = await store();
   writeFileSync(a.config, JSON.stringify({ store: 'sqlite', storeUrl: 'http://127.0.0.1:9/', patientId: a.pid })); // the store is down: every attempt fails after the unzip
   const job = startJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
   const j = await settled(a.dir, job.id);
   expect(j).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringContaining('GA is not running') });
-  expect(existsSync(j.root!)).toBe(true);
+  expect(existsSync(j.root!)).toBe(false);
+  expect(readdirSync(join(a.dir, 'imports', job.id))).toEqual(['job.json']);
 });
 
 // A batch too big for the container: the kernel kills the whole gateway each time (no worker error, no message), the restarted
