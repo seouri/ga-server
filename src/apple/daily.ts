@@ -24,7 +24,12 @@ const TOTALS: Record<string, { text: string; loinc?: string; ucum: string; conv:
 const STAGES: Record<string, string> = { Core: 'Core sleep', Deep: 'Deep sleep', REM: 'REM sleep', Unspecified: 'Unspecified sleep', '': 'Unspecified sleep' };
 const GAP = 3 * 3600e3;
 
-type Iv = { s: number; e: number; sStr: string; eStr: string; src: string; stage: string };
+// One sleep interval, small: a long export holds tens of thousands (staged sleep is ~35 segments a night). Times are
+// instants plus their written offset (shared strings), from which appleDate's text is rebuilt exactly (whole seconds).
+type Iv = { s: number; e: number; so: string; eo: string; src: string; stage: string };
+const OFFSET = /[+-]\d\d:\d\d$/;
+const written = (ms: number, off: string) =>
+  `${new Date(ms + (off[0] === '-' ? -1 : 1) * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6))) * 60000).toISOString().slice(0, 19)}${off}`;
 const merge = (ivs: { s: number; e: number }[]) => {
   const out: { s: number; e: number }[] = [];
   for (const i of [...ivs].sort((a, b) => a.s - b.s)) {
@@ -48,6 +53,15 @@ export class Daily {
   private inBed: Iv[] = [];
   readonly rings: Observation[] = [];
   readonly skips = { activityEmptyDays: 0, unexpectedUnit: 0, badValue: 0 };
+
+  // One copy of each repeated string (source names, stages, offsets, kinds): the reader copies every value per record.
+  private pool = new Map<string, string>();
+  private intern(x: string): string {
+    const h = this.pool.get(x);
+    if (h !== undefined) return h;
+    this.pool.set(x, x);
+    return x;
+  }
 
   private timeZone: string;
   constructor(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) { this.timeZone = timeZone; }
@@ -76,7 +90,10 @@ export class Daily {
     if (t === 'SleepAnalysis') {
       const m = /SleepAnalysis(InBed|Awake|Asleep)(\w*)$/.exec(rec.value ?? '');
       if (!m || m[1] === 'Awake') return true;
-      const iv = { s: Date.parse(rec.startDate), e: Date.parse(rec.endDate), sStr: rec.startDate, eStr: rec.endDate, src: rec.sourceName, stage: m[2] };
+      const iv: Iv = {
+        s: Date.parse(rec.startDate), e: Date.parse(rec.endDate), so: this.intern(OFFSET.exec(rec.startDate)?.[0] ?? ''), eo: this.intern(OFFSET.exec(rec.endDate)?.[0] ?? ''),
+        src: this.intern(rec.sourceName), stage: this.intern(m[2]),
+      };
       (m[1] === 'InBed' ? this.inBed : this.asleep).push(iv);
       return true;
     }
@@ -89,12 +106,13 @@ export class Daily {
       if (rec.unit !== rate.unit) { this.skips.unexpectedUnit++; return true; }
       const a = this.rates.get(k);
       if (a) { a.sum += v; a.n++; a.min = Math.min(a.min, v); a.max = Math.max(a.max, v); }
-      else this.rates.set(k, { kind: t, day, sum: v, min: v, max: v, n: 1 });
+      else this.rates.set(k, { kind: this.intern(t), day, sum: v, min: v, max: v, n: 1 });
     } else {
       const conv = rec.unit ? tot.conv[rec.unit] : undefined;
       if (!conv) { this.skips.unexpectedUnit++; return true; }
-      const a = this.totals.get(k) ?? { kind: t, day, bySrc: new Map() };
-      a.bySrc.set(rec.sourceName, (a.bySrc.get(rec.sourceName) ?? 0) + conv(v));
+      const a = this.totals.get(k) ?? { kind: this.intern(t), day, bySrc: new Map() };
+      const src = this.intern(rec.sourceName);
+      a.bySrc.set(src, (a.bySrc.get(src) ?? 0) + conv(v));
       this.totals.set(k, a);
     }
     return true;
@@ -123,10 +141,11 @@ export class Daily {
     const ends = clusters.map((c) => Math.max(...c.map((i) => i.e)));
     for (const [n, c] of clusters.entries()) {
       const first = c[0], last = c.reduce((a, b) => (b.e > a.e ? b : a));
-      const wake = this.localDay(last.eStr);
+      const sStr = written(first.s, first.so), eStr = written(last.e, last.eo);
+      const wake = this.localDay(eStr);
       const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake);
-      o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${first.sStr}`) }]; // wake day can repeat (naps)
-      o.effectivePeriod = { start: first.sStr, end: last.eStr };
+      o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${sStr}`) }]; // wake day can repeat (naps)
+      o.effectivePeriod = { start: sStr, end: eStr };
       o.valueQuantity = q(r(minutes(c), 1), 'min');
       const bySrc = new Map<string, number>();
       for (const i of c) bySrc.set(i.src, (bySrc.get(i.src) ?? 0) + (i.e - i.s));

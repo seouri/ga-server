@@ -1,4 +1,4 @@
-// Synthetic Apple Health export (no real data): ~1560 Records/day, so 3,650 days come to about 2.2 GB like a real export.xml.
+// Synthetic Apple Health export (no real data): ~1570 Records/day, so 3,650 days come to about 2.2 GB like a real export.xml.
 import { cpSync, createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const dev = 'device="&lt;&lt;HKDevice: 0x000000000000&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,2, software:10.1&gt;"';
@@ -7,6 +7,8 @@ const ts = (d: number, m: number) => { const t = new Date(Date.UTC(2016, 0, 1) +
 const rec = (type: string, unit: string, value: string | number, d: number, m: number, len = 1) =>
   `  <Record type="${type}" sourceName="Synthetic Watch" sourceVersion="10.1" ${dev} unit="${unit}" creationDate="${ts(d, m + len)}" startDate="${ts(d, m)}" endDate="${ts(d, m + len)}" value="${value}"/>\n`;
 const Q = 'HKQuantityTypeIdentifier';
+const SLEEP = 'HKCategoryTypeIdentifierSleepAnalysis';
+const STAGE = ['AsleepCore', 'AsleepDeep', 'AsleepCore', 'AsleepREM', 'Awake'];
 
 export async function writeAppleExport(dir: string, days: number): Promise<{ records: number; bytes: number }> {
   mkdirSync(dir, { recursive: true });
@@ -28,7 +30,10 @@ export async function writeAppleExport(dir: string, days: number): Promise<{ rec
     add(1, () => rec(`${Q}BodyFatPercentage`, '%', '0.21', d, 421));
     add(1, () => rec(`${Q}RestingHeartRate`, 'count/min', 58 + (d % 6), d, 1200));
     add(1, () => rec(`${Q}WalkingHeartRateAverage`, 'count/min', 95, d, 1201));
-    add(4, (i) => { const [k, v] = [['Core', 120], ['Deep', 60], ['REM', 90], ['Core', 100]][i] as [string, number]; return rec('HKCategoryTypeIdentifierSleepAnalysis', '', `HKCategoryValueSleepAnalysisAsleep${k}`, d, -300 + v, v); });
+    // A staged night as watchOS 9+ writes it: one in-bed span and ~35 back-to-back stage segments (Awake ones included).
+    add(1, () => rec(SLEEP, '', 'HKCategoryValueSleepAnalysisInBed', d, -130, 560));
+    let at = -120;
+    add(35, (i) => { const len = 8 + ((i * 7) % 13); at += len; return rec(SLEEP, '', `HKCategoryValueSleepAnalysis${STAGE[i % STAGE.length]}`, d, at - len, len); });
     s += ` <ActivitySummary dateComponents="${ts(d, 0).slice(0, 10)}" activeEnergyBurned="450" activeEnergyBurnedGoal="500" activeEnergyBurnedUnit="Cal" appleExerciseTime="30" appleStandHours="10"/>\n`;
     await w(s);
   }
