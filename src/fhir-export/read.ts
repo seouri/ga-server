@@ -11,17 +11,21 @@ const NOT_EXPORT = 'not a FHIR export: expected {"fhir": {...}}';
 
 const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-// Put the attachment at its dotted path (content.0.attachment) under the resource; false when the path does not lead through objects.
+const UNSAFE = new Set(['__proto__', 'constructor', 'prototype']);
+
+// Put the attachment at its dotted path (content.0.attachment) under the resource. Every step must already exist as an own
+// property (an array index below its length), so nothing is created and no prototype is reached; false otherwise.
 function place(r: Resource, a: Attach): boolean {
   const parts = a.path.split('.');
+  if (!parts.every((p) => p && !UNSAFE.has(p))) return false;
   let node: unknown = r;
   for (const p of parts.slice(0, -1)) {
-    node = isObj(node) || Array.isArray(node) ? (node as Record<string, unknown>)[p] : undefined;
-    if (!isObj(node) && !Array.isArray(node)) return false;
+    if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, p)) return false;
+    node = (node as Record<string, unknown>)[p];
   }
   const last = parts[parts.length - 1];
+  if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, last)) return false; // an index past the end is not an own property
   const holder = node as Record<string, unknown>;
-  if (!last || !(isObj(holder) || Array.isArray(holder))) return false;
   const existing = holder[last];
   holder[last] = { ...(isObj(existing) ? existing : {}), contentType: a.contentType, data: a.contentBase64 };
   return true;
@@ -39,8 +43,10 @@ export function readFhirExport(path: string): { resources: Resource[]; skippedTy
   const skippedTypes: Record<string, number> = {};
   for (const [type, list] of Object.entries(doc.fhir)) {
     if (!Array.isArray(list)) continue;
-    const ok = list.filter((r): r is Resource => isObj(r) && typeof r.resourceType === 'string' && typeof r.id === 'string');
-    if (KEPT.has(type)) resources.push(...ok.filter((r) => r.resourceType === type));
+    const ok = list.filter((r): r is Resource => isObj(r) && r.resourceType === type && typeof r.id === 'string');
+    const bad = list.length - ok.length;
+    if (bad) skippedTypes[`${type} (invalid)`] = bad;
+    if (KEPT.has(type)) resources.push(...ok);
     else if (ok.length) skippedTypes[type] = ok.length;
   }
   const byKey = new Map(resources.map((r) => [`${r.resourceType}/${r.id}`, r]));

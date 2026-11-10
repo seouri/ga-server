@@ -612,13 +612,10 @@ export async function importResources(
       } else if (existing) {
         target = existing;
         const filled = fillFrom(existing, coded, source);
-        let d = decide(existing, filled);
-        // A FHIR export copy at the same source date that adds notes (the annotation copy) updates the record and keeps its own notes.
+        const d = decide(existing, filled);
+        // A FHIR export copy that decides skip (same or older source date) but carries notes the record lacks (the annotation
+        // copy): only the notes are added; the stored body, extensions and source date stay.
         const addedNotes = source.kind === 'fhir-export' && d === 'skip' && !agentOrShielded(existing) ? newNotes(existing, filled) : [];
-        if (addedNotes.length) {
-          d = 'update';
-          Object.assign(filled, { note: [...noteList(existing), ...addedNotes] });
-        }
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
         const inc = new Set(idList(incoming).map(idKey));
@@ -631,6 +628,9 @@ export async function importResources(
           if (carries(existing)) await keep(tagged, tagged !== existing);
           else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
+        } else if (addedNotes.length) {
+          target = await client.updateResource({ ...existing, note: [...noteList(existing), ...addedNotes] } as Resource);
+          report.updated++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (hospitalOntoApple(existing) && !agentOrShielded(existing)) {
           target = await unionUpdate(client, existing, filled);

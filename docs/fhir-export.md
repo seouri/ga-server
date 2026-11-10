@@ -10,7 +10,7 @@ records instead of duplicating them. They carry the tag `src-fhir-export`. Impor
 
 `attachments` (`resourceType`, `resourceId`, `path`, `contentType`, `contentBase64`) are placed at the dotted `path` under that
 resource (for example `content.0.attachment` or `presentedForm.0`). HTML and RTF notes and report text become plain text, as
-in a portal sync; PDFs and images are stored as Binaries. A copy of a record that only adds `note` entries updates the stored
+in a portal sync; PDFs and images in a DocumentReference are stored as Binaries; a report's `presentedForm` PDF or image stays inline. A copy of a record that only adds `note` entries updates the stored
 record and keeps its notes.
 
 The report gives the usual counts plus:

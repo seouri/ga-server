@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Condition, DiagnosticReport, DocumentReference } from '@medplum/fhirtypes';
@@ -29,5 +31,27 @@ describe('readFhirExport', () => {
     const src = { key: sourceKey(base), name: 'x', fhirBase: base };
     const fromFile = mapForGa(readFhirExport(MINI).resources, src).resources.find((x) => x.resourceType === 'Condition')!;
     expect((fromFile as Condition).identifier?.[0]).toEqual({ system: `urn:ga-server:id:smart:${sourceKey(base)}`, value: 'Condition/c1' });
+  });
+
+  const exportWith = (attachments: object[], extra: object = {}): string => {
+    const f = join(mkdtempSync(join(tmpdir(), 'ga-fe-')), 'e.json');
+    const doc = { fhir: { DocumentReference: [{ resourceType: 'DocumentReference', id: 'd1', status: 'current', content: [{ attachment: { contentType: 'text/html' } }] }], ...extra }, attachments };
+    writeFileSync(f, JSON.stringify(doc));
+    return f;
+  };
+  const att = (path: string) => ({ resourceType: 'DocumentReference', resourceId: 'd1', path, contentType: 'text/html', contentBase64: 'eA==' });
+  it('refuses a prototype path', () => {
+    const r = readFhirExport(exportWith([att('__proto__.polluted'), att('content.0.constructor'), att('content.0.attachment.__proto__')]));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(r.attachmentsUnplaced).toBe(3);
+  });
+  it('counts an out-of-range index as unplaced', () => {
+    const r = readFhirExport(exportWith([att('content.5.attachment'), att('content.1')]));
+    expect(r.attachmentsUnplaced).toBe(2);
+    expect((r.resources[0] as DocumentReference).content).toHaveLength(1);
+  });
+  it('counts resources without an id or of another type', () => {
+    const r = readFhirExport(exportWith([], { Condition: [{ resourceType: 'Condition' }, { resourceType: 'Observation', id: 'x' }] }));
+    expect(r.skippedTypes).toEqual({ 'Condition (invalid)': 2 });
   });
 });

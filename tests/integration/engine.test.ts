@@ -909,6 +909,22 @@ test('fhir-export copy at the same date that adds a note updates the record and 
   expect((found as { note?: { text: string }[] }).note?.map((x) => x.text)).toEqual(['first note', 'second note']);
 });
 
+test('an older note-carrying fhir-export copy adds only the note', async () => {
+  const n = uid('c');
+  const newer = '2026-03-01T00:00:00Z';
+  const older = '2025-01-01T00:00:00Z';
+  const copy = (text: string, at: string, notes: string[]) => ({ ...hospCond(n, text), meta: { lastUpdated: at }, note: notes.map((t) => ({ text: t })) }) as Resource;
+  const run = (r: Resource, at: string) => importResources(client, [r], feSrc({ dateOf: () => at }), pid, 'h');
+  await run(copy('newer wording', newer, []), newer);
+  const [before] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  const srcDate = (r: Resource) => (r as Condition).extension?.find((e) => e.url.endsWith('source-date'))?.valueDateTime;
+  expect(await run(copy('older wording', older, ['owner note']), older)).toMatchObject({ updated: 1 });
+  const [after] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(after.code?.text).toBe('newer wording');
+  expect(srcDate(after)).toBe(srcDate(before));
+  expect((after as { note?: { text: string }[] }).note?.map((x) => x.text)).toEqual(['owner note']);
+});
+
 for (const [label, tag] of [['person-edited', 'person-edited'], ['writer-agent', 'writer-agent']] as const) {
   test(`a ${label} apple copy is not replaced by an older hospital record`, async () => {
     const n = uid('c');
