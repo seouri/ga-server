@@ -83,4 +83,5 @@ export function randomLabs(rnd: (n: number) => number, n = 60): Observation[] {
   });
 }
 
-export const seeded = (seed: number) => (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) % n);
+// A seeded integer below n, from the generator's high bits (its low bits repeat with a short period).
+export const seeded = (seed: number) => (n: number) => Math.floor(((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31) * n);
