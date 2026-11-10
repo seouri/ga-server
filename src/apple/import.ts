@@ -1,14 +1,12 @@
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
-import { GaError, type GaConfig } from '../config.ts';
-import { importResources, type ImportReport } from '../engine.ts';
+import type { GaConfig } from '../config.ts';
+import { addReport, importResources, type ImportReport } from '../engine.ts';
 import { sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
-import { mapClinical, mapEcgs } from './clinical.ts';
-import { Daily } from './daily.ts';
-import { type AhClinical, readExport } from './read.ts';
-import { Readings, short } from './readings.ts';
+import { appleBatches } from './batches.ts';
+import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
 // Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id) and the search param naming the patient.
@@ -16,77 +14,65 @@ const TYPES: [string, string][] = [['Observation', 'subject'], ['DocumentReferen
 
 const projection = (r: Record<string, unknown>) =>
   JSON.stringify({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }, sorted);
+const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
-// Medplum refuses search offsets past 10000 ("Search offset exceeds maximum", measured), and a real export is far larger,
-// so a type is fetched in _lastUpdated windows, halved until each holds at most `max` resources.
-const MAX_OFFSET = 10000;
-
-async function fetchWindow(client: MedplumClient, type: string, q: Record<string, string>, lo: number, hi: number, max: number, out: Map<string, string>): Promise<number> {
-  // URLSearchParams: _lastUpdated twice (an object would join the values with a comma)
-  const w = (extra: Record<string, string>) => new URLSearchParams({ ...q, ...extra, _lastUpdated: `ge${new Date(lo).toISOString()}` }).toString() + `&_lastUpdated=lt${new Date(hi).toISOString()}`;
-  const total = (await client.search(type as 'Observation', w({ _summary: 'count' }), { cache: 'no-cache' })).total ?? 0;
-  if (total === 0) return 0;
-  if (total > max) {
-    if (hi - lo <= 1) throw new GaError(`more than ${max} existing ${type} records share one timestamp; cannot page`);
-    const mid = Math.floor((lo + hi) / 2);
-    return (await fetchWindow(client, type, q, lo, mid, max, out)) + (await fetchWindow(client, type, q, mid, hi, max, out));
-  }
-  let n = 0;
-  for await (const page of client.searchResourcePages(type as 'Observation', w({
-    _count: '1000', _elements: 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod',
-  }), { cache: 'no-cache' })) {
-    for (const r of page) { n++; out.set(firstId(r as never), projection(r as never)); }
-  }
-  if (n !== total) throw new GaError(`paging returned ${n} of ${total} existing ${type} records; refusing to import`);
-  return n;
-}
-
-// What GA already holds from Apple Health for this patient: first identifier -> projection. Counts are checked against
-// the server's own totals, so a short result throws instead of silently re-importing everything.
-export async function existing(client: MedplumClient, patientId: string, max = MAX_OFFSET): Promise<Map<string, string>> {
+// What GA already holds from Apple Health for this patient among these resources: first identifier -> projection. One
+// search per type and chunk of identifiers (a chunk's URL stays near 4 KB).
+const CHUNK = 40;
+export async function existing(client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const [type, param] of TYPES) {
-    const q = { [param]: `Patient/${patientId}`, _tag: TAGGED };
-    const n = await fetchWindow(client, type, q, 0, Date.now() + 86400e3, max, out);
-    const total = (await client.search(type as 'Observation', { ...q, _summary: 'count' }, { cache: 'no-cache' })).total;
-    if (total !== n) throw new GaError(`paging returned ${n} of ${total} existing ${type} records; refusing to import`);
+    const ids = [...new Set(resources.filter((r) => r.resourceType === type).map((r) => firstId(r as never)))];
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      for await (const page of client.searchResourcePages(type as 'Observation', {
+        [param]: `Patient/${patientId}`, _tag: TAGGED, identifier: ids.slice(i, i + CHUNK).join(','), _count: '1000',
+        _elements: 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod',
+      }, { cache: 'no-cache' })) {
+        for (const r of page) out.set(firstId(r as never), projection(r as never));
+      }
+    }
   }
   return out;
 }
 
+const BATCH = 500;
+const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
+
+// Reads the export and writes it batch by batch, each under the import lock with its own unchanged check. skipThrough:
+// batches up to that index are read but not written (a resumed import). onBatch: after each committed batch, lock released.
 export async function importAppleHealth(
   client: MedplumClient,
   cfg: GaConfig,
   dir: string,
   patientId = cfg.patientId,
+  opts: { batchSize?: number; skipThrough?: number; onBatch?: (index: number, report: ImportReport & { unchanged: number }) => Promise<void> } = {},
 ): Promise<ImportReport & { archived: 'stored' | 'already-present'; unchanged: number; seconds: number; skips: Record<string, unknown> }> {
   const t0 = Date.now();
   const archived = await archiveFolder(client, dir, patientId, 'urn:ga-server:id:apple-health-archive');
-  const readings = new Readings();
-  const daily = new Daily();
-  const refs: AhClinical[] = [];
-  const archiveOnly: Record<string, number> = {};
-  const { exportDate, nested } = await readExport(dir, {
-    record(r) {
-      const a = readings.add(r);
-      const b = daily.add(r);
-      if (!a && !b) archiveOnly[short(r.type)] = (archiveOnly[short(r.type)] ?? 0) + 1;
-    },
-    summary: (s) => daily.summary(s),
-    clinical: (c) => refs.push(c),
-  });
-  const rd = readings.result(), dl = daily.result(), cl = mapClinical(dir, refs), ecg = mapEcgs(dir);
-  const all: Resource[] = [{ resourceType: 'Patient', id: 'apple-patient' }, ...rd.resources, ...dl.resources, ...cl.resources, ...ecg.resources];
-  const have = await existing(client, patientId);
+  const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
+  const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
-  const rest = all.filter((r) => {
-    if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
-    const same = have.get(firstId(r as never)) === projection(r as never);
-    if (same) unchanged++;
-    return !same;
-  });
-  const report = await withImportLock(() => importResources(client, rest, { kind: 'apple-health', file: dir, date: exportDate, writer: 'importer' }, patientId, ''));
-  const skips = { nested, archiveOnly, ...rd.skips, ...dl.skips, ...cl.skips, ...ecg.skips };
-  return { ...report, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips };
+  const it = appleBatches(dir, { size: opts.batchSize ?? BATCH, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  let n = await it.next();
+  for (; !n.done; n = await it.next()) {
+    const { index, resources } = n.value;
+    if (index <= (opts.skipThrough ?? -1)) continue;
+    const report = await withImportLock(async () => {
+      const have = await existing(client, patientId, resources);
+      let same = 0;
+      const rest = resources.filter((r) => {
+        if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
+        const hit = have.get(firstId(r as never)) === projection(r as never);
+        if (hit) same++;
+        return !hit;
+      });
+      const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
+      return { ...written, unchanged: same };
+    });
+    addReport(total, report);
+    unchanged += report.unchanged;
+    await opts.onBatch?.(index, report);
+  }
+  return { ...total, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips: n.value.skips };
 }

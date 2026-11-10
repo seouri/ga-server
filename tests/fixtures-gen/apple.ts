@@ -1,5 +1,5 @@
 // Synthetic Apple Health export (no real data): ~1560 Records/day, so 3,650 days come to about 2.2 GB like a real export.xml.
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { cpSync, createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const dev = 'device="&lt;&lt;HKDevice: 0x000000000000&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,2, software:10.1&gt;"';
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -36,4 +36,26 @@ export async function writeAppleExport(dir: string, days: number): Promise<{ rec
   out.end();
   await new Promise((r) => out.on('finish', r));
   return { records, bytes: out.bytesWritten };
+}
+
+// writeAppleExport plus what batching must keep: tests/fixtures/apple's body (BP, a Correlation, a Workout, sleep, rings,
+// clinical records) and its ECG, a second ECG with the same Recorded Date, a second steps source, a second ring for day 0
+// at the end, and (twoSources) one weight from two sources.
+export async function writeAppleTestExport(dir: string, days: number, opts: { twoSources?: boolean } = {}): Promise<void> {
+  const fx = `${import.meta.dirname}/../fixtures/apple`;
+  await writeAppleExport(dir, days);
+  const x = readFileSync(`${fx}/export.xml`, 'utf8');
+  const body = x.slice(x.indexOf('\n', x.indexOf('<Me ')) + 1, x.indexOf('</HealthData>'));
+  const extra = [
+    rec(`${Q}StepCount`, 'count', 9000, 1, 600, 30).replace('Synthetic Watch', 'Synthetic Phone'),
+    ...(opts.twoSources ? [rec(`${Q}BodyMass`, 'lb', '180.0', 0, 420).replace('Synthetic Watch', 'Synthetic Scale')] : []),
+    ` <ActivitySummary dateComponents="${ts(0, 0).slice(0, 10)}" activeEnergyBurned="300" activeEnergyBurnedGoal="500" activeEnergyBurnedUnit="Cal" appleExerciseTime="20" appleStandHours="9"/>\n`,
+  ].join('');
+  const file = `${dir}/export.xml`;
+  writeFileSync(file, readFileSync(file, 'utf8').replace('</HealthData>', `${body}${extra}</HealthData>`));
+  cpSync(`${fx}/clinical-records`, `${dir}/clinical-records`, { recursive: true });
+  mkdirSync(`${dir}/electrocardiograms`, { recursive: true });
+  const ecg = readFileSync(`${fx}/electrocardiograms/ecg_2024-02-11.csv`, 'utf8');
+  writeFileSync(`${dir}/electrocardiograms/ecg_2024-02-11.csv`, ecg);
+  writeFileSync(`${dir}/electrocardiograms/ecg_2024-02-11_1.csv`, `${ecg}9\n`);
 }

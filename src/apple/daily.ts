@@ -46,8 +46,8 @@ export class Daily {
   private totals = new Map<string, { kind: string; day: string; bySrc: Map<string, number> }>();
   private asleep: Iv[] = [];
   private inBed: Iv[] = [];
-  private rings: Observation[] = [];
-  private skips = { activityEmptyDays: 0, unexpectedUnit: 0, badValue: 0 };
+  readonly rings: Observation[] = [];
+  readonly skips = { activityEmptyDays: 0, unexpectedUnit: 0, badValue: 0 };
 
   private timeZone: string;
   constructor(timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) { this.timeZone = timeZone; }
@@ -111,8 +111,8 @@ export class Daily {
     this.rings.push(o);
   }
 
-  private sleep(): Observation[] {
-    const out: Observation[] = [];
+  // One Observation per night, built when asked (after the whole export is read).
+  *sleep(): Generator<Observation> {
     const sorted = [...this.asleep].sort((a, b) => a.s - b.s);
     const clusters: Iv[][] = [];
     let end = -Infinity;
@@ -143,19 +143,18 @@ export class Daily {
       const bed = this.inBed.filter((i) => i.s < hi && i.e > lo && i.s < ce && i.e > cs).map((i) => ({ s: Math.max(i.s, lo), e: Math.min(i.e, hi) }));
       if (bed.length) comps.push({ code: { text: 'In bed' }, valueQuantity: q(r(minutes(bed), 1), 'min') });
       if (comps.length) o.component = comps;
-      out.push(o);
+      yield o;
     }
-    return out;
   }
 
-  result(): { resources: Observation[]; skips: { activityEmptyDays: number; unexpectedUnit: number; badValue: number } } {
-    const out: Observation[] = [];
+  // Daily means and totals, one at a time (after the whole export is read).
+  *sums(): Generator<Observation> {
     for (const a of this.rates.values()) {
       const d = RATES[a.kind];
       const o = this.obs(a.kind, { text: d.text }, a.day);
       o.valueQuantity = q(r(a.sum / a.n, 1), d.ucum);
       o.component = [comp('Minimum', a.min, d.ucum), comp('Maximum', a.max, d.ucum), comp('Sample count', a.n, '1')];
-      out.push(o);
+      yield o;
     }
     for (const a of this.totals.values()) {
       const d = TOTALS[a.kind];
@@ -163,8 +162,11 @@ export class Daily {
       if (d.loinc) code.coding = [{ system: 'http://loinc.org', code: d.loinc }];
       const o = this.obs(a.kind, code, a.day);
       o.valueQuantity = q(r(Math.max(...a.bySrc.values()), 3), d.ucum);
-      out.push(o);
+      yield o;
     }
-    return { resources: [...out, ...this.rings, ...this.sleep()], skips: { ...this.skips } };
+  }
+
+  result(): { resources: Observation[]; skips: { activityEmptyDays: number; unexpectedUnit: number; badValue: number } } {
+    return { resources: [...this.sums(), ...this.rings, ...this.sleep()], skips: { ...this.skips } };
   }
 }
