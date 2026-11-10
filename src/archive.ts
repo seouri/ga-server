@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createReadStream, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MedplumClient } from '@medplum/core';
@@ -27,8 +27,10 @@ export async function archiveFolder(client: MedplumClient, dir: string, patientI
   if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return 'already-present';
   // The tarball holds the whole export: a user-owned dir next to GA's config, not the shared system temp dir.
   const parent = join(dirname(defaultConfigPath()), 'tmp');
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
-  const tmp = mkdtempSync(join(parent, 'archive-'));
+  // Named by the manifest and emptied first: a kill or restart skips the finally, and a retry must not add a second tarball.
+  const tmp = join(parent, `archive-${id.value}`);
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true, mode: 0o700 });
   try {
     const file = join(tmp, `${basename(dir)}.tar.gz`);
     // shortcut: system tar (macOS/Linux); switch to a library only if Windows support is needed.

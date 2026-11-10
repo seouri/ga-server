@@ -9,6 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { archiveFolder, manifestHash } from '../src/archive.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
 import { GaError } from '../src/config.ts';
@@ -319,6 +320,17 @@ test.each([
   expect(report(done.report)).toEqual(report(whole.report));
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
+
+// A kill or restart skips archiveFolder's cleanup; each retry must not add another tarball the size of the export.
+test('an archive step cut short leaves no second tarball: the retry reuses its folder', async () => {
+  const a = await store();
+  const src = join(work, 'apple_health_export');
+  const stale = join(a.s.dir, 'tmp', `archive-${await manifestHash(src)}`);
+  mkdirSync(stale, { recursive: true });
+  writeFileSync(join(stale, 'apple_health_export.tar.gz'), 'cut short');
+  expect(await archiveFolder(a.client, src, a.pid, 'urn:ga-server:id:apple-health-archive')).toBe('stored');
+  expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
+});
 
 test('runJob in the calling thread (ga import-job) imports a recorded job', async () => {
   const a = await store();
