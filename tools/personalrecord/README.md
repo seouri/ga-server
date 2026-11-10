@@ -39,4 +39,4 @@ The id is the bundle id without its prefix. `date` is the Observation's `effecti
 
 ## Annotations
 
-Each owner annotation (ended, ongoing, date correction, comment) is matched to one resource by its code display (and the original date when several share it) and added as a `note` (author `Patient`). A match in `--known` is written as a verbatim copy of that resource with the note appended; a match among rebuilt resources gets the note directly. No match, or several, is reported and skipped.
+Each owner annotation (ended, ongoing, date correction, comment) is matched to exactly one resource, first in `--known`, then (only if none there) among the rebuilt ones, by case-insensitive code text (`code.text`, `medicationCodeableConcept.text`, `medicationReference.display`, `type.text`) and, when the annotation has a date, the same calendar day. It is added as a `note` (author `Patient`). A match in `--known` is written as a verbatim copy of that resource with the note appended; a match among rebuilt resources gets the note directly. No match, or several, is reported and skipped.

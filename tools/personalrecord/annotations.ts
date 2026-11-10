@@ -6,9 +6,11 @@ type Loose = Record<string, unknown> & { resourceType: string; note?: Record<str
 
 const norm = (s: unknown) => (typeof s === 'string' ? s.trim().toLowerCase() : '');
 
+// The text an annotation can match: Condition/Observation code.text, MedicationRequest medicationCodeableConcept.text
+// or medicationReference.display, DocumentReference type.text.
 function names(r: Loose): string[] {
-  const c = (r.code ?? r.vaccineCode ?? r.medicationCodeableConcept ?? r.type) as CodeableConcept | undefined;
-  return [c?.text, ...(c?.coding?.map((x) => x.display) ?? [])].map(norm).filter(Boolean);
+  const t = (c: unknown) => (c as CodeableConcept | undefined)?.text;
+  return [t(r.code), t(r.medicationCodeableConcept), (r.medicationReference as { display?: string } | undefined)?.display, t(r.type)].map(norm).filter(Boolean);
 }
 const dateOf = (r: Loose): string => {
   for (const f of ['effectiveDateTime', 'recordedDate', 'authoredOn', 'date', 'occurrenceDateTime', 'performedDateTime', 'onsetDateTime']) if (typeof r[f] === 'string') return (r[f] as string).slice(0, 10);
@@ -20,9 +22,9 @@ function noteText(a: PrAnnotation): string {
   try { d = JSON.parse(a.annotation_data) as Record<string, unknown>; } catch { /* unreadable annotation data: the label alone */ }
   const str = (v: unknown) => (typeof v === 'string' ? v : '');
   switch (a.annotation_type) {
-    case 'ended': return `Ended: ${str(d.status_date)} (personalrecord annotation)`;
-    case 'ongoing': return `Ongoing: ${str(d.status_date)} (personalrecord annotation)`;
-    case 'date_change': return `Date corrected to ${str(d.annotated_date)}: ${str(d.original_date) || 'no earlier date'} (personalrecord annotation)`;
+    case 'ended': return `Ended${str(d.status_date) ? `: ${str(d.status_date)}` : ''} (personalrecord annotation)`;
+    case 'ongoing': return `Ongoing${str(d.status_date) ? `: ${str(d.status_date)}` : ''} (personalrecord annotation)`;
+    case 'date_change': return `Date corrected to ${str(d.annotated_date)}: ${str(d.original_date) || 'no earlier date'}${str(d.reason) ? `; reason: ${str(d.reason)}` : ''} (personalrecord annotation)`;
     default: return `Comment: ${str(d.text)} (personalrecord annotation)`;
   }
 }
@@ -38,12 +40,10 @@ export function attachAnnotations(anns: PrAnnotation[], known: Record<string, Re
   ];
   for (const a of anns) {
     const want = norm(a.code_display);
-    let hits = pool.filter((p) => names(p.r).includes(want));
     const orig = a.effective_datetime_original?.slice(0, 10);
-    if (hits.length > 1 && orig) {
-      const narrowed = hits.filter((p) => dateOf(p.r) === orig);
-      if (narrowed.length) hits = narrowed;
-    }
+    const find = (list: typeof pool) => list.filter((p) => names(p.r).includes(want) && (!orig || dateOf(p.r) === orig));
+    let hits = find(pool.filter((p) => p.isKnown)); // --known first, the reconstructed ones only when it has none
+    if (!hits.length) hits = find(pool.filter((p) => !p.isKnown));
     if (hits.length !== 1) { unmatched.push({ code: a.code_display, reason: hits.length ? 'several' : 'none' }); continue; }
     const hit = hits[0];
     const note = { authorString: 'Patient', time: a.created_at, text: noteText(a) };
