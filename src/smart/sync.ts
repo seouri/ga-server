@@ -63,7 +63,7 @@ function dryRunClient(client: MedplumClient): MedplumClient {
 
 // Upload each pending Binary and point its attachment at it. A DocumentReference already stored with an attachment of the
 // same hash keeps that Binary, so a re-sync uploads nothing and changes nothing (a summary document: whatever its hash).
-async function uploadBinaries(client: MedplumClient, resources: Resource[], binaries: PendingBinary[], src: SourceRec, patientId: string): Promise<void> {
+export async function uploadBinaries(client: MedplumClient, resources: Resource[], binaries: PendingBinary[], src: SourceRec, patientId: string): Promise<void> {
   const byRef = new Map(binaries.map((b) => [b.ref, b]));
   for (const r of resources) {
     if (r.resourceType !== 'DocumentReference') continue;
