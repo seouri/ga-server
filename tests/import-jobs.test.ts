@@ -12,8 +12,8 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
 import { GaError } from '../src/config.ts';
-import { inWorker, type JobRecord, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
-import { IMPORT_BUSY } from '../src/lock.ts';
+import { inWorker, JOB_BUSY, type JobRecord, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
+import { IMPORT_BUSY, takeLock } from '../src/lock.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
 import { writeEhiExport } from './fixtures-gen/ehi.ts';
 import { appleZip, crash, report, settled, snapshot, upload } from './import-jobs-helpers.ts';
@@ -326,6 +326,18 @@ test('runJob in the calling thread (ga import-job) imports a recorded job', asyn
   await runJob(a.dir, job.id);
   expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'done', lastBatch: expect.any(Number) });
 }, 120_000);
+
+test('ga import-job refuses a job another process is running, and the gateway waits for it without spending attempts', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const lock = (await takeLock(join(a.dir, 'imports', job.id, 'import.lock'), 0))!; // held by a running attempt
+  await expect(runJob(a.dir, job.id)).rejects.toThrow(JOB_BUSY);
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', lastBatch: -1 });
+  resumeJobs(a.dir, { run: inWorker(), busyRetryMs: 60_000 });
+  for (let i = 0; i < 100 && !jobStatus(a.dir, job.id)!.message; i++) await new Promise((r) => setTimeout(r, 100));
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 0, message: JOB_BUSY });
+  rmSync(lock);
+}, 30_000);
 
 test('a crash between the unzip and the zip delete: the next attempt deletes the zip', async () => {
   const a = await store();

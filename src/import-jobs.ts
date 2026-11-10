@@ -9,11 +9,11 @@ import type { MedplumClient } from '@medplum/core';
 import { BATCH_SIZE, type Pending } from './batches.ts';
 import { addNotImported } from './ccda.ts';
 import type { MapEntry } from './conceptmap.ts';
-import { type GaConfig, getClient, loadConfig } from './config.ts';
+import { GaError, type GaConfig, getClient, loadConfig } from './config.ts';
 import { addReport, type ImportReport } from './engine.ts';
 import { detectKind, importAny, type ImportKind } from './import.ts';
 import { IMPORT_WORKER_HEAP_MB, IMPORT_WORKER_YOUNG_MB } from './limits.ts';
-import { freeThreadLock, IMPORT_BUSY } from './lock.ts';
+import { freeThreadLock, IMPORT_BUSY, takeLock } from './lock.ts';
 import { unzipSafe } from './gateway/uploads.ts';
 
 type Report = ImportReport & { unchanged?: number; skips?: Record<string, number> }; // skips: counted per batch (EHI)
@@ -41,6 +41,7 @@ export type JobRecord = {
 export type Run = (dir: string, id: string) => Promise<void>;
 
 const MAX_ATTEMPTS = 3;
+export const JOB_BUSY = 'this import job is already running (in ga-gateway or another `ga import-job`): try again later';
 const ID = /^[A-Za-z0-9_-]{12}$/;
 const jobDir = (dir: string, id: string): string => join(dir, 'imports', id);
 const stopMark = (dir: string, id: string): string => join(jobDir(dir, id), 'stopped');
@@ -130,11 +131,11 @@ function supervise(dir: string, id: string, opts: Supervision): void {
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         const now = jobStatus(dir, id)!;
-        if (message !== IMPORT_BUSY) {
+        if (message !== IMPORT_BUSY && message !== JOB_BUSY) {
           save(dir, { ...now, message });
           continue;
         }
-        save(dir, { ...now, attempts: Math.max(0, now.attempts - 1), message: 'waiting for the import lock: another import or sync is running' });
+        save(dir, { ...now, attempts: Math.max(0, now.attempts - 1), message: message === JOB_BUSY ? JOB_BUSY : 'waiting for the import lock: another import or sync is running' });
         setTimeout(() => supervise(dir, id, opts), opts.busyRetryMs ?? BUSY_RETRY_MS).unref();
         return;
       } finally { current = undefined; }
@@ -155,6 +156,7 @@ export const inWorker = (resourceLimits = WORKER_LIMITS): Run => (dir, id) =>
       : (e as Error)));
     w.on('exit', (code) => {
       freeThreadLock(thread);
+      freeThreadLock(thread, jobDir(dir, id));
       if (error || code) no(error ?? new Error(`the import stopped (exit ${code})`));
       else ok();
     });
@@ -165,31 +167,38 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
   let j = jobStatus(dir, id);
   if (!j) throw new Error(`no import job ${id}`);
   if (j.status !== 'running') return; // finished: nothing to redo
-  const into = join(jobDir(dir, id), 'root');
-  if (!j.root) {
-    rmSync(into, { recursive: true, force: true }); // a crash mid-unzip
-    j = save(dir, { ...j, root: /\.zip$/i.test(j.upload) ? await unzipSafe(j.upload, into) : j.upload });
+  // One attempt per job at a time: two would overwrite each other's checkpoint (and the first done would delete root under the other).
+  const lock = await takeLock(join(jobDir(dir, id), 'import.lock'), 0);
+  if (!lock) throw new GaError(JOB_BUSY);
+  try {
+    const into = join(jobDir(dir, id), 'root');
+    if (!j.root) {
+      rmSync(into, { recursive: true, force: true }); // a crash mid-unzip
+      j = save(dir, { ...j, root: /\.zip$/i.test(j.upload) ? await unzipSafe(j.upload, into) : j.upload });
+    }
+    if (/\.zip$/i.test(j.upload)) rmSync(j.upload, { force: true }); // unzipped: the folder is enough to resume
+    j = save(dir, { ...j, kind: detectKind(j.root!) });
+    const cfg = deps.cfg ?? loadConfig();
+    const client = deps.client ?? (await getClient(cfg));
+    const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {
+      tz: j.tz, timeZone: j.timeZone, batchSize: j.batchSize, skipThrough: j.lastBatch, redo: j.pending,
+      beforeWrite: (pending) => { j = save(dir, { ...j!, pending }); },
+      // An earlier attempt's outcome wins. shortcut: a crash between the archive upload and this save reads 'already-present' on
+      // the retry; derive it from the archive's own record if that matters.
+      onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
+      epicOrg: j.epicOrg, onEpicOrg: (epicOrg) => { j = save(dir, { ...j!, epicOrg }); },
+      learned: j.learned, onLearned: (learned) => { j = save(dir, { ...j!, learned }); },
+      onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0, note: undefined }); },
+    });
+    // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest
+    // (other skips, seconds) is this attempt's.
+    const r = result as { skips?: object }, c = j.report as Report | undefined;
+    const report = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
+    save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined, note: undefined });
+    for (const p of [into, j.upload]) rmSync(p, { recursive: true, force: true });
+  } finally {
+    rmSync(lock, { force: true });
   }
-  if (/\.zip$/i.test(j.upload)) rmSync(j.upload, { force: true }); // unzipped: the folder is enough to resume
-  j = save(dir, { ...j, kind: detectKind(j.root!) });
-  const cfg = deps.cfg ?? loadConfig();
-  const client = deps.client ?? (await getClient(cfg));
-  const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {
-    tz: j.tz, timeZone: j.timeZone, batchSize: j.batchSize, skipThrough: j.lastBatch, redo: j.pending,
-    beforeWrite: (pending) => { j = save(dir, { ...j!, pending }); },
-    // An earlier attempt's outcome wins. shortcut: a crash between the archive upload and this save reads 'already-present' on
-    // the retry; derive it from the archive's own record if that matters.
-    onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
-    epicOrg: j.epicOrg, onEpicOrg: (epicOrg) => { j = save(dir, { ...j!, epicOrg }); },
-    learned: j.learned, onLearned: (learned) => { j = save(dir, { ...j!, learned }); },
-    onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0, note: undefined }); },
-  });
-  // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest
-  // (other skips, seconds) is this attempt's.
-  const r = result as { skips?: object }, c = j.report as Report | undefined;
-  const report = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
-  save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined, note: undefined });
-  for (const p of [into, j.upload]) rmSync(p, { recursive: true, force: true });
 }
 
 function sum(total: Report | undefined, r: Report): Report {
