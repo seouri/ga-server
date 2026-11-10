@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -135,4 +136,33 @@ test('ChatGPT download_url: refused unless https on a listed host, with no fetch
   expect(ok.json).toEqual({ created: 1 });
   expect(listed.extracted[0].bytes).toBe('%PDF-1.4 from chatgpt');
   expect(listed.extracted[0].sourceFile).toMatch(/\/uploads\/[A-Za-z0-9_-]{22}\/a\.pdf$/);
+});
+
+test('routes an uploaded TIFF to agent extraction', async () => {
+  const { call, upload } = await setup();
+  const r = await call('import_file', { fileId: await upload('scan.tiff', 'II*\0') });
+  expect(r.isError).toBe(true);
+  expect(r.msg).toContain('this is a PDF or image');
+});
+
+test('refuses a FHIR export or DICOM upload', async () => {
+  const { call, upload } = await setup();
+  const msg = 'this is an Epic FHIR export or a DICOM study: import it with ga import on the computer running GA';
+  const json = await call('import_file', { fileId: await upload('export.json', '{}') });
+  expect(json.isError).toBe(true);
+  expect(json.msg).toContain(msg);
+  expect((await call('import_status', {})).json.jobs).toEqual([]);
+});
+
+test('a zip holding a DICOMDIR fails its job with the same message', async () => {
+  const { call, upload, dir } = await setup();
+  const src = join(dir, 'study');
+  mkdirSync(src);
+  writeFileSync(join(src, 'DICOMDIR'), 'x');
+  const zip = join(dir, 'study.zip');
+  execFileSync('zip', ['-qr', zip, 'DICOMDIR'], { cwd: src });
+  const r = await call('import_file', { fileId: await upload('study.zip', readFileSync(zip)) });
+  const s = await waitDone(call, r.json.jobId);
+  expect(s.status).toBe('failed');
+  expect(s.message).toContain('import it with ga import on the computer running GA');
 });

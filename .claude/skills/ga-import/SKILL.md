@@ -7,7 +7,7 @@ allowed-tools: Read Bash(node src/cli.ts import:*) mcp__ga-server__ga_import mcp
 
 Import `$ARGUMENTS` into GA. If no path was given, ask for one. The path must exist on this machine.
 
-- **PDF or image** (`.pdf`, `.png`, `.jpg`, `.jpeg`): read it yourself and call `ga_import`, following [extract.md](extract.md). GA never sends the file anywhere.
+- **PDF or image** (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`): read it yourself and call `ga_import`, following [extract.md](extract.md). GA never sends the file anywhere.
 - **Anything else**: run `node src/cli.ts import <path>` from the repo root and relay its report (counts only). It detects the kind:
   - Epic EHI export (folder with `EHITables/`); add `--tz <IANA zone>` if the user names the site's time zone.
   - Apple Health export (folder with `export.xml`); an `export.zip` must be unzipped first.
