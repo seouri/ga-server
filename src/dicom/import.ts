@@ -17,7 +17,7 @@ const PDF_CLASS = '1.2.840.10008.5.1.4.1.1.104.1';
 // Reads every file under dir: DICOM headers become ImagingStudy resources, encapsulated PDFs become documents linked to their study,
 // the whole folder is archived (never shared). Files that are not DICOM (DICOMDIR, previews, .DS_Store) are counted as skipped.
 export async function importDicom(client: MedplumClient, cfg: GaConfig, dir: string, patientId = cfg.patientId): Promise<DicomReport> {
-  void cfg;
+  void cfg; // part of the importer signature shared with the other kinds; DICOM needs nothing from it
   const headers: DicomHeader[] = [];
   const pdfs: { file: string; header: DicomHeader }[] = [];
   let skipped = 0;
@@ -29,6 +29,7 @@ export async function importDicom(client: MedplumClient, cfg: GaConfig, dir: str
     if (h === 'not-dicom') skipped++;
     else if (h === 'unsupported') unsupported++;
     else {
+      if (!h.studyUid || !h.seriesUid) skipped++; // no place in a study
       headers.push(h);
       if (h.sopClass === PDF_CLASS) pdfs.push({ file, header: h });
     }
@@ -51,8 +52,8 @@ export async function importDicom(client: MedplumClient, cfg: GaConfig, dir: str
       if (!bytes) continue;
       const out = join(tmp, `${header.sopInstance}.pdf`);
       writeFileSync(out, bytes, { mode: 0o600 });
-      const { docRef } = await storeDocument(client, out, patientId, 'application/pdf', [{ system: 'urn:dicom:uid', value: `urn:oid:${header.sopInstance}` }]);
-      documents++;
+      const { docRef, created } = await storeDocument(client, out, patientId, 'application/pdf', [{ system: 'urn:dicom:uid', value: `urn:oid:${header.sopInstance}` }]);
+      if (created) documents++;
       const study = header.studyUid && (await client.searchOne('ImagingStudy', { identifier: `urn:dicom:uid|urn:oid:${header.studyUid}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' }));
       if (study && !docRef.context?.related?.length) await client.updateResource<DocumentReference>({ ...docRef, context: { ...docRef.context, related: [{ reference: `ImagingStudy/${(study as ImagingStudy).id}` }] } });
     }

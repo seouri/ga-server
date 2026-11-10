@@ -34,8 +34,10 @@ function element(b: Buffer, pos: number, implicit: boolean): Elem | undefined {
 }
 
 // End of the value of e: its length, or for an undefined length the byte after the matching sequence delimitation item.
-function valueEnd(b: Buffer, e: Elem, implicit: boolean): number | undefined {
+const MAX_DEPTH = 64;
+function valueEnd(b: Buffer, e: Elem, implicit: boolean, depth = 0): number | undefined {
   if (e.length !== UNDEFINED) return e.start + e.length;
+  if (depth > MAX_DEPTH) return undefined;
   let pos = e.start;
   for (;;) {
     const it = element(b, pos, implicit);
@@ -48,7 +50,7 @@ function valueEnd(b: Buffer, e: Elem, implicit: boolean): number | undefined {
       const x = element(b, pos, implicit);
       if (!x) return undefined;
       if (x.tag === key(0xfffe, 0xe00d)) { pos = x.start; break; }
-      const end = valueEnd(b, x, implicit);
+      const end = valueEnd(b, x, implicit, depth + 1);
       if (end === undefined) return undefined;
       pos = end;
     }
@@ -98,7 +100,8 @@ export function readHeader(file: string): DicomHeader | 'not-dicom' | 'unsupport
     } finally { closeSync(fd); }
   } catch { return 'not-dicom'; }
   const raw: Partial<Record<string, string>> = {};
-  const status = walk(buf, key(0x20, 0x13), (tag, v) => { const f = FIELD[tag]; if (f) raw[f] = text(v); });
+  let status: boolean | 'unsupported';
+  try { status = walk(buf, key(0x20, 0x13), (tag, v) => { const f = FIELD[tag]; if (f) raw[f] = text(v); }); } catch { return 'not-dicom'; }
   if (status === false) return 'not-dicom';
   if (status === 'unsupported') return 'unsupported';
   if (!raw.sopClass || !raw.sopInstance) return 'not-dicom';
@@ -118,10 +121,13 @@ export function encapsulatedPdf(file: string): Buffer | undefined {
   try { b = readFileSync(file); } catch { return undefined; }
   let sop = '';
   let pdf: Buffer | undefined;
-  const status = walk(b, key(0x42, 0x11), (tag, v) => {
-    if (tag === key(8, 0x16)) sop = text(v);
-    if (tag === key(0x42, 0x11)) pdf = v;
-  });
+  let status: boolean | 'unsupported';
+  try {
+    status = walk(b, key(0x42, 0x11), (tag, v) => {
+      if (tag === key(8, 0x16)) sop = text(v);
+      if (tag === key(0x42, 0x11)) pdf = v;
+    });
+  } catch { return undefined; }
   if (status !== true || sop !== PDF_CLASS || !pdf) return undefined;
   return pdf[pdf.length - 1] === 0 ? pdf.subarray(0, pdf.length - 1) : pdf; // the odd-length pad byte
 }
