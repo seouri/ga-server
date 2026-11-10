@@ -151,7 +151,7 @@ export function combine(guideline: GuidelineItem[], vaccines: Item[], plans: Pla
 
 const NOTE = "Guideline items cite their source. The doctor's plan is shown as of its date. Not medical advice: input for a conversation with your clinician.";
 
-export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), months?: number, loaded?: Observation[]) {
+export async function healthMaintenance(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), months?: number) {
   const p = await client.readResource('Patient', patientId) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
@@ -174,7 +174,7 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
       evidence(os.filter((o) => !planIds.has(o.id) && (!o.category?.length || o.category.some((c) => c.coding?.some((k) => k.code === 'laboratory' || k.code === 'vital-signs')))));
       for (const o of os) { const e = immunityOf(o, schedule); if (e) immunity.push(e); }
     };
-    return loaded ? page(loaded) : eachObservation(client, patientId, page);
+    return eachObservation(client, patientId, page);
   });
   const [hm, basics] = await Promise.all([
     hmP, searchAll(client, 'Basic', { subject: ref, code: `${REMINDER}|` }) as Promise<Basic[]>,
