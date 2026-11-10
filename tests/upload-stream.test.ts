@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { createReadStream, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import type { MedplumClient } from '@medplum/core';
 import { expect, test } from 'vitest';
 import { storeDocument } from '../src/document.ts';
 import { uploadBinaryFile } from '../src/upload-stream.ts';
@@ -56,4 +58,25 @@ test('uploadBinaryFile fails when the bytes sent are not the bytes hashed', asyn
       await expect(uploadBinaryFile(client, file, 'text/plain', 'a'.repeat(64))).rejects.toThrow('file changed during upload');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+});
+
+test('a failed upload closes its file, and a hash mismatch deletes the stored Binary', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-upload-'));
+  try {
+    const file = join(dir, 'a.txt');
+    writeFileSync(file, 'synthetic');
+    let body: Readable | undefined;
+    const deleted: string[] = [];
+    const client = (post: (b: Readable) => Promise<unknown>) => ({
+      getBaseUrl: () => 'http://127.0.0.1:9/', post: (_u: string, b: Readable) => { body = b; return post(b); },
+      deleteResource: async (type: string, id: string) => { deleted.push(`${type}/${id}`); },
+    }) as unknown as MedplumClient;
+    // The store refuses before reading the body (a 401, the store down).
+    await expect(uploadBinaryFile(client(async () => { throw new Error('refused'); }), file, 'text/plain')).rejects.toThrow('refused');
+    expect(body!.destroyed).toBe(true);
+    // The bytes sent are not the ones hashed (the file changed between the passes).
+    const read = client(async (b) => { for await (const _ of b); return { id: 'bin1' }; });
+    await expect(uploadBinaryFile(read, file, 'text/plain', '0'.repeat(64))).rejects.toThrow('file changed during upload');
+    expect(deleted).toEqual(['Binary/bin1']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
