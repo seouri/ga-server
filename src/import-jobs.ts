@@ -20,7 +20,7 @@ export type JobRecord = {
   kind?: ImportKind; // known once unzipped
   upload: string;
   root?: string;
-  tz?: string; // an EHI export's zone, as import_file got it
+  tz?: string; // an EHI export's zone: import_file's, else GA_EHI_TZ, else this machine's (as ga import), fixed at the start
   timeZone: string; // where Apple Health days are cut: this machine's zone at the start, so every attempt cuts the same batches
   batchSize: number;
   patientId?: string;
@@ -61,7 +61,7 @@ export function recordJob(dir: string, upload: string, opts: { tz?: string; pati
   const moved = join(jobDir(dir, id), basename(upload));
   renameSync(upload, moved);
   return save(dir, {
-    id, upload: moved, tz: opts.tz, patientId: opts.patientId, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    id, upload: moved, tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     batchSize: opts.batchSize ?? BATCH, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
   });
 }
