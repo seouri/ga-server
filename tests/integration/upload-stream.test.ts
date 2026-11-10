@@ -23,9 +23,9 @@ afterAll(async () => { await cleanupTestPatient(client, pid); rmSync(dir, { recu
 
 test('a 50 MB file streams to Medplum and reads back identical', async () => {
   const file = join(dir, 'big.bin');
-  await writeRandomFile(file, Number(process.env.GA_UPLOAD_MIB ?? 50)) // 300 MB also passed on Medplum (GA_UPLOAD_MIB=300); no limit hit;
+  await writeRandomFile(file, Number(process.env.GA_UPLOAD_MIB ?? 50)) // 300 MB also passed on Medplum (GA_UPLOAD_MIB=300); no limit hit
   const { docRef, fileHash } = await storeDocument(client, file, pid, 'application/octet-stream');
-  const bin = await client.download(docRef.content[0].attachment.url!) // Medplum answers a signed storage URL;
+  const bin = await client.download(docRef.content[0].attachment.url!) // Medplum answers a signed storage URL
   const h = createHash('sha256');
   const buf = Buffer.from(await bin.arrayBuffer());
   h.update(buf);

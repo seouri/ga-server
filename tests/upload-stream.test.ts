@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { expect, test } from 'vitest';
 import { storeDocument } from '../src/document.ts';
+import { uploadBinaryFile } from '../src/upload-stream.ts';
 import { peakRss } from './memory.ts';
 import { writeRandomFile } from './random-file.ts';
 import { onStore, tempStore } from './temp-store.ts';
@@ -42,6 +43,17 @@ test('storeDocument of the same file twice creates one Binary and one DocumentRe
       expect(a.docRef.id).toBe(b.docRef.id);
       expect((await client.search('DocumentReference', {})).entry).toHaveLength(1);
       expect(a.docRef.content[0].attachment.url).toBe(b.docRef.content[0].attachment.url); // the second call uploaded nothing
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+test('uploadBinaryFile fails when the bytes sent are not the bytes hashed', async () => {
+  await onStore(async ({ client }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ga-upload-'));
+    try {
+      const file = join(dir, 'a.txt');
+      writeFileSync(file, 'synthetic');
+      await expect(uploadBinaryFile(client, file, 'text/plain', 'a'.repeat(64))).rejects.toThrow('file changed during upload');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
