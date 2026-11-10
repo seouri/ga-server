@@ -20,11 +20,11 @@ function place(r: Resource, a: Attach): boolean {
   if (!parts.every((p) => p && !UNSAFE.has(p))) return false;
   let node: unknown = r;
   for (const p of parts.slice(0, -1)) {
-    if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, p)) return false;
+    if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, p) || (Array.isArray(node) && !/^\d+$/.test(p))) return false;
     node = (node as Record<string, unknown>)[p];
   }
   const last = parts[parts.length - 1];
-  if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, last)) return false; // an index past the end is not an own property
+  if (!(isObj(node) || Array.isArray(node)) || !Object.hasOwn(node, last) || (Array.isArray(node) && !/^\d+$/.test(last))) return false; // an index past the end is not an own property
   const holder = node as Record<string, unknown>;
   const existing = holder[last];
   holder[last] = { ...(isObj(existing) ? existing : {}), contentType: a.contentType, data: a.contentBase64 };

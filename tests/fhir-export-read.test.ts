@@ -50,6 +50,10 @@ describe('readFhirExport', () => {
     expect(r.attachmentsUnplaced).toBe(2);
     expect((r.resources[0] as DocumentReference).content).toHaveLength(1);
   });
+  it('counts a length path as unplaced', () => {
+    const r = readFhirExport(exportWith([att('content.length'), att('content.0.attachment')]));
+    expect(r.attachmentsUnplaced).toBe(1);
+  });
   it('counts resources without an id or of another type', () => {
     const r = readFhirExport(exportWith([], { Condition: [{ resourceType: 'Condition' }, { resourceType: 'Observation', id: 'x' }] }));
     expect(r.skippedTypes).toEqual({ 'Condition (invalid)': 2 });

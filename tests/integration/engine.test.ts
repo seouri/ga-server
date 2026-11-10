@@ -925,6 +925,16 @@ test('an older note-carrying fhir-export copy adds only the note', async () => {
   expect((after as { note?: { text: string }[] }).note?.map((x) => x.text)).toEqual(['owner note']);
 });
 
+test('a hospital copy with a note still replaces an apple-only body', async () => {
+  const n = uid('c');
+  await importResources(client, [appleCond(n)], appleClinicalSrc(), pid, 'h');
+  const copy = { ...hospCond(n, 'hospital wording'), note: [{ text: 'owner note' }] } as Resource;
+  await importResources(client, [copy], feSrc({ date: '2020-01-01' }), pid, 'h');
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(found[0].code?.text).toBe('hospital wording');
+});
+
 for (const [label, tag] of [['person-edited', 'person-edited'], ['writer-agent', 'writer-agent']] as const) {
   test(`a ${label} apple copy is not replaced by an older hospital record`, async () => {
     const n = uid('c');

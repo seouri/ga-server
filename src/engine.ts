@@ -628,15 +628,15 @@ export async function importResources(
           if (carries(existing)) await keep(tagged, tagged !== existing);
           else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
-        } else if (addedNotes.length) {
-          target = await client.updateResource({ ...existing, note: [...noteList(existing), ...addedNotes] } as Resource);
-          report.updated++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
         else if (hospitalOntoApple(existing) && !agentOrShielded(existing)) {
           target = await unionUpdate(client, existing, filled);
           report.updated++;
         }
-        else if (d === 'update') {
+        else if (addedNotes.length) {
+          target = await client.updateResource({ ...existing, note: [...noteList(existing), ...addedNotes] } as Resource);
+          report.updated++;
+        } else if (d === 'update') {
           target = await unionUpdate(client, existing, filled);
           report.updated++;
         } else if (linked) {
