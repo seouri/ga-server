@@ -1,5 +1,5 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -189,6 +189,24 @@ test('a C-CDA zip runs as a job and resumes to the same records', async () => {
   const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid }).id);
   expect(whole.status, whole.message).toBe('done');
   // shortcut: one batch, so a kill mid-write is redone whole and its counts are not exact; the records are.
+  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
+}, 300_000);
+
+test('a C-CDA folder is a batch per document: a crash in the second resumes from it', async () => {
+  const src = join(work, 'ccda-two');
+  mkdirSync(src);
+  for (const f of ['ccda-synthetic.xml', 'ccda-epic-style.xml']) cpSync(join(FX, f), join(src, f));
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid });
+  await crash(a.config, a.dir, job.id, { at: 0, creates: 2 });
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ lastBatch: 0 }); // the first document committed
+  expect(resumeJobs(a.dir)).toBe(1);
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const b = await store();
+  const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid }).id);
+  expect(whole.status, whole.message).toBe('done');
+  expect((done.report as { notImported: unknown }).notImported).toEqual((whole.report as { notImported: unknown }).notImported);
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
 

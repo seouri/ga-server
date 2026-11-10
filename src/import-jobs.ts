@@ -7,6 +7,7 @@ import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
 import type { MedplumClient } from '@medplum/core';
 import { BATCH, type Pending } from './apple/import.ts';
+import { addNotImported } from './ccda.ts';
 import { type GaConfig, getClient, loadConfig } from './config.ts';
 import { addReport, type ImportReport } from './engine.ts';
 import { detectKind, importAny, type ImportKind } from './import.ts';
@@ -161,6 +162,7 @@ function sum(total: Report | undefined, r: Report): Report {
   addReport(total, r);
   if (r.unchanged !== undefined) total.unchanged = (total.unchanged ?? 0) + r.unchanged;
   for (const [k, v] of Object.entries(r.skips ?? {})) (total.skips ??= {})[k] = (total.skips[k] ?? 0) + v;
+  if (r.notImported) addNotImported((total.notImported ??= []), r.notImported);
   return total;
 }
 

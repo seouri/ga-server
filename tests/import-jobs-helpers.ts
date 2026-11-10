@@ -31,7 +31,8 @@ export async function settled(dir: string, id: string, ms = 120_000): Promise<Jo
   throw new Error('job never settled');
 }
 
-// Everything the import wrote, without server ids, times and arrival stamps; a reference reads as its target's identifier.
+// Everything the import wrote, without server ids, times and arrival stamps; a reference reads as its target's identifier (a
+// shared record outside the patient's compartment, such as a C-CDA's Practitioner, as its type).
 export async function snapshot(client: MedplumClient, pid: string): Promise<string[]> {
   const b = await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=1000`, { cache: 'no-cache' });
   const every = (b.entry ?? []).map((e) => e.resource as Resource & { identifier?: { system?: string; value?: string }[] });
@@ -40,7 +41,7 @@ export async function snapshot(client: MedplumClient, pid: string): Promise<stri
   return all.map((r) => {
     const { id: _i, meta, extension, ...rest } = r as Resource & { extension?: { url: string }[] };
     const ext = extension?.filter((e) => e.url !== ARRIVED);
-    return JSON.stringify({ ...rest, tag: meta?.tag, ...(ext?.length && { extension: ext }) }, (k, v) => (k === 'reference' && idOf.has(v) ? idOf.get(v) : sorted(k, v)));
+    return JSON.stringify({ ...rest, tag: meta?.tag, ...(ext?.length && { extension: ext }) }, (k, v) => (k === 'reference' && typeof v === 'string' ? idOf.get(v) ?? v.replace(/\/[^/]+$/, '') : sorted(k, v)));
   }).map((x) => x.replaceAll(pid, 'PATIENT').replace(/\|[0-9a-f]{64}/g, '|HASH').replace(/"Binary\/[^"]+"/g, '"Binary"')).sort();
 }
 export const report = (r: unknown) => { const { seconds: _s, ...rest } = r as { seconds?: number }; return rest; };
