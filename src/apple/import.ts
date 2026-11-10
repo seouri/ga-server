@@ -1,12 +1,13 @@
 import type { MedplumClient } from '@medplum/core';
-import type { Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Identifier, Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
 import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
 import { addReport, importResources, type ImportReport } from '../engine.ts';
-import { sorted } from '../identity.ts';
+import { APPLE, sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
 import { appleBatches, type Batch } from './batches.ts';
+import { receivedBy } from './clinical.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
@@ -25,6 +26,21 @@ export const existing = (client: MedplumClient, patientId: string, resources: Re
     elements: (type) => (FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier'),
   });
 
+const SMART = 'urn:ga-server:id:smart:';
+const smartId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system?.startsWith(SMART));
+const appleId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system === APPLE);
+
+// An allergy an older import wrote is identified by its sourceURL only: give it the portal-style identifier now, so the engine
+// finds it instead of writing a second one.
+async function adoptOldAllergies(client: MedplumClient, patientId: string, resources: Resource[]): Promise<void> {
+  for (const r of resources) {
+    const s = smartId(r), a = appleId(r);
+    if (r.resourceType !== 'AllergyIntolerance' || !s || !a) continue;
+    const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
+    if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) await client.updateResource({ ...old, identifier: [...(old.identifier ?? []), s] });
+  }
+}
+
 const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
 
 // Reads the export and writes it batch by batch, each under the import lock with its own unchanged check. skipThrough:
@@ -39,7 +55,10 @@ export async function importAppleHealth(
   const t0 = Date.now();
   const archived = await archiveFolder(client, dir, patientId, 'urn:ga-server:id:apple-health-archive');
   await opts.onArchived?.(archived);
-  const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
+  // A clinical copy (the hospital's identifier plus Apple's) carries Epic's receivedDate and never replaces another source's record.
+  const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer',
+    dateOf: (r: Resource) => receivedBy.get(appleId(r)?.value ?? ''),
+    fillOnly: (r: Resource) => !!smartId(r) } as const;
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
   const it = appleBatches(dir, { size: opts.batchSize ?? BATCH_SIZE, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
@@ -71,6 +90,7 @@ export async function importAppleHealth(
           return false;
         });
         if (!redo) await opts.beforeWrite?.(p); // a redo keeps the first attempt's lists
+        await adoptOldAllergies(client, patientId, rest);
         const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
         return { ...written, created: written.created + created, updated: written.updated + updated, unchanged: kept };
       });

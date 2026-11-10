@@ -1,41 +1,62 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Identifier, Resource } from '@medplum/fhirtypes';
+import { COMPARTMENT } from '../engine.ts';
 import { APPLE, sha256 as sha } from '../identity.ts';
+import { sourceKey } from '../smart/auth.ts';
+import { mapForGa } from '../smart/fetch.ts';
 import { appleDate, type AhClinical } from './read.ts';
 import { SUBJECT } from './readings.ts';
 
-// Replace every Reference with its display only (hospital ids mean nothing in GA); no display -> dropped.
-function stripRefs(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(stripRefs).filter((x) => x !== undefined);
-  if (v && typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    if (typeof o.reference === 'string') return o.display === undefined ? undefined : { display: o.display };
-    return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, stripRefs(x)]).filter(([, x]) => x !== undefined));
-  }
-  return v;
+// FHIR base and source key of a ClinicalRecord's sourceURL (".../<Type>/<id>"); undefined when it has no such shape.
+export function fhirBaseOf(sourceURL: string): { base: string; key: string } | undefined {
+  try {
+    const u = new URL(sourceURL);
+    const m = /^(.*)\/[A-Za-z]+\/[^/]+$/.exec(u.pathname);
+    if (!m || !/^https?:$/.test(u.protocol)) return undefined;
+    const base = `${u.origin}${m[1]}`;
+    return { base, key: sourceKey(base) };
+  } catch { return undefined; }
 }
 
-export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; skips: { clinicalTypeUnsupported: number; clinicalUnreadable: number } } {
+// Epic's receivedDate per sourceURL (the APPLE identifier value): the source date of an Apple clinical copy. Keyed by value because
+// the engine stamps a clone of each resource.
+export const receivedBy = new Map<string, string>();
+
+// Hospital JSON now and then holds an invalid escape (a stray "\d" in a string): double that backslash and parse again.
+function parseJson(text: string): any {
+  try { return JSON.parse(text); } catch { return JSON.parse(text.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, ok) => (ok ? m : '\\\\'))); }
+}
+
+export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; skips: { clinicalVersionUnsupported: number; clinicalUnreadable: number } } {
   const resources: Resource[] = [];
   const ids = new Map<string, Identifier>(); // one Patient with the union of identifiers
-  let clinicalTypeUnsupported = 0;
+  let clinicalVersionUnsupported = 0;
   let clinicalUnreadable = 0;
   let patients = 0;
   for (const ref of refs) {
+    if (!ref.fhirVersion?.startsWith('4.')) { clinicalVersionUnsupported++; continue; }
     let r: any;
-    try { r = JSON.parse(readFileSync(join(dir, ref.resourceFilePath), 'utf8')); } catch { clinicalUnreadable++; continue; }
+    try { r = parseJson(readFileSync(join(dir, ref.resourceFilePath), 'utf8')); } catch { clinicalUnreadable++; continue; }
     if (r?.resourceType === 'Patient') {
       patients++;
       for (const i of r.identifier ?? []) ids.set(`${i.system}|${i.value}`, i);
-    } else if (r?.resourceType === 'AllergyIntolerance' && ref.fhirVersion.startsWith('4.')) {
-      const { id: _id, patient, ...rest } = r;
-      const a = stripRefs(rest) as Record<string, any>;
-      resources.push({ ...a, resourceType: 'AllergyIntolerance', patient: { ...SUBJECT, ...(patient?.display && { display: patient.display }) }, identifier: [{ system: APPLE, value: ref.sourceURL }, ...(a.identifier ?? [])] });
-    } else clinicalTypeUnsupported++;
+      continue;
+    }
+    const at = fhirBaseOf(ref.sourceURL);
+    if (!at || typeof r?.resourceType !== 'string' || !r.id) { clinicalUnreadable++; continue; }
+    // One record at a time: a reference to another record would dangle when the batches cut between them, so mapForGa keeps displays only.
+    const { resources: [m] } = mapForGa([r], { key: at.key, name: ref.sourceName ?? new URL(at.base).hostname, fhirBase: at.base });
+    const out = m as Record<string, any>;
+    const field = COMPARTMENT[out.resourceType];
+    if (field) out[field] = { ...SUBJECT, ...(r[field]?.display && { display: r[field].display }) };
+    for (const c of out.content ?? []) if (String(c.attachment?.url).startsWith('urn:ga-server:pending-binary:')) delete c.attachment.url; // no Binary upload for an Apple copy
+    out.identifier = [out.identifier, { system: APPLE, value: ref.sourceURL }].flat();
+    if (ref.receivedDate) receivedBy.set(ref.sourceURL, ref.receivedDate);
+    resources.push(m);
   }
   if (patients) resources.unshift({ resourceType: 'Patient', id: 'apple-patient', identifier: [...ids.values()] });
-  return { resources, skips: { clinicalTypeUnsupported, clinicalUnreadable } };
+  return { resources, skips: { clinicalVersionUnsupported, clinicalUnreadable } };
 }
 
 const KEYS = new Set(['Recorded Date', 'Classification', 'Symptoms']);

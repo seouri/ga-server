@@ -1,0 +1,1 @@
+{"resourceType": "DiagnosticReport", "id": "d1", "status": "final", "code": {"text": "Chest X-ray"}, "subject": {"reference": "Patient/p1"}, "effectiveDateTime": "2024-02-01", "presentedForm": [{"contentType": "text/html", "data": "PHA+SW1wcmVzc2lvbjogY2xlYXIuPC9wPg=="}]}

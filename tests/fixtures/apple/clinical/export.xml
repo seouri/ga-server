@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [
+<!ELEMENT HealthData (ExportDate,Me,ClinicalRecord*)>
+<!ELEMENT ClinicalRecord EMPTY>
+]>
+<HealthData locale="en_US">
+ <ExportDate value="2026-11-05 13:39:52 -0500"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="1970-01-01"/>
+ <ClinicalRecord type="Patient" identifier="p1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/Patient/p1" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:40 -0800" resourceFilePath="/clinical-records/Patient-0.json"/>
+ <ClinicalRecord type="AllergyIntolerance" identifier="a1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/AllergyIntolerance/a1" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:41 -0800" resourceFilePath="/clinical-records/AllergyIntolerance-1.json"/>
+ <ClinicalRecord type="Condition" identifier="c1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/Condition/c1" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:42 -0800" resourceFilePath="/clinical-records/Condition-2.json"/>
+ <ClinicalRecord type="Observation" identifier="o1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/Observation/o1" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:43 -0800" resourceFilePath="/clinical-records/Observation-3.json"/>
+ <ClinicalRecord type="MedicationRequest" identifier="m1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/MedicationRequest/m1" fhirVersion="1.0.2" receivedDate="2025-11-02 00:15:44 -0800" resourceFilePath="/clinical-records/MedicationRequest-4.json"/>
+ <ClinicalRecord type="DiagnosticReport" identifier="d1" sourceName="Synthetic Hospital" sourceURL="https://fhir.example.org/api/FHIR/R4/DiagnosticReport/d1" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:45 -0800" resourceFilePath="/clinical-records/DiagnosticReport-5.json"/>
+</HealthData>

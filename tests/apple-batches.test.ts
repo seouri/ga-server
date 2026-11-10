@@ -84,11 +84,11 @@ test("batched import writes the same resources as one batch, and as today's impo
     archived: 'stored', unchanged: 0,
     skips: {
       nested: 3, archiveOnly: { ActiveEnergyBurned: 15000 }, sameReadingTwoSources: 1, bpUnpaired: 0, unexpectedUnit: 0,
-      activityEmptyDays: 1, badValue: 0, clinicalTypeUnsupported: 1, clinicalUnreadable: 0, ecgUnparsed: 0,
+      activityEmptyDays: 1, badValue: 0, clinicalVersionUnsupported: 1, clinicalUnreadable: 0, ecgUnparsed: 0,
     },
   });
   expect(snap).toHaveLength(614);
-  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('b753a171f6c5c82fd8f776cf32c1323760d6cebebeaaa1f044bc40eea0f172db');
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('82e3782b49a738b40f02275d072b0b5d94f14033d85f4d6b124c0a17dd3c6092');
 }, 300_000);
 
 test('shuffled records give the same resources as sorted ones', async () => {
@@ -135,7 +135,7 @@ test('re-import of the same export writes nothing; a newer export updates only i
     const hr = '<Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Synthetic Watch" unit="count/min" startDate="2016-01-30 12:00:30 -0500" endDate="2016-01-30 12:00:30 -0500" value="190"/>\n';
     writeFileSync(join(dir, 'export.xml'), xml.replace('</HealthData>', `${hr}</HealthData>`).replace('<ExportDate value="2016-01-31', '<ExportDate value="2016-02-01'));
     const newer = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
-    expect(newer).toMatchObject({ created: 0, updated: 2 }); // that day's heart-rate mean, and the allergy (it always goes to the engine) under the newer date
+    expect(newer).toMatchObject({ created: 0, updated: 1 }); // that day's heart-rate mean; the allergy keeps its receivedDate, so it is skipped
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 300_000);
 
