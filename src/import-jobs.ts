@@ -3,6 +3,7 @@
 // each committed batch, so a retry or a gateway restart (resumeJobs) carries on from there with the same report.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
 import type { MedplumClient } from '@medplum/core';
@@ -136,7 +137,8 @@ function supervise(dir: string, id: string, opts: Supervision): void {
         }
         // Nothing resumes a failed job: the export (up to 2 GB zipped, 8 GB unzipped) would only fill the disk and the nightly backup.
         // Removed first: a kill midway repeats this at the next start.
-        for (const p of [join(jobDir(dir, id), 'root'), j.upload, ...(j.root ? [archiveTmp(j.root)] : [])]) rmSync(p, { recursive: true, force: true });
+        // Off the main thread (an unzipped export can hold thousands of files): share pages and chat requests keep answering.
+        await Promise.all([join(jobDir(dir, id), 'root'), j.upload, ...(j.root ? [archiveTmp(j.root)] : [])].map((p) => rm(p, { recursive: true, force: true })));
         save(dir, { ...j, status: 'failed', note: undefined, message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
         return void rmSync(lock, { force: true });
       }
