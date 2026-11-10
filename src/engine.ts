@@ -34,7 +34,7 @@ type TypeCounts = { created: number; linked: number; updated: number; flagged: n
 type R = Resource & { identifier?: Identifier[]; extension?: Extension[] };
 export const DUP_OF = 'urn:ga-server:ext:possible-duplicate-of';
 const KEPT_TAGS = ['possible-duplicate', 'source-conflict'];
-// Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only SMART copy.
+// Identifier systems of GA's other sources: a record carrying one is never replaced by a fill-only copy (SMART, FHIR export, Apple clinical).
 // Apple is left out: on an Apple-only record the hospital body wins (otherOntoApple).
 const OTHER_SOURCE = (system: string) => system.startsWith('urn:ga-server:id:ehi:') || ['urn:ga-server:id:ccda', 'urn:ga-server:id:pdf'].includes(system);
 // Patient-compartment types and the field (= Medplum search param) naming the patient; link lookups are scoped by it.
@@ -618,7 +618,7 @@ export async function importResources(
           else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
-        else if (hospitalOntoApple(existing)) {
+        else if (hospitalOntoApple(existing) && !agentOrShielded(existing)) {
           target = await unionUpdate(client, existing, filled);
           report.updated++;
         }
@@ -648,7 +648,7 @@ export async function importResources(
           const d = decide(same, filled);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
-          const otherOntoApple = !fromApple && isApple(same) && (!hasNonApple(same) || hospitalOntoApple(same)); // hospital body beats an Apple one
+          const otherOntoApple = !fromApple && isApple(same) && (!hasNonApple(same) || hospitalOntoApple(same)) && !agentOrShielded(same); // hospital body beats an Apple one
           if (d === 'conflict') report.skipped++;
           else if (fillOnly(same)) await fillOnto(same);
           else {

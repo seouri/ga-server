@@ -895,3 +895,17 @@ test('fhir-export fill-only copy never replaces a smart record', async () => {
   expect(found).toHaveLength(1);
   expect(found[0].code?.text).toBe('portal wording');
 });
+
+for (const [label, tag] of [['person-edited', 'person-edited'], ['writer-agent', 'writer-agent']] as const) {
+  test(`a ${label} apple copy is not replaced by an older hospital record`, async () => {
+    const n = uid('c');
+    await importResources(client, [appleCond(n)], appleClinicalSrc(), pid, 'h');
+    const [apple] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+    await client.updateResource({ ...apple, meta: { ...apple.meta, tag: [...(apple.meta?.tag ?? []), { system: 'urn:ga-server:tag', code: tag }] } });
+    await importResources(client, [hospCond(n, 'hospital wording')], feSrc(), pid, 'h');
+    const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+    expect(found).toHaveLength(1);
+    expect(found[0].code?.text).toBe('apple wording');
+    expect(found[0].meta?.tag?.some((t) => t.code === tag)).toBe(true);
+  });
+}
