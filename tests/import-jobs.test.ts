@@ -9,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
-import { archiveFolder, manifestHash } from '../src/archive.ts';
+import { archiveFolder, archiveTmp } from '../src/archive.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
 import { GaError } from '../src/config.ts';
@@ -326,13 +326,15 @@ test.each([
 }, 300_000);
 
 // A kill or restart skips archiveFolder's cleanup; each retry must not add another tarball the size of the export.
-test('an archive step cut short leaves no second tarball: the retry reuses its folder', async () => {
+test('an archive step cut short leaves no second tarball: the retry reuses its folder, stored or not', async () => {
   const a = await store();
   const src = join(work, 'apple_health_export');
-  const stale = join(a.s.dir, 'tmp', `archive-${await manifestHash(src)}`);
-  mkdirSync(stale, { recursive: true });
-  writeFileSync(join(stale, 'apple_health_export.tar.gz'), 'cut short');
+  const cutShort = () => { mkdirSync(archiveTmp(src), { recursive: true }); writeFileSync(join(archiveTmp(src), 'apple_health_export.tar.gz'), 'cut short'); };
+  cutShort();
   expect(await archiveFolder(a.client, src, a.pid, 'urn:ga-server:id:apple-health-archive')).toBe('stored');
+  expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
+  cutShort(); // killed after the store kept the archive, before its finally
+  expect(await archiveFolder(a.client, src, a.pid, 'urn:ga-server:id:apple-health-archive')).toBe('already-present');
   expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
 });
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MedplumClient } from '@medplum/core';
 import { defaultConfigPath, GaError } from './config.ts';
@@ -20,16 +20,18 @@ export async function manifestHash(dir: string): Promise<string> {
   return createHash('sha256').update(lines.sort().join('\n')).digest('hex');
 }
 
+// Where a folder's tarball is built: a user-owned dir next to GA's config, not the shared system temp dir. Named by the folder,
+// so a retry (a kill or restart skips archiveFolder's finally) reuses it and an import job's failure can remove it.
+export const archiveTmp = (dir: string): string =>
+  join(dirname(defaultConfigPath()), 'tmp', `archive-${createHash('sha256').update(resolve(dir)).digest('hex').slice(0, 32)}`);
+
 // shortcut: the tar.gz is uploaded as one Binary (a ~155 MB real Apple Health archive uploaded fine); upgrade to chunks if exports reach GBs.
 export async function archiveFolder(client: MedplumClient, dir: string, patientId: string, system: string): Promise<'stored' | 'already-present'> {
+  const tmp = archiveTmp(dir);
+  rmSync(tmp, { recursive: true, force: true }); // first: a killed attempt's tarball, also when its archive was stored
   const id = { system, value: await manifestHash(dir) };
   const query = { identifier: `${id.system}|${id.value}`, subject: `Patient/${patientId}` };
   if (await client.searchOne('DocumentReference', query, { cache: 'no-cache' })) return 'already-present';
-  // The tarball holds the whole export: a user-owned dir next to GA's config, not the shared system temp dir.
-  const parent = join(dirname(defaultConfigPath()), 'tmp');
-  // Named by the manifest and emptied first: a kill or restart skips the finally, and a retry must not add a second tarball.
-  const tmp = join(parent, `archive-${id.value}`);
-  rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true, mode: 0o700 });
   try {
     const file = join(tmp, `${basename(dir)}.tar.gz`);
