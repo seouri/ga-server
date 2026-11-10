@@ -1,12 +1,12 @@
 // Health maintenance list: guideline screenings, vaccines, Epic's plan and the person's reminders merged into Items; healthMaintenance loads them.
 import type { MedplumClient } from '@medplum/core';
-import type { Basic, Condition, Extension, Observation, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
-import { loadObservations, searchAll } from './labs.ts';
+import type { Basic, Extension, Observation, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
+import { eachObservation, eachPage, searchAll } from './labs.ts';
 import { GaError } from './config.ts';
-import { evaluateScreenings, loadRules, SOON_DAYS, TOLD } from './screenings.ts';
+import { loadRules, screenings, SOON_DAYS, TOLD } from './screenings.ts';
 import { SRC_DATE } from './identity.ts';
 import type { GuidelineItem, Rules, Status } from './screenings.ts';
-import { addDays, addMonths, loadSchedule, vaccineGaps } from './vaccines.ts';
+import { addDays, addMonths, type Evidence, immunityOf, loadSchedule, vaccineGaps } from './vaccines.ts';
 
 export const REMINDER = 'urn:ga-server:reminder'; // Basic.code system; codes not-now, postpone, dismiss, done, followup
 const X = { topic: 'urn:ga-server:ext:topic', until: 'urn:ga-server:ext:until', due: 'urn:ga-server:ext:due', quote: 'urn:ga-server:ext:quote', doneDate: 'urn:ga-server:ext:done-date', method: 'urn:ga-server:ext:method', where: 'urn:ga-server:ext:where' };
@@ -155,19 +155,34 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
   const p = await client.readResource('Patient', patientId) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
-  const all = (type: ResourceType, q: Record<string, string>) => searchAll(client, type, q);
   const ref = `Patient/${patientId}`;
-  // One load of the non-Apple Observations (Apple readings are numerous and never evidence); the evidence subsets are derived from it.
-  const [procedures, reports, obs, hm, conditions, basics] = await Promise.all([
-    all('Procedure', { subject: ref }), all('DiagnosticReport', { subject: ref }), loaded ?? loadObservations(client, patientId),
-    all('Observation', { subject: ref, 'code:text': 'Health maintenance' }), all('Condition', { subject: ref }), all('Basic', { subject: ref, code: `${REMINDER}|` }),
-  ]) as [Resource[], Resource[], Observation[], Observation[], Condition[], Basic[]];
-  const planIds = new Set(hm.map((o) => o.id));
-  const evidence = obs.filter((o) => !planIds.has(o.id) && (!o.category?.length || o.category.some((c) => c.coding?.some((k) => k.code === 'laboratory' || k.code === 'vital-signs'))));
   const rules = loadRules();
-  const vaccines = await vaccineGaps(client, patientId, asOf, obs);
+  const screen = screenings(rules, { birthDate: p.birthDate, sex }, asOf);
+  // Records are folded as their pages arrive and dropped. Their place in [procedures, reports, evidence, conditions, told] (type,
+  // then page order) breaks ties, as when they were one array.
+  const seq = [0, 0, 0, 0, 0];
+  const fold = (type: number) => (page: Resource[]) => { for (const r of page) screen.add(r, type * 2 ** 32 + seq[type]++); };
+  const each = (type: ResourceType, n: number) => eachPage(client, type, { subject: ref }, fold(n));
+  const immunity: Evidence[] = [];
+  const schedule = loadSchedule();
+  // One read of the non-Apple Observations (Apple readings are numerous and never evidence) serves screening evidence and vaccine immunity.
+  const hmP = searchAll(client, 'Observation', { subject: ref, 'code:text': 'Health maintenance' }) as Promise<Observation[]>;
+  const observations = hmP.then((hm) => {
+    const planIds = new Set(hm.map((o) => o.id));
+    const evidence = fold(2);
+    const page = (os: Observation[]) => {
+      evidence(os.filter((o) => !planIds.has(o.id) && (!o.category?.length || o.category.some((c) => c.coding?.some((k) => k.code === 'laboratory' || k.code === 'vital-signs')))));
+      for (const o of os) { const e = immunityOf(o, schedule); if (e) immunity.push(e); }
+    };
+    return loaded ? page(loaded) : eachObservation(client, patientId, page);
+  });
+  const [hm, basics] = await Promise.all([
+    hmP, searchAll(client, 'Basic', { subject: ref, code: `${REMINDER}|` }) as Promise<Basic[]>,
+    each('Procedure', 0), each('DiagnosticReport', 1), observations, each('Condition', 3),
+  ]);
+  const vaccines = await vaccineGaps(client, patientId, asOf, immunity);
   // "I already did this" (done) for a screening becomes a record the rule's own text match and interval read.
-  const told = basics.flatMap((b): Resource[] => {
+  fold(4)(basics.flatMap((b): Resource[] => {
     const get = (url: string) => b.extension?.find((e) => e.url === url)?.valueString;
     const method = get(X.method), date = get(X.doneDate);
     const t = rules.topics.find((x) => x.id === get(X.topic)?.toLowerCase());
@@ -175,8 +190,8 @@ export async function healthMaintenance(client: MedplumClient, patientId: string
     const type = t.doneBy.find((d) => d.name === method)?.types[0] ?? 'Procedure';
     return [{ resourceType: type, id: b.id, status: type === 'Procedure' ? 'completed' : 'final', code: { text: method }, meta: { source: TOLD },
       ...(type === 'Procedure' ? { performedDateTime: fullDay(date) } : { effectiveDateTime: fullDay(date) }) } as unknown as Resource];
-  });
-  const guideline = evaluateScreenings(rules, { birthDate: p.birthDate, sex, records: [...procedures, ...reports, ...evidence, ...conditions, ...told] }, asOf);
+  }));
+  const guideline = screen.result();
   for (const g of guideline) if (g.last?.source === TOLD && g.last.id) g.last.id = g.last.id.replace(/^\w+\//, 'Basic/'); // the synthetic record is the Basic
   const items = combine(guideline, vaccineItems(vaccines), epicPlans(hm, p.birthDate), basics, rules, asOf);
   return { asOf, edition: rules.edition, items, upcoming: upcoming(items, asOf, months), byTheWay: byTheWay(items, asOf), note: NOTE };

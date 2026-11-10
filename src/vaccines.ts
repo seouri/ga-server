@@ -5,7 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Immunization, Observation, Patient } from '@medplum/fhirtypes';
-import { loadObservations, searchAll, validDay } from './labs.ts';
+import { eachObservation, eachPage, validDay } from './labs.ts';
 import { trusted } from './concept-apply.ts';
 import { GaError } from './config.ts';
 import { TAG } from './identity.ts';
@@ -33,7 +33,7 @@ export type Schedule = {
   vaccines: { id: string; name: string; cvx: string[]; names: string[]; excludeNames?: string[]; rules: Rule[]; immuneIf?: { loinc?: string[]; names: string[]; positive: string[]; all?: boolean } }[];
 };
 type Dose = { date: string; cvx?: string; name?: string; source: string };
-type Evidence = { name: string; value: string; date: string; source: string };
+export type Evidence = { name: string; value: string; date: string; source: string };
 // sex is absent when GA's gender is neither male nor female: sex-specific rules (none in the 2025 schedule) then never apply.
 export type VaccineInput = { birthDate: string; sex?: 'male' | 'female'; immunizations: Dose[]; immunity: Evidence[] };
 type Status = 'complete' | 'due' | 'overdue' | 'not-recommended' | 'immune' | 'not-evaluated';
@@ -65,6 +65,14 @@ export const addMonths = (date: string, n: number) => {
 export const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 export const ageOn = (birth: string, asOf: string) => Number(asOf.slice(0, 4)) - Number(birth.slice(0, 4)) - (asOf.slice(5, 10) < birth.slice(5, 10) ? 1 : 0);
 
+// Lab evidence of immunity to v under one of its immuneIf names. The value must start with a positive word ("Positive
+// (immune)"), not merely contain one ("Immune status unknown").
+const immuneBy = (v: Schedule['vaccines'][number], e: Evidence, n: string) => {
+  const nm = norm(e.name);
+  return has(nm, n) && !/\bigm\b/.test(nm) && (!BARE.has(n) || ANTIBODY.test(nm))
+    && v.immuneIf!.positive.some((p) => new RegExp(`^${p}\\b`).test(e.value.trim().toLowerCase())) && !NEGATED.test(norm(e.value));
+};
+
 export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: string) {
   const day = asOf.slice(0, 10);
   const age = ageOn(input.birthDate, day);
@@ -95,10 +103,7 @@ export function evaluateVaccines(schedule: Schedule, input: VaccineInput, asOf: 
     const last = doses.at(-1)?.date.slice(0, 10);
     const out = (status: Status, reason: string, used: Ref[] = records) => ({ vaccine: v.id, status, records: used, reason });
 
-    // The value must start with a positive word ("Positive (immune)"), not merely contain one ("Immune status unknown").
-    const pos = (e: Evidence) => v.immuneIf!.positive.some((p) => new RegExp(`^${p}\\b`).test(e.value.trim().toLowerCase())) && !NEGATED.test(norm(e.value));
-    const named = (e: Evidence, n: string) => { const nm = norm(e.name); return has(nm, n) && !/\bigm\b/.test(nm) && (!BARE.has(n) || ANTIBODY.test(nm)); };
-    const ev = (n: string) => immunity.filter((e) => named(e, n) && pos(e));
+    const ev = (n: string) => immunity.filter((e) => immuneBy(v, e, n));
     if (v.immuneIf) {
       const groups = v.immuneIf.names.map(ev);
       const ok = v.immuneIf.all ? groups.every((g) => g.length) : groups.some((g) => g.length);
@@ -141,23 +146,35 @@ export function doseOf(i: Immunization): Dose {
   return { date: (i.occurrenceDateTime ?? '').slice(0, 10), ...(cvx && { cvx }), ...(name && { name }), source: src(i) };
 }
 
-// Reads the patient's own GA data so values never pass through the agent.
-export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), loaded?: Observation[]) {
+// An Observation as lab evidence of immunity, when some vaccine of the schedule can use it; else undefined (not kept).
+export function immunityOf(o: Observation, schedule = loadSchedule()): Evidence | undefined {
+  if (['entered-in-error', 'cancelled', 'preliminary'].includes(o.status)) return undefined;
+  const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;
+  const value = o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.find((c) => c.display)?.display;
+  const e = name && value ? { name, value, date: (o.effectiveDateTime ?? '').slice(0, 10), source: src(o) } : undefined;
+  return e && schedule.vaccines.some((v) => v.immuneIf?.names.some((n) => immuneBy(v, e, n))) ? e : undefined;
+}
+
+// Reads the patient's own GA data so values never pass through the agent. Records are read page by page and only doses and
+// immunity evidence kept. immunity: already read from the Observations (health maintenance reads them once for both).
+export async function vaccineGaps(client: MedplumClient, patientId: string, asOf = new Date().toLocaleDateString('en-CA'), immunity?: Evidence[]) {
   if (!validDay(asOf)) throw new GaError('asOf must be a date (YYYY-MM-DD)');
   const p = await client.readResource('Patient', patientId, { cache: 'no-cache' }) as Patient;
   if (!p.birthDate) throw new GaError('Patient has no birthDate in GA');
   const sex = p.gender === 'male' || p.gender === 'female' ? p.gender : undefined;
-  const imms = ((await searchAll(client, 'Immunization', { patient: `Patient/${patientId}` })) as Immunization[]).filter((i) => i.status === 'completed');
-  const obs = (loaded ?? await loadObservations(client, patientId)).filter((o) => !['entered-in-error', 'cancelled', 'preliminary'].includes(o.status));
-  const immunizations = imms.map(doseOf);
-  const immunity = obs.flatMap((o) => {
-    const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;
-    const value = o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.find((c) => c.display)?.display;
-    return name && value ? [{ name, value, date: (o.effectiveDateTime ?? '').slice(0, 10), source: src(o) }] : [];
-  });
-  const possibleDuplicates = imms
-    .filter((i) => i.meta?.tag?.some((t) => t.system === TAG && t.code === 'possible-duplicate'))
-    .map((i) => ({ date: (i.occurrenceDateTime ?? '').slice(0, 10), name: i.vaccineCode?.text, source: src(i) }));
-  return { ...evaluateVaccines(loadSchedule(), { birthDate: p.birthDate, sex, immunizations, immunity }, asOf), asOf, possibleDuplicates,
+  const schedule = loadSchedule();
+  const immunizations: Dose[] = [];
+  const possibleDuplicates: { date: string; name?: string; source: string }[] = [];
+  const found: Evidence[] = [];
+  await Promise.all([
+    eachPage<Immunization>(client, 'Immunization', { patient: `Patient/${patientId}` }, (page) => {
+      for (const i of page.filter((x) => x.status === 'completed')) {
+        immunizations.push(doseOf(i));
+        if (i.meta?.tag?.some((t) => t.system === TAG && t.code === 'possible-duplicate')) possibleDuplicates.push({ date: (i.occurrenceDateTime ?? '').slice(0, 10), name: i.vaccineCode?.text, source: src(i) });
+      }
+    }),
+    immunity ?? eachObservation(client, patientId, (page) => { for (const o of page) { const e = immunityOf(o, schedule); if (e) found.push(e); } }),
+  ]);
+  return { ...evaluateVaccines(schedule, { birthDate: p.birthDate, sex, immunizations, immunity: immunity ?? found }, asOf), asOf, possibleDuplicates,
     ...(!sex && { note: `Patient gender in GA is ${p.gender ?? 'missing'}: sex-specific rules not applied (the schedule has none).` }) };
 }
