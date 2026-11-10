@@ -62,3 +62,31 @@ The synthetic export now writes sleep as watchOS 9+ does: one in-bed span and 35
 | 1,095 days | 14.7 MiB (4.9 MiB/yr) | 7.6 MiB (2.5 MiB/yr) |
 
 At this rate, 10 years keep about 25 MiB live on top of the working set of a batch (15–20 MiB measured). The 2 GB runs above used the earlier four-segment sleep shape; they were not repeated for this change.
+
+## Task 5: the import in a worker thread inside the gateway
+
+Setup: a gateway stand-in loads `src/gateway/server.ts` and runs one `import_file` job (`startJob`, unzip, archive, batched import) in a worker with `resourceLimits` {old 64 MB, young as below}. Export: the 365-day synthetic export from `tests/fixtures-gen/apple.ts` (218 MB `export.xml`, 7 MB zip, 7,300 resources). Environment: `node:26.13.0-alpine`, store in a second container.
+- The cgroup peak is from `docker stats` sampled about every second, as in the recon; idle it reads 104 MiB, like the real gateway.
+- RssAnon and VmHWM are from `/proc/self/status`. VmHWM includes about 70 MiB of file-backed pages (the node binary and ICU), so it is not the container's figure.
+
+| young MB | batch | cgroup peak (docker stats) | VmHWM | peak RssAnon | RssAnon before batch 0 | time |
+|---|---|---|---|---|---|---|
+| idle (no job) | - | 104 MiB | 169 | 99 | - | - |
+| default | 900 | 247 | 353 | - | - | 187 s |
+| 16 | 500 | 191 | 282 | - | - | 123 s |
+| **8** | **500** | **174 / 175 (two runs)** | 249 / 272 | 170 | 153 | 119-158 s |
+| 8 | 250 | 180 | 255 | 170 | 151 | 117 s |
+| 16 | 250 | 196 | 273 | 187 | 163 | 117 s |
+
+- Chosen: `IMPORT_WORKER_HEAP_MB = 64` and `IMPORT_WORKER_YOUNG_MB = 8`, with the Apple batch size kept at 500.
+  - Whole gateway at its peak: 175 MiB, within 190.
+  - The import's increment over the idle gateway: about 71 MiB, within `IMPORT_WORKER_RSS_MB = 86`.
+- The young generation is what the cap was missing. V8's default young generation (semi-spaces) sits outside `maxOldGenerationSizeMb` and cost about 70 MiB here.
+- Smaller batches did not help: 250 gave the same or more, because the per-batch working set is small next to the fixed costs.
+- The peak by phase:
+  - Most of the peak comes before the first batch is written: 153 of 170 MiB RssAnon, during the unzip, the streamed archive upload and the read.
+  - Part of that is off-heap (zlib and tar buffers, streams), which `resourceLimits` does not cap.
+  - The batches add about 17 MiB on top.
+- The worker's own baseline is small next to a child process: the worker's isolate and modules sit inside the figures above, with no second node binary or second set of `@medplum/*` code.
+- Not measured here: the 3,650-day (2 GB) export through the worker. The read's retained daily state grows about 2.5 MiB a year (see above), so expect about 20 MiB more at 10 years. Task 7's whole-server run is the gate (Ruling 7).
+- Too-small caps: with `maxOldGenerationSizeMb: 2`, V8 aborts the whole process while creating the worker's isolate. That is a fatal error, not `ERR_WORKER_OUT_OF_MEMORY`. With 8 MB the worker runs out of memory cleanly while loading modules, and the gateway lives on (tested).
