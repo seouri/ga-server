@@ -303,6 +303,14 @@ function mergeValue(a: unknown, b: unknown, newer: boolean, k: string): unknown 
 }
 
 // Incoming body wins; keeps identifiers from merges, review tags and possible-duplicate pointers.
+type Note = { text?: string; time?: string };
+const noteList = (r: R): Note[] => ((r as { note?: Note[] }).note ?? []);
+// Notes of `incoming` that `existing` lacks (by text and time).
+const newNotes = (existing: R, incoming: R): Note[] => {
+  const have = new Set(noteList(existing).map((n) => `${n.time ?? ''}|${n.text ?? ''}`));
+  return noteList(incoming).filter((n) => !have.has(`${n.time ?? ''}|${n.text ?? ''}`));
+};
+
 async function unionUpdate(client: MedplumClient, existing: R, coded: R): Promise<Resource> {
   const incoming = carryConcept(existing, coded);
   const ids = idList(existing);
@@ -604,7 +612,13 @@ export async function importResources(
       } else if (existing) {
         target = existing;
         const filled = fillFrom(existing, coded, source);
-        const d = decide(existing, filled);
+        let d = decide(existing, filled);
+        // A FHIR export copy at the same source date that adds notes (the annotation copy) updates the record and keeps its own notes.
+        const addedNotes = source.kind === 'fhir-export' && d === 'skip' && !agentOrShielded(existing) ? newNotes(existing, filled) : [];
+        if (addedNotes.length) {
+          d = 'update';
+          Object.assign(filled, { note: [...noteList(existing), ...addedNotes] });
+        }
         // An Apple reading already merged into a hospital record: the hospital body stays, whatever the dates say.
         // Hospital ids the Apple copy itself carries (Health Records allergies) don't count.
         const inc = new Set(idList(incoming).map(idKey));

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { DocumentReference, Encounter, MedicationRequest, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { DiagnosticReport, DocumentReference, Encounter, MedicationRequest, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { fetchAll, mapForGa } from '../src/smart/fetch.ts';
 import { sourceKey } from '../src/smart/auth.ts';
 import { walkReferences } from '../src/patient.ts';
@@ -101,6 +101,16 @@ describe('fetchAll', () => {
     const got = await fetchAll(m2.fhirBase, m2.grant(), P, ['Encounter']);
     await m2.close();
     expect(got.byType.Encounter).toBe(2);
+  });
+});
+
+describe('mapForGa report text', () => {
+  it('converts report html to text', () => {
+    const base = 'https://fhir.example.org/api/FHIR/R4/';
+    const dr = { resourceType: 'DiagnosticReport', id: 'r1', status: 'final', code: { text: 'X-ray' }, presentedForm: [{ contentType: 'text/html', data: Buffer.from('<p>Impression: normal</p>').toString('base64') }] } as DiagnosticReport;
+    const out = mapForGa([dr], { key: sourceKey(base), name: 'x', fhirBase: base }).resources[0] as DiagnosticReport;
+    expect(out.presentedForm?.[0].contentType).toBe('text/plain; charset=utf-8');
+    expect(Buffer.from(out.presentedForm?.[0].data ?? '', 'base64').toString('utf8')).toBe('Impression: normal');
   });
 });
 
