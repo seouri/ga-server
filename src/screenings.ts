@@ -44,23 +44,56 @@ export const SOON_DAYS = 90; // "due soon" window, shared with the doctor's-plan
 const NEVER = '9999-12-31'; // a once-in-a-lifetime test never falls due again
 
 export function evaluateScreenings(rules: Rules, input: ScreenInput, asOf: string): GuidelineItem[] {
+  const f = screenings(rules, input, asOf);
+  input.records.forEach((r, i) => f.add(r, i));
+  return f.result();
+}
+
+// What a record contributes, without the record.
+type Hit = { date: string; by: string; order: number; years?: number | null; due?: string; source?: string; id?: string };
+
+// evaluateScreenings as a fold, so a caller hands records over as pages arrive and keeps none: per topic the record that
+// covers longest and, per history method, its first dated and first matching record. order: the record's place in the
+// input (ties go to the earlier), so records may be added in any order.
+export function screenings(rules: Rules, input: Omit<ScreenInput, 'records'>, asOf: string) {
   const day = asOf.slice(0, 10);
   const age = ageOn(input.birthDate, day);
+  const best = new Map<string, Hit>();
+  const history = new Map<string, { dated?: Hit; any?: Hit }[]>(rules.topics.map((t) => [t.id, (t.history ?? []).map(() => ({}))]));
+  const first = (a: Hit | undefined, b: Hit) => (!a || b.order < a.order ? b : a);
   // Clinic records only: Apple Health readings never count (controller ruling); nothing after asOf.
   // A date before birth is a placeholder: never shown, and the record is no screening evidence (history still counts).
-  const all = (input.records as Rec[]).flatMap((r) => {
+  const add = (rec: Resource, order: number) => {
+    const r = rec as Rec;
     const date = dateOf(r);
     const apple = r.meta?.tag?.some((t) => t.system === TAG && t.code === 'src-apple-health');
     const status = r.status ?? r.verificationStatus?.coding?.[0]?.code ?? '';
-    if (apple || date > day || NOT_EVIDENCE.has(status) || r.dataAbsentReason) return [];
+    if (apple || date > day || NOT_EVIDENCE.has(status) || r.dataAbsentReason) return;
     const codings = trusted(r, r.code?.coding);
     // "HIV-1/2 Ag/Ab" reads as " HIV 1 2 Ag Ab ".
     const raw = ` ${[r.code?.text, ...codings.map((c) => c.display)].join(' ').replace(/[^A-Za-z0-9]+/g, ' ').trim()} `;
-    return [{ r, date: date >= input.birthDate ? date : '', codes: new Set(codings.map((c) => `${c.system}|${c.code}`)), name: raw.toLowerCase(), raw } as Found];
-  });
-  const records = all.filter((f) => f.date);
+    const f: Found = { r, date: date >= input.birthDate ? date : '', codes: new Set(codings.map((c) => `${c.system}|${c.code}`)), name: raw.toLowerCase(), raw };
+    for (const t of rules.topics) {
+      t.history?.forEach((m, i) => {
+        if (!matches(m, f)) return;
+        const h = history.get(t.id)![i], hit = { date: f.date, by: m.name, order };
+        h.any = first(h.any, hit);
+        if (f.date) h.dated = first(h.dated, hit);
+      });
+      // Each record counts by its shortest matching interval; the record that keeps the person covered longest wins.
+      if (!f.date) continue;
+      const hits = t.doneBy.filter((d) => matches(d, f) && !(d.minAge && ageOn(input.birthDate, f.date) < d.minAge));
+      if (!hits.length) continue;
+      const d = hits.reduce((a, b) => ((a.years ?? Infinity) <= (b.years ?? Infinity) ? a : b));
+      const due = d.years === null ? NEVER : addMonths(f.date, d.years * 12);
+      const b = best.get(t.id);
+      if (!b || due > b.due! || (due === b.due && (f.date > b.date || (f.date === b.date && order < b.order)))) {
+        best.set(t.id, { due, date: f.date, by: d.name, years: d.years, order, ...(r.meta?.source && { source: basename(r.meta.source) }), ...(r.id && { id: `${r.resourceType}/${r.id}` }) });
+      }
+    }
+  };
 
-  return rules.topics.map((t) => {
+  const result = () => rules.topics.map((t) => {
     const out = (status: Status, reason: string, extra: Partial<GuidelineItem> = {}): GuidelineItem => ({
       topic: t.id, name: t.name, status, grade: t.grade, ...extra, reason, why: t.why, cost: t.cost,
       citation: `USPSTF recommendation statement, grade ${t.grade}, ${t.published}: ${t.source}`,
@@ -69,33 +102,27 @@ export function evaluateScreenings(rules: Rules, input: ScreenInput, asOf: strin
     const who = t.sex === 'female' ? 'women' : 'men';
     if (t.sex && !input.sex) return out('discuss', `The guideline is for ${who}; whether it applies to you is worth discussing with your doctor.`);
     if (t.sex && input.sex !== t.sex) return out('not for you', `For ${who}.`);
-    const h = t.history?.flatMap((m) => all.filter((f) => matches(m, f)).map((f) => ({ ...f, by: m.name }))).sort((x, y) => (y.date ? 1 : 0) - (x.date ? 1 : 0))[0]; // a dated match first
+    const hs = history.get(t.id)!;
+    const h = hs.find((x) => x.dated)?.dated ?? hs.find((x) => x.any)?.any; // a dated match first, then by method, then by record
     if (h) return out('discuss', `Your record shows ${h.by}${h.date ? ` on ${h.date}` : ''}; whether this screening still applies is worth discussing with your doctor.`);
 
-    // Each record counts by its shortest matching interval; the record that keeps the person covered longest wins.
-    let best: { due: string; date: string; by: string; years: number | null; r: Rec } | undefined;
-    for (const m of records) {
-      const hits = t.doneBy.filter((d) => matches(d, m) && !(d.minAge && ageOn(input.birthDate, m.date) < d.minAge));
-      if (!hits.length) continue;
-      const d = hits.reduce((a, b) => ((a.years ?? Infinity) <= (b.years ?? Infinity) ? a : b));
-      const due = d.years === null ? NEVER : addMonths(m.date, d.years * 12);
-      if (!best || due > best.due || (due === best.due && m.date > best.date)) best = { due, date: m.date, by: d.name, years: d.years, r: m.r };
-    }
-    const last = best && { date: best.date, by: best.by, ...(best.r.meta?.source && { source: basename(best.r.meta.source) }), ...(best.r.id && { id: `${best.r.resourceType}/${best.r.id}` }) };
-    const dueDate = best && best.years !== null ? best.due : undefined;
+    const b = best.get(t.id);
+    const last = b && { date: b.date, by: b.by, ...(b.source && { source: b.source }), ...(b.id && { id: b.id }) };
+    const dueDate = b && b.years !== null ? b.due : undefined;
     const seen = last ? ` Last ${last.by} on ${last.date}.` : '';
 
     if (t.grade === 'C') return out('discuss', `USPSTF grade C: worth discussing with your doctor.${seen}`, { ...(last && { last }) });
     let status: Status;
     let reason: string;
-    if (!best) [status, reason] = ['due', `No ${[...new Set(t.doneBy.map((d) => d.name))].join(' or ')} on record.`];
-    else if (!dueDate) [status, reason] = ['done', `${best.by} on ${best.date}; needed once.`];
-    else if (dueDate < day) [status, reason] = ['overdue', `Last ${best.by} on ${best.date}; was due ${dueDate}.`];
-    else [status, reason] = [dueDate <= addDays(day, SOON_DAYS) ? 'due soon' : 'done', `Last ${best.by} on ${best.date}; next due ${dueDate}.`];
+    if (!b) [status, reason] = ['due', `No ${[...new Set(t.doneBy.map((d) => d.name))].join(' or ')} on record.`];
+    else if (!dueDate) [status, reason] = ['done', `${b.by} on ${b.date}; needed once.`];
+    else if (dueDate < day) [status, reason] = ['overdue', `Last ${b.by} on ${b.date}; was due ${dueDate}.`];
+    else [status, reason] = [dueDate <= addDays(day, SOON_DAYS) ? 'due soon' : 'done', `Last ${b.by} on ${b.date}; next due ${dueDate}.`];
     // GA cannot check the risk factor: only a current screening on record answers it.
     if (t.riskBased && status !== 'done' && status !== 'due soon') {
       return out('discuss', `For people with "${t.riskBased}" (the guideline's words); whether that applies to you is worth discussing with your doctor.${seen}`, { ...(last && { last }) });
     }
     return out(status, reason, { ...(dueDate && { dueDate }), ...(last && { last }) });
   });
+  return { add, result };
 }
