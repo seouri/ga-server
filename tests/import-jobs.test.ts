@@ -1,4 +1,5 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
+import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -155,6 +156,23 @@ test('three failed attempts mark the job failed with the last error and keep roo
   expect(j).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringContaining('GA is not running') });
   expect(existsSync(j.root!)).toBe(true);
 });
+
+// A batch too big for the container: the kernel kills the whole gateway each time (no worker error, no message), the restarted
+// gateway resumes it on the same batch. Attempts are counted before each start, so it ends failed, with the plain message.
+test('a batch that kills the whole process every time ends failed after three restarts, with the out-of-memory message', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const host = `const { resumeJobs, jobStatus } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
+    resumeJobs(process.argv[1], { run: async () => process.kill(process.pid, 'SIGKILL') });
+    for (;;) { if (jobStatus(process.argv[1], process.argv[2]).status !== 'running') process.exit(0); await new Promise((r) => setTimeout(r, 20)); }`;
+  let kills = 0;
+  for (let i = 0; i < 6 && jobStatus(a.dir, job.id)!.status === 'running'; i++) {
+    const r = spawnSync('node', ['--input-type=module', '-e', host, a.dir, job.id], { env: { PATH: process.env.PATH!, GA_CONFIG: a.config } });
+    if (r.signal === 'SIGKILL') kills++;
+  }
+  expect(kills).toBe(3);
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringMatching(/^GA stopped during each of the last 3 attempts.*import it with `ga import` on a computer with more memory$/) });
+}, 60_000);
 
 test('a job that made progress gets three fresh attempts after it', async () => {
   const a = await store();
