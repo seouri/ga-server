@@ -180,7 +180,7 @@ test('a batch that kills the whole process every time ends failed after three re
   const path = join(a.dir, 'imports', job.id, 'job.json');
   writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), message: 'waiting for the import lock: another import or sync is running' })); // stale
   const host = `const { resumeJobs, jobStatus } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
-    resumeJobs(process.argv[1], { run: async () => process.kill(process.pid, 'SIGKILL') });
+    resumeJobs(process.argv[1], { run: async (d, id) => { (await import('node:fs')).writeFileSync(d + '/imports/' + id + '/import.lock', '{}'); process.kill(process.pid, 'SIGKILL'); } });
     for (;;) { if (jobStatus(process.argv[1], process.argv[2]).status !== 'running') process.exit(0); await new Promise((r) => setTimeout(r, 20)); }`;
   let kills = 0;
   for (let i = 0; i < 6 && jobStatus(a.dir, job.id)!.status === 'running'; i++) {
@@ -189,6 +189,7 @@ test('a batch that kills the whole process every time ends failed after three re
   }
   expect(kills).toBe(3);
   expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringMatching(/^GA stopped during the last attempt, most likely out of memory: .*import it with `ga import` on a computer with more memory$/) });
+  expect(readdirSync(join(a.dir, 'imports', job.id))).toEqual(['job.json']);
 }, 60_000);
 
 // docker restart, a deploy, a reboot: SIGTERM mid-attempt. The attempt is given back, so restarts never fail a healthy job.
