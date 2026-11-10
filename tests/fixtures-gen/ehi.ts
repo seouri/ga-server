@@ -12,8 +12,9 @@ const ID = /(^|_)(ID|CSN)$|_CSN_ID$/;
 const DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}:\d{2}:\d{2} [AP]M)$/;
 const PARA = 'Synthetic paragraph: the patient’s visit went as planned, vitals stable, no new complaints, plan unchanged. ';
 
-// sizes in KB per copy: an RTF note (note 1001), a plain-text note (1002) and an RTF message (900001).
-export type EhiSizes = { noteKB: number; plainKB: number; messageKB: number };
+// sizes in KB per copy: an RTF note (note 1001), a plain-text note (1002) and an RTF message (900001). distinct: each copy's RTF
+// note names its copy, so every Rich Text file is stored (otherwise all copies are one file, stored once).
+export type EhiSizes = { noteKB: number; plainKB: number; messageKB: number; distinct?: boolean };
 
 const newId = (v: string, k: number) => (k && /^\d+$/.test(v) ? `${v}${String(k).padStart(5, '0')}` : v);
 function shift(v: string, k: number): string {
@@ -28,7 +29,7 @@ const text = (kb: number, rtf: boolean) => {
   return s;
 };
 
-export async function writeEhiExport(dir: string, factor: number, sizes: EhiSizes = { noteKB: 60, plainKB: 30, messageKB: 15 }): Promise<{ bytes: number; notes: number; messages: number }> {
+export async function writeEhiExport(dir: string, factor: number, sizes: EhiSizes = { noteKB: 60, plainKB: 30, messageKB: 15, distinct: true }): Promise<{ bytes: number; notes: number; messages: number }> {
   mkdirSync(join(dir, 'EHITables'), { recursive: true });
   mkdirSync(join(dir, 'Rich Text'), { recursive: true });
   copyFileSync(join(FIX, 'readme.PDF'), join(dir, 'readme.PDF'));
@@ -64,7 +65,7 @@ export async function writeEhiExport(dir: string, factor: number, sizes: EhiSize
   }
   for (let k = 0; k < factor; k++) {
     const out = join(dir, 'Rich Text', `HNO_${newId('1001', k)}_56510_41.RTF`);
-    const s = `${noteRtf}`;
+    const s = sizes.distinct ? noteRtf.replace('Synthetic note body.', `Synthetic note body ${k}.`) : noteRtf;
     bytes += s.length;
     await new Promise<void>((ok, no) => createWriteStream(out).end(s, () => ok()).on('error', no));
   }

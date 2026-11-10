@@ -109,6 +109,8 @@ function* documents(t: EhiTables, ctx: EhiCtx, dir: string, size: number, c: Rea
 }
 
 // The export's batches in order. Same export and size: same batches, so a resumed import skips exactly the written ones.
+// shortcut: one source key (TABLE|pk) twice with different content in different batches (a malformed export: Epic's keys are
+// unique) reads as a newer copy of the first instead of two records each keyed by content; group by key if exports show it.
 function* ehiBatches(t: EhiTables, ctx: EhiCtx, dir: string, size: number, c: ReadCounts): Generator<Batch> {
   let index = 0;
   for (const g of cut(records(t, ctx, c), size, weight)) yield { index: index++, resources: g.flat(), files: [] };

@@ -47,6 +47,8 @@ const immBody = (f: ImmFields, ctx: EhiCtx) => {
 // A row without a vaccine name or date says nothing: skipped, counted.
 // Yields one group per day (that day's IMMUNE doses, then its IMM_ADMIN pairs), so a possible duplicate and the doses it points
 // at, and every record the linking pass (linkImmunizationsToExisting) pairs on one day, are written together.
+// shortcut: an IMMUNE dose whose C-CDA copy has another date claims that copy only within its own day's batch, so an IMM_ADMIN
+// pair on the copy's date could link to it; never seen (C-CDA and EHI dates of a dose agree), batch all doses together if it is.
 export function* mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 }): Generator<Resource[]> {
   const enc = encounterRef(t);
   const seen = new Set<string>();

@@ -90,3 +90,36 @@ Setup: a gateway stand-in loads `src/gateway/server.ts` and runs one `import_fil
 - The worker's own baseline is small next to a child process: the worker's isolate and modules sit inside the figures above, with no second node binary or second set of `@medplum/*` code.
 - Not measured here: the 3,650-day (2 GB) export through the worker. The read's retained daily state grows about 2.5 MiB a year (see above), so expect about 20 MiB more at 10 years. Task 7's whole-server run is the gate (Ruling 7).
 - Too-small caps: with `maxOldGenerationSizeMb: 2`, V8 aborts the whole process while creating the worker's isolate. That is a fatal error, not `ERR_WORKER_OUT_OF_MEMORY`. With 8 MB the worker runs out of memory cleanly while loading modules, and the gateway lives on (tested).
+
+## Task 6: Epic EHI and C-CDA through the worker
+
+Setup as in Task 5: the gateway stand-in (now `tests/import-memory-host.ts`) runs one `import_file` job on a zipped upload in a worker with
+`resourceLimits` {old 64, young 8}, store in a second container, `node:26.13.0-alpine`. Exports: `tests/fixtures-gen/ehi.ts`, every
+fixture table's rows times the factor (new ids, dates a day earlier per copy), each copy with a 60 KB RTF note (distinct text per copy),
+a 30 KB plain-text note and a 15 KB RTF message. The zip is small (synthetic text compresses well); the unzipped bytes are below.
+
+| Export | Importer | status | records | time | idle anon | peak anon (increment) | docker stats peak |
+|---|---|---|---|---|---|---|---|
+| factor 900, 102 MB (45 MB tables, 56 MB Rich Text; 2,700 notes, 1,800 messages) | before Task 6 (80207ab, one batch) | failed: out of memory, 3 attempts | - | 9 s | 96 | 226 | 201 |
+| same | batched, 4 MB document batches | done | 27,904 created | 206 s | 97-102 | 183, 201, 203 | 192, 200, 182 |
+| same | + 1 MB document batches | done | 27,904 | ~180 s | 98-99 | 192, 184 | 188, 192 |
+| same | + reused read buffer, sparse rows (committed) | done | 27,904 | 181 s | 100 | 185 (85) | 183 |
+| same, distinct notes (every Rich Text file stored) | committed | done | 28,803 | 184-198 s | 98-101 | 194 (96), 180 (79) | 187, 192 |
+| factor 4500, 512 MB (224 MB tables, 281 MB Rich Text; 13,500 notes, 9,000 messages) | committed | done, 0 invalid | 139,504 created | 1,306 s | 99 | 221 (122) | 258 |
+
+- The peak is always before the first batch is committed: after the archive upload, while the concept-learning pre-pass reads every
+  record table and the first batch is linked. From there on the batches stay below it (notes and messages included).
+- It grows with the export: anon 180-194 at 102 MB, 221 at 512 MB. Worker heap (V8 used, macOS) at the same point: 32 MB at 102 MB,
+  43 MB at 512 MB; without the pre-pass 31 MB, but the records batches then reach 43-44 MB at 512 MB anyway (38 at 102 MB). The heap
+  stays under the 64 MB cap (no out-of-memory at 512 MB); what grows is how far V8 lets it grow before collecting, plus the per-key
+  indexes (O(visits, orders, doses, answer sets)) of the mapper in progress.
+- Against the targets (Ruling 7): 102 MB is at the line (docker stats 183-192 vs 190; increment 79-96 vs 86); 512 MB is over
+  (258 / 122). Task 7's whole-server run is the gate.
+- Per document batch: 4 MB of JSON per batch put the notes phase at 55 MB used heap; 1 MB keeps it at about 33.
+- One note: a single 5 MB RTF note imports (its text attachment is then rejected by the store as invalid, as before Task 6); a 10 MB
+  one runs the worker out of memory (the RTF is read whole and converted to text and base64).
+
+C-CDA (one document converted whole by the vendored converter, which builds the full tree): the largest fixture (`ccda-epic-style.xml`,
+40 KB) imports. Synthetic Health Summaries (the fixture's entries repeated with new ids; dense entries only, so a narrative-heavy
+document may fall at another size): 2.5 MB and 3.7 MB import (Linux 3.7 MB: anon 188, docker 192, 123 s); 4.9 MB, 6.1 MB and 49 MB
+run the worker out of memory (Linux 4.9 MB confirmed). Converting 6 MB retains about 32 MB (18 MB tree, 14 MB bundle).
