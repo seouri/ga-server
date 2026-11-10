@@ -31,6 +31,7 @@ export const SEARCH_SCHEMA = `
   create table if not exists idx(rid integer not null, type text not null, code text not null, sys text, val, lo, hi);
   create index if not exists idx_v on idx(type, code, val, sys, rid) where val is not null;
   create index if not exists idx_l on idx(type, code, lo, hi, rid) where lo is not null;
+  create index if not exists idx_h on idx(type, code, hi, rid) where hi is not null; -- ge, gt, eb bound hi only: without it, a scan of every row
   create index if not exists idx_r on idx(rid, code, val, sys, lo, hi);
   create table if not exists comp(rid integer not null, type text not null, code text not null, grp integer not null, n integer not null, sys text, val, lo, hi);
   create index if not exists comp_v on comp(type, code, n, val, rid);
