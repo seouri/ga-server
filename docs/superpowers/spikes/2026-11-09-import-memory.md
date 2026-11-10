@@ -170,6 +170,9 @@ Uploaded, started with `import_file`, `docker restart` of the gateway after batc
   3-5. 14:45, 14:52, 14:59: each resumed attempt re-read the export, climbed to 173 by the end of the read and was killed
      building batch 102 again. After the third attempt in a row without progress the job ended **failed** with the plain message
      ("GA stopped during each of the last 3 attempts, most likely out of memory: ..."), root kept, gateway answering.
+- Kills 2-5 are deterministic (same point, four attempts); kill 1 did not recur on the redo of batch 92 (a marginal transient;
+  the 10 s `docker exec` sampler runs inside the capped cgroup). No kill overlapped the parallel EHI runs. The restarts after
+  kills 2-5 loaded the plain-message change (committed mid-run); it touches only the failure message.
 - Integrity of what was written: 51,000 Observations in the store = the summed report's created = 102 x 500 (every uncapped
   batch was 500); no duplicate identifiers; `pending` cleared; no records from batch 102 on. The uncapped run of the same export:
   done, 73,000 created, 0 invalid, no duplicate identifiers, 5,309 s.
