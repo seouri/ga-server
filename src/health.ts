@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Encounter, Endpoint, Observation, Patient } from '@medplum/fhirtypes';
 import { TAG } from './identity.ts';
 import { collect, fit, labResults } from './labs.ts';
-import { concept, type Kind, listRows, loadLists } from './lists.ts';
+import { concept, type Kind, listsByKind } from './lists.ts';
 import { part, SOURCES } from './whats-new.ts';
 import { endpointStatus } from './smart/sync.ts';
 import { healthMaintenance, raiseNow } from './maintenance.ts';
@@ -34,7 +34,7 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
   };
   const [patient, lists, labs, vitals, maintenance, lastVisit, imports] = await Promise.all([
     part(client.readResource('Patient', patientId, opts).then((p: Patient) => ({ age: p.birthDate ? ageOn(p.birthDate, asOf) : undefined, sex: p.gender }))),
-    part(eps.then((e) => loadLists(client, patientId, e))),
+    part(eps.then((e) => listsByKind(client, patientId, e))),
     part(labResults(client, patientId, { summary: true, keyOnly: true, limit: 1000 })),
     part(Promise.all(VITALS.map(vital)).then((r) => r.flat())),
     // The engine's short view, so a chat app whose tool list predates health_maintenance still answers "what's due" from it.
@@ -52,6 +52,6 @@ export async function healthSummary(client: MedplumClient, patientId: string, ep
     })),
   ]);
   // At most 200 each, so the remote 150k cut can't drop the sections after them.
-  const list = (kind: Kind) => ('error' in lists ? lists : fit(listRows(lists.all, lists.ctx, kind).map(({ name, currency, since, source, flags }) => ({ name, currency, since, source, flags })), 200));
+  const list = (kind: Kind) => ('error' in lists ? lists : fit(lists[kind].map(({ name, currency, since, source, flags }) => ({ name, currency, since, source, flags })), 200));
   return { asOf, patient, problems: list('problems'), medications: list('medications'), allergies: list('allergies'), keyLabs: labs, vitals, maintenance, lastVisit: lastVisit ?? null, imports };
 }

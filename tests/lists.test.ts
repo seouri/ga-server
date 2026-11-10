@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { Resource } from '@medplum/fhirtypes';
 import { currencyContext } from '../src/current.ts';
-import { listRows, loadLists } from '../src/lists.ts';
+import { listRows, listsByKind, loadLists } from '../src/lists.ts';
 import type { MedplumClient } from '@medplum/core';
 import { NEWEST_IMPORT } from '../src/identity.ts';
 
@@ -115,4 +115,20 @@ test('loadLists: searches with _include ask for at most 500 per page', async () 
   await loadLists(client, 'p1', []);
   for (const [t, q] of asked) expect([t, q.get('_count')]).toEqual([t, q.has('_include') ? '500' : '1000']);
   expect(asked.filter(([, q]) => q.has('_include')).length).toBe(2);
+});
+
+// health_summary reads the lists page by page: each page's included Medications name its medications; the same rows as loadLists.
+test('listsByKind: page by page, the same rows as listRows over loadLists', async () => {
+  const two = [...all, { resourceType: 'MedicationRequest', id: 'a2', status: 'active', authoredOn: '2026-02-02', medicationReference: { reference: 'Medication/m1' }, ...seen(T0) }] as Resource[];
+  // Each type's matches one per page, a referenced Medication included in that page.
+  const pages = (t: string) => two.filter((r) => r.resourceType === t).map((r) => [r, ...((r as { medicationReference?: unknown }).medicationReference ? [all[0]] : [])]);
+  const page = (t: string, i: number) => ({ resourceType: 'Bundle', entry: (pages(t)[i] ?? []).map((resource) => ({ resource })), link: i + 1 < pages(t).length ? [{ relation: 'next', url: `http://h/fhir/R4/${t}?p=${i + 1}` }] : [] });
+  const client = {
+    search: async (t: string) => page(t, 0), get: async (url: string) => page(url.split('?')[0].split('/').at(-1)!, Number(url.split('p=')[1])),
+    readResource: async () => ({ resourceType: 'Patient', extension: [{ url: NEWEST_IMPORT, valueDateTime: T0 }] }),
+  } as unknown as MedplumClient;
+  const loaded = await loadLists(client, 'p1', [ep as never]);
+  const got = await listsByKind(client, 'p1', [ep as never]);
+  for (const kind of ['medications', 'problems', 'allergies'] as const) expect(got[kind]).toEqual(listRows(loaded.all, loaded.ctx, kind));
+  expect(got.medications.map((r) => r.name)).toContain('Metformin 500 mg');
 });

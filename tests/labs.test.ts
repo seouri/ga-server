@@ -2,7 +2,7 @@ import { describe, expect, it, test } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Observation } from '@medplum/fhirtypes';
 import { CONCEPT_SRC } from '../src/concept-apply.ts';
-import { isPanel, keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
+import { conceptMatch, groupLabs, highLow, isPanel, keyLabs, labResults, labRow, summarizeLabs, type LabRow, type LabTrend } from '../src/labs.ts';
 
 describe('labRow', () => {
   it('keeps the comparator, unit, one-sided ranges and flags; omits empty fields', () => {
@@ -197,4 +197,52 @@ test('isPanel: only a panel that holds nothing of its own is hidden behind its m
   expect(isPanel({ ...portal, interpretation: [{ coding: [{ code: 'A' }] }], note: [{ text: 'see members' }] })).toBe(false);
   expect(isPanel({ ...portal, referenceRange: [{ text: 'normal' }] })).toBe(false);
   expect(isPanel({ ...portal, dataAbsentReason: { text: 'not done' } })).toBe(false);
+});
+
+// summarizeLabs as it was (every result held, grouped, each group sorted): the fold must give the same trends, in the same order.
+function heldSummary(obs: Observation[]): LabTrend[] {
+  const loincOf = (o: Observation) => o.code?.coding?.find((c) => c.system === 'http://loinc.org')?.code;
+  const num = (o: Observation) => (o.valueQuantity?.comparator ? undefined : o.valueQuantity?.value);
+  const unitOf = (o: Observation) => o.valueQuantity?.unit ?? o.valueQuantity?.code;
+  return groupLabs(obs).map((os): LabTrend => {
+    const g = os.map((o) => { const m = conceptMatch(o); return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested }; });
+    const [l] = g;
+    const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
+    const a = num(l.o), b = p && num(p.o);
+    const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
+    return {
+      test: g.find((x) => x.m)?.m?.concept.name, name: l.r.name, loinc: g.map((x) => (x.guess ? undefined : loincOf(x.o))).find(Boolean), unit: unitOf(l.o),
+      latest: { date: l.r.date, value: a ?? l.r.value, flag, method: l.m?.label },
+      previous: p && { date: p.r.date, value: b ?? p.r.value, method: p.m?.label },
+      change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
+      count: g.length, outOfRange: g.filter((x) => highLow(x.o)).length, first: g.findLast((x) => x.r.date)?.r.date, source: l.r.source, flags: l.r.flags,
+    };
+  }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
+}
+
+test('summarizeLabs (a fold) matches every result held and grouped: ties, undated, uncoded twins, guesses, unmatched, several sources', () => {
+  let seed = 7;
+  const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) % n);
+  const pick = <T,>(xs: T[]) => xs[rnd(xs.length)];
+  const tag = (...codes: string[]) => codes.map((code) => ({ system: 'urn:ga-server:tag', code }));
+  const ga = (code: string) => ({ system: 'http://loinc.org', code, extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] });
+  for (let run = 0; run < 40; run++) {
+    const all: Observation[] = Array.from({ length: 60 }, (_, i) => {
+      const name = pick(['Glucose', 'glucose ', 'LDL', 'Hemoglobin A1c', 'eGFR', 'Other', '']);
+      const coding = pick([[], [], [{ system: 'http://loinc.org', code: pick(['2345-7', '13457-7', '4548-4', '98979-8', '48642-3', '9999-9']) }], [ga(pick(['2345-7', '13457-7']))]]);
+      const src = pick(['ehi', 'pdf', 'ccda']);
+      const codes = [`src-${src}`, ...(coding.length && rnd(3) === 0 ? ['concept-suggested'] : []), ...(rnd(8) === 0 ? ['concept-unmatched'] : []), ...(coding.some((c) => 'extension' in c) ? ['extracted-by-llm'] : [])];
+      return {
+        resourceType: 'Observation', id: `o${i}`, status: 'final', code: { ...(name && { text: name }), coding },
+        ...(rnd(6) ? { effectiveDateTime: pick(['2024-01-01', '2024-01-01T09:00:00Z', '2023-05-02', '2025-03-03', '2022-12-31']) } : {}),
+        valueQuantity: rnd(5) ? { value: rnd(200), unit: pick(['mg/dL', 'mg/dL', 'mmol/L']) } : { comparator: '<', value: 5, unit: 'mg/dL' },
+        ...(rnd(3) === 0 && { interpretation: [{ coding: [{ code: pick(['H', 'L', 'N', 'A']) }] }] }),
+        ...(rnd(3) === 0 && { referenceRange: [{ low: { value: 50 }, high: { value: 150 } }] }),
+        ...(src === 'ehi' && { identifier: [{ system: `urn:ga-server:id:ehi:${pick(['a', 'b'])}`, value: `x${i}` }] }),
+        meta: { tag: tag(...codes), lastUpdated: pick(['2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', undefined]), source: `/data/${src}/${pick(['one', 'two'])}.file` },
+      } as Observation;
+    });
+    expect(summarizeLabs(all)).toEqual(heldSummary(all));
+    expect(JSON.stringify(summarizeLabs(all))).toBe(JSON.stringify(heldSummary(all)));
+  }
 });

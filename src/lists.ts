@@ -1,12 +1,12 @@
 // current_medications, current_problems, allergies: active records with the currency rule (src/current.ts) already applied.
 import { basename } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { CodeableConcept, Endpoint, Resource } from '@medplum/fhirtypes';
+import type { CodeableConcept, Endpoint, Resource, ResourceType } from '@medplum/fhirtypes';
 import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { currencyContext, explain, isPlanned, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
-import { collect, fit, flagsOf } from './labs.ts';
+import { bundles, collect, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
@@ -42,8 +42,15 @@ export const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
 
 // all: every fetched resource (all four covered types, any status, plus included Medications); the context needs them all.
 export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all'): ListRow[] {
-  const meds = medMap(all);
-  const items = all.flatMap((res): { row: ListRow; keys: string[]; code?: string }[] => {
+  const g = grouper();
+  listItems(all, medMap(all), ctx, kind, include).forEach(g.add);
+  return g.rows();
+}
+
+type ListItem = { row: ListRow; keys: string[]; code?: string };
+// The rows of `kind` among rs, before grouping. meds: the Medications they may reference (an _include brings them in the same page).
+function listItems(rs: Resource[], meds: ReturnType<typeof medMap>, ctx: Ctx, kind: Kind, include?: 'all'): ListItem[] {
+  return rs.flatMap((res): ListItem[] => {
     const r = res as Any;
     if (!TYPES[kind].includes(r.resourceType)) return [];
     if (kind === 'problems' && !r.category?.some((c: Any) => c.coding?.some((x: Any) => x.code === 'problem-list-item'))) return [];
@@ -81,39 +88,68 @@ export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all')
     const coding = kind === 'medications' ? undefined : r.code?.coding?.find((x: Any) => x.system && x.code);
     return [{ row, keys: dupKeys, code: coding && `${coding.system}|${coding.code}` }];
   });
-  // One row per item across sources: same RxNorm or name (problems, allergies: and no differing standard codes). The best currency wins.
+}
+
+// One row per item across sources: same RxNorm or name (problems, allergies: and no differing standard codes). The best currency wins.
+// Items are added in the order of the records.
+function grouper() {
   const groups: { best: ListRow; keys: Set<string>; code?: string; sources: Set<string>; ids: string[] }[] = [];
-  for (const { row, keys, code } of items) {
+  const add = ({ row, keys, code }: ListItem) => {
     const g = keys.length ? groups.find((g) => keys.some((k) => g.keys.has(k)) && !(code && g.code && code !== g.code)) : undefined;
-    if (!g) { groups.push({ best: row, keys: new Set(keys), code, sources: new Set(row.source ? [row.source] : []), ids: row.id ? [row.id] : [] }); continue; }
+    if (!g) { groups.push({ best: row, keys: new Set(keys), code, sources: new Set(row.source ? [row.source] : []), ids: row.id ? [row.id] : [] }); return; }
     keys.forEach((k) => g.keys.add(k));
     g.code ??= code;
     if (row.source) g.sources.add(row.source);
     if (row.id) g.ids.push(row.id);
     if (rank(row) < rank(g.best)) g.best = row;
-  }
-  const rows = groups.map((g): ListRow => ({
+  };
+  const rows = () => groups.map((g): ListRow => ({
     ...g.best,
     ...(g.sources.size ? { source: [...g.sources].sort().join('; ') } : {}),
     ...(g.ids.length > 1 ? { ids: g.ids } : {}),
-  }));
   // Current first, then unconfirmed, unstated, inactive; newest first within each.
-  return rows.sort((a, b) => rank(a) - rank(b) || (b.since ?? '').localeCompare(a.since ?? ''));
+  })).sort((a, b) => rank(a) - rank(b) || (b.since ?? '').localeCompare(a.since ?? ''));
+  return { add, rows };
 }
+
+// The searches of each list, in the order their records are read.
+// A page may hold at most 1000 entries, includes counted (Medplum and GA's store refuse more): 500 matches leave room for their Medications.
+const searches = (patientId: string): Record<Kind, [ResourceType, URLSearchParams][]> => {
+  const q = (...p: string[][]) => new URLSearchParams([...p, ['_count', p.some(([k]) => k === '_include') ? '500' : '1000']]);
+  const subject = ['subject', `Patient/${patientId}`];
+  return {
+    medications: [['MedicationStatement', q(subject, ['_include', 'MedicationStatement:medication'])], ['MedicationRequest', q(subject, ['_include', 'MedicationRequest:medication'])]],
+    problems: [['Condition', q(subject)]],
+    allergies: [['AllergyIntolerance', q(['patient', `Patient/${patientId}`])]],
+  };
+};
 
 // Every covered record and the currency context, fetched once. eps: the patient's source Endpoints (read once, also for the stale-source warning).
 export async function loadLists(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<{ all: Resource[]; ctx: Ctx }> {
-  // A page may hold at most 1000 entries, includes counted (Medplum and GA's store refuse more): 500 matches leave room for their Medications.
-  const all = (type: string, q: string[][]) => collect(client, type as 'Observation', new URLSearchParams([...q, ['_count', q.some(([k]) => k === '_include') ? '500' : '1000']]), (r: Resource) => r, Infinity).then((x) => x.rows);
-  const subject = ['subject', `Patient/${patientId}`];
+  const s = searches(patientId);
   const [ms, mr, cond, alg, newest] = await Promise.all([
-    all('MedicationStatement', [subject, ['_include', 'MedicationStatement:medication']]),
-    all('MedicationRequest', [subject, ['_include', 'MedicationRequest:medication']]),
-    all('Condition', [subject]),
-    all('AllergyIntolerance', [['patient', `Patient/${patientId}`]]),
+    ...[...s.medications, ...s.problems, ...s.allergies].map(([type, q]) => collect(client, type, q, (r: Resource) => r, Infinity).then((x) => x.rows)),
     newestEpicImport(client, patientId),
-  ]);
+  ]) as [Resource[], Resource[], Resource[], Resource[], number];
   return { all: [...ms, ...mr, ...cond, ...alg], ctx: currencyContext([], eps, newest) };
+}
+
+// The three lists' rows (as listRows), read page by page: each page is made rows and dropped, so only the rows are kept.
+export async function listsByKind(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<Record<Kind, ListRow[]>> {
+  const ctx = currencyContext([], eps, await newestEpicImport(client, patientId));
+  const s = searches(patientId);
+  const read = async (kind: Kind) => {
+    const g = grouper();
+    for (const [type, q] of s[kind]) {
+      for await (const b of bundles(client, type, q)) {
+        const page = (b.entry ?? []).flatMap((e) => (e.resource ? [e.resource] : []));
+        listItems(page, medMap(page), ctx, kind).forEach(g.add);
+      }
+    }
+    return g.rows();
+  };
+  const [medications, problems, allergies] = await Promise.all([read('medications'), read('problems'), read('allergies')]);
+  return { medications, problems, allergies };
 }
 
 export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include: 'all' | undefined, eps: Endpoint[]): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {

@@ -22,7 +22,7 @@ export function flagsOf(meta?: { tag?: { code?: string }[] }): string[] | undefi
 }
 
 // The record's concept and member label. suggested: only through a GA-added coding on a record tagged concept-suggested.
-function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
+export function conceptMatch(o: Observation): { concept: Concept; label?: string; suggested?: true } | undefined {
   const codings = o.code?.coding ?? [];
   const mine = trusted(o, codings);
   const sure = conceptOf(mine);
@@ -66,34 +66,51 @@ export function dateRange(q: URLSearchParams, param: string, since?: string, unt
 
 // Reads pages until more than `limit` rows are kept (row() returns undefined to skip) or `scan` records were read.
 // more: rows or pages were left unread.
-// Every page of a search. _sort=_lastUpdated (ascending, _count >= 20) makes Medplum page by _cursor: it caps _offset at 10000.
+// Every page of a search, handed to `page` as it arrives and then dropped, so a caller keeps only what it derives.
+// _sort=_lastUpdated (ascending, _count >= 20) makes Medplum page by _cursor: it caps _offset at 10000.
+export async function eachPage<T extends Resource = Resource>(client: MedplumClient, type: ResourceType, q: Record<string, string>, page: (rs: T[]) => void): Promise<void> {
+  for await (const p of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) page(p as unknown as T[]);
+}
+
+// Every resource of a search.
 export async function searchAll(client: MedplumClient, type: ResourceType, q: Record<string, string>): Promise<Resource[]> {
   const out: Resource[] = [];
-  for await (const page of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) out.push(...page);
+  await eachPage(client, type, q, (p) => out.push(...p));
   return out;
 }
 
-// Every non-Apple Observation, loaded once so health maintenance, vaccines and what's new derive their subsets in memory.
-export const loadObservations = (client: MedplumClient, patientId: string) =>
-  searchAll(client, 'Observation', { subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` }) as Promise<Observation[]>;
+// Every non-Apple Observation: loaded once so what's new derives its subsets in memory, or page by page (eachObservation).
+const nonApple = (patientId: string) => ({ subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` });
+export const loadObservations = (client: MedplumClient, patientId: string) => searchAll(client, 'Observation', nonApple(patientId)) as Promise<Observation[]>;
+export const eachObservation = (client: MedplumClient, patientId: string, page: (rs: Observation[]) => void) => eachPage(client, 'Observation', nonApple(patientId), page);
+
+// The pages of a search, as they come; the next one is fetched only when asked for.
+export async function* bundles<T extends Resource>(client: MedplumClient, type: ResourceType, q: URLSearchParams): AsyncGenerator<Bundle<T>> {
+  let b = await client.search(type as 'Observation', q, { cache: 'no-cache' }) as unknown as Bundle<T>;
+  for (;;) {
+    yield b;
+    const next: string | undefined = b.link?.find((l) => l.relation === 'next')?.url;
+    if (!next) return;
+    // Follow by path: the link's host is Medplum's configured base, which the gateway container may not reach.
+    b = await client.get<Bundle<T>>(next.replace(/^\w+:\/\/[^/]+\//, ''), { cache: 'no-cache' });
+  }
+}
 
 export async function collect<T extends Resource, R>(
   client: MedplumClient, type: ResourceType, q: URLSearchParams, row: (r: T) => R | undefined, limit: number, scan = Infinity,
 ): Promise<{ rows: R[]; more: boolean }> {
   const rows: R[] = [];
   let read = 0;
-  let b: Bundle<T> | undefined = await client.search(type as 'Observation', q, { cache: 'no-cache' }) as unknown as Bundle<T>;
-  for (;;) {
+  for await (const b of bundles<T>(client, type, q)) {
     for (const e of b.entry ?? []) {
       read++;
       const r = e.resource && row(e.resource);
       if (r !== undefined) rows.push(r);
     }
-    const next: string | undefined = b.link?.find((l) => l.relation === 'next')?.url;
+    const next = b.link?.some((l) => l.relation === 'next');
     if (rows.length > limit || read >= scan || !next) return { rows, more: rows.length > limit || !!next };
-    // Follow by path: the link's host is Medplum's configured base, which the gateway container may not reach.
-    b = await client.get<Bundle<T>>(next.replace(/^\w+:\/\/[^/]+\//, ''), { cache: 'no-cache' });
   }
+  return { rows, more: false };
 }
 
 // At most `limit` rows and BUDGET characters, so the remote cap never cuts JSON mid-row.
@@ -162,7 +179,7 @@ function grouped(obs: Observation[]) {
     const twin = x.guess || unmatched(x.o) ? undefined : new Set(ids(x.o).flatMap((id) => [...(twins.get(id) ?? [])]));
     const k = keyOf(x) ?? (twin?.size === 1 ? [...twin][0] : norm(x.r.name));
     if (!k) continue; // nothing to group by
-    groups.set(k, [...(groups.get(k) ?? []), x]);
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(x); // push, not a copy per row: a copy is quadratic in a test's results
   }
   // Undated last; the same day: the newest written first.
   return [...groups.values()].map((g) => g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? '')));
@@ -170,20 +187,87 @@ function grouped(obs: Observation[]) {
 
 export const groupLabs = (obs: Observation[]): Observation[][] => grouped(obs).map((g) => g.map((x) => x.o));
 
-export function summarizeLabs(obs: Observation[]): LabTrend[] {
-  return grouped(obs).map((g): LabTrend => {
-    const [l] = g;
-    const p = g.find((x) => x.r.date && l.r.date && x.r.date < l.r.date);
-    const a = num(l.o), b = p && num(p.o);
-    const flag = highLow(l.o) ?? (l.r.interpretation && !/^n/i.test(l.r.interpretation) ? l.r.interpretation : undefined);
-    return {
-      test: g.find((x) => x.m)?.m?.concept.name, name: l.r.name, loinc: g.map((x) => (x.guess ? undefined : loincOf(x.o))).find(Boolean), unit: unitOf(l.o),
-      latest: { date: l.r.date, value: a ?? l.r.value, flag, method: l.m?.label },
-      previous: p && { date: p.r.date, value: b ?? p.r.value, method: p.m?.label },
-      change: a !== undefined && b !== undefined && unitOf(l.o) === unitOf(p!.o) ? Math.round((a - b) * 1e6) / 1e6 : undefined,
-      count: g.length, outOfRange: g.filter((x) => highLow(x.o)).length, first: g.findLast((x) => x.r.date)?.r.date, source: l.r.source, flags: l.r.flags,
+export const summarizeLabs = (obs: Observation[]): LabTrend[] => {
+  const f = labTrends();
+  for (const o of obs) f.add(o);
+  return f.result();
+};
+
+// One result as a trend needs it, without the resource. seq: its place in the input, the last tie-break (grouped() sorts stably).
+type Pt = { seq: number; date?: string; lu?: string; name?: string; value?: string; num?: number; unit?: string; flag?: string; method?: string; source?: string; flags?: string[]; loinc?: string; test?: string };
+// a before b in grouped()'s order: newest date first (undated last), the same day: the newest written first.
+const ahead = (a: Pt, b: Pt) => ((b.date ?? '').localeCompare(a.date ?? '') || (b.lu ?? '').localeCompare(a.lu ?? '') || a.seq - b.seq) < 0;
+const best = (ps: (Pt | undefined)[]) => ps.reduce<Pt | undefined>((x, p) => (p && (!x || ahead(p, x)) ? p : x), undefined);
+// The newest result dated before `date` (summarizeLabs' previous).
+const before = (ps: (Pt | undefined)[], date?: string) => best(ps.filter((p) => p?.date && date && p.date < date));
+type Agg = { top: Pt; prev?: Pt; loinc?: Pt; test?: Pt; count: number; outOfRange: number; first?: string };
+
+// summarizeLabs as a fold, so a scan keeps a few compact results per test instead of every result: the same trends as
+// grouped() over the results in the order added. An uncoded result's group depends on its twins (grouped()), known only at
+// the end: until then results are kept per what decides it (its source-term ids and name), which grows with the distinct
+// tests, not their results.
+export function labTrends() {
+  const twins = new Map<string, Set<string>>();
+  const aggs = new Map<string, Agg & { ids?: string[]; name: string }>(); // 'k' + group key, or 'p' + pending (ids, name)
+  let seq = 0;
+  const add = (o: Observation) => {
+    const m0 = conceptMatch(o);
+    const r = labRow(o, m0);
+    const guess = !!m0?.suggested, m = guess ? undefined : m0;
+    const loinc = guess ? undefined : loincOf(o);
+    const key = m ? `concept:${m.concept.name}` : guess ? undefined : loinc;
+    const t = termKey(o);
+    const ids = t ? sourcesOf(o).map((s) => `${s}\n${t}`) : [];
+    if (key) for (const id of ids) twins.set(id, (twins.get(id) ?? new Set()).add(key));
+    const unmatched = !!o.meta?.tag?.some((x) => x.system === TAG && x.code === 'concept-unmatched');
+    const name = norm(r.name);
+    const pending = !key && !guess && !unmatched;
+    const a = pending ? `p${JSON.stringify([ids, name])}` : `k${key ?? name}`;
+    const n = num(o);
+    const p: Pt = {
+      seq: seq++, date: r.date, lu: o.meta?.lastUpdated, name: r.name, value: r.value, num: n, unit: unitOf(o),
+      flag: highLow(o) ?? (r.interpretation && !/^n/i.test(r.interpretation) ? r.interpretation : undefined), method: m?.label, source: r.source, flags: r.flags,
+      loinc, test: m?.concept.name,
     };
-  }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
+    const g = aggs.get(a);
+    if (!g) {
+      aggs.set(a, { top: p, ...(loinc && { loinc: p }), ...(p.test && { test: p }), count: 1, outOfRange: highLow(o) ? 1 : 0, first: p.date, name, ...(pending && { ids }) });
+      return;
+    }
+    g.count++;
+    if (highLow(o)) g.outOfRange++;
+    if (p.date && (!g.first || p.date.localeCompare(g.first) < 0)) g.first = p.date;
+    if (loinc) g.loinc = best([g.loinc, p]);
+    if (p.test) g.test = best([g.test, p]);
+    if (ahead(p, g.top)) [g.prev, g.top] = [before([g.top, g.prev], p.date), p];
+    else g.prev = best([g.prev, before([p], g.top.date)]);
+  };
+  const result = (): LabTrend[] => {
+    // Each kept set of results joins its group (grouped(): its key, else its one coded twin, else its name; none: skipped).
+    // Sets come in the order of their first result, so groups do too, as in grouped().
+    const groups = new Map<string, Agg[]>();
+    for (const [a, g] of aggs) {
+      const twin = g.ids && new Set(g.ids.flatMap((id) => [...(twins.get(id) ?? [])]));
+      const k = a[0] === 'k' ? a.slice(1) : twin?.size === 1 ? [...twin][0] : g.name;
+      if (k) (groups.get(k) ?? groups.set(k, []).get(k)!).push(g);
+    }
+    return [...groups.values()].map((gs) => {
+      const l = best(gs.map((g) => g.top))!;
+      // Each set's best result before the latest's day: its top, or (when its top shares that day) its own previous.
+      const p = before(gs.flatMap((g) => [g.top, g.prev]), l.date);
+      const a = l.num, b = p?.num;
+      const firsts = gs.map((g) => g.first).filter((d): d is string => !!d);
+      return {
+        test: best(gs.map((g) => g.test))?.test, name: l.name, loinc: best(gs.map((g) => g.loinc))?.loinc, unit: l.unit,
+        latest: { date: l.date, value: a ?? l.value, flag: l.flag, method: l.method },
+        previous: p && { date: p.date, value: b ?? p.value, method: p.method },
+        change: a !== undefined && b !== undefined && l.unit === p!.unit ? Math.round((a - b) * 1e6) / 1e6 : undefined,
+        count: gs.reduce((n, g) => n + g.count, 0), outOfRange: gs.reduce((n, g) => n + g.outOfRange, 0),
+        first: firsts.reduce<string | undefined>((x, d) => (!x || d.localeCompare(x) < 0 ? d : x), undefined), source: l.source, flags: l.flags,
+      } satisfies LabTrend;
+    }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
+  };
+  return { add, result };
 }
 
 // The lab concepts' entries, in concepts.json order (summarizeLabs already groups each into one entry).
@@ -218,23 +302,31 @@ export async function labResults(
     return { q, key, named, matches: (o: Observation) => (key ? named(o) : text(o)) };
   };
   // Every result: _lastUpdated with _count >= 20 pages by cursor (Medplum caps _offset at 10000); dates are ordered here.
-  const scan = async (n?: string) => {
+  // Each result is folded into a trend or made a row as its page arrives: no result is kept whole.
+  const scan = async (n: string | undefined, use: (o: Observation) => void) => {
     const { q, named } = query(n);
     q.set('_sort', '_lastUpdated');
     q.set('_count', '1000');
-    return (await collect(client, 'Observation', q, (o: Observation) => (isLab(o) && named(o) ? o : undefined), Infinity)).rows;
+    await collect(client, 'Observation', q, (o: Observation) => { if (isLab(o) && named(o)) use(o); return undefined; }, Infinity);
   };
-  const finish = (obs: Observation[]) =>
-    // keyOnly (health_summary): key labs picked before fit, so other tests can't push them out.
-    summary ? fit(keyOnly ? keyLabs(summarizeLabs(obs)) : summarizeLabs(obs), limit)
-      : fit(obs.map((o) => labRow(o)).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
+  const finish = async (n?: string, keep: (o: Observation) => boolean = () => true) => {
+    if (summary) {
+      const f = labTrends();
+      await scan(n, (o) => keep(o) && f.add(o));
+      // keyOnly (health_summary): key labs picked before fit, so other tests can't push them out.
+      return fit(keyOnly ? keyLabs(f.result()) : f.result(), limit);
+    }
+    const rows: LabRow[] = [];
+    await scan(n, (o) => keep(o) && rows.push(labRow(o)));
+    return fit(rows.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '')), limit); // undated last
+  };
   if (Array.isArray(name)) {
     // One scan of every lab; a result is kept once when any name matches it (concept names match by code, others by text).
     const matchers = name.map((n) => query(n).matches);
-    return finish((await scan()).filter((o) => matchers.some((m) => m(o))));
+    return finish(undefined, (o) => matchers.some((m) => m(o)));
   }
   const { q, key } = query(name);
-  if (summary || key) return finish(await scan(name));
+  if (summary || key) return finish(name);
   const { rows } = await collect(client, 'Observation', q, (o: Observation) => (isLab(o) ? labRow(o) : undefined), limit);
   // Medplum sorts undated results first on -date; a latest-value question wants them last.
   // shortcut: only within the fetched pages, fine unless a patient has over a page of undated labs.

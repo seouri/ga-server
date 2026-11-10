@@ -33,6 +33,7 @@ export const SEARCH_SCHEMA = `
   create index if not exists idx_l on idx(type, code, lo, hi, rid) where lo is not null;
   create index if not exists idx_h on idx(type, code, hi, rid) where hi is not null; -- ge, gt, eb bound hi only: without it, a scan of every row
   create index if not exists idx_r on idx(rid, code, val, sys, lo, hi);
+  create index if not exists idx_s on idx(type, code, sys, rid) where val is null and sys is not null; -- system| on a coding with no code (idx_v has the rest)
   create table if not exists comp(rid integer not null, type text not null, code text not null, grp integer not null, n integer not null, sys text, val, lo, hi);
   create index if not exists comp_v on comp(type, code, n, val, rid);
   create index if not exists comp_r on comp(rid, code, grp, n);
@@ -332,7 +333,8 @@ function valueSql(type: string, p: SearchParameter, op: string, v: string, i: st
       if (bar < 0) return [`${i}.val = ? and (${i}.sys is null or ${i}.sys <> ?)`, [ci(v), TEXT]];
       const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
       if (!s) return [`${i}.val = ? and ${i}.sys is null`, [val]];
-      if (!val) return [`${i}.sys = ?`, [s]];
+      // Two arms, so each has an index (idx_v, idx_s); a bare sys = ? scanned every row.
+      if (!val) return [`(${i}.val is not null and ${i}.sys = ?) or (${i}.val is null and ${i}.sys = ?)`, [s, s]];
       return [`${i}.val = ? and ${i}.sys = ?`, [val, s]];
     }
     case 'string': {
