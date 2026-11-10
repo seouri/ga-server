@@ -158,34 +158,43 @@ export type LabTrend = {
 // others by LOINC, else by name (case/space-insensitive). An uncoded result joins the coded group of its name and unit (+ specimen)
 // from the same source when there is exactly one; never across sources (a PDF "Glucose" is not the hospital's), never one its
 // source map calls unmatched. A suggested-only result keeps to its name: its GA-suggested LOINC is a guess.
-function grouped(obs: Observation[]) {
-  const rows = obs.map((o) => {
-    const m = conceptMatch(o);
-    return { o, r: labRow(o, m), m: m?.suggested ? undefined : m, guess: !!m?.suggested };
-  });
-  const keyOf = (x: (typeof rows)[number]) => (x.m ? `concept:${x.m.concept.name}` : x.guess ? undefined : loincOf(x.o));
-  const twins = new Map<string, Set<string>>();
-  const ids = (o: Observation) => {
-    const t = termKey(o);
-    return t ? sourcesOf(o).map((s) => `${s}\n${t}`) : [];
-  };
-  for (const x of rows) {
-    const k = keyOf(x);
-    if (k) for (const id of ids(x.o)) twins.set(id, (twins.get(id) ?? new Set()).add(k));
-  }
-  const unmatched = (o: Observation) => !!o.meta?.tag?.some((t) => t.system === TAG && t.code === 'concept-unmatched');
-  const groups = new Map<string, typeof rows>();
-  for (const x of rows) {
-    const twin = x.guess || unmatched(x.o) ? undefined : new Set(ids(x.o).flatMap((id) => [...(twins.get(id) ?? [])]));
-    const k = keyOf(x) ?? (twin?.size === 1 ? [...twin][0] : norm(x.r.name));
-    if (!k) continue; // nothing to group by
-    (groups.get(k) ?? groups.set(k, []).get(k)!).push(x); // push, not a copy per row: a copy is quadratic in a test's results
-  }
-  // Undated last; the same day: the newest written first.
-  return [...groups.values()].map((g) => g.sort((a, b) => (b.r.date ?? '').localeCompare(a.r.date ?? '') || (b.o.meta?.lastUpdated ?? '').localeCompare(a.o.meta?.lastUpdated ?? '')));
+// What decides a result's group: its key (concept, else LOINC; none for a guess), else (pending) the twins of its source-term
+// ids, else its name.
+function decides(o: Observation, m0: ReturnType<typeof conceptMatch>, rowName?: string) {
+  const guess = !!m0?.suggested, m = guess ? undefined : m0;
+  const loinc = guess ? undefined : loincOf(o);
+  const key = m ? `concept:${m.concept.name}` : loinc;
+  const t = termKey(o);
+  const ids = t ? sourcesOf(o).map((s) => `${s}\n${t}`) : [];
+  const unmatched = !!o.meta?.tag?.some((x) => x.system === TAG && x.code === 'concept-unmatched');
+  return { m, loinc, key, ids, name: norm(rowName), pending: !key && !guess && !unmatched };
 }
 
-export const groupLabs = (obs: Observation[]): Observation[][] => grouped(obs).map((g) => g.map((x) => x.o));
+// Results folded per set (what decides their group) as they come; their groups are known only at the end, once every coded
+// twin is: so a fold keeps per set, which grows with the distinct tests, not their results. init: a set's empty state.
+function labSets<S>(init: () => S) {
+  const twins = new Map<string, Set<string>>();
+  const sets = new Map<string, { s: S; ids?: string[]; name: string }>(); // 'k' + group key, or 'p' + pending (ids, name)
+  const add = (d: ReturnType<typeof decides>): S => {
+    if (d.key) for (const id of d.ids) twins.set(id, (twins.get(id) ?? new Set()).add(d.key));
+    const a = d.pending ? `p${JSON.stringify([d.ids, d.name])}` : `k${d.key ?? d.name}`;
+    let x = sets.get(a);
+    if (!x) sets.set(a, (x = { s: init(), name: d.name, ...(d.pending && { ids: d.ids }) }));
+    return x.s;
+  };
+  // Each set joins its group: its key, else its one coded twin, else its name (none: skipped). Sets come in the order of
+  // their first result, so groups do too.
+  const groups = (): S[][] => {
+    const out = new Map<string, S[]>();
+    for (const [a, x] of sets) {
+      const twin = x.ids && new Set(x.ids.flatMap((id) => [...(twins.get(id) ?? [])]));
+      const k = a[0] === 'k' ? a.slice(1) : twin?.size === 1 ? [...twin][0] : x.name;
+      if (k) (out.get(k) ?? out.set(k, []).get(k)!).push(x.s);
+    }
+    return [...out.values()];
+  };
+  return { add, groups };
+}
 
 export const summarizeLabs = (obs: Observation[]): LabTrend[] => {
   const f = labTrends();
@@ -193,9 +202,9 @@ export const summarizeLabs = (obs: Observation[]): LabTrend[] => {
   return f.result();
 };
 
-// One result as a trend needs it, without the resource. seq: its place in the input, the last tie-break (grouped() sorts stably).
+// One result as a fold needs it, without the resource. seq: its place in the input, the last tie-break.
 type Pt = { seq: number; date?: string; lu?: string; name?: string; value?: string; num?: number; unit?: string; flag?: string; method?: string; source?: string; flags?: string[]; loinc?: string; test?: string };
-// a before b in grouped()'s order: newest date first (undated last), the same day: the newest written first.
+// a before b in a group's order: newest date first (undated last), the same day: the newest written first, then the first added.
 const ahead = (a: Pt, b: Pt) => ((b.date ?? '').localeCompare(a.date ?? '') || (b.lu ?? '').localeCompare(a.lu ?? '') || a.seq - b.seq) < 0;
 const best = (ps: (Pt | undefined)[]) => ps.reduce<Pt | undefined>((x, p) => (p && (!x || ahead(p, x)) ? p : x), undefined);
 // The newest result dated before `date` (summarizeLabs' previous).
@@ -203,55 +212,35 @@ const before = (ps: (Pt | undefined)[], date?: string) => best(ps.filter((p) => 
 type Agg = { top: Pt; prev?: Pt; loinc?: Pt; test?: Pt; count: number; outOfRange: number; first?: string };
 
 // summarizeLabs as a fold, so a scan keeps a few compact results per test instead of every result: the same trends as
-// grouped() over the results in the order added. An uncoded result's group depends on its twins (grouped()), known only at
-// the end: until then results are kept per what decides it (its source-term ids and name), which grows with the distinct
-// tests, not their results.
+// grouping every result in the order added.
 export function labTrends() {
-  const twins = new Map<string, Set<string>>();
-  const aggs = new Map<string, Agg & { ids?: string[]; name: string }>(); // 'k' + group key, or 'p' + pending (ids, name)
+  const sets = labSets<Agg>(() => ({ count: 0 }) as Agg);
   let seq = 0;
   const add = (o: Observation) => {
     const m0 = conceptMatch(o);
     const r = labRow(o, m0);
-    const guess = !!m0?.suggested, m = guess ? undefined : m0;
-    const loinc = guess ? undefined : loincOf(o);
-    const key = m ? `concept:${m.concept.name}` : guess ? undefined : loinc;
-    const t = termKey(o);
-    const ids = t ? sourcesOf(o).map((s) => `${s}\n${t}`) : [];
-    if (key) for (const id of ids) twins.set(id, (twins.get(id) ?? new Set()).add(key));
-    const unmatched = !!o.meta?.tag?.some((x) => x.system === TAG && x.code === 'concept-unmatched');
-    const name = norm(r.name);
-    const pending = !key && !guess && !unmatched;
-    const a = pending ? `p${JSON.stringify([ids, name])}` : `k${key ?? name}`;
+    const d = decides(o, m0, r.name);
     const n = num(o);
     const p: Pt = {
       seq: seq++, date: r.date, lu: o.meta?.lastUpdated, name: r.name, value: r.value, num: n, unit: unitOf(o),
-      flag: highLow(o) ?? (r.interpretation && !/^n/i.test(r.interpretation) ? r.interpretation : undefined), method: m?.label, source: r.source, flags: r.flags,
-      loinc, test: m?.concept.name,
+      flag: highLow(o) ?? (r.interpretation && !/^n/i.test(r.interpretation) ? r.interpretation : undefined), method: d.m?.label, source: r.source, flags: r.flags,
+      loinc: d.loinc, test: d.m?.concept.name,
     };
-    const g = aggs.get(a);
-    if (!g) {
-      aggs.set(a, { top: p, ...(loinc && { loinc: p }), ...(p.test && { test: p }), count: 1, outOfRange: highLow(o) ? 1 : 0, first: p.date, name, ...(pending && { ids }) });
+    const g = sets.add(d);
+    if (!g.count) {
+      Object.assign(g, { top: p, ...(d.loinc && { loinc: p }), ...(p.test && { test: p }), count: 1, outOfRange: highLow(o) ? 1 : 0, first: p.date });
       return;
     }
     g.count++;
     if (highLow(o)) g.outOfRange++;
     if (p.date && (!g.first || p.date.localeCompare(g.first) < 0)) g.first = p.date;
-    if (loinc) g.loinc = best([g.loinc, p]);
+    if (d.loinc) g.loinc = best([g.loinc, p]);
     if (p.test) g.test = best([g.test, p]);
     if (ahead(p, g.top)) [g.prev, g.top] = [before([g.top, g.prev], p.date), p];
     else g.prev = best([g.prev, before([p], g.top.date)]);
   };
-  const result = (): LabTrend[] => {
-    // Each kept set of results joins its group (grouped(): its key, else its one coded twin, else its name; none: skipped).
-    // Sets come in the order of their first result, so groups do too, as in grouped().
-    const groups = new Map<string, Agg[]>();
-    for (const [a, g] of aggs) {
-      const twin = g.ids && new Set(g.ids.flatMap((id) => [...(twins.get(id) ?? [])]));
-      const k = a[0] === 'k' ? a.slice(1) : twin?.size === 1 ? [...twin][0] : g.name;
-      if (k) (groups.get(k) ?? groups.set(k, []).get(k)!).push(g);
-    }
-    return [...groups.values()].map((gs) => {
+  const result = (): LabTrend[] =>
+    sets.groups().map((gs) => {
       const l = best(gs.map((g) => g.top))!;
       // Each set's best result before the latest's day: its top, or (when its top shares that day) its own previous.
       const p = before(gs.flatMap((g) => [g.top, g.prev]), l.date);
@@ -266,8 +255,37 @@ export function labTrends() {
         first: firsts.reduce<string | undefined>((x, d) => (!x || d.localeCompare(x) < 0 ? d : x), undefined), source: l.source, flags: l.flags,
       } satisfies LabTrend;
     }).sort((x, y) => (y.latest.date ?? '').localeCompare(x.latest.date ?? ''));
-  };
   return { add, result };
+}
+
+// For whats_new: a kept result's next older result in its group (the newest dated before it). Per set it keeps the newest
+// result dated before `from` and the newest of each day since, so it grows with the results since `from`, not the whole
+// history. keep: a result dated on or after `from` that done() will be asked about.
+export function olderInGroup(from: string) {
+  const sets = labSets<{ old?: Pt; days: Map<string, Pt> }>(() => ({ days: new Map() }));
+  const kept = new Map<string, ReturnType<typeof sets.add>>();
+  let seq = 0;
+  const add = (o: Observation, keep = false) => {
+    const m = conceptMatch(o);
+    const r = labRow(o, m);
+    const s = sets.add(decides(o, m, r.name));
+    const p: Pt = { seq: seq++, date: r.date, lu: o.meta?.lastUpdated, value: r.value };
+    if (keep && o.id && p.date && p.date >= from) kept.set(o.id, s);
+    if (!p.date) return; // undated: never an older result
+    if (p.date < from) s.old = best([s.old, p]);
+    else s.days.set(p.date, best([s.days.get(p.date), p])!);
+  };
+  // (id, date): the older result of kept result id, dated before `date`.
+  const done = () => {
+    const groupOf = new Map<ReturnType<typeof sets.add>, ReturnType<typeof sets.add>[]>();
+    for (const g of sets.groups()) for (const s of g) groupOf.set(s, g);
+    return (id: string, date: string): { date?: string; value?: string } | undefined => {
+      const s = kept.get(id);
+      const p = before((s && groupOf.get(s) || []).flatMap((x) => [x.old, ...x.days.values()]), date);
+      return p && { date: p.date, value: p.value };
+    };
+  };
+  return { add, done };
 }
 
 // The lab concepts' entries, in concepts.json order (summarizeLabs already groups each into one entry).

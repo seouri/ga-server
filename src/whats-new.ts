@@ -7,7 +7,7 @@ import { defaultConfigPath } from './config.ts';
 import { isPlanned } from './current.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { fit, groupLabs, highLow, isPanel, labRow, loadObservations, searchAll } from './labs.ts';
+import { fit, highLow, isPanel, labRow, loadObservations, olderInGroup, searchAll } from './labs.ts';
 import { concept, listRows, loadLists, medCode, medKeys, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
@@ -106,17 +106,40 @@ export type ReviewItem = {
   title: string; date?: string; detail: Record<string, unknown>; source?: string; id?: string;
 };
 
+// Each out-of-range result of `arrived` dated within a year, with the next older result of its group among allLabs.
 export function labItems(arrived: Observation[], allLabs: Observation[], asOf: string): ReviewItem[] {
-  const cutoff = addDays(asOf, -365);
-  const groups = groupLabs(allLabs);
-  return arrived.flatMap((o): ReviewItem[] => {
-    const flag = highLow(o), date = clinicalDate(o);
-    if (!flag || !date || date < cutoff) return [];
-    const row = labRow(o);
-    const older = groups.find((g) => g.some((x) => x.id === o.id))?.find((x) => { const d = clinicalDate(x); return d && d < date; });
-    const p = older && labRow(older);
-    return [{ kind: 'lab', title: row.name ?? 'Lab result', date, detail: { value: row.value, range: row.range, flag, previous: p && { date: p.date, value: p.value } }, source: row.source, id: o.id }];
-  }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  const f = labFold(asOf);
+  allLabs.forEach(f.add);
+  return f.result().items(arrived.flatMap((o) => flagged(o, asOf) ?? []));
+}
+
+// An out-of-range result dated within a year, as its item needs it, without the resource.
+type Flagged = { title: string; date: string; value?: string; range?: string; flag: string; source?: string; id?: string };
+function flagged(o: Observation, asOf: string): Flagged | undefined {
+  const flag = highLow(o), date = clinicalDate(o);
+  if (!flag || !date || date < addDays(asOf, -365)) return undefined;
+  const row = labRow(o);
+  return { title: row.name ?? 'Lab result', date, value: row.value, range: row.range, flag, source: row.source, id: o.id };
+}
+
+// labItems as a fold over the labs as their pages arrive. recent: labItems(labs, labs); items(rs): labItems of those arrived.
+function labFold(asOf: string) {
+  const older = olderInGroup(addDays(asOf, -365));
+  const recent: Flagged[] = [];
+  const add = (o: Observation) => {
+    const x = flagged(o, asOf);
+    older.add(o, !!x);
+    if (x) recent.push(x);
+  };
+  const result = () => {
+    const prev = older.done();
+    const items = (xs: Flagged[]) => xs.map(({ title, date, value, range, flag, source, id }): ReviewItem => {
+      const p = id === undefined ? undefined : prev(id, date);
+      return { kind: 'lab', title, date, detail: { value, range, flag, previous: p && { date: p.date, value: p.value } }, source, id };
+    }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+    return { recent: items(recent), items };
+  };
+  return { add, result };
 }
 
 const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : undefined);

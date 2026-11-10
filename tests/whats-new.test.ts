@@ -5,6 +5,8 @@ import type { Observation, Resource } from '@medplum/fhirtypes';
 import type { MedplumClient } from '@medplum/core';
 import type { Item } from '../src/maintenance.ts';
 import { expect, test } from 'vitest';
+import { heldLabItems, randomLabs, seeded } from './fixtures-gen/labs.ts';
+import { hasCategory } from '../src/share/scope.ts';
 import { arrivedSince, clinicalDate, followUpItems, kindOf, labItems, medicationItems, readLastSeen, statusItems, tally, whatsNew, writeLastSeen } from '../src/whats-new.ts';
 
 const TAG = 'urn:ga-server:tag';
@@ -82,6 +84,27 @@ test('labItems: high with previous, no range, and historical', () => {
   expect(labItems([plain], [plain], '2026-11-07')).toEqual([]);
   const h = ldl('d', '2024-05-05', 170);
   expect(labItems([h], [h], '2026-11-07')).toEqual([]);
+});
+
+// labItems folds the labs; the frozen held version groups them all. Arrived results include uncategorised ones and panels
+// (labs by kindOf, not among the labs), undated and flagged ones, on both sides of the year cutoff.
+test('labItems (a fold) matches every lab held and grouped', () => {
+  const rnd = seeded(11);
+  const pick = <T,>(xs: T[]) => xs[rnd(xs.length)];
+  for (let run = 0; run < 60; run++) {
+    const all = randomLabs(rnd, 80).map((o) => ({
+      ...o,
+      ...pick([{}, { category: [{ coding: [{ code: 'laboratory' }] }] }, { category: [{ coding: [{ code: 'laboratory' }] }] }, { category: [{ coding: [{ code: 'vital-signs' }] }] }]),
+      ...(rnd(10) === 0 && { hasMember: [{ reference: 'Observation/x' }] }),
+    }) as Observation);
+    const labs = all.filter((o) => hasCategory(o, 'laboratory') || o.meta?.tag?.some((t) => t.code === 'extracted-by-llm'));
+    const arrived = all.filter((o) => rnd(2) && kindOf(o) === 'lab results');
+    const asOf = pick(['2025-06-01', '2024-12-31', '2026-01-01', '2024-03-03']);
+    for (const [a, l] of [[arrived, labs], [labs, labs]]) {
+      expect(labItems(a, l, asOf)).toEqual(heldLabItems(a, l, asOf));
+      expect(JSON.stringify(labItems(a, l, asOf))).toBe(JSON.stringify(heldLabItems(a, l, asOf)));
+    }
+  }
 });
 
 const RX = 'http://www.nlm.nih.gov/research/umls/rxnorm';
