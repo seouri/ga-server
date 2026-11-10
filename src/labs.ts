@@ -69,7 +69,7 @@ export function dateRange(q: URLSearchParams, param: string, since?: string, unt
 // Every page of a search, handed to `page` as it arrives and then dropped, so a caller keeps only what it derives.
 // _sort=_lastUpdated (ascending, _count >= 20) makes Medplum page by _cursor: it caps _offset at 10000.
 export async function eachPage<T extends Resource = Resource>(client: MedplumClient, type: ResourceType, q: Record<string, string>, page: (rs: T[]) => void): Promise<void> {
-  for await (const p of client.searchResourcePages(type, { ...q, _sort: '_lastUpdated', _count: '1000' }, { cache: 'no-cache' })) page(p as unknown as T[]);
+  for await (const p of client.searchResourcePages(type, { _count: '1000', ...q, _sort: '_lastUpdated' }, { cache: 'no-cache' })) page(p as unknown as T[]);
 }
 
 // Every resource of a search.

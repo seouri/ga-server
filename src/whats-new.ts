@@ -93,7 +93,8 @@ export async function arrivedSince(client: MedplumClient, patientId: string, sin
 async function eachArrived(client: MedplumClient, patientId: string, since: string, page: (rs: Resource[]) => void): Promise<void> {
   const apple = `${TAG}|src-apple-health`;
   for (const [type, param] of TYPES) {
-    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}` };
+    // Notes and messages can be large (tens of KB each): 100 per page keeps one page small (cursor paging needs >= 20).
+    const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}`, ...((type === 'DocumentReference' || type === 'Communication') && { _count: '100' }) };
     const qs = type === 'Observation' ? [{ ...base, '_tag:not': apple }, { ...base, _tag: apple, _elements: APPLE_FIELDS }] : [base];
     for (const q of qs) await eachPage(client, type as ResourceType, q, (rs) => page(rs.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; })));
   }
@@ -141,7 +142,7 @@ function labFold(asOf: string) {
   const recent: Flagged[] = [];
   const add = (o: Observation) => {
     const x = flagged(o, asOf);
-    older.add(o, !!x);
+    older.add(o, true); // every in-year id, so an arrived lab edited between the two scans still finds its group
     if (x) recent.push(x);
   };
   const result = () => {
