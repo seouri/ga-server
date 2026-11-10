@@ -44,5 +44,8 @@
     "@medplum/core": {
       "pdfmake": "$pdfmake"
     }
+  },
+  "allowScripts": {
+    "fsevents": false
   }
 }

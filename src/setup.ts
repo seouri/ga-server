@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { getStatus, MedplumClient, OperationOutcomeError } from '@medplum/core';
+import { ClientStorage, getStatus, MedplumClient, MemoryStorage, OperationOutcomeError } from '@medplum/core';
 import type { AccessPolicy, ClientApplication, Patient, ProjectMembership } from '@medplum/fhirtypes';
 import { defaultConfigPath, GaError, type GaConfig, getClient, isGaNotRunning, loadConfig, NOT_RUNNING, storeKind } from './config.ts';
 import { GA_STORE_TYPES } from './store-types.ts';
@@ -42,13 +42,19 @@ export async function setup(
   const known = (out === path ? stored : tryLoad(out))?.projectId;
   // An install from before GA had its own project: a fresh setup here would point GA at an empty project.
   if (out === path && stored?.clientId && !stored.projectId) throw new GaError('this GA install predates its own Medplum project: run ga migrate');
-  const medplum = new MedplumClient({ baseUrl });
+  // Memory storage: Node's localStorage is experimental (it warns). Our own PKCE pair: Medplum hashes the verifier with window.btoa,
+  // which Node lacks, and falls back to a plain challenge with a stack trace; processCode reads the verifier from storage.
+  const storage = new ClientStorage(new MemoryStorage());
+  const medplum = new MedplumClient({ baseUrl, storage });
+  const verifier = randomBytes(32).toString('base64url'); // one pair serves every login of this run
+  storage.setString('codeVerifier', verifier);
+  const pkce = { codeChallenge: createHash('sha256').update(verifier).digest('base64url'), codeChallengeMethod: 'S256' as const };
   let login;
   let password = '';
   for (const p of [stored?.adminPassword, DEFAULT_PASSWORD]) {
     if (!p) continue;
     try {
-      login = await medplum.startLogin({ email: ADMIN, password: p, projectId: known });
+      login = await medplum.startLogin({ email: ADMIN, password: p, projectId: known, ...pkce });
       password = p;
       break;
     } catch (e) {
@@ -64,8 +70,8 @@ export async function setup(
   const code = known
     ? login.code
     : existing
-      ? (await medplum.startLogin({ email: ADMIN, password, projectId: existing })).code
-      : (await medplum.startNewProject({ login: (await medplum.startLogin({ email: ADMIN, password, projectId: 'new' })).login, projectName })).code;
+      ? (await medplum.startLogin({ email: ADMIN, password, projectId: existing, ...pkce })).code
+      : (await medplum.startNewProject({ login: (await medplum.startLogin({ email: ADMIN, password, projectId: 'new', ...pkce })).login, projectName })).code;
   if (!code) throw new GaError('admin login did not return a code');
   await medplum.processCode(code);
   const projectId = medplum.getActiveLogin()?.project.reference?.split('/')[1];
