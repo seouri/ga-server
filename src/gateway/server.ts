@@ -425,7 +425,7 @@ export async function serveGateway(): Promise<void> {
   }
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
-  exitOnStop();
+  exitOnStop(gatewayDir());
   const resumed = resumeJobs(gatewayDir());
   if (resumed) console.log(`resuming ${resumed} import${resumed > 1 ? 's' : ''}`);
   const model = process.env.GA_LLM_MODEL;

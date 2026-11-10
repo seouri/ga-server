@@ -94,8 +94,8 @@ export function startJob(dir: string, upload: string, opts: { tz?: string; patie
 export function resumeJobs(dir: string, opts: Supervision = {}): number {
   const running = listJobs(dir).filter((j) => j.status === 'running');
   for (const j of running) {
-    const stopped = existsSync(stopMark(dir, j.id));
-    save(dir, { ...j, attempts: stopped ? Math.max(0, j.attempts - 1) : j.attempts, note: stopped
+    const stopped = existsSync(stopMark(dir, j.id)), inAttempt = stopped && readFileSync(stopMark(dir, j.id), 'utf8') === 'attempt';
+    save(dir, { ...j, attempts: inAttempt ? Math.max(0, j.attempts - 1) : j.attempts, note: stopped
       ? 'GA restarted during the import; it resumes from the last saved batch'
       : 'GA stopped during the import (most likely out of memory) and restarted; it resumes from the last saved batch' });
     rmSync(stopMark(dir, j.id), { force: true });
@@ -104,12 +104,12 @@ export function resumeJobs(dir: string, opts: Supervision = {}): number {
   return running.length;
 }
 
-// The gateway's SIGTERM/SIGINT (docker restart, a deploy, a reboot): marks the attempt in progress as stopped, for resumeJobs
-// to give back. A file of its own, so it never races a checkpoint the worker is saving.
-let current: { dir: string; id: string } | undefined;
-export function exitOnStop(): void {
+// The gateway's SIGTERM/SIGINT (docker restart, a deploy, a reboot): marks every running job as stopped, and the one whose
+// attempt is in progress as such, for resumeJobs to give back. Files of their own, so they never race a checkpoint being saved.
+let current: string | undefined;
+export function exitOnStop(dir: string): void {
   for (const sig of ['SIGTERM', 'SIGINT'] as const) process.once(sig, () => {
-    if (current) writeFileSync(stopMark(current.dir, current.id), '');
+    for (const j of listJobs(dir)) if (j.status === 'running') writeFileSync(stopMark(dir, j.id), j.id === current ? 'attempt' : '');
     process.exit(0);
   });
 }
@@ -133,7 +133,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
         return;
       }
       save(dir, { ...j, attempts: j.attempts + 1, message: undefined }); // a failed attempt saves its own; an earlier one is stale
-      current = { dir, id };
+      current = id;
       try {
         await run(dir, id);
       } catch (e) {

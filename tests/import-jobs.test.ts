@@ -192,11 +192,12 @@ test('a batch that kills the whole process every time ends failed after three re
 }, 60_000);
 
 // docker restart, a deploy, a reboot: SIGTERM mid-attempt. The attempt is given back, so restarts never fail a healthy job.
-test('a gateway stopped with SIGTERM mid-attempt four times keeps the job running with its attempt given back', async () => {
+test('a gateway stopped with SIGTERM mid-attempt four times keeps its jobs running with the attempt given back', async () => {
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const queued = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid }); // waits behind the other
   const host = `const { exitOnStop, resumeJobs } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
-    exitOnStop();
+    exitOnStop(process.argv[1]);
     resumeJobs(process.argv[1], { run: () => { console.log('running'); return new Promise(() => {}); } });
     setInterval(() => {}, 1000);`;
   for (let i = 0; i < 4; i++) {
@@ -205,7 +206,9 @@ test('a gateway stopped with SIGTERM mid-attempt four times keeps the job runnin
     const [code, sig] = await new Promise<unknown[]>((ok) => c.on('close', (...x) => ok(x)));
     expect({ i, code, sig }).toEqual({ i, code: 0, sig: null });
     // import_status says why it is running again: the first start found no stop marker (a kill), the later ones a restart
-    expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 1, note: expect.stringMatching(i ? /^GA restarted/ : /^GA stopped/) });
+    const note = expect.stringMatching(i ? /^GA restarted/ : /^GA stopped/);
+    expect([jobStatus(a.dir, job.id), jobStatus(a.dir, queued.id)].map((j) => j!.attempts).sort()).toEqual([0, 1]);
+    for (const j of [job, queued]) expect(jobStatus(a.dir, j.id)).toMatchObject({ status: 'running', note });
   }
 }, 60_000);
 
