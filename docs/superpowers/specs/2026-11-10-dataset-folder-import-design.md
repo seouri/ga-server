@@ -1,0 +1,57 @@
+# Dataset folder import: design
+
+Goal: bring every dataset in a personal health dataset folder (the `manifest.json` layout `<data_type>/<source>/<date>/...`) into GA, adding importers only where GA has none, so a later hospital portal sync never duplicates what the folder brought in.
+
+The folder path is an argument everywhere; nothing in code or docs names the person.
+
+## What the folder holds, and the decision for each part
+
+| Dataset | Content (measured 2026-11-10) | Decision |
+|---|---|---|
+| `clinical-records/mgb-epic-fhir/<date>/ehr-data.json` | `{fhir: {<Type>: Resource[]}, attachments: [...]}`: 2,880 FHIR R4 resources from the MGB Epic portal across 20 types (1,717 Observation, 174 Condition, 171 DocumentReference, 160 Encounter, 140 Medication, 138 MedicationRequest, 94 Practitioner, 89 DiagnosticReport, 77 Specimen, 33 Location, 22 Organization, 21 Immunization, 18 ServiceRequest, 16 Procedure, 4 Coverage, 2 MedicationDispense, 1 each AllergyIntolerance, CareTeam, Goal, Patient), plus 264 attachments (`{resourceType, resourceId, path, contentType, contentBase64, contentPlaintext}`: 93 html + 93 rtf + 62 xml on DocumentReference, 16 html on DiagnosticReport). Newest record 2025-09-29. Resource ids are the Epic FHIR server ids. | **New importer** (kind `fhir-export`). Records are identified exactly like a portal sync of the same server (`urn:ga-server:id:smart:<sourceKey(fhirBase)>` \| `<Type>/<id>`), so a later `ga connect` of MGB links to them instead of duplicating. The FHIR base is given on the command line (`--fhir-base`); for this export it is `https://ws-interconnect-fhir.partners.org/Interconnect-FHIR-MU-PRD/api/FHIR/R4/` (from the Apple copies' `sourceURL`). |
+| `device-data/apple-health/<date>/export.xml` | HealthKit export, 181 MB | **Existing importer**: `ga import <folder>`. |
+| `device-data/apple-health/<date>/clinical-records/` | 1,788 MGB FHIR R4 copies | **Apple importer updated to import every FHIR R4 clinical record**, because an Apple export may be the only data a person has. Each copy is identified like a portal sync of its hospital (base and id from the record's `sourceURL`), so it links to the same record from a sync or an Epic export in either order; the hospital version always wins. Here all 1,788 ids are also in `ehr-data.json`, so after both imports there is one record per id. One file has an invalid JSON escape; the importer repairs stray backslashes before giving up. |
+| `device-data/apple-health/<date>/export_cda.xml` | Apple's CDA rendering of the same HealthKit samples (Results and Vital Signs only); its `recordTarget` name differs from the person's | **Not imported.** Same data as `export.xml`. The name mismatch is reported to the owner in the final report. |
+| `documents/scanned-labs/<date>/*.pdf` (3) and `scans/*.png` (3) | Image-only scanned lab reports (CBC, metabolic, lipid, CRP, urinalysis, urine sediment) | **Existing path**: the agent reads each and calls `ga_import` (PDF extraction rules). |
+| `documents/scanned-labs/<date>/scans/*.tiff` (3) | Scanned lab reports | **Small change**: `ga_import` accepts `.tif`/`.tiff` (`image/tiff`) as `sourceFile`. The agent reads a PNG copy (`sips -s format png`) it makes in its scratch directory, because it cannot view TIFF. |
+| `imaging/dental-ct-dicom/<date>/` | DICOMDIR media, 702 files, 836 MB: one study, series CT2–CT8, COMP0 and RAWEXAM1 (raw data, SOP 1.2.840.10008.5.1.4.1.1.66), CT4.. secondary capture (…1.1.7), EPDF8 an encapsulated PDF (…1.104.1) that is an image overview sheet (no report text), Preview.jpg. Transfer syntax Explicit VR Little Endian. | **New importer** (kind `dicom`): one `ImagingStudy` from the DICOM headers, one `DocumentReference` per encapsulated PDF, and the whole folder archived as a `DocumentReference` (identifier system `urn:ga-server:id:dicom-archive`, never shared), like the EHI and Apple archives. No pixel data is interpreted. |
+| `derived/personalrecord/2026-06-01/bundle.json` | 196,256 Observations flattened by the personalrecord app from the sources above, including 182 MGB records dated 2025-10-01..2026-03-29 that no source file holds (notes, medication orders, vitals, echo findings). Original type is recoverable from the id prefix (`condition-`, `medrx-`, `docref-`, `dr-`, `imm-`, `proc-`; none = Observation); the rest of the id is the Epic FHIR id. | **Separate project** `tools/personalrecord/` (no GA imports): rebuilds properly typed FHIR resources and writes them in the `ehr-data.json` shape, which the `fhir-export` importer then imports with the same `--fhir-base`. **No portal sync** (owner's decision). |
+| `derived/personalrecord/2026-06-01/annotations.json` (14) | The owner's annotations in that app: ended / ongoing / date change / comment | **Notes on the record** (owner's decision): each becomes an `Annotation` in the matched resource's `note` (author = the patient, `time` = annotation `created_at`, text says what was annotated). Status and dates are never changed. Unmatched annotations are listed in the extractor's report. |
+| `derived/personalrecord/2025-12-04/*`, `loinc_mappings.json`, `llm_notes.json`, `saved_prompts.json` | Older annotation copy (same 14), app metadata, the app's own LOINC table, two empty files | **Not imported.** GA does its own concept mapping. |
+
+## Behaviour of the new pieces
+
+### `fhir-export` importer
+- `ga import <file.json> --fhir-base <url>`; a `.json` path is detected as kind `fhir-export`. Missing `--fhir-base` is a usage error. A file without a top-level `fhir` object is refused (`not a FHIR export: expected {"fhir": {...}}`).
+- Each attachment is placed at `<resource>.<path>` (`content.0.attachment`, `presentedForm.0`) as `data` + `contentType`; one whose resource or path is missing is counted in `attachmentsUnplaced`, never fatal.
+- Mapping is the portal sync's own (`mapForGa`): same identifiers, references, note text conversion (html, rtf → text), binaries stored by `uploadBinaries`. `mapForGa` also converts DiagnosticReport `presentedForm` html to text (Medplum's 1 MB JSON limit), which sync and the Apple importer then share.
+- Source info: kind `fhir-export`, `file` = absolute path, `date` = newest `meta.lastUpdated` in the file else the newest clinical date, `dateOf` = `meta.lastUpdated`, `fillOnly` when a resource has no `meta.lastUpdated`, no `seenAt` (a snapshot never claims a record is still current).
+- It is a whole-record Epic import: tag `src-fhir-export` counts in the currency rule's newest Epic import (`EPIC_TAGS`) and in `storeNewestImport`, and the engine fills existing records from it as it does for `smart` and `ehi`.
+- A copy of a resource that differs from the stored one only by an added `note` element updates the record and keeps the note (the annotation path depends on this).
+- Re-import of the same file creates nothing.
+
+### Apple Health clinical records
+- Every `ClinicalRecord` with `fhirVersion` 4.x is imported, whatever its type (today only Patient identifiers and AllergyIntolerance are). DSTU2 records (`1.0.2`, older iPhones) are counted in `clinicalVersionUnsupported`, not converted.
+- Records are grouped by FHIR base (the `sourceURL` minus `/<Type>/<id>`) and each group is mapped with `mapForGa` using `{ key: sourceKey(base), name: sourceName, fhirBase: base }`: identifier `urn:ga-server:id:smart:<key>` | `<Type>/<id>` first, `urn:ga-server:id:apple-health` | `sourceURL` second. Attachments without inline data keep their (absolute) hospital URL; nothing is fetched.
+- Source info for this batch: kind `apple-health`, `dateOf` = the record's `receivedDate`, `fillOnly` always true. With the engine filling for `apple-health` (Task 0), an Apple copy only adds fields an existing hospital record lacks; a hospital record arriving later replaces the Apple body (it carries `meta.lastUpdated`, or is a whole-record export).
+- An AllergyIntolerance imported by the old mapping (identified only by `apple-health` | `sourceURL`) gains the new identifier instead of being duplicated.
+- A file that is not valid JSON is retried once with each backslash that does not start a valid JSON escape doubled; still invalid → `clinicalUnreadable`.
+- All clinical records of one export go to one `importResources` call (references resolve within it), separate from the reading batches.
+
+### `dicom` importer
+- `ga import <folder>`: a folder holding `DICOMDIR` is kind `dicom`.
+- Reads the header of every file (first 256 KB) with a zero-dependency parser: Explicit and Implicit VR Little Endian, undefined-length sequences skipped; stops at the first tag past group 0x0020 or at pixel data. Non-DICOM files (no `DICM` at 128) are counted in `skipped`, never fatal. Big endian or deflated transfer syntax: file counted in `unsupported`.
+- One `ImagingStudy` per StudyInstanceUID: identifier `urn:dicom:uid` \| `urn:oid:<uid>`, `status: available`, `started` from StudyDate/StudyTime, `modality` (distinct), `numberOfSeries`, `numberOfInstances`, `description`, and per series `uid`, `number`, `modality`, `description`, `numberOfInstances`, `instance[]` (`uid`, `sopClass`, `number`).
+- Encapsulated PDF (SOP 1.2.840.10008.5.1.4.1.1.104.1): the PDF bytes (EncapsulatedDocument 0042,0011) stored as a `DocumentReference` (`application/pdf`, `context.related` → the ImagingStudy).
+- The folder is archived with `archiveFolder(..., 'urn:ga-server:id:dicom-archive')`; that system joins `NEVER_DOCS`.
+
+### `tools/personalrecord` extractor
+- `node tools/personalrecord/cli.ts <personalrecord-dir> --known <ehr-data.json> --out <file.json> [--include-before-cutoff]`; prints a JSON report.
+- Imports only `node:*` and `@medplum/fhirtypes` types (movable to its own repository like `src/store`).
+- Considers only bundle records whose `source` extension is `ehr_data` and whose id (after the prefix) looks like an Epic id (`/^e[A-Za-z0-9.\-]{15,}$/`). Skips those whose id is in `--known`. By default emits only records dated after the newest clinical date in `--known` (the cutoff); `--include-before-cutoff` emits the rest too.
+- Rebuilds per prefix (field mapping in the plan), drops the app's extensions and non-FHIR fields, never sets `meta.lastUpdated` (so GA treats them as fill-only), never sets a status it cannot know (`MedicationRequest.status: unknown`, no Condition `clinicalStatus`), and adds the note `Reconstructed from a personalrecord export; original structure lost.`
+- Annotations: matched to exactly one resource, first in `--known`, then among the reconstructed ones, by case-insensitive code text (Condition `code.text`, MedicationRequest `medicationCodeableConcept.text` or `medicationReference.display`, DocumentReference `type.text`, Observation `code.text`) and, when the annotation has a date, the same calendar day. A match in `--known` is emitted as a verbatim copy of that resource with the note appended. Zero or several matches: listed in `report.annotationsUnmatched` with the reason.
+- Output: `{fhir: {<Type>: Resource[]}, attachments: []}`.
+
+## Out of scope
+Portal sync, pixel data and image viewing, the app's LOINC table, `export_cda.xml`, and converting Apple DSTU2 clinical records to R4.
