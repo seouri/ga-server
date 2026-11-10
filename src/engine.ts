@@ -558,7 +558,17 @@ export async function importResources(
       return out;
     };
     // A portal copy marked fill-only never replaces a record another GA source (EHI, C-CDA, PDF) wrote, on every sync.
-    const fillOnly = (ex: R) => source.kind === 'smart' && !!source.fillOnly?.(incoming) && idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''));
+    // The same holds for a FHIR export copy without lastUpdated and an Apple clinical copy, onto a record another source wrote
+    // (a src-<x> tag other than its own, or an EHI, C-CDA or PDF identifier).
+    const srcTags = (r: R) => (r.meta?.tag ?? []).filter((t) => t.system === TAG && t.code?.startsWith('src-')).map((t) => t.code!);
+    const fillOnly = (ex: R) =>
+      !!source.fillOnly?.(incoming) &&
+      (source.kind === 'smart'
+        ? idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))
+        : (source.kind === 'fhir-export' || source.kind === 'apple-health') &&
+          (srcTags(ex).some((c) => c !== `src-${source.kind}`) || idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))));
+    // A hospital record (portal, FHIR export, EHI, C-CDA) replaces a body only an Apple clinical copy wrote, whatever the dates.
+    const hospitalOntoApple = (ex: R) => ['smart', 'fhir-export', 'ehi', 'ccda'].includes(source.kind) && srcTags(ex).length === 1 && srcTags(ex)[0] === 'src-apple-health';
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
     const fromApple = source.kind === 'apple-health';
     // A same-day content match at another time of day is a possible duplicate only with the same value (one lab, collected vs resulted
@@ -608,6 +618,10 @@ export async function importResources(
           else if (tagged !== existing) await client.updateResource(tagged);
           report.conflicts++;
         } else if (fillOnly(existing)) target = await fillOnto(existing);
+        else if (hospitalOntoApple(existing)) {
+          target = await unionUpdate(client, existing, filled);
+          report.updated++;
+        }
         else if (d === 'update') {
           target = await unionUpdate(client, existing, filled);
           report.updated++;
@@ -634,7 +648,7 @@ export async function importResources(
           const d = decide(same, filled);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
           const appleOntoOther = fromApple && !isApple(same);
-          const otherOntoApple = !fromApple && isApple(same) && !hasNonApple(same); // hospital body beats an Apple-only one
+          const otherOntoApple = !fromApple && isApple(same) && (!hasNonApple(same) || hospitalOntoApple(same)); // hospital body beats an Apple one
           if (d === 'conflict') report.skipped++;
           else if (fillOnly(same)) await fillOnto(same);
           else {

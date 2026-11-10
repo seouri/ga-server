@@ -857,3 +857,41 @@ test('arrival survives a last-seen bump and a fill-only merge', async () => {
   expect(await importResources(client, [smartProblem(pl, 'resolved')], smartSrc('2026-11-05T00:00:00Z', { fillOnly: () => true }), pid, 'h')).toMatchObject({ merged: 1 });
   expect(await stamp()).toBe(ehiArrival);
 });
+
+// Apple clinical copies and FHIR export copies against hospital records (spec: Apple Health clinical records).
+const feSrc = (extra: Partial<SourceInfo> = {}): SourceInfo => ({ kind: 'fhir-export', file: '/synthetic/ehr.json', date: '2025-09-01', writer: 'importer', ...extra });
+const appleClinicalSrc = (): SourceInfo => ({ kind: 'apple-health', file: '/synthetic/export.xml', date: '2025-11-02', writer: 'importer', fillOnly: () => true, dateOf: () => '2025-11-02T00:00:00Z' });
+const hospCond = (n: string, text: string, extra: object = {}) =>
+  ({ ...problem([{ system: SMART_SYS, value: `Condition/${n}` }], 'active'), code: { text }, meta: { lastUpdated: '2025-09-01T00:00:00Z' }, ...extra }) as Resource;
+const appleCond = (n: string) =>
+  ({ ...problem([{ system: SMART_SYS, value: `Condition/${n}` }, { system: APPLE, value: `https://fhir.example.org/Condition/${n}` }], 'active'), code: { text: 'apple wording' }, note: [{ text: 'apple-note' }] }) as Resource;
+
+test('apple fill-only copy never replaces a hospital record', async () => {
+  const n = uid('c');
+  await importResources(client, [hospCond(n, 'hospital wording')], feSrc(), pid, 'h');
+  await importResources(client, [appleCond(n)], appleClinicalSrc(), pid, 'h');
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(found[0].code?.text).toBe('hospital wording');
+  expect(found[0].note).toEqual([{ text: 'apple-note' }]);
+});
+
+test('hospital record replaces an apple-only copy', async () => {
+  const n = uid('c');
+  await importResources(client, [appleCond(n)], appleClinicalSrc(), pid, 'h');
+  const r = await importResources(client, [hospCond(n, 'hospital wording')], feSrc(), pid, 'h');
+  expect(r).toMatchObject({ updated: 1, created: 0 });
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(found[0].code?.text).toBe('hospital wording');
+});
+
+test('fhir-export fill-only copy never replaces a smart record', async () => {
+  const n = uid('c');
+  await importResources(client, [hospCond(n, 'portal wording')], smartSrc('2025-09-01T00:00:00Z'), pid, 'h');
+  const copy = { ...hospCond(n, 'file wording'), meta: undefined } as Resource;
+  await importResources(client, [copy], feSrc({ date: '2025-12-01', fillOnly: () => true }), pid, 'h');
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(found[0].code?.text).toBe('portal wording');
+});
