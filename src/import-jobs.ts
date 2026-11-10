@@ -179,6 +179,8 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
   const lock = await takeLock(join(jobDir(dir, id), 'import.lock'), 0);
   if (!lock) throw new GaError(JOB_BUSY);
   try {
+    j = jobStatus(dir, id); // as saved by the attempt before ours, which may have ended since the read above
+    if (j?.status !== 'running') return;
     const into = join(jobDir(dir, id), 'root');
     if (!j.root) {
       rmSync(into, { recursive: true, force: true }); // a crash mid-unzip
