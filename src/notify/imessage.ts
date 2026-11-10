@@ -1,6 +1,7 @@
 // The iMessage bridge: runs on the host (launchd), reads ~/Library/Messages/chat.db, sends through osascript, talks to the gateway's /notify/exchange.
 // Logs hold counts, ids and errors only; never message text or handles.
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,6 +17,9 @@ const osascript = (args: string[]): Promise<void> => new Promise((resolve, rejec
 // Phone: +digits; email: lowercased. Applied to the setup value and to chat.db handles before comparing.
 export const normalizeHandle = (h: string): string => (h.includes('@') ? h.trim().toLowerCase() : `+${h.replace(/\D/g, '')}`);
 
+// Texts are remembered by hash only (no message text on disk).
+export const textHash = (t: string): string => createHash('sha256').update(t).digest('base64url');
+
 export const sendText = (to: string, text: string, run: (args: string[]) => Promise<void> = osascript): Promise<void> => run([...SCRIPT, to, text]);
 
 // attributedBody is a typedstream: after "NSString" comes 0x01 '+', a length (1 byte, or 0x81 + 2 bytes LE), then UTF-8.
@@ -30,32 +34,41 @@ export function decodeBody(b: Buffer): string | undefined {
   return i + len <= b.length ? b.subarray(i, i + len).toString('utf8') : undefined;
 }
 
-type Row = { rowId: number; from: string; text: string; at: string };
+type Row = { rowId: number; from: string; text: string; at: string; key: string };
 
-// Owner's replies (the send handle plus `also` handles, e.g. the Apple ID email iPhone replies are recorded under): any row unless its text is one GA just sent. is_from_me=1 counts as an owner text only in self-message mode
+// Owner's replies (the send handle plus `also` handles, e.g. the Apple ID email iPhone replies are recorded under): any row unless its text is one GA sent in the last 7 days. is_from_me=1 counts as an owner text only in self-message mode
 // (owner's Apple ID on this Mac), pending the spike. Other handles are skipped. `scanned` is the highest ROWID looked at, skipped rows included.
-export function readSince(dbPath: string, afterRowId: number, owner: string | string[], recent: string[] = []): { rows: Row[]; scanned: number } {
+// `sentHashes`: textHash of each text GA sent lately. `seen`: keys of owner texts already taken: in self-message mode each text comes as a
+// sent and a received copy (the latter up to a day later), with the same text and the same send time to the millisecond.
+export function readSince(dbPath: string, afterRowId: number, owner: string | string[], sentHashes: string[] = [], seen: string[] = []): { rows: Row[]; scanned: number } {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const st = db.prepare('select h.id hid, m.ROWID r, m.text t, m.attributedBody b, m.is_from_me me, m.date d, coalesce(m.associated_message_type, 0) a from message m join handle h on h.ROWID = m.handle_id where m.ROWID > ? order by m.ROWID');
     st.setReadBigInts(true); // ns dates exceed 2^53
     const rows = st.all(afterRowId) as { hid: string; r: bigint; t: string | null; b: Uint8Array | null; me: bigint; d: bigint; a: bigint }[];
-    const out: Row[] = [], mine = [owner].flat().map(normalizeHandle);
+    const out: Row[] = [], mine = [owner].flat().map(normalizeHandle), taken = new Set(seen);
     let scanned = afterRowId;
     for (const x of rows) {
       scanned = Math.max(scanned, Number(x.r));
       const from = normalizeHandle(x.hid);
       if (!mine.includes(from) || x.a !== 0n) continue; // a tapback (type >= 2000) is not a text
       const text = x.t ?? (x.b ? decodeBody(Buffer.from(x.b)) : undefined);
-      if (!text || recent.includes(text)) continue; // GA's own sends can come back either way
-      const d = Number(x.d), ms = Math.abs(d) > 1e12 ? d / 1e6 : d * 1e3; // ns on recent macOS, seconds before
-      out.push({ rowId: Number(x.r), from, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString() });
+      if (!text) continue;
+      const h = textHash(text);
+      if (sentHashes.includes(h)) continue; // GA's own sends come back either way, the received copy up to a day later
+      const ms = x.d > 1_000_000_000_000n || x.d < -1_000_000_000_000n ? Number(x.d / 1_000_000n) : Number(x.d) * 1e3; // ns on recent macOS, seconds before
+      const key = `${h}:${ms}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
+      out.push({ rowId: Number(x.r), from, text, at: new Date(Date.UTC(2001, 0, 1) + ms).toISOString(), key });
     }
     return { rows: out, scanned };
   } finally { db.close(); }
 }
 
-type Bridge = { lastRowId?: number; recent: { text: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }>; hintAt?: number };
+type Bridge = { lastRowId?: number; recent: { h: string; at: number }[]; seen?: { k: string; at: number }[]; sent: string[]; failed: { id: string; error: string }[]; retry?: Record<string, { n: number; next: number }>; hintAt?: number };
+// Messages in iCloud delivered the received copy of GA's sends about 24 h late; a week covers it.
+const ECHO_MS = 7 * 24 * 3600_000;
 const BACKOFF = [1, 5, 30].map((m) => m * 60_000); // a failed id is retried after 1, 5, then 30 minutes
 export type BridgeDeps = { url: string; token: string; dbPath: string; owner: string; also?: string[]; every: number; dir: string; send?: typeof sendText; fetch?: typeof fetch; now?: () => number };
 
@@ -68,12 +81,13 @@ const maxRowId = (dbPath: string): number => {
 export async function round(d: BridgeDeps, log: (s: string) => void): Promise<boolean> {
   const now = (d.now ?? Date.now)(), send = d.send ?? sendText;
   const st = readJson<Bridge>(d.dir, 'bridge.json', { recent: [], sent: [], failed: [] });
-  st.recent = st.recent.filter((r) => now - r.at < 10 * 60_000);
+  st.recent = st.recent.filter((r) => r.h && now - r.at < ECHO_MS); // entries without h: the old text form
+  st.seen = (st.seen ?? []).filter((r) => now - r.at < ECHO_MS);
   let incoming: Row[] = [], scanned = 0;
   try {
     if (st.lastRowId === undefined) { st.lastRowId = maxRowId(d.dbPath); writeJson(d.dir, 'bridge.json', st); } // first run: do not replay history
     else {
-      const r = readSince(d.dbPath, st.lastRowId, [d.owner, ...(d.also ?? [])], st.recent.map((x) => x.text));
+      const r = readSince(d.dbPath, st.lastRowId, [d.owner, ...(d.also ?? [])], st.recent.map((x) => x.h), st.seen.map((x) => x.k));
       incoming = r.rows; scanned = r.scanned;
     }
   } catch (e) {
@@ -87,6 +101,7 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   const { outgoing = [] } = (await res.json()) as { outgoing?: { id: string; text: string }[] };
   // Persist before any send, and after each, so a crash neither re-sends nor replays.
   if (scanned > (st.lastRowId ?? 0)) st.lastRowId = scanned;
+  st.seen.push(...incoming.map((m) => ({ k: m.key, at: now })));
   st.sent = []; st.failed = [];
   writeJson(d.dir, 'bridge.json', st);
   const retry = st.retry ?? {};
@@ -94,7 +109,7 @@ export async function round(d: BridgeDeps, log: (s: string) => void): Promise<bo
   for (const o of outgoing) {
     if (retry[o.id] && now < retry[o.id].next) continue; // waiting out its backoff
     tried++;
-    try { await send(d.owner, o.text); st.sent.push(o.id); delete retry[o.id]; st.recent.push({ text: o.text, at: (d.now ?? Date.now)() }); } catch (e) {
+    try { await send(d.owner, o.text); st.sent.push(o.id); delete retry[o.id]; st.recent.push({ h: textHash(o.text), at: (d.now ?? Date.now)() }); } catch (e) {
       const m = (e as Error).message, n = (retry[o.id]?.n ?? 0) + 1;
       retry[o.id] = { n, next: now + BACKOFF[Math.min(n, BACKOFF.length) - 1] };
       st.failed.push({ id: o.id, error: /^(timeout|osascript exit \S+)$/.test(m) ? m : 'send failed' });

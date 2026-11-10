@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { decodeBody, normalizeHandle, readSince, round, sendText } from '../src/notify/imessage.ts';
+import { decodeBody, normalizeHandle, readSince, round, sendText, textHash } from '../src/notify/imessage.ts';
 
 // Synthetic typedstream: ...NSString, 0x01 '+', length, utf8.
 const blob = (t: string) => {
@@ -48,7 +48,7 @@ describe('readSince', () => {
     ins.run(5, 'stranger', null, 0, 2, d);
     ins.run(6, 'typed on this mac', null, 1, 1, d); // owner's own message in self chat
     db.close();
-    const { rows, scanned } = readSince(p, 1, '+1 (555) 123-0000', ['GA: digest']);
+    const { rows, scanned } = readSince(p, 1, '+1 (555) 123-0000', [textHash('GA: digest')]);
     expect(scanned).toBe(6);
     expect(rows.map((r) => [r.rowId, r.text, r.from])).toEqual([[3, 'reply plain', '+15551230000'], [4, 'reply blob', '+15551230000'], [6, 'typed on this mac', '+15551230000']]);
     expect(rows[0].at).toBe(new Date(Date.UTC(2001, 0, 1) + 700_000_000_000).toISOString());
@@ -79,7 +79,7 @@ describe('readSince with also handles', () => {
     ins.run(2, 'iphone reply', null, 1, 2, d); // owner's iPhone reply, email handle
     ins.run(3, 'nope', null, 1, 3, d);
     db.close();
-    const { rows, scanned } = readSince(p, 0, ['+15551230000', 'owner@example.com'], ['GA: digest']);
+    const { rows, scanned } = readSince(p, 0, ['+15551230000', 'owner@example.com'], [textHash('GA: digest')]);
     expect(scanned).toBe(3);
     expect(rows.map((r) => [r.rowId, r.text, r.from])).toEqual([[2, 'iphone reply', 'owner@example.com']]);
     expect(readSince(p, 0, '+15551230000').rows.map((r) => r.rowId)).toEqual([1]);
@@ -101,7 +101,7 @@ describe('round', () => {
     const db = new DatabaseSync(p);
     db.exec('create table handle (ROWID integer primary key, id text); create table message (ROWID integer primary key, text text, attributedBody blob, is_from_me integer, handle_id integer, date integer, associated_message_type integer default 0)');
     db.prepare('insert into handle values (1, ?)').run(OWNER);
-    const add = (id: number, text: string, me: number) => db.prepare('insert into message (ROWID, text, attributedBody, is_from_me, handle_id, date) values (?, ?, null, ?, 1, 0)').run(id, text, me);
+    const add = (id: number, text: string, me: number, date = 0n) => db.prepare('insert into message (ROWID, text, attributedBody, is_from_me, handle_id, date) values (?, ?, null, ?, 1, ?)').run(id, text, me, date);
     const bodies: { incoming: unknown[]; sent: string[]; failed: unknown[] }[] = [];
     let outgoing: { id: string; text: string }[] = [];
     const fetch = (async (_u: string, init: { body: string }) => { bodies.push(JSON.parse(init.body)); const o = outgoing; outgoing = []; return { ok: true, json: async () => ({ outgoing: o }) }; }) as unknown as typeof globalThis.fetch;
@@ -113,7 +113,7 @@ describe('round', () => {
   it('a skipped echo is not re-read after the recent window', async () => {
     const e = setup();
     await round(e.deps(T0), () => {}); // first run: starts at max rowid 0
-    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ text: 'GA: digest', at: T0 }] }));
+    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ h: textHash('GA: digest'), at: T0 }] }));
     e.add(1, 'GA: digest', 1);
     await round(e.deps(T0 + 60_000), () => {}); // inside window: skipped, lastRowId advances
     expect(e.state().lastRowId).toBe(1);
@@ -137,10 +137,33 @@ describe('round', () => {
     expect(e.bodies[1].incoming).toHaveLength(1);
   });
 
+  it("the owner's text is taken once though its received copy comes a day after the sent copy", async () => {
+    const e = setup();
+    await round(e.deps(T0), () => {});
+    e.add(1, 'when is my next shot?', 1, 815943109526000000n); // sent copy: send time, ms precision
+    await round(e.deps(T0 + 1000), () => {});
+    e.add(2, 'when is my next shot?', 0, 815943109526938624n); // received copy, same send time
+    e.add(3, 'when is my next shot?', 1, 815943209526000000n); // the same words sent again later: a new text
+    await round(e.deps(T0 + 24 * 3600_000), () => {});
+    expect(e.bodies.map((b) => b.incoming.length)).toEqual([0, 1, 1]);
+    expect(JSON.stringify(e.state())).not.toContain('next shot'); // hashes only on disk
+  });
+
+  it("GA's send echoed back a day later is not taken for the owner's text", async () => {
+    const e = setup();
+    await round(e.deps(T0), () => {});
+    e.setOut([{ id: 'a', text: 'GA: answer' }]);
+    await round(e.deps(T0 + 1000), () => {});
+    e.add(1, 'GA: answer', 0); // Messages in iCloud delivered the received copy ~24 h late
+    await round(e.deps(T0 + 25 * 3600_000), () => {});
+    expect(e.bodies[2].incoming).toEqual([]);
+    expect(JSON.stringify(e.state())).not.toContain('GA: answer'); // hashes only on disk
+  });
+
   it('an is_from_me=0 row equal to a recent GA send is skipped', async () => {
     const e = setup();
     await round(e.deps(T0), () => {});
-    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ text: 'GA: digest', at: T0 }] }));
+    writeFileSync(join(e.dir, 'bridge.json'), JSON.stringify({ ...e.state(), recent: [{ h: textHash('GA: digest'), at: T0 }] }));
     e.add(1, 'GA: digest', 0);
     await round(e.deps(T0 + 1000), () => {});
     expect(e.bodies[1].incoming).toEqual([]);
