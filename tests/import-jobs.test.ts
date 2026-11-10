@@ -180,7 +180,7 @@ test('a batch that kills the whole process every time ends failed after three re
   const path = join(a.dir, 'imports', job.id, 'job.json');
   writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), message: 'waiting for the import lock: another import or sync is running' })); // stale
   const host = `const { resumeJobs, jobStatus } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
-    resumeJobs(process.argv[1], { run: async (d, id) => { (await import('node:fs')).writeFileSync(d + '/imports/' + id + '/import.lock', '{}'); process.kill(process.pid, 'SIGKILL'); } });
+    resumeJobs(process.argv[1], { run: async (d, id) => { (await import('node:fs')).writeFileSync(d + '/imports/' + id + '/import.lock', JSON.stringify({ pid: process.pid, host: (await import('node:os')).hostname(), started: Date.now() })); process.kill(process.pid, 'SIGKILL'); } });
     for (;;) { if (jobStatus(process.argv[1], process.argv[2]).status !== 'running') process.exit(0); await new Promise((r) => setTimeout(r, 20)); }`;
   let kills = 0;
   for (let i = 0; i < 6 && jobStatus(a.dir, job.id)!.status === 'running'; i++) {
@@ -336,6 +336,22 @@ test('an archive step cut short leaves no second tarball: the retry reuses its f
   cutShort(); // killed after the store kept the archive, before its finally
   expect(await archiveFolder(a.client, src, a.pid, 'urn:ga-server:id:apple-health-archive')).toBe('already-present');
   expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
+});
+
+test('the 3-attempt failure waits while another process holds the job, and removes nothing under it', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const folder = join(a.dir, 'imports', job.id), root = join(folder, 'root');
+  mkdirSync(root);
+  writeFileSync(join(folder, 'job.json'), JSON.stringify({ ...jobStatus(a.dir, job.id), root, attempts: 3 }));
+  const lock = (await takeLock(join(folder, 'import.lock'), 0))!; // a `ga import-job` retrying it
+  resumeJobs(a.dir, { busyRetryMs: 50 });
+  await new Promise((r) => setTimeout(r, 30));
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', note: JOB_BUSY });
+  expect([existsSync(root), existsSync(job.upload)]).toEqual([true, true]);
+  rmSync(lock);
+  expect(await settled(a.dir, job.id)).toMatchObject({ status: 'failed', message: expect.stringMatching(/^GA stopped during the last attempt/) });
+  expect(readdirSync(folder)).toEqual(['job.json']);
 });
 
 // save() renames without fsync: a power loss can leave an empty job.json. The gateway must still start.

@@ -127,10 +127,17 @@ function supervise(dir: string, id: string, opts: Supervision): void {
       if (j?.status !== 'running') return;
       // No message: the last attempt ended with GA itself (a container killed out of memory, most likely), not with an error.
       if (j.attempts >= MAX_ATTEMPTS) {
+        // Under the job lock: a `ga import-job` retrying it keeps its files (a killed attempt's lock is stale and taken over).
+        const lock = await takeLock(join(jobDir(dir, id), 'import.lock'), 0);
+        if (!lock) {
+          save(dir, { ...j, note: JOB_BUSY }); // the message stays: it is what the failure will say
+          return void setTimeout(() => supervise(dir, id, opts), opts.busyRetryMs ?? BUSY_RETRY_MS).unref();
+        }
         // Nothing resumes a failed job: the export (up to 2 GB zipped, 8 GB unzipped) would only fill the disk and the nightly backup.
-        // Removed first: a kill midway repeats this at the next start. The lock is one a killed attempt left.
-        for (const p of [join(jobDir(dir, id), 'root'), j.upload, join(jobDir(dir, id), 'import.lock')]) rmSync(p, { recursive: true, force: true });
-        return void save(dir, { ...j, status: 'failed', note: undefined, message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
+        // Removed first: a kill midway repeats this at the next start.
+        for (const p of [join(jobDir(dir, id), 'root'), j.upload]) rmSync(p, { recursive: true, force: true });
+        save(dir, { ...j, status: 'failed', note: undefined, message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
+        return void rmSync(lock, { force: true });
       }
       save(dir, { ...j, attempts: j.attempts + 1, message: undefined }); // a failed attempt saves its own; an earlier one is stale
       current = id;
