@@ -123,3 +123,93 @@ C-CDA (one document converted whole by the vendored converter, which builds the 
 40 KB) imports. Synthetic Health Summaries (the fixture's entries repeated with new ids; dense entries only, so a narrative-heavy
 document may fall at another size): 2.5 MB and 3.7 MB import (Linux 3.7 MB: anon 188, docker 192, 123 s); 4.9 MB, 6.1 MB and 49 MB
 run the worker out of memory (Linux 4.9 MB confirmed). Converting 6 MB retains about 32 MB (18 MB tree, 14 MB bundle).
+
+## Task 7: the whole server under 512 MB
+
+Setup: the repo's `compose.yaml` run as a separate project (`ga-t7`) with `--profile sqlite`, only `ga-store`, `ga-sync` and
+`ga-gateway` (`--no-deps`), a throwaway `.ga` (SQLite store) and its own ports; `GA_PUBLIC_URL` set so `/mcp` is on. Everything
+went through the gateway's HTTP surface as a chat app does: OAuth (the owner signed in with an owner cookie signed by the
+throwaway gateway's `cookie.key`, as the gateway tests do, which skips the passkey), `upload_link`, the upload page,
+`import_file`, `import_status` every minute and `health_summary` every 5 minutes. Memory: `docker stats` about every 2 s (summed
+per sample) and each container's cgroup `memory.stat` (anon, file, kernel) and `memory.peak` every 10 s; `docker events` for
+oom/die/start. Exports: the 3,650-day synthetic Apple export (5.73 M Records, 2.2 GB `export.xml`, 71 MB zip) and the factor-4500
+synthetic EHI export (512 MB, 12.8 MB zip), both regenerated with today's generators. TZ America/New_York. Docker Desktop on macOS
+(Linux VM, cgroup v2), `node:26.13.0-alpine`.
+
+### Uncapped run (for the split)
+
+Peaks of anon + kernel (what a cap cannot reclaim; `docker stats` and `memory.peak` also count page cache, which the unzip and
+archive fill with gigabytes and a cap reclaims):
+
+| Container | Apple 2 GB: peak | Apple: steady (batches) | EHI 512 MB: peak |
+|---|---|---|---|
+| ga-store | 196 (boot only) | 130-143 | 232 |
+| ga-sync | 108 (boot only) | 77 | 107 |
+| ga-gateway | 241 (unzip, archive, read) | 173-191 | 511 (see `health_summary` below) |
+| max simultaneous sum (anon) | 432 | | 778 |
+
+The per-container peaks add to 545 for Apple: they don't coincide (boot vs. import), but a per-container cap has to hold each one.
+Boot probes (store and sync alone, empty store, capped): the store is OOM-killed in a loop at 150, boots at 180 once and with two
+restarts at 200, and cleanly at 220 (peak 211); sync is OOM-killed at 60-80, runs at 90 pinned at the cap, and at 100 peaks 96-97.
+
+**Split** (fixed before any capped run): store 220, sync 100 (their reliable boot), gateway the remainder, 192; `memswap_limit`
+equal to `mem_limit` (no swap). Predicted: the gateway's uncapped 241 is over 192, so it might be OOM-killed in the read phase.
+
+### Apple Health 2 GB, capped, one gateway restart: fails at batch 102 of 146
+
+Uploaded, started with `import_file`, `docker restart` of the gateway after batch 10. Timeline:
+- The restart: the gateway logged "resuming 1 import", `import_status` showed the job running (attempts 1), batches went on
+  from 11. The first read fit (about 158 anon, not 233: under the cap V8 keeps less); the re-read after a restart ends near 173.
+- Batches ran at 166 + 7 (anon + kernel) in the gateway, 120-168 in the store, 77-82 in sync. `docker stats` summed per sample:
+  max 388 MiB over 6,514 samples (with per-container caps the sum cannot pass 512; what decides is the kills).
+- The gateway was OOM-killed five times, store and sync never:
+  1. 12:23, right after batch 91 was committed, building batch 92 (in under 10 s from 173). Restarted, resumed, re-read, and
+     batch 92 onwards were committed.
+  2. 14:38, right after batch 101 was committed, building batch 102, the first batch after the readings (the read's end state,
+     10 years of daily data, plus that batch).
+  3-5. 14:45, 14:52, 14:59: each resumed attempt re-read the export, climbed to 173 by the end of the read and was killed
+     building batch 102 again. After the third attempt in a row without progress the job ended **failed** with the plain message
+     ("GA stopped during each of the last 3 attempts, most likely out of memory: ..."), root kept, gateway answering.
+- Integrity of what was written: 51,000 Observations in the store = the summed report's created = 102 x 500 (every uncapped
+  batch was 500); no duplicate identifiers; `pending` cleared; no records from batch 102 on. The uncapped run of the same export:
+  done, 73,000 created, 0 invalid, no duplicate identifiers, 5,309 s.
+- `health_summary` answered all 65 calls (5-minute interval, through every restart), from 141 ms to 65 s.
+- Slow under the caps: the store's page cache is squeezed to about 96 MB (36 M file refaults) against a database of several
+  hundred MB, so batches went from about 1.5 min uncapped to 8-17 min, and the run took 5.5 h to batch 101. Follow-up, not fixed
+  here (Ruling 16): store write and search speed with a small page cache.
+
+So the 2 GB Apple import does not fit a 192 MiB gateway: its steady batches leave about 19 MiB of headroom and the transition
+to the daily batches needs more. With the store and sync booting as they do today, 192 is what the gateway gets of 512 (store 211 at boot, sync about 97, both falling to 130-168 and 77-82 later).
+
+### Epic EHI, 512 MB (factor 4500), capped: fails
+
+Run as an `import_file` job under the same caps, with `health_summary` held back during the job (it is measured separately,
+below). The gateway was OOM-killed by the kernel three times, about 40 s into each attempt: in the concept-learning pre-pass,
+before the first batch (anon about 155 at the last 10 s sample before each kill, against 192). Each kill takes the whole gateway
+down (Docker restarts it at once); on the third restart `resumeJobs` marks the job failed (attempts are counted before each
+start, so a kill counts), with no records written but the archive. No loop: the job stays failed and the gateway keeps
+answering. That run said only "stopped 3 times in a row"; a failure with no recorded error (every attempt ended with GA itself)
+now gives the plain message, and a second run with the same caps ended with it: "GA stopped during each of the last 3 attempts,
+most likely out of memory: too large to import within this server's memory; import it with `ga import` on a computer with more
+memory" (the worker's own out-of-memory error gives the same advice with its heap limit). Store and sync were not killed; one
+`health_summary` after each job answered (127-144 ms). Uncapped, the same job is done in 1,406 s, 144,003 created, 0 invalid, no
+duplicate identifiers (Task 6's 139,504 is the same export without distinct Rich Text: the difference is factor - 1). So Ruling 13's
+question is answered: the pre-pass peak (Task 6: 258 in `docker stats`) does not fit a 192 MiB gateway even with the store idle.
+
+`health_summary` on that record (uncapped run): each call took the gateway from about 147 to 391, then 420-440, then about 480
+MiB anon, and V8 kept it. Its labs, problems, medications and immunizations are read whole; factor 4500 makes 13,500 problems,
+far more than a real record, but the growth is with the record and unbounded. On the Apple record (vitals only) the calls left
+the gateway flat. Node sizes its default heap from the container's cap (262 MiB under a 200 MiB cap, above the cap), so a big
+`health_summary` under the cap would be a container kill too.
+
+### Summary and follow-ups
+
+The binding gate (Ruling 15: per-container caps summing to 512, no OOM kill) fails for both exports with this split: store 220,
+sync 100, gateway 192. What holds: no duplicate or lost records across five kills and a restart; a job that cannot progress ends
+failed with a plain message instead of looping; the store, sync and the read tools stay up. Follow-ups for the controller (not
+changed here, Ruling 16):
+- Boot cost of store (211) and sync (about 97) leaves the gateway 192; both fall to well under that once running.
+- The gateway's headroom at the end of a 10-year Apple read (173 of 192) and EHI's concept-learning pre-pass.
+- `health_summary` memory grows with the record (EHI: up to about 480 MiB in the gateway); Node's default heap limit under a cap
+  is above the cap, so such a call is a container kill, not a JS error.
+- Store speed with a small page cache (above).
