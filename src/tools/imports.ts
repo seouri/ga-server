@@ -14,7 +14,7 @@ import { fail, importExtracted, text, type ToolDeps } from '../mcp.ts';
 // Empty until a ChatGPT download host is verified in acceptance testing: until then ChatGPT uses upload_link too.
 const FILE_HOSTS = (JSON.parse(readFileSync(new URL('../../config/chat-apps.json', import.meta.url), 'utf8')) as { fileHosts?: string[] }).fileHosts ?? [];
 // What import_status shows of a job record: no paths, no checkpoint internals.
-const view = (j: JobRecord) => ({ jobId: j.id, status: j.status, started: j.started, batchesDone: j.lastBatch + 1, attempts: j.attempts, report: j.report, message: j.message });
+const view = (j: JobRecord) => ({ jobId: j.id, status: j.status, started: j.started, batchesDone: j.lastBatch + 1, attempts: j.attempts, report: j.report, message: j.message, note: j.note });
 
 // ChatGPT passes attached files as {download_url, file_name} for the params named in _meta["openai/fileParams"].
 const FILE = z.object({ download_url: z.string(), file_name: z.string() }).optional();

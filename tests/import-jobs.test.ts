@@ -201,7 +201,8 @@ test('a gateway stopped with SIGTERM mid-attempt four times keeps the job runnin
     c.stdout.on('data', (d) => { if (String(d).includes('running')) c.kill('SIGTERM'); });
     const [code, sig] = await new Promise<unknown[]>((ok) => c.on('close', (...x) => ok(x)));
     expect({ i, code, sig }).toEqual({ i, code: 0, sig: null });
-    expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 1 });
+    // import_status says why it is running again: the first start found no stop marker (a kill), the later ones a restart
+    expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 1, note: expect.stringMatching(i ? /^GA restarted/ : /^GA stopped/) });
   }
 }, 60_000);
 

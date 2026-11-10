@@ -35,6 +35,7 @@ export type JobRecord = {
   epicOrg?: string | null; // EHI: the first attempt's Epic org number (null: none), which shapes its batches
   learned?: Record<string, MapEntry[]>; // EHI: the concepts the first attempt learned from the whole export
   message?: string;
+  note?: string; // why a resumed job is running again, until its next committed batch
   attempts: number; // attempts since the last committed batch
 };
 export type Run = (dir: string, id: string) => Promise<void>;
@@ -85,7 +86,9 @@ export function resumeJobs(dir: string, opts: Supervision = {}): number {
   const running = listJobs(dir).filter((j) => j.status === 'running');
   for (const j of running) {
     const stopped = existsSync(stopMark(dir, j.id));
-    save(dir, { ...j, attempts: stopped ? Math.max(0, j.attempts - 1) : j.attempts });
+    save(dir, { ...j, attempts: stopped ? Math.max(0, j.attempts - 1) : j.attempts, note: stopped
+      ? 'GA restarted during the import; it resumes from the last saved batch'
+      : 'GA stopped during the import (most likely out of memory) and restarted; it resumes from the last saved batch' });
     rmSync(stopMark(dir, j.id), { force: true });
     supervise(dir, j.id, opts);
   }
@@ -114,7 +117,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
       const j = jobStatus(dir, id);
       if (j?.status !== 'running') return;
       // No message: the last attempt ended with GA itself (a container killed out of memory, most likely), not with an error.
-      if (j.attempts >= MAX_ATTEMPTS) return void save(dir, { ...j, status: 'failed', message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
+      if (j.attempts >= MAX_ATTEMPTS) return void save(dir, { ...j, status: 'failed', note: undefined, message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
       save(dir, { ...j, attempts: j.attempts + 1, message: undefined }); // a failed attempt saves its own; an earlier one is stale
       current = { dir, id };
       try {
@@ -174,13 +177,13 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
     epicOrg: j.epicOrg, onEpicOrg: (epicOrg) => { j = save(dir, { ...j!, epicOrg }); },
     learned: j.learned, onLearned: (learned) => { j = save(dir, { ...j!, learned }); },
-    onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0 }); },
+    onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0, note: undefined }); },
   });
   // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest
   // (other skips, seconds) is this attempt's.
   const r = result as { skips?: object }, c = j.report as Report | undefined;
   const report = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
-  save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined });
+  save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined, note: undefined });
   for (const p of [into, j.upload]) rmSync(p, { recursive: true, force: true });
 }
 
