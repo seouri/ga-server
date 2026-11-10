@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
 import type { MedplumClient } from '@medplum/core';
+import { archiveTmp } from './archive.ts';
 import { BATCH_SIZE, type Pending } from './batches.ts';
 import { addNotImported } from './ccda.ts';
 import type { MapEntry } from './conceptmap.ts';
@@ -135,7 +136,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
         }
         // Nothing resumes a failed job: the export (up to 2 GB zipped, 8 GB unzipped) would only fill the disk and the nightly backup.
         // Removed first: a kill midway repeats this at the next start.
-        for (const p of [join(jobDir(dir, id), 'root'), j.upload]) rmSync(p, { recursive: true, force: true });
+        for (const p of [join(jobDir(dir, id), 'root'), j.upload, ...(j.root ? [archiveTmp(j.root)] : [])]) rmSync(p, { recursive: true, force: true });
         save(dir, { ...j, status: 'failed', note: undefined, message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
         return void rmSync(lock, { force: true });
       }

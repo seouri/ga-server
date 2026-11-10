@@ -338,11 +338,12 @@ test('an archive step cut short leaves no second tarball: the retry reuses its f
   expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
 });
 
-test('the 3-attempt failure waits while another process holds the job, and removes nothing under it', async () => {
+test('the 3-attempt failure waits while another process holds the job, and removes nothing under it; then also the tarball folder', async () => {
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
   const folder = join(a.dir, 'imports', job.id), root = join(folder, 'root');
   mkdirSync(root);
+  mkdirSync(archiveTmp(root), { recursive: true }); // each attempt killed in the archive step
   writeFileSync(join(folder, 'job.json'), JSON.stringify({ ...jobStatus(a.dir, job.id), root, attempts: 3 }));
   const lock = (await takeLock(join(folder, 'import.lock'), 0))!; // a `ga import-job` retrying it
   resumeJobs(a.dir, { busyRetryMs: 50 });
@@ -352,6 +353,7 @@ test('the 3-attempt failure waits while another process holds the job, and remov
   rmSync(lock);
   expect(await settled(a.dir, job.id)).toMatchObject({ status: 'failed', message: expect.stringMatching(/^GA stopped during the last attempt/) });
   expect(readdirSync(folder)).toEqual(['job.json']);
+  expect(existsSync(archiveTmp(root))).toBe(false);
 });
 
 // save() renames without fsync: a power loss can leave an empty job.json. The gateway must still start.
