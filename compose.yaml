@@ -164,6 +164,8 @@ services:
   ga-gateway:
     image: node:26.13.0-alpine
     restart: unless-stopped
+    # Fixed, and only here: a recreated gateway (same pid) then recognises an import lock its previous instance left (src/lock.ts).
+    hostname: ga-gateway
     init: true
     user: '${UID:-1000}:${GID:-1000}'
     depends_on:
