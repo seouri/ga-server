@@ -147,7 +147,7 @@ export function doseOf(i: Immunization): Dose {
 }
 
 // An Observation as lab evidence of immunity, when some vaccine of the schedule can use it; else undefined (not kept).
-export function immunityOf(o: Observation, schedule = loadSchedule()): Evidence | undefined {
+export function immunityOf(o: Observation, schedule: Schedule): Evidence | undefined {
   if (['entered-in-error', 'cancelled', 'preliminary'].includes(o.status)) return undefined;
   const name = o.code?.text ?? o.code?.coding?.find((c) => c.display)?.display;
   const value = o.valueString ?? o.valueCodeableConcept?.text ?? o.valueCodeableConcept?.coding?.find((c) => c.display)?.display;

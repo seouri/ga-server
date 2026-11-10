@@ -228,8 +228,8 @@ test('summarizeLabs (a fold) matches every result held and grouped: ties, undate
   const ga = (code: string) => ({ system: 'http://loinc.org', code, extension: [{ url: CONCEPT_SRC, valueCode: 'agent' }] });
   for (let run = 0; run < 40; run++) {
     const all: Observation[] = Array.from({ length: 60 }, (_, i) => {
-      const name = pick(['Glucose', 'glucose ', 'LDL', 'Hemoglobin A1c', 'Other', '']);
-      const coding = pick([[], [], [{ system: 'http://loinc.org', code: pick(['2345-7', '13457-7', '4548-4', '9999-9']) }], [ga(pick(['2345-7', '13457-7']))]]);
+      const name = pick(['Glucose', 'glucose ', 'LDL', 'Hemoglobin A1c', 'eGFR', 'Other', '']);
+      const coding = pick([[], [], [{ system: 'http://loinc.org', code: pick(['2345-7', '13457-7', '4548-4', '98979-8', '48642-3', '9999-9']) }], [ga(pick(['2345-7', '13457-7']))]]);
       const src = pick(['ehi', 'pdf', 'ccda']);
       const codes = [`src-${src}`, ...(coding.length && rnd(3) === 0 ? ['concept-suggested'] : []), ...(rnd(8) === 0 ? ['concept-unmatched'] : []), ...(coding.some((c) => 'extension' in c) ? ['extracted-by-llm'] : [])];
       return {
