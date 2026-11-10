@@ -116,6 +116,7 @@ export const inWorker = (resourceLimits = WORKER_LIMITS): Run => (dir, id) =>
 export async function runJob(dir: string, id: string, deps: { importAny?: typeof importAny; client?: MedplumClient; cfg?: GaConfig } = {}): Promise<void> {
   let j = jobStatus(dir, id);
   if (!j) throw new Error(`no import job ${id}`);
+  if (j.status !== 'running') return; // finished: nothing to redo
   const into = join(jobDir(dir, id), 'root');
   if (!j.root) {
     rmSync(into, { recursive: true, force: true }); // a crash mid-unzip
