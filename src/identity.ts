@@ -12,6 +12,7 @@ export type SourceInfo = {
   dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
   seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
+  prelearned?: boolean; // concepts already learned from the whole import (a batched EHI import): importResources only applies the maps
 };
 // On the Patient: the newest source date of any C-CDA or EHI import, so list reads need not scan every Epic record (src/share/scope.ts newestEpicImport).
 export const NEWEST_IMPORT = 'urn:ga-server:ext:newest-epic-import';

@@ -1,40 +1,123 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { GaError } from '../config.ts';
 
 export type Row = Record<string, string>;
 
-// Epic's TSVs are unquoted (checked on a real export: every row has the header's width). Fields are
-// literal: split on tab, rows on CRLF only, so quotes and a bare LF inside a field survive.
-function parseTsv(text: string): string[][] {
-  const lines = text.replace(/^\uFEFF/, '').split('\r\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines.map((l) => l.split('\t'));
-}
 
 export function isEhiExport(dir: string): boolean {
   try { return statSync(join(dir, 'EHITables')).isDirectory(); } catch { return false; }
 }
 
+// A table's lines as [start, end) byte ranges of the file, contiguous lines merged into one range.
+export type Ranges = number[];
+const CRLF = Buffer.from('\r\n');
+
+// Tables are read a chunk at a time, never whole: an export's tables and the notes and messages in them can be hundreds of MB.
 export class EhiTables {
   skipped: { table: string; reason: 'missing' | 'empty' }[] = [];
   private dir: string;
-  constructor(dir: string) { this.dir = dir; }
-
-  private skip(table: string, reason: 'missing' | 'empty'): Row[] {
-    if (!this.skipped.some((s) => s.table === table)) this.skipped.push({ table, reason });
-    return [];
+  private chunk: number;
+  private headers = new Map<string, string[]>();
+  constructor(dir: string, chunk = 1 << 20) {
+    this.dir = dir;
+    this.chunk = chunk;
   }
 
-  rows(table: string): Row[] {
+  private skip(table: string, reason: 'missing' | 'empty'): void {
+    if (!this.skipped.some((s) => s.table === table)) this.skipped.push({ table, reason });
+  }
+
+  // Each line of the file with its byte range: split on CRLF only (a bare LF stays in its field); a last line without CRLF counts
+  // unless empty. Bytes are split before decoding, so a character across two chunks stays whole.
+  private *lines(file: string): Generator<{ text: string; start: number; end: number }> {
+    const fd = openSync(file, 'r');
+    try {
+      let buf = Buffer.alloc(0);
+      let at = 0; // file offset of buf[0]
+      for (;;) {
+        const chunk = Buffer.alloc(this.chunk);
+        const n = readSync(fd, chunk, 0, this.chunk, at + buf.length);
+        buf = buf.length ? Buffer.concat([buf, chunk.subarray(0, n)]) : chunk.subarray(0, n);
+        let from = 0;
+        for (let i = buf.indexOf(CRLF); i >= 0; i = buf.indexOf(CRLF, from)) {
+          yield { text: buf.toString('utf8', from, i), start: at + from, end: at + i + 2 };
+          from = i + 2;
+        }
+        if (!n) {
+          if (from < buf.length) yield { text: buf.toString('utf8', from), start: at + from, end: at + buf.length };
+          return;
+        }
+        buf = buf.subarray(from);
+        at += from;
+      }
+    } finally { closeSync(fd); }
+  }
+
+  private file(table: string): string | undefined {
     const file = join(this.dir, 'EHITables', `${table}.tsv`);
-    if (!existsSync(file)) return this.skip(table, 'missing');
-    const [header, ...body] = parseTsv(readFileSync(file, 'utf8'));
-    if (!body.length) return this.skip(table, 'empty');
-    return body.map((cells) => Object.fromEntries(header.map((h, i) => [h, cells[i] ?? ''])));
+    if (existsSync(file)) return file;
+    this.skip(table, 'missing');
+  }
+
+  private *entries(table: string): Generator<{ row: Row; start: number; end: number }> {
+    const file = this.file(table);
+    if (!file) return;
+    let header: string[] | undefined;
+    let empty = true;
+    for (const l of this.lines(file)) {
+      if (!header) {
+        header = l.text.replace(/^﻿/, '').split('\t');
+        this.headers.set(table, header);
+        continue;
+      }
+      empty = false;
+      yield { row: toRow(header, l.text), start: l.start, end: l.end };
+    }
+    if (empty) this.skip(table, 'empty');
+  }
+
+  *rows(table: string): Generator<Row> {
+    for (const e of this.entries(table)) yield e.row;
+  }
+
+  // Rows grouped by key (no key: left out), keys in first-seen order, each group as byte ranges to read back with read().
+  index(table: string, key: (r: Row) => string | undefined): Map<string, Ranges> {
+    const out = new Map<string, Ranges>();
+    let last: Ranges | undefined;
+    for (const { row, start, end } of this.entries(table)) {
+      const k = key(row);
+      const r = k === undefined ? undefined : out.get(k) ?? out.set(k, []).get(k)!;
+      if (r && r === last && r[r.length - 1] === start) r[r.length - 1] = end;
+      else r?.push(start, end);
+      last = r;
+    }
+    return out;
+  }
+
+  read(table: string, ranges: Ranges): Row[] {
+    if (!ranges.length) return [];
+    const header = this.headers.get(table) as string[]; // set by the index() that gave the ranges
+    const fd = openSync(join(this.dir, 'EHITables', `${table}.tsv`), 'r');
+    try {
+      const out: Row[] = [];
+      for (let i = 0; i < ranges.length; i += 2) {
+        const buf = Buffer.alloc(ranges[i + 1] - ranges[i]);
+        readSync(fd, buf, 0, buf.length, ranges[i]);
+        const text = buf.toString('utf8');
+        for (const line of (text.endsWith('\r\n') ? text : `${text}\r\n`).split('\r\n').slice(0, -1)) out.push(toRow(header, line));
+      }
+      return out;
+    } finally { closeSync(fd); }
   }
 }
+// Epic's TSVs are unquoted (checked on a real export: every row has the header's width). Fields are literal: split on tab,
+// rows on CRLF only, so quotes and a bare LF inside a field survive.
+const toRow = (header: string[], line: string): Row => {
+  const cells = line.split('\t');
+  return Object.fromEntries(header.map((h, i) => [h, cells[i] ?? '']));
+};
 
 const ESC: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' };
 function pdfString(s: string): string {

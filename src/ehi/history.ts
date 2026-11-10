@@ -45,22 +45,42 @@ const immBody = (f: ImmFields, ctx: EhiCtx) => {
 // R18: such a pair on the date of an IMMUNE dose with the same lot number is that dose (not created, counted); with
 // another or no lot it is created as a possible duplicate of that date's IMMUNE dose(s), engine tag and extension.
 // A row without a vaccine name or date says nothing: skipped, counted.
-export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 }): Resource[] {
+// Yields one group per day (that day's IMMUNE doses, then its IMM_ADMIN pairs), so a possible duplicate and the doses it points
+// at, and every record the linking pass (linkImmunizationsToExisting) pairs on one day, are written together.
+export function* mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 }): Generator<Resource[]> {
   const enc = encounterRef(t);
-  const out: Immunization[] = [];
   const seen = new Set<string>();
-  for (const r of t.rows('IMMUNE')) {
+  const immuneDays = t.index('IMMUNE', (r) => {
     const name = r.IMMUNZATN_ID_NAME;
     const date = ehiDate(r.IMMUNE_DATE, ctx);
     if (!name || !date) {
       counts.skippedNoName++;
-      continue;
+      return;
     }
     seen.add(`${norm(name)}|${date.slice(0, 10)}`);
-    const encounter = enc(r.IMM_CSN);
-    const b = immBody({ name, date, status: r.IMMNZTN_STATUS_C_NAME, ndc: r.NDC_NUM_ID_NDC_CODE, mfg: r.MFG_C_NAME, lot: r.LOT, exp: r.EXPIRATION_DATE, site: r.SITE_C_NAME, route: r.ROUTE_C_NAME, amount: r.IMMNZTN_DOSE_AMOUNT, unit: r.IMMNZTN_DOSE_UNIT_C_NAME }, ctx);
+    return date.slice(0, 10);
+  });
+  // IMM_ADMIN rows by vaccine+date, those IMMUNE lacks; the latest contact's row of each is the record.
+  const admin = t.index('IMM_ADMIN', (r) => {
+    const name = r.IMM_TYPE_ID_NAME || r.IMM_TYPE_FREE_TEXT;
+    const date = ehiDate(r.IMM_DATE, ctx);
+    if (!name || !date) {
+      counts.skippedNoName++;
+      return;
+    }
+    const k = `${norm(name)}|${date.slice(0, 10)}`;
+    return seen.has(k) ? undefined : k;
+  });
+  const adminDays = new Map<string, string[]>();
+  for (const k of admin.keys()) {
+    const day = k.split('|')[1];
+    adminDays.set(day, [...(adminDays.get(day) ?? []), k]);
+  }
+  const immuneRecord = (r: Row): Immunization => {
+    const b = immBody({ name: r.IMMUNZATN_ID_NAME, date: ehiDate(r.IMMUNE_DATE, ctx) as string, status: r.IMMNZTN_STATUS_C_NAME, ndc: r.NDC_NUM_ID_NDC_CODE, mfg: r.MFG_C_NAME, lot: r.LOT, exp: r.EXPIRATION_DATE, site: r.SITE_C_NAME, route: r.ROUTE_C_NAME, amount: r.IMMNZTN_DOSE_AMOUNT, unit: r.IMMNZTN_DOSE_UNIT_C_NAME }, ctx);
     const { resourceType, status, vaccineCode, patient, occurrenceDateTime, ...rest } = b;
-    out.push({
+    const encounter = enc(r.IMM_CSN);
+    return {
       resourceType,
       id: localId('IMMUNE', r.IMMUNE_ID),
       identifier: [ehiId(ctx, 'IMMUNE', r.IMMUNE_ID), ...epicId(ctx, 'imm', r.IMMUNE_ID)],
@@ -71,45 +91,34 @@ export function mapImmunizations(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
       occurrenceDateTime,
       ...(r.IMM_HISTORIC_ADM_YN === 'Y' && { primarySource: false }),
       ...rest,
-    });
-  }
-  // Latest contact's row per vaccine+date.
-  const latest = new Map<string, Row>();
-  for (const r of t.rows('IMM_ADMIN')) {
-    const name = r.IMM_TYPE_ID_NAME || r.IMM_TYPE_FREE_TEXT;
-    const date = ehiDate(r.IMM_DATE, ctx);
-    if (!name || !date) {
-      counts.skippedNoName++;
-      continue;
-    }
-    const k = `${norm(name)}|${date.slice(0, 10)}`;
-    if (seen.has(k)) continue;
-    const prev = latest.get(k);
-    if (!prev || Number(r.CONTACT_DATE_REAL) > Number(prev.CONTACT_DATE_REAL)) latest.set(k, r);
-  }
-  const immune = [...out];
-  const immuneOn = (day: string) => immune.filter((i) => i.occurrenceDateTime?.slice(0, 10) === day);
-  for (const [k, r] of latest) {
+    };
+  };
+  const adminRecord = (k: string, same: Immunization[]): Immunization | undefined => {
+    let r: Row | undefined; // latest contact's row
+    for (const x of t.read('IMM_ADMIN', admin.get(k) ?? [])) if (!r || Number(x.CONTACT_DATE_REAL) > Number(r.CONTACT_DATE_REAL)) r = x;
+    if (!r) return;
     const [n, date] = k.split('|');
-    const same = immuneOn(date);
     if (r.IMM_LOT_NUMBER && same.some((i) => i.lotNumber === r.IMM_LOT_NUMBER)) {
       counts.immAdminSameDose++;
-      continue;
+      return;
     }
     const dup = same.length > 0;
     if (dup) counts.immAdminPossibleDuplicate++;
     const b = immBody({ name: r.IMM_TYPE_ID_NAME || r.IMM_TYPE_FREE_TEXT, date, status: r.IMM_STATUS_C_NAME, mfg: r.IMM_MANUFACTURER_C_NAME || r.IMM_MANUF_FREE_TEXT, lot: r.IMM_LOT_NUMBER, exp: r.IMM_ADMIN_EXPIRATION_DATE, site: r.IMM_SITE_C_NAME, route: r.IMM_ROUTE_C_NAME, amount: r.IMM_DOSE_AMOUNT, unit: r.IMM_DOSE_UNIT_C_NAME }, ctx);
     const { resourceType, ...rest } = b;
-    out.push({
+    return {
       resourceType,
       id: localId('IMM_ADMIN', `${n}-${date}`),
       ...(dup && { meta: { tag: [{ system: TAG, code: 'possible-duplicate' }] } }),
       identifier: [ehiId(ctx, 'IMM_ADMIN', k)],
       ...rest,
       ...(dup && { extension: same.map((i) => ({ url: DUP_OF, valueReference: { reference: `Immunization/${i.id}` } })) }),
-    });
+    };
+  };
+  for (const day of new Set([...immuneDays.keys(), ...adminDays.keys()])) {
+    const same = t.read('IMMUNE', immuneDays.get(day) ?? []).map(immuneRecord);
+    yield [...same, ...(adminDays.get(day) ?? []).flatMap((k) => adminRecord(k, same) ?? [])];
   }
-  return out;
 }
 
 const epicIds = (r: { identifier?: Identifier[] }) => (r.identifier ?? []).filter((i) => i.system?.startsWith(EPIC_OID) && i.value);
@@ -186,15 +195,14 @@ const ROLE_SYS = 'http://terminology.hl7.org/CodeSystem/v3-RoleCode';
 
 // FAMILY_HX is re-recorded at visits (snapshots by CSN): each relative (FAM_MED_REL_ID) is taken from their latest
 // snapshot (highest CSN). R4 FamilyMemberHistory has no encounter element. "Neg HX" lists conditions absent from the family: kept as a note, never as conditions.
-export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNoRelative: 0, skippedNoCondition: 0 }): Resource[] {
-  const byRel = new Map<string, Row[]>();
-  for (const r of t.rows('FAMILY_HX')) {
+export function* mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNoRelative: 0, skippedNoCondition: 0 }): Generator<Resource> {
+  const byRel = t.index('FAMILY_HX', (r) => {
     const k = r.FAM_MED_REL_ID || r.RELATION_C_NAME;
-    if (k) byRel.set(k, [...(byRel.get(k) ?? []), r]);
-    else counts.skippedNoRelative++; // neither a relation nor a relative id: whose history is unknown
-  }
-  const out: FamilyMemberHistory[] = [];
-  for (const [k, all] of byRel) {
+    if (k) return k;
+    counts.skippedNoRelative++; // neither a relation nor a relative id: whose history is unknown
+  });
+  for (const [k, ranges] of byRel) {
+    const all = t.read('FAMILY_HX', ranges);
     const csn = all.map((r) => r.PAT_ENC_CSN_ID).sort((a, b) => Number(b) - Number(a))[0];
     const rows = all.filter((r) => r.PAT_ENC_CSN_ID === csn).sort(byLine);
     const relation = rows[0].RELATION_C_NAME;
@@ -213,7 +221,7 @@ export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
     }
     // No relation name but a relative id: a family member of unknown relation (relationship is 1..1, never empty).
     const role = neg || !relation ? 'FAMMEMB' : ROLE[norm(relation)];
-    out.push({
+    yield {
       resourceType: 'FamilyMemberHistory',
       id: localId('FAMILY_HX', k),
       identifier: [ehiId(ctx, 'FAMILY_HX', k)],
@@ -221,9 +229,8 @@ export function mapFamilyHistory(t: EhiTables, ctx: EhiCtx, counts = { skippedNo
       patient: PATIENT_REF,
       relationship: { ...(role && { coding: [{ system: ROLE_SYS, code: role }] }), ...(relation && { text: relation }) },
       ...(neg ? { note: [{ text: `No family history of: ${names.join(', ')}` }] } : { condition }),
-    } as FamilyMemberHistory);
+    } as FamilyMemberHistory;
   }
-  return out;
 }
 
 // Flowsheet vitals in the C-CDA's LOINC codes and units (GA's C-CDA vitals use kg, cm, Cel, separate systolic/diastolic),
@@ -245,15 +252,20 @@ const round = (v: number, d?: number, trunc = false) => (d === undefined ? v : (
 const utc = (s: string | undefined) => (s && s.length > 10 ? new Date(s).toISOString().replace('.000Z', 'Z') : s);
 
 // IP_FLWSHT_MEAS rows with their values (V_EHI_FLO_MEAS_VALUE, same FSD_ID/LINE); a row without a value is skipped, counted.
-export function mapVitals(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 }): Resource[] {
+export function* mapVitals(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 }): Generator<Resource> {
   const enc = encounterRef(t);
-  const value = new Map(t.rows('V_EHI_FLO_MEAS_VALUE').map((v) => [`${v.FSD_ID}-${v.LINE}`, v]));
+  const values = t.index('V_EHI_FLO_MEAS_VALUE', (v) => v.FSD_ID); // read per flowsheet record, as its rows come
   // FSD_ID -> INPATIENT_DATA_ID -> the one encounter carrying it.
   const csnOf = new Map<string, string[]>();
   for (const e of t.rows('PAT_ENC')) if (e.INPATIENT_DATA_ID) csnOf.set(e.INPATIENT_DATA_ID, [...(csnOf.get(e.INPATIENT_DATA_ID) ?? []), e.PAT_ENC_CSN_ID]);
-  const fsdCsn = new Map(t.rows('IP_FLWSHT_REC').map((r) => [r.FSD_ID, csnOf.get(r.INPATIENT_DATA_ID)]));
-  const out: Observation[] = [];
+  const fsdCsn = new Map(Array.from(t.rows('IP_FLWSHT_REC'), (r) => [r.FSD_ID, csnOf.get(r.INPATIENT_DATA_ID)]));
+  let fsd: string | undefined;
+  let value = new Map<string, Row>();
   for (const r of t.rows('IP_FLWSHT_MEAS')) {
+    if (r.FSD_ID !== fsd) {
+      fsd = r.FSD_ID;
+      value = new Map(t.read('V_EHI_FLO_MEAS_VALUE', values.get(fsd) ?? []).map((v) => [`${v.FSD_ID}-${v.LINE}`, v]));
+    }
     const pk = `${r.FSD_ID}-${r.LINE}`;
     const v = value.get(pk);
     const raw = v?.MEAS_VALUE_EXTERNAL;
@@ -281,23 +293,23 @@ export function mapVitals(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 
     });
     const bp = /^(BP|BLOOD PRESSURE)$/i.test(name) && /^(\d+)\/(\d+)$/.exec(raw);
     if (bp) {
-      out.push(vital('8480-6', 'mm[Hg]', Number(bp[1])), vital('8462-4', 'mm[Hg]', Number(bp[2])));
+      yield vital('8480-6', 'mm[Hg]', Number(bp[1]));
+      yield vital('8462-4', 'mm[Hg]', Number(bp[2]));
       continue;
     }
     const spec = VITALS.find(([re]) => re.test(name.toUpperCase()))?.[1];
     const conv = spec && NUM.test(raw) && (spec.from ? spec.from[v?.UNITS ?? ''] : (x: number) => x);
     if (spec && conv) {
-      out.push(vital(spec.code, spec.unit, round(conv(Number(raw)), spec.digits, spec.trunc)));
+      yield vital(spec.code, spec.unit, round(conv(Number(raw)), spec.digits, spec.trunc));
       continue;
     }
-    out.push({
+    yield {
       ...base(''),
       code: { text: name },
       ...tail,
       ...(NUM.test(raw) ? { valueQuantity: { value: Number(raw), ...(v?.UNITS && { unit: v.UNITS }) } } : { valueString: raw }),
-    });
+    } as Observation;
   }
-  return out;
 }
 
 // R20: Epic smoking status names -> the SNOMED codes the C-CDA smoking-status entries carry; others stay text only.
@@ -311,9 +323,8 @@ const smokingValue = (name: string): CodeableConcept => {
 };
 
 // SOCIAL_HX, one row per visit: smoking status (72166-2), alcohol use (11331-6) and ounces per week (no LOINC: by name).
-export function mapSocial(t: EhiTables, ctx: EhiCtx): Resource[] {
+export function* mapSocial(t: EhiTables, ctx: EhiCtx): Generator<Resource> {
   const enc = encounterRef(t);
-  const out: Observation[] = [];
   for (const r of t.rows('SOCIAL_HX')) {
     const csn = r.PAT_ENC_CSN_ID;
     if (!csn) continue; // no key; never seen in the export
@@ -331,31 +342,30 @@ export function mapSocial(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(effectiveDateTime && { effectiveDateTime }),
       ...value,
     });
-    if (r.SMOKING_TOB_USE_C_NAME) out.push(obs('smoking', { coding: [{ system: LOINC, code: '72166-2' }], text: 'Tobacco smoking status' }, { valueCodeableConcept: smokingValue(r.SMOKING_TOB_USE_C_NAME) }));
+    if (r.SMOKING_TOB_USE_C_NAME) yield obs('smoking', { coding: [{ system: LOINC, code: '72166-2' }], text: 'Tobacco smoking status' }, { valueCodeableConcept: smokingValue(r.SMOKING_TOB_USE_C_NAME) });
     if (r.ALCOHOL_USE_C_NAME)
-      out.push(obs('alcohol', { coding: [{ system: LOINC, code: '11331-6' }], text: 'Alcohol use' }, { valueCodeableConcept: { text: r.ALCOHOL_USE_C_NAME }, ...(r.ALCOHOL_COMMENT && { note: [{ text: r.ALCOHOL_COMMENT }] }) }));
-    if (NUM.test(r.ALCOHOL_OZ_PER_WK ?? '')) out.push(obs('alcohol-oz', { text: 'Alcohol oz per week' }, { valueQuantity: { value: Number(r.ALCOHOL_OZ_PER_WK), unit: 'oz/wk' } }));
+      yield obs('alcohol', { coding: [{ system: LOINC, code: '11331-6' }], text: 'Alcohol use' }, { valueCodeableConcept: { text: r.ALCOHOL_USE_C_NAME }, ...(r.ALCOHOL_COMMENT && { note: [{ text: r.ALCOHOL_COMMENT }] }) });
+    if (NUM.test(r.ALCOHOL_OZ_PER_WK ?? '')) yield obs('alcohol-oz', { text: 'Alcohol oz per week' }, { valueQuantity: { value: Number(r.ALCOHOL_OZ_PER_WK), unit: 'oz/wk' } });
   }
-  return out;
 }
 
 // R6: Epic's health-maintenance view at export time = the latest HM_HISTORICAL_STATUS row per topic (highest LINE;
 // on real data completion dates never decrease with LINE), dated the export. HM_HISTORY completions (no topic in the
 // export) become Procedures; one without a time is skipped, counted.
-export function mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skippedNoDate: 0 }): Resource[] {
+export function* mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skippedNoDate: 0 }): Generator<Resource> {
   const latest = new Map<string, Row>();
   for (const r of t.rows('HM_HISTORICAL_STATUS')) {
     const prev = latest.get(r.HM_TOPIC_ID_NAME);
     if (r.HM_TOPIC_ID_NAME && (!prev || Number(r.LINE) > Number(prev.LINE))) latest.set(r.HM_TOPIC_ID_NAME, r);
   }
-  const status = [...latest].map(([topic, r]): Observation => {
+  for (const [topic, r] of latest) {
     const due = ehiDate(r.NEXT_DUE_DATE, ctx);
     const done = ehiDate(r.LAST_COMPLETED_DATE, ctx);
     const component = [
       ...(due ? [{ code: { text: 'Next due date' }, valueDateTime: due }] : []),
       ...(done ? [{ code: { text: 'Last completed date' }, valueDateTime: done }] : []),
     ];
-    return {
+    yield {
       resourceType: 'Observation',
       id: localId('HM_HISTORICAL_STATUS', r.LINE),
       identifier: [ehiId(ctx, 'HM_HISTORICAL_STATUS', topic)],
@@ -365,21 +375,25 @@ export function mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skipp
       effectiveDateTime: ctx.date,
       ...(r.HM_STATUS_C_NAME && { valueString: r.HM_STATUS_C_NAME }),
       ...(component.length && { component }),
-    };
-  });
-  const done: Procedure[] = [];
+    } as Observation;
+  }
   // Keyed by completion type and time (LINE is a list position, not an id); LINE only breaks a tie between equal rows.
-  const keyed = t.rows('HM_HISTORY').flatMap((r) => {
+  const keyed = (r: Row) => {
     const performedDateTime = ehiDate(r.HM_COMP_UTC_DTTM, { ...ctx, timeZone: 'UTC' }); // the column is UTC
-    if (!performedDateTime || !r.HM_COMP_TYPE_C_NAME) {
-      counts.skippedNoDate++;
-      return [];
-    }
-    return [{ r, performedDateTime, key: `${r.HM_COMP_TYPE_C_NAME}|${performedDateTime}` }];
-  });
-  for (const { r, performedDateTime, key } of keyed) {
-    const tie = keyed.filter((x) => x.key === key).length > 1;
-    done.push({
+    return performedDateTime && r.HM_COMP_TYPE_C_NAME ? { performedDateTime, key: `${r.HM_COMP_TYPE_C_NAME}|${performedDateTime}` } : undefined;
+  };
+  const rowsOf = new Map<string, number>();
+  for (const r of t.rows('HM_HISTORY')) {
+    const k = keyed(r)?.key;
+    if (k) rowsOf.set(k, (rowsOf.get(k) ?? 0) + 1);
+    else counts.skippedNoDate++;
+  }
+  for (const r of t.rows('HM_HISTORY')) {
+    const x = keyed(r);
+    if (!x) continue;
+    const { performedDateTime, key } = x;
+    const tie = (rowsOf.get(key) ?? 0) > 1;
+    yield {
       resourceType: 'Procedure',
       id: localId('HM_HISTORY', r.LINE),
       identifier: [ehiId(ctx, 'HM_HISTORY', tie ? `${key}|${r.LINE}` : key)],
@@ -387,31 +401,28 @@ export function mapHealthMaintenance(t: EhiTables, ctx: EhiCtx, counts = { skipp
       code: { text: `Health maintenance completion: ${r.HM_COMP_TYPE_C_NAME}` },
       subject: PATIENT_REF,
       performedDateTime,
-    });
+    } as Procedure;
   }
-  return [...status, ...done];
 }
 
 // One QuestionnaireResponse per ANSWER_ID. The export has no question text (CL_QANSWER_QA is absent): items are keyed
 // by LINE. Unanswered lines are left out; an answer set with no answers is skipped, counted.
-export function mapQuestionnaires(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 }): Resource[] {
-  const sets = new Map<string, Row[]>();
-  for (const r of t.rows('V_EHI_HQA_QUEST_ANSWER')) sets.set(r.ANSWER_ID, [...(sets.get(r.ANSWER_ID) ?? []), r]);
-  const out: QuestionnaireResponse[] = [];
-  for (const [id, rows] of sets) {
+export function* mapQuestionnaires(t: EhiTables, ctx: EhiCtx, counts = { skippedEmpty: 0 }): Generator<Resource> {
+  const sets = t.index('V_EHI_HQA_QUEST_ANSWER', (r) => r.ANSWER_ID);
+  for (const [id, ranges] of sets) {
+    const rows = t.read('V_EHI_HQA_QUEST_ANSWER', ranges);
     const item = rows.filter((r) => r.QUEST_ANSWER_EXTERNAL).sort(byLine).map((r) => ({ linkId: r.LINE, answer: [{ valueString: r.QUEST_ANSWER_EXTERNAL }] }));
     if (!item.length) {
       counts.skippedEmpty++;
       continue;
     }
-    out.push({
+    yield {
       resourceType: 'QuestionnaireResponse',
       id: localId('V_EHI_HQA_QUEST_ANSWER', id),
       identifier: ehiId(ctx, 'V_EHI_HQA_QUEST_ANSWER', id), // 0..1 on this type
       status: 'completed',
       subject: PATIENT_REF,
       item,
-    });
+    } as QuestionnaireResponse;
   }
-  return out;
 }

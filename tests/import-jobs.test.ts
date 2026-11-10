@@ -14,16 +14,20 @@ import { GaError } from '../src/config.ts';
 import { inWorker, type JobRecord, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
 import { IMPORT_BUSY } from '../src/lock.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
+import { writeEhiExport } from './fixtures-gen/ehi.ts';
 import { appleZip, crash, report, settled, snapshot, upload } from './import-jobs-helpers.ts';
 import { type TempStore, tempStore } from './temp-store.ts';
 
 const FX = join(import.meta.dirname, 'fixtures');
 const oldConfig = process.env.GA_CONFIG;
 let zip: string;
+let ehi: string;
 let work: string;
 beforeAll(async () => {
   work = mkdtempSync(join(tmpdir(), 'ga-jobs-fx-'));
   zip = await appleZip(work, 10);
+  ehi = join(work, 'ehi');
+  await writeEhiExport(ehi, 6, { noteKB: 3, plainKB: 2, messageKB: 2 });
 });
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 const stores: TempStore[] = [];
@@ -173,20 +177,45 @@ test('import_status reports a job across a gateway restart', async () => {
   expect(jobStatus(a.dir, '../../x')).toBeUndefined();
 }, 120_000);
 
-test('an EHI export and a C-CDA zip run as jobs and resume to the same records', async () => {
-  for (const [src, tz, creates] of [[join(FX, 'ehi'), 'America/New_York', 10], [join(FX, 'zips', 'ccda.zip'), undefined, 3]] as const) {
-    const a = await store();
-    const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid, tz });
-    await crash(a.config, a.dir, job.id, { at: -1, creates });
-    expect(resumeJobs(a.dir)).toBe(1);
-    const done = await settled(a.dir, job.id);
-    expect(done.status, done.message).toBe('done');
-    const b = await store();
-    const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid, tz }).id);
-    expect(whole.status, whole.message).toBe('done');
-    // shortcut: one batch, so a kill mid-write is redone whole and its counts are not exact; the records are.
-    expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
-  }
+test('a C-CDA zip runs as a job and resumes to the same records', async () => {
+  const src = join(FX, 'zips', 'ccda.zip');
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid });
+  await crash(a.config, a.dir, job.id, { at: -1, creates: 3 });
+  expect(resumeJobs(a.dir)).toBe(1);
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const b = await store();
+  const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid }).id);
+  expect(whole.status, whole.message).toBe('done');
+  // shortcut: one batch, so a kill mid-write is redone whole and its counts are not exact; the records are.
+  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
+}, 300_000);
+
+// An EHI export resumed after a crash at each kind of point (records, a note batch after its Rich Text files, a message thread, a
+// media file, a batch written but not checkpointed) gives the records and the report of an uninterrupted job.
+test.each([
+  ['the fixture, mid-records', 'fixture', { at: -1, creates: 10 }],
+  ['mid-records batch', 'synthetic', { at: 2, creates: 3 }],
+  ['a note batch, after its Rich Text files', 'synthetic', { type: 'DocumentReference' }],
+  ['mid-thread', 'synthetic', { type: 'Communication' }],
+  ['a media file', 'synthetic', { file: 'scan.pdf' }],
+  ['after a batch, before its checkpoint', 'synthetic', { at: 2, unlock: true }],
+] as const)('EHI job: a crash %s resumes exactly', async (_, which, kill) => {
+  const src = which === 'fixture' ? join(FX, 'ehi') : ehi;
+  const batchSize = which === 'fixture' ? undefined : 7;
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid, tz: 'America/New_York', batchSize });
+  await crash(a.config, a.dir, job.id, kill);
+  expect(jobStatus(a.dir, job.id)!.pending).toBeDefined(); // killed inside a batch
+  expect(resumeJobs(a.dir)).toBe(1);
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const b = await store();
+  const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid, tz: 'America/New_York', batchSize }).id);
+  expect(whole.status, whole.message).toBe('done');
+  expect(report(done.report)).toEqual(report(whole.report));
+  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
 
 test('runJob in the calling thread (ga import-job) imports a recorded job', async () => {

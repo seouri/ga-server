@@ -16,6 +16,7 @@ import { linkResultsToExisting, mapLabs } from '../../src/ehi/labs.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
 import type { SourceInfo } from '../../src/identity.ts';
+import { ehiTables } from '../fixtures-gen/ehi.ts';
 import { cleanupCcda, cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 // Synthetic fixtures sharing order 9000001 (C-CDA organizer id under an Epic order root, org number 99).
@@ -59,7 +60,7 @@ const tagged = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.syste
 
 async function importLabs(ctx: EhiCtx, edit: (rs: Resource[]) => void = () => {}) {
   const t = new EhiTables(EHI);
-  const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...mapConditions(t, ctx), ...mapLabs(t, ctx)];
+  const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...mapConditions(t, ctx), ...mapLabs(t, ctx)].flat() as Resource[];
   edit(batch);
   const linked = await linkResultsToExisting(client, batch, pid);
   const { resources, skippedNoName } = await resolveUnlinked(client, linked.resources, pid);
@@ -171,7 +172,7 @@ test('an EHI update never replaces coded, referenced or more precise C-CDA value
     ORDER_RESULTS: [{ ORDER_PROC_ID: order, LINE: '1', COMPONENT_ID_NAME: 'CHOLESTEROL', ORD_VALUE: '190', REFERENCE_UNIT: 'mg/dL', RESULT_STATUS_C_NAME: 'Final', RESULT_FLAG_C_NAME: 'High', RESULT_DATE: '1/5/2024 12:00:00 AM', PAT_ENC_CSN_ID: csn }],
     IMMUNE: [{ IMMUNE_ID: imm, IMMUNZATN_ID_NAME: 'Influenza', IMMUNE_DATE: '10/1/2023 12:00:00 AM', ROUTE_C_NAME: 'Intramuscular', IMMNZTN_STATUS_C_NAME: 'Given' }],
   };
-  const t = { rows: (n: string) => (data[n] ?? []).map((r) => new Proxy(r, { get: (o, f: string) => o[f] ?? '' })), skipped: [] } as unknown as EhiTables;
+  const t = ehiTables((n) => data[n] ?? []);
   const ctx: EhiCtx = { org: `synthetic-fill-${k}`, date: '2026-01-17T08:30:00-05:00', timeZone: 'America/New_York', epicOrgNumber: '99' };
   const ehi = async () => {
     const { resources } = await prepareEhi(client, t, ctx, pid);

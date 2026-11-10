@@ -1,7 +1,7 @@
 // Preload for tests/import-jobs.test.ts: SIGKILL this process (a gateway crash) at a chosen point of an import job.
 // GA_TEST_KILL_AT: only while the job's lastBatch is this. Then GA_TEST_KILL_CREATES: right after that many creates; or
-// GA_TEST_KILL_TYPE: right after creating that resource type; or GA_TEST_KILL_UNLOCK: right after the import lock is released
-// (a batch fully written, its checkpoint not yet saved).
+// GA_TEST_KILL_TYPE: right after creating that resource type; or GA_TEST_KILL_FILE: right after storing the file of that name;
+// or GA_TEST_KILL_UNLOCK: right after the import lock is released (a batch fully written, its checkpoint not yet saved).
 import fs, { readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { MedplumClient } from '@medplum/core';
@@ -17,6 +17,13 @@ MedplumClient.prototype.createResource = async function (this: MedplumClient, ..
   if (env.GA_TEST_KILL_TYPE ? args[0].resourceType === env.GA_TEST_KILL_TYPE : env.GA_TEST_KILL_CREATES && armed() && ++n >= Number(env.GA_TEST_KILL_CREATES)) die();
   return r;
 } as typeof create;
+
+const once = MedplumClient.prototype.createResourceIfNoneExist;
+MedplumClient.prototype.createResourceIfNoneExist = async function (this: MedplumClient, ...args: Parameters<typeof once>) {
+  const r = await once.apply(this, args);
+  if (env.GA_TEST_KILL_FILE && (args[0] as { content?: { attachment?: { title?: string } }[] }).content?.[0]?.attachment?.title === env.GA_TEST_KILL_FILE) die();
+  return r;
+} as typeof once;
 
 if (env.GA_TEST_KILL_UNLOCK) {
   const rm = fs.rmSync;

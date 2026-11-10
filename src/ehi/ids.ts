@@ -31,7 +31,7 @@ export const localId = (table: string, pk: string): string => `${table}-${pk}`;
 
 // Encounter reference for a CSN, only when PAT_ENC has that CSN (a dangling reference would fail the write).
 export function encounterRef(t: EhiTables): (csn: string) => { reference: string } | undefined {
-  const csns = new Set(t.rows('PAT_ENC').map((r) => r.PAT_ENC_CSN_ID));
+  const csns = new Set(Array.from(t.rows('PAT_ENC'), (r) => r.PAT_ENC_CSN_ID));
   return (csn) => (csns.has(csn) ? { reference: `Encounter/${localId('PAT_ENC', csn)}` } : undefined);
 }
 

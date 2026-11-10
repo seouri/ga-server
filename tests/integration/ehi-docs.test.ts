@@ -2,14 +2,15 @@ import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Reference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { getClient, loadConfig } from '../../src/config.ts';
-import { importDocuments } from '../../src/ehi/documents.ts';
+import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
+import { importEhi } from '../../src/ehi/import.ts';
 import { mapEncounters } from '../../src/ehi/encounters.ts';
 import { linkImmunizationsToExisting, mapFamilyHistory, mapHealthMaintenance, mapImmunizations, mapQuestionnaires, mapSocial, mapVitals } from '../../src/ehi/history.ts';
 import { type EhiCtx, PATIENT_REF, resolveUnlinked } from '../../src/ehi/ids.ts';
 import { mapMeds } from '../../src/ehi/meds.ts';
 import { EhiTables, exportInfo } from '../../src/ehi/read.ts';
 import { importResources } from '../../src/engine.ts';
+import { ehiTables } from '../fixtures-gen/ehi.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const EHI = join(import.meta.dirname, '..', 'fixtures', 'ehi');
@@ -39,7 +40,7 @@ async function importHistory() {
   const batch: Resource[] = [
     { resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, ctx), ...mapImmunizations(t, ctx), ...mapFamilyHistory(t, ctx),
     ...mapVitals(t, ctx), ...mapSocial(t, ctx), ...mapHealthMaintenance(t, ctx), ...mapQuestionnaires(t, ctx), ...mapMeds(t, ctx),
-  ];
+  ].flat() as Resource[];
   const linked = await linkImmunizationsToExisting(client, batch, pid);
   const { resources } = await resolveUnlinked(client, linked.resources, pid);
   return importResources(client, resources, { kind: 'ehi', file: EHI, date: ctx.date, writer: 'importer' }, pid, '');
@@ -51,9 +52,8 @@ test('history and medication records are valid FHIR and re-import is a no-op', a
   expect(await importHistory()).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
 });
 
-test('importDocuments stores notes, messages and media once, readable', async () => {
-  const t = new EhiTables(EHI);
-  const first = await importDocuments(client, EHI, t, ctx, pid);
+test('the import stores notes, messages and media once, readable', async () => {
+  const first = await importEhi(client, { patientId: pid } as GaConfig, EHI, pid, ctx.timeZone);
   expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
   expect(first.created).toBeGreaterThanOrEqual(7); // 3 notes, 2 messages, 1 RTF file, 1 media (+ the Encounter when new)
   const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${ctx.org}|HNO_INFO|1001` }, { cache: 'no-cache' });
@@ -72,7 +72,7 @@ test('importDocuments stores notes, messages and media once, readable', async ()
   expect(reply?.inResponseTo?.[0]?.reference).toBe(`Communication/${msgs.find((m) => !m.inResponseTo)?.id}`);
   // Medplum presigns attachment URLs with an expiry: wait so a URL in the compared body would differ.
   await new Promise((r) => setTimeout(r, 1100));
-  const again = await importDocuments(client, EHI, new EhiTables(EHI), ctx, pid);
+  const again = await importEhi(client, { patientId: pid } as GaConfig, EHI, pid, ctx.timeZone);
   expect(again).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
   const [same] = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${ctx.org}|HNO_INFO|1001` }, { cache: 'no-cache' });
   expect(same.relatesTo).toEqual(notes[0].relatesTo); // the same stored RTF, no second upload
@@ -80,10 +80,10 @@ test('importDocuments stores notes, messages and media once, readable', async ()
 
 test('R18: an IMM_ADMIN dose on an IMMUNE dose date is stored as its possible duplicate, pointing at it', async () => {
   const base = new EhiTables(EHI);
-  const extra = { ...base.rows('IMM_ADMIN')[1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT2' };
-  const t = { rows: (table: string) => (table === 'IMM_ADMIN' ? [...base.rows(table), extra] : base.rows(table)) } as unknown as EhiTables;
+  const extra = { ...[...base.rows('IMM_ADMIN')][1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT2' };
+  const t = ehiTables((table: string) => (table === 'IMM_ADMIN' ? [...base.rows(table), extra] : base.rows(table)));
   const c: EhiCtx = { ...ctx, org: 'synthetic-health-dup' };
-  const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, c), ...mapImmunizations(t, c)];
+  const batch: Resource[] = [{ resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }, ...mapEncounters(t, c), ...mapImmunizations(t, c)].flat() as Resource[];
   const src = { kind: 'ehi' as const, file: EHI, date: c.date, writer: 'importer' as const };
   const run = async () => importResources(client, (await resolveUnlinked(client, batch, pid)).resources, src, pid, '');
   expect(await run()).toMatchObject({ invalid: 0 });

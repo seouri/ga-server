@@ -186,7 +186,7 @@ test.skipIf(!root)('real EHI export: dry pass valid, imports twice without dupli
   const ctx = await ehiContext(client, dir, pid);
   const t = new EhiTables(dir);
   const prepared = await prepareEhi(client, t, ctx, pid);
-  const dry = [...prepared.resources, ...mapNotes(t, ctx, dir).resources, ...mapMessages(t, ctx)];
+  const dry = [...prepared.resources, ...Array.from(mapNotes(t, ctx, dir), (n) => n.doc), ...[...mapMessages(t, ctx)].flat()];
   const { resources: collapsed } = collapsePatients(dry, pid);
   const dryInvalid: Record<string, number> = {};
   const mapped: Record<string, number> = {};
@@ -207,7 +207,7 @@ test.skipIf(!root)('real EHI export: dry pass valid, imports twice without dupli
     'HNO_INFO', 'MYC_MESG'];
   Object.assign(out, {
     epicOrgNumberFound: !!ctx.epicOrgNumber,
-    sourceRows: Object.fromEntries(tables.map((x) => [x, t.rows(x).length])),
+    sourceRows: Object.fromEntries(tables.map((x) => [x, [...t.rows(x)].length])),
     dry: { mapped, skips: prepared.skips, skippedTables: t.skipped, linkedEncountersClassFromExisting, invalid: dryInvalid },
   });
   save();

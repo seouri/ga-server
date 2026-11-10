@@ -6,18 +6,39 @@ import type {
   Procedure, QuestionnaireResponse, Resource,
 } from '@medplum/fhirtypes';
 import { describe, expect, it } from 'vitest';
-import { mapConditions } from '../src/ehi/conditions.ts';
 import { ehiDate } from '../src/ehi/dates.ts';
-import { mapEncounters } from '../src/ehi/encounters.ts';
 import { type EhiCtx, PATIENT_REF } from '../src/ehi/ids.ts';
-import { linkResultsToExisting, mapLabs } from '../src/ehi/labs.ts';
+import * as labs from '../src/ehi/labs.ts';
 import type { MedplumClient } from '@medplum/core';
 import { EhiTables } from '../src/ehi/read.ts';
-import { linkImmunizationsToExisting, mapFamilyHistory, pairImmunizations, mapHealthMaintenance, mapImmunizations, mapQuestionnaires, mapSocial, mapVitals } from '../src/ehi/history.ts';
-import { mapMeds } from '../src/ehi/meds.ts';
-import { mapMessages, mapNotes } from '../src/ehi/documents.ts';
+import { ehiTables } from './fixtures-gen/ehi.ts';
+import * as history from '../src/ehi/history.ts';
+import * as meds from '../src/ehi/meds.ts';
+import * as docs from '../src/ehi/documents.ts';
+import * as conditions from '../src/ehi/conditions.ts';
+import * as encounters from '../src/ehi/encounters.ts';
 
 const FIX = join(import.meta.dirname, 'fixtures/ehi');
+const { linkResultsToExisting } = labs;
+const { linkImmunizationsToExisting, pairImmunizations } = history;
+// The mappers stream (records, or groups that are written together); here as one list.
+const all = <A extends unknown[]>(map: (...a: A) => Iterable<Resource | Resource[]>) => (...a: A): Resource[] => [...map(...a)].flat();
+const mapLabs = all(labs.mapLabs);
+const mapEncounters = all(encounters.mapEncounters);
+const mapConditions = all(conditions.mapConditions);
+const mapMeds = all(meds.mapMeds);
+const mapImmunizations = all(history.mapImmunizations);
+const mapFamilyHistory = all(history.mapFamilyHistory);
+const mapVitals = all(history.mapVitals);
+const mapSocial = all(history.mapSocial);
+const mapHealthMaintenance = all(history.mapHealthMaintenance);
+const mapQuestionnaires = all(history.mapQuestionnaires);
+const mapMessages = all(docs.mapMessages);
+const mapNotes = (...a: Parameters<typeof docs.mapNotes>) => {
+  const ns = [...docs.mapNotes(...a)];
+  return { resources: ns.map((n) => n.doc as Resource), rtf: new Map(ns.filter((n) => n.rtf.length).map((n) => [n.doc.id as string, n.rtf])) };
+};
+const fake = ehiTables;
 const t = () => new EhiTables(FIX);
 const ctx: EhiCtx = { org: 'synthetic-health', date: '2026-01-17T08:30:00-05:00', timeZone: 'America/New_York', epicOrgNumber: '99' };
 const SYS = 'urn:ga-server:id:ehi:synthetic-health';
@@ -135,9 +156,9 @@ describe('EHI mappers', () => {
   it('mapLabs skips and counts a result line without any name', () => {
     const base = t();
     const rows = (table: string) =>
-      table === 'ORDER_RESULTS' ? [...base.rows(table), { ...base.rows(table)[0], LINE: '3', COMPONENT_ID_NAME: '', COMPON_LNC_ID_LNC_LONG_NAME: '' }] : base.rows(table);
+      table === 'ORDER_RESULTS' ? [...base.rows(table), { ...[...base.rows(table)][0], LINE: '3', COMPONENT_ID_NAME: '', COMPON_LNC_ID_LNC_LONG_NAME: '' }] : base.rows(table);
     const counts = { skippedNoName: 0 };
-    const rs = mapLabs({ rows } as unknown as EhiTables, ctx, counts);
+    const rs = mapLabs(fake(rows), ctx, counts);
     expect(of<Observation>(rs, 'Observation')).toHaveLength(2);
     expect(of<DiagnosticReport>(rs, 'DiagnosticReport')[0].result).toHaveLength(2);
     expect(counts.skippedNoName).toBe(1);
@@ -169,8 +190,8 @@ describe('EHI mappers', () => {
   it('an entered-in-error problem gets no clinical status and no abatement', () => {
     const base = t();
     const rows = (table: string) =>
-      table === 'PROBLEM_LIST' ? [{ ...base.rows(table)[1], PROBLEM_STATUS_C_NAME: 'Deleted' }] : base.rows(table);
-    const [c] = (mapConditions({ rows } as unknown as EhiTables, ctx) as Condition[]).filter((x) => x.id?.startsWith('PROBLEM_LIST'));
+      table === 'PROBLEM_LIST' ? [{ ...[...base.rows(table)][1], PROBLEM_STATUS_C_NAME: 'Deleted' }] : base.rows(table);
+    const [c] = (mapConditions(fake(rows), ctx) as Condition[]).filter((x) => x.id?.startsWith('PROBLEM_LIST'));
     expect(c.verificationStatus?.coding?.[0]?.code).toBe('entered-in-error');
     expect(c.clinicalStatus).toBeUndefined();
     expect(c.abatementDateTime).toBeUndefined();
@@ -211,16 +232,17 @@ describe('EHI mappers', () => {
 
   it('an IMM_ADMIN dose on an IMMUNE dose\'s date: same lot is that dose; another lot is a possible duplicate of it (R18)', () => {
     const base = t();
-    const extra = (lot: string, date = '1/15/2026 12:00:00 AM') => ({ ...base.rows('IMM_ADMIN')[1], IMM_TYPE_FREE_TEXT: 'Test vaccine (outside name)', IMM_DATE: date, IMM_LOT_NUMBER: lot });
+    const extra = (lot: string, date = '1/15/2026 12:00:00 AM') => ({ ...[...base.rows('IMM_ADMIN')][1], IMM_TYPE_FREE_TEXT: 'Test vaccine (outside name)', IMM_DATE: date, IMM_LOT_NUMBER: lot });
     const rows = (table: string) => (table === 'IMM_ADMIN' ? [...base.rows(table), extra('LOT1'), { ...extra('LOT2'), IMM_TYPE_FREE_TEXT: 'Another name' }] : base.rows(table));
     const counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 };
-    const rs = mapImmunizations({ rows } as unknown as EhiTables, ctx, counts) as Immunization[];
+    const rs = mapImmunizations(fake(rows), ctx, counts) as Immunization[];
     expect(counts).toEqual({ skippedNoName: 0, immAdminSameDose: 1, immAdminPossibleDuplicate: 1 });
-    expect(rs.map((r) => r.id)).toEqual(['IMMUNE-6100001', 'IMMUNE-6100002', 'IMM_ADMIN-outside vaccine-2020-05-01', 'IMM_ADMIN-another name-2026-01-15']);
-    const dup = rs[3];
+    // A day at a time (written together): the duplicate with the dose it points at.
+    expect(rs.map((r) => r.id)).toEqual(['IMMUNE-6100001', 'IMM_ADMIN-another name-2026-01-15', 'IMMUNE-6100002', 'IMM_ADMIN-outside vaccine-2020-05-01']);
+    const dup = rs[1];
     expect(dup.meta).toEqual({ tag: [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }] });
     expect(dup.extension).toEqual([{ url: 'urn:ga-server:ext:possible-duplicate-of', valueReference: { reference: 'Immunization/IMMUNE-6100001' } }]);
-    expect(rs[2].meta).toBeUndefined(); // no IMMUNE dose that day: an ordinary record
+    expect(rs[3].meta).toBeUndefined(); // no IMMUNE dose that day: an ordinary record
   });
 
   it('linkImmunizationsToExisting keeps the C-CDA vaccine codes and links IMM_ADMIN doses by date and name, never on a tie', async () => {
@@ -418,8 +440,8 @@ describe('EHI mappers', () => {
     const base = t();
     const names = ['Former', 'Current Every Day', 'Current Some Day', 'Never Assessed', 'Unknown', 'never', 'Heavy Smoker'];
     const rows = (table: string) =>
-      table === 'SOCIAL_HX' ? names.map((n, i) => ({ ...base.rows(table)[0], PAT_ENC_CSN_ID: `80000${i}`, SMOKING_TOB_USE_C_NAME: n, ALCOHOL_USE_C_NAME: '', ALCOHOL_OZ_PER_WK: '' })) : base.rows(table);
-    const vs = (mapSocial({ rows } as unknown as EhiTables, ctx) as Observation[]).map((o) => o.valueCodeableConcept);
+      table === 'SOCIAL_HX' ? names.map((n, i) => ({ ...[...base.rows(table)][0], PAT_ENC_CSN_ID: `80000${i}`, SMOKING_TOB_USE_C_NAME: n, ALCOHOL_USE_C_NAME: '', ALCOHOL_OZ_PER_WK: '' })) : base.rows(table);
+    const vs = (mapSocial(fake(rows), ctx) as Observation[]).map((o) => o.valueCodeableConcept);
     expect(vs.map((v) => v?.coding?.[0]?.code)).toEqual(['8517006', '449868002', '428041000124106', '266927001', '266927001', '266919005', undefined]);
     expect(vs[6]).toEqual({ text: 'Heavy Smoker' });
   });
@@ -427,7 +449,7 @@ describe('EHI mappers', () => {
   it('an RTF message without text falls back to MSG_TXT', () => {
     const base = t();
     const rows = (table: string) => (table === 'MYC_MESG_RTF_TEXT' ? [...base.rows(table), { MESSAGE_ID: '900002', LINE: '1', RTF_TXT: '{\\rtf1 {\\fonttbl{\\f0 Arial;}}}' }] : base.rows(table));
-    const reply = (mapMessages({ rows } as unknown as EhiTables, ctx) as Communication[])[1];
+    const reply = (mapMessages(fake(rows), ctx) as Communication[])[1];
     expect(reply.payload?.[0]?.contentString).toBe('plain line\nsay "x\n"quoted" start not split\nline1\nline2');
   });
 
@@ -437,7 +459,7 @@ describe('EHI mappers', () => {
     writeFileSync(join(dir, 'Rich Text', 'HNO_77_56510_41.RTF'), '{\\rtf1 second}');
     writeFileSync(join(dir, 'Rich Text', 'HNO_77_9.5_41.RTF'), '{\\rtf1 first}');
     const rows = (table: string) => (table === 'HNO_INFO' ? [{ NOTE_ID: '77' }] : []);
-    const { resources, rtf } = mapNotes({ rows } as unknown as EhiTables, ctx, dir);
+    const { resources, rtf } = mapNotes(fake(rows, dir), ctx, dir);
     expect(rtf.get('HNO_INFO-77')?.map((f) => basename(f).split('_')[2])).toEqual(['9.5', '56510']);
     expect((resources[0] as DocumentReference).content.map((c) => Buffer.from(c.attachment.data as string, 'base64').toString())).toEqual(['first', 'second']);
   });
@@ -445,11 +467,11 @@ describe('EHI mappers', () => {
   it('R18 compares IMMUNE and IMM_ADMIN dates by day', () => {
     const base = t();
     const rows = (table: string) =>
-      table === 'IMMUNE' ? [{ ...base.rows(table)[0], IMMUNE_DATE: '1/15/2026 9:00:00 AM' }]
-        : table === 'IMM_ADMIN' ? [{ ...base.rows(table)[1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT1' }, { ...base.rows(table)[0], IMM_DATE: '1/15/2026 12:00:00 AM' }]
+      table === 'IMMUNE' ? [{ ...[...base.rows(table)][0], IMMUNE_DATE: '1/15/2026 9:00:00 AM' }]
+        : table === 'IMM_ADMIN' ? [{ ...[...base.rows(table)][1], IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT1' }, { ...[...base.rows(table)][0], IMM_DATE: '1/15/2026 12:00:00 AM' }]
           : base.rows(table);
     const counts = { skippedNoName: 0, immAdminSameDose: 0, immAdminPossibleDuplicate: 0 };
-    const rs = mapImmunizations({ rows } as unknown as EhiTables, ctx, counts);
+    const rs = mapImmunizations(fake(rows), ctx, counts);
     expect(rs.map((r) => r.id)).toEqual(['IMMUNE-6100001']); // same lot that day: the same dose; same name that day: already IMMUNE
     expect(counts.immAdminSameDose).toBe(1);
   });
@@ -458,19 +480,19 @@ describe('EHI mappers', () => {
     const base = t();
     const rows = (table: string) =>
       table === 'FAMILY_HX'
-        ? [{ ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '9' }, { ...base.rows(table)[1], RELATION_C_NAME: '', FAM_MED_REL_ID: '' }, { ...base.rows(table)[1], FAM_MED_REL_ID: '10', MEDICAL_HX_C_NAME: '', MEDICAL_OTHER: '' }]
+        ? [{ ...[...base.rows(table)][1], RELATION_C_NAME: '', FAM_MED_REL_ID: '9' }, { ...[...base.rows(table)][1], RELATION_C_NAME: '', FAM_MED_REL_ID: '' }, { ...[...base.rows(table)][1], FAM_MED_REL_ID: '10', MEDICAL_HX_C_NAME: '', MEDICAL_OTHER: '' }]
         : base.rows(table);
     const counts = { skippedNoRelative: 0, skippedNoCondition: 0 };
-    const fh = mapFamilyHistory({ rows } as unknown as EhiTables, ctx, counts) as FamilyMemberHistory[];
+    const fh = mapFamilyHistory(fake(rows), ctx, counts) as FamilyMemberHistory[];
     expect(fh.map((f) => f.relationship)).toEqual([{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/v3-RoleCode', code: 'FAMMEMB' }] }]);
     expect(counts).toEqual({ skippedNoRelative: 1, skippedNoCondition: 1 }); // relative 10 has no condition: counted
   });
 
   it('HM completions are keyed by type and time; LINE breaks only a tie', () => {
     const base = t();
-    const row = base.rows('HM_HISTORY')[0];
+    const row = [...base.rows('HM_HISTORY')][0];
     const rows = (table: string) => (table === 'HM_HISTORY' ? [row, { ...row, LINE: '7' }, { ...row, LINE: '8', HM_COMP_TYPE_C_NAME: 'LOS Code' }] : base.rows(table));
-    const keys = mapHealthMaintenance({ rows } as unknown as EhiTables, ctx).filter((r) => r.resourceType === 'Procedure').map((r) => (r as Procedure).identifier?.[0].value);
+    const keys = mapHealthMaintenance(fake(rows), ctx).filter((r) => r.resourceType === 'Procedure').map((r) => (r as Procedure).identifier?.[0].value);
     expect(keys).toEqual(['HM_HISTORY|Immunization|2026-01-15T20:30:00Z|1', 'HM_HISTORY|Immunization|2026-01-15T20:30:00Z|7', 'HM_HISTORY|LOS Code|2026-01-15T20:30:00Z']);
   });
 });

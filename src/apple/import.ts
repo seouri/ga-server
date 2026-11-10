@@ -39,7 +39,7 @@ export async function existing(client: MedplumClient, patientId: string, resourc
 export const BATCH = 500;
 // A batch's new and changed records by first identifier, saved before it writes (Pending), so a redo after a crash inside
 // it counts the records that attempt wrote as created/updated, not unchanged.
-export type Pending = { index: number; created: string[]; updated: string[] };
+export type Pending = { index: number; created: string[]; updated: string[]; files?: string[]; skips?: Record<string, number> }; // files, skips: EHI
 export type AppleBatchOpts = {
   batchSize?: number;
   timeZone?: string; // where days are cut (default: this machine's zone)

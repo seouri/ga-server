@@ -14,7 +14,7 @@ import { IMPORT_WORKER_HEAP_MB, IMPORT_WORKER_YOUNG_MB } from './limits.ts';
 import { freeThreadLock, IMPORT_BUSY } from './lock.ts';
 import { unzipSafe } from './gateway/uploads.ts';
 
-type Report = ImportReport & { unchanged?: number };
+type Report = ImportReport & { unchanged?: number; skips?: Record<string, number> }; // skips: counted per batch (EHI)
 export type JobRecord = {
   id: string;
   kind?: ImportKind; // known once unzipped
@@ -148,8 +148,10 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
     onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0 }); },
   });
-  // The counts are the checkpoint's (every batch once); the rest (skips, seconds) is this attempt's.
-  const report = j.report ? { ...(result as object), ...(j.report as object), ...(j.archived && { archived: j.archived }) } : result;
+  // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest
+  // (other skips, seconds) is this attempt's.
+  const r = result as { skips?: object }, c = j.report as Report | undefined;
+  const report = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
   save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined });
   for (const p of [into, j.upload]) rmSync(p, { recursive: true, force: true });
 }
@@ -158,6 +160,7 @@ function sum(total: Report | undefined, r: Report): Report {
   if (!total) return structuredClone(r);
   addReport(total, r);
   if (r.unchanged !== undefined) total.unchanged = (total.unchanged ?? 0) + r.unchanged;
+  for (const [k, v] of Object.entries(r.skips ?? {})) (total.skips ??= {})[k] = (total.skips[k] ?? 0) + v;
   return total;
 }
 

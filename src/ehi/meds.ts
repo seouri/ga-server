@@ -12,15 +12,15 @@ function status(r: Row, ctx: EhiCtx): MedicationRequest['status'] {
 }
 
 // ORDER_MED -> MedicationRequest, linked to the C-CDA's copy by order id.
-export function mapMeds(t: EhiTables, ctx: EhiCtx): Resource[] {
+export function* mapMeds(t: EhiTables, ctx: EhiCtx): Generator<Resource> {
   const enc = encounterRef(t);
-  return t.rows('ORDER_MED').map((r): MedicationRequest => {
+  for (const r of t.rows('ORDER_MED')) {
     const id = r.ORDER_MED_ID;
     const name = r.MEDICATION_ID_MEDICATION_NAME || r.DESCRIPTION;
     const encounter = enc(r.PAT_ENC_CSN_ID);
     const authoredOn = ehiDate(r.ORDERING_DATE, ctx);
     const prescriber = r.MED_PRESC_PROV_ID_PROV_NAME || r.AUTHRZING_PROV_ID_PROV_NAME;
-    return {
+    yield {
       resourceType: 'MedicationRequest',
       id: localId('ORDER_MED', id),
       identifier: [ehiId(ctx, 'ORDER_MED', id), ...epicId(ctx, 'order', id)],
@@ -33,5 +33,5 @@ export function mapMeds(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(authoredOn && { authoredOn }),
       ...(prescriber && { requester: { display: prescriber } }),
     } as MedicationRequest;
-  });
+  }
 }
