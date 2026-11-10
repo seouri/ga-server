@@ -3,6 +3,7 @@
 // code+sort 2.9 -> 10; category+date 14.6 -> 30; subject 3.5 -> 10; _has 2.8 -> 10; chain 8.3 -> 20.
 // System search (added with _type, measured then): unsorted 1.2 -> 10; sorted by -_lastUpdated 8.7 -> 20.
 // Two-level chain (added with deeper chains): 3.3 -> 10 (the task's outer bound was 1 s).
+// System-only token of a type with no records (added with idx_s): 16 before the index, 0.1 after -> 10.
 // Memory, two limits: RSS growth over the run measured 345 MB in a vitest worker (the 20,000 rows themselves grow it by ~343 MB),
 // limit measured + 25%, 430 MB (GROWTH_MB); and an absolute guard on RSS after the run, 440 MB.
 import { mkdtempSync, rmSync } from 'node:fs';
