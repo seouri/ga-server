@@ -45,6 +45,11 @@ test('tally splits historical at 365 days and lists sources', () => {
   expect(t).toEqual({ total: 3, historical: 1, noRangeGiven: 2, byKind: { 'lab results': 2, problems: 1 }, sources: ['PDF or photo', 'portal-a'] });
 });
 
+test('tally takes a singular identifier (QuestionnaireResponse)', () => {
+  const qr = { resourceType: 'QuestionnaireResponse', status: 'completed', identifier: { system: 'urn:ga-server:id:smart:portal-b', value: 'QuestionnaireResponse/1' } } as Resource;
+  expect(tally([qr], '2026-11-07').sources).toEqual(['portal-b']);
+});
+
 test('last-seen file: missing, then round trip with mode 0600', () => {
   const dir = mkdtempSync(join(tmpdir(), 'wn-'));
   expect(readLastSeen(dir)).toBeUndefined();

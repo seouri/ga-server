@@ -58,7 +58,7 @@ export function tally(arrived: Resource[], asOf: string) {
     if (d && d < cutoff) historical++;
     if (k === 'lab results' && r.resourceType === 'Observation' && !r.interpretation?.length && !r.referenceRange?.length) noRangeGiven++; // listed, never judged
     for (const [tag, label] of SOURCES) if (hasTag(r, tag)) sources.add(label);
-    for (const i of (r as { identifier?: { system?: string }[] }).identifier ?? []) {
+    for (const i of [(r as { identifier?: { system?: string } | { system?: string }[] }).identifier ?? []].flat()) { // singular on QuestionnaireResponse
       if (i.system?.startsWith('urn:ga-server:id:smart:')) sources.add(i.system.slice('urn:ga-server:id:smart:'.length));
     }
   }
