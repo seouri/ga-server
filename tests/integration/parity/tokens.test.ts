@@ -347,4 +347,12 @@ describe.skipIf(SQLITE)('Medplum tokens.test.ts (parity)', () => {
     }
     return out;
   }));
+  // Added: a system-only search and a coding with a system but no code (the store's token row then has no value).
+  test('Added: code by system only finds a coding with no code', () => same(sides, async (s) => {
+    const system = `urn:parity:${crypto.randomUUID()}`;
+    const coded = await s.create({ resourceType: 'Basic', code: { coding: [{ system, code: 'x' }] } });
+    const codeless = await s.create({ resourceType: 'Basic', code: { coding: [{ system }], text: 'no code' } });
+    const r = await search(s, q('Basic', ['code', `${system}|`]));
+    expect([has(r, coded), has(r, codeless)]).toEqual([true, true]);
+  }));
 });
