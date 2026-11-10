@@ -185,7 +185,7 @@ test('a batch that kills the whole process every time ends failed after three re
     if (r.signal === 'SIGKILL') kills++;
   }
   expect(kills).toBe(3);
-  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringMatching(/^GA stopped during each of the last 3 attempts.*import it with `ga import` on a computer with more memory$/) });
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringMatching(/^GA stopped during the last attempt, most likely out of memory: .*import it with `ga import` on a computer with more memory$/) });
 }, 60_000);
 
 test('a job that made progress gets three fresh attempts after it', async () => {
