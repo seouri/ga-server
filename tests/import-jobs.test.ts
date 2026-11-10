@@ -356,6 +356,17 @@ test('the 3-attempt failure waits while another process holds the job, and remov
   expect(existsSync(archiveTmp(root))).toBe(false);
 });
 
+test('a done job whose cleanup a stop cut short loses the rest of its files at the next start', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const folder = join(a.dir, 'imports', job.id);
+  mkdirSync(join(folder, 'root', 'part'), { recursive: true });
+  writeFileSync(join(folder, 'job.json'), JSON.stringify({ ...jobStatus(a.dir, job.id), root: join(folder, 'root'), status: 'done' }));
+  expect(resumeJobs(a.dir)).toBe(0);
+  for (let i = 0; i < 50 && readdirSync(folder).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
+  expect(readdirSync(folder)).toEqual(['job.json']);
+});
+
 // save() renames without fsync: a power loss can leave an empty job.json. The gateway must still start.
 test('an empty job.json is skipped: the other jobs resume and the list leaves it out', async () => {
   const a = await store();

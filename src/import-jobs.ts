@@ -94,7 +94,10 @@ export function startJob(dir: string, upload: string, opts: { tz?: string; patie
 // At gateway start: every job still running gets its attempts again. Returns how many. An attempt that a stop (exitOnStop)
 // ended is given back; one that a kill ended (out of memory, most likely) still counts.
 export function resumeJobs(dir: string, opts: Supervision = {}): number {
-  const running = listJobs(dir).filter((j) => j.status === 'running');
+  const all = listJobs(dir), running = all.filter((j) => j.status === 'running');
+  // A stop or kill while a done job's files were removed leaves the rest. Removed only after done is saved: a retry needs the
+  // whole export to read up to its last batch.
+  for (const j of all.filter((x) => x.status === 'done')) for (const p of [join(jobDir(dir, j.id), 'root'), j.upload]) rm(p, { recursive: true, force: true }).catch(() => {});
   for (const j of running) {
     const stopped = existsSync(stopMark(dir, j.id)), inAttempt = stopped && readFileSync(stopMark(dir, j.id), 'utf8') === 'attempt';
     save(dir, { ...j, attempts: inAttempt ? Math.max(0, j.attempts - 1) : j.attempts, note: stopped
