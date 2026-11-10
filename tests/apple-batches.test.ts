@@ -1,10 +1,11 @@
 // The Apple Health import in batches gives today's single-batch result (spec: same result), on a temp SQLite store.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, type ReadStream, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { appleBatches } from '../src/apple/batches.ts';
 import { importAppleHealth } from '../src/apple/import.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -13,13 +14,27 @@ import { withImportLock } from '../src/lock.ts';
 import { writeAppleTestExport } from './fixtures-gen/apple.ts';
 import { type TempStore, tempStore } from './temp-store.ts';
 
+// Every file stream the importer opens, to check export.xml is closed after a failed import.
+const streams = vi.hoisted(() => [] as { path: string; s: ReadStream }[]);
+vi.mock('node:fs', async (orig) => {
+  const fs = await orig<typeof import('node:fs')>();
+  const createReadStream = ((path: string, o?: never) => { const s = fs.createReadStream(path, o); streams.push({ path: String(path), s }); return s; }) as typeof fs.createReadStream;
+  return { ...fs, default: { ...fs, createReadStream }, createReadStream };
+});
+
+// Days are cut in the machine's zone: pin it, so the pinned result below holds on every machine.
+const oldTz = process.env.TZ;
+process.env.TZ = 'America/New_York';
 const oldConfig = process.env.GA_CONFIG;
 let exp: string;
 beforeAll(async () => {
   exp = mkdtempSync(join(tmpdir(), 'ga-apple-batches-'));
   await writeAppleTestExport(exp, 30, { twoSources: true });
 });
-afterAll(() => rmSync(exp, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(exp, { recursive: true, force: true });
+  if (oldTz === undefined) delete process.env.TZ; else process.env.TZ = oldTz;
+});
 const stores: TempStore[] = [];
 afterEach(async () => {
   process.env.GA_CONFIG = oldConfig;
@@ -54,15 +69,26 @@ async function snapshot(client: MedplumClient, pid: string): Promise<string[]> {
 }
 const report = ({ seconds: _s, ...r }: { seconds: number }) => r;
 
-test('batched import writes the same resources as one batch', async () => {
+test("batched import writes the same resources as one batch, and as today's importer", async () => {
   const a = await store();
   const ra = await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 7 });
   const b = await store();
   const rb = await importAppleHealth(b.client, b.cfg, exp, b.pid, { batchSize: 1_000_000 });
-  expect(rb.created).toBeGreaterThan(500);
   expect(report(ra)).toEqual(report(rb));
-  expect((rb.skips as { sameReadingTwoSources: number }).sameReadingTwoSources).toBe(1);
-  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
+  const snap = await snapshot(b.client, b.pid);
+  expect(await snapshot(a.client, a.pid)).toEqual(snap);
+  // Today's importer (3f5f829, before batching) on this export: its report, skips, and a digest of what it stored.
+  expect(report(rb)).toEqual({
+    created: 613, updated: 0, skipped: 1, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0,
+    unmapped: [{ source: 'apple-health', type: 'Observation', key: 'walking heart rate average|/min', name: 'Walking heart rate average', unit: '/min', count: 30 }],
+    archived: 'stored', unchanged: 0,
+    skips: {
+      nested: 3, archiveOnly: { ActiveEnergyBurned: 15000 }, sameReadingTwoSources: 1, bpUnpaired: 0, unexpectedUnit: 0,
+      activityEmptyDays: 1, badValue: 0, clinicalTypeUnsupported: 1, clinicalUnreadable: 0, ecgUnparsed: 0,
+    },
+  });
+  expect(snap).toHaveLength(614);
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('b753a171f6c5c82fd8f776cf32c1323760d6cebebeaaa1f044bc40eea0f172db');
 }, 300_000);
 
 test('shuffled records give the same resources as sorted ones', async () => {
@@ -144,7 +170,7 @@ test('a truncated export.xml fails with its error and no partial batch', async (
   try {
     await writeAppleTestExport(dir, 3);
     const xml = readFileSync(join(dir, 'export.xml'), 'utf8');
-    // Day 0 has 14 readings (1,538 records); cut inside a startDate on day 1: batches 0 and 1 (5 each) are written,
+    // Day 0 has 14 readings (1,570 records); cut inside a startDate on day 1: batches 0 and 1 (5 each) are written,
     // the 4 readings of the batch the cut interrupts are not.
     let at = 0;
     for (let i = 0; i < 1600; i++) at = xml.indexOf('<Record ', at + 1);
@@ -155,4 +181,13 @@ test('a truncated export.xml fails with its error and no partial batch', async (
     expect(seen).toEqual([0, 1]);
     expect(await a.client.searchResources('Observation', { subject: `Patient/${a.pid}` }, { cache: 'no-cache' })).toHaveLength(10);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+}, 300_000);
+
+test('a failed batch closes export.xml', async () => {
+  const a = await store();
+  streams.length = 0;
+  await expect(importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50, onBatch: async () => { throw new Error('write failed'); } })).rejects.toThrow('write failed');
+  const xml = streams.filter((x) => x.path.endsWith('export.xml'));
+  expect(xml.length).toBeGreaterThan(0);
+  expect(xml.every((x) => x.s.destroyed)).toBe(true);
 }, 300_000);

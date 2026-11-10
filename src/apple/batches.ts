@@ -50,16 +50,18 @@ export async function* appleBatches(dir: string, opts: { size: number; timeZone:
   const archiveOnly: Record<string, number> = {};
   const it = readItems(dir);
   let n = await it.next();
-  for (; !n.done; n = await it.next()) {
-    const x = n.value;
-    if ('record' in x) {
-      const a = readings.add(x.record);
-      const b = daily.add(x.record);
-      if (!a && !b) archiveOnly[short(x.record.type)] = (archiveOnly[short(x.record.type)] ?? 0) + 1;
-    } else if ('summary' in x) daily.summary(x.summary);
-    else if ('clinical' in x) refs.push(x.clinical);
-    yield* drain();
-  }
+  try {
+    for (; !n.done; n = await it.next()) {
+      const x = n.value;
+      if ('record' in x) {
+        const a = readings.add(x.record);
+        const b = daily.add(x.record);
+        if (!a && !b) archiveOnly[short(x.record.type)] = (archiveOnly[short(x.record.type)] ?? 0) + 1;
+      } else if ('summary' in x) daily.summary(x.summary);
+      else if ('clinical' in x) refs.push(x.clinical);
+      yield* drain();
+    }
+  } finally { await it.return(undefined as never); } // stopped early (a failed write upstream): close the file
   const { exportDate, nested } = n.value;
   const rd = readings.result();
   yield* drain();

@@ -5,7 +5,7 @@ import type { GaConfig } from '../config.ts';
 import { addReport, importResources, type ImportReport } from '../engine.ts';
 import { sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
-import { appleBatches } from './batches.ts';
+import { appleBatches, type Batch } from './batches.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
@@ -54,25 +54,28 @@ export async function importAppleHealth(
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
   const it = appleBatches(dir, { size: opts.batchSize ?? BATCH, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
-  let n = await it.next();
-  for (; !n.done; n = await it.next()) {
-    const { index, resources } = n.value;
-    if (index <= (opts.skipThrough ?? -1)) continue;
-    const report = await withImportLock(async () => {
-      const have = await existing(client, patientId, resources);
-      let same = 0;
-      const rest = resources.filter((r) => {
-        if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
-        const hit = have.get(firstId(r as never)) === projection(r as never);
-        if (hit) same++;
-        return !hit;
+  let n: IteratorResult<Batch, { skips: Record<string, unknown> }>;
+  try {
+    n = await it.next();
+    for (; !n.done; n = await it.next()) {
+      const { index, resources } = n.value;
+      if (index <= (opts.skipThrough ?? -1)) continue;
+      const report = await withImportLock(async () => {
+        const have = await existing(client, patientId, resources);
+        let same = 0;
+        const rest = resources.filter((r) => {
+          if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
+          const hit = have.get(firstId(r as never)) === projection(r as never);
+          if (hit) same++;
+          return !hit;
+        });
+        const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
+        return { ...written, unchanged: same };
       });
-      const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
-      return { ...written, unchanged: same };
-    });
-    addReport(total, report);
-    unchanged += report.unchanged;
-    await opts.onBatch?.(index, report);
-  }
+      addReport(total, report);
+      unchanged += report.unchanged;
+      await opts.onBatch?.(index, report);
+    }
+  } finally { await it.return(undefined as never); } // a failed batch: stop the read and close export.xml now (a gateway worker lives on)
   return { ...total, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips: n.value.skips };
 }
