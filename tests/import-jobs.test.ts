@@ -1,20 +1,17 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
-import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { createGateway } from '../src/gateway/server.ts';
-import { inWorker, jobStatus, recordJob, resumeJobs, runJob, startJob, type JobRecord } from '../src/import-jobs.ts';
-import { ARRIVED, sorted } from '../src/identity.ts';
+import { inWorker, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
-import { writeAppleTestExport } from './fixtures-gen/apple.ts';
+import { appleZip, crash, report, settled, snapshot, upload } from './import-jobs-helpers.ts';
 import { type TempStore, tempStore } from './temp-store.ts';
 
 const FX = join(import.meta.dirname, 'fixtures');
@@ -23,9 +20,7 @@ let zip: string;
 let work: string;
 beforeAll(async () => {
   work = mkdtempSync(join(tmpdir(), 'ga-jobs-fx-'));
-  await writeAppleTestExport(join(work, 'apple_health_export'), 10);
-  expect(spawnSync('zip', ['-qr', 'export.zip', 'apple_health_export'], { cwd: work }).status).toBe(0);
-  zip = join(work, 'export.zip');
+  zip = await appleZip(work, 10);
 });
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 const stores: TempStore[] = [];
@@ -44,46 +39,6 @@ async function store() {
   process.env.GA_CONFIG = config;
   return { s, client: s.client, pid, config, dir: join(s.dir, 'gateway') };
 }
-// An upload as the gateway keeps it: a copy under uploads/<fileId>/.
-function upload(dir: string, from: string): string {
-  const to = join(dir, 'uploads', 'f'.repeat(22), from.split('/').pop()!);
-  mkdirSync(join(to, '..'), { recursive: true });
-  cpSync(from, to, { recursive: true });
-  return to;
-}
-async function settled(dir: string, id: string, ms = 120_000): Promise<JobRecord> {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 100))) {
-    const j = jobStatus(dir, id)!;
-    if (j.status !== 'running') return j;
-  }
-  throw new Error('job never settled');
-}
-
-// Everything the import wrote, without server ids, times and arrival stamps; a reference reads as its target's identifier.
-async function snapshot(client: MedplumClient, pid: string): Promise<string[]> {
-  const b = await client.get<Bundle>(`fhir/R4/Patient/${pid}/$everything?_count=5000`, { cache: 'no-cache' });
-  const every = (b.entry ?? []).map((e) => e.resource as Resource & { identifier?: { system?: string; value?: string }[] });
-  const idOf = new Map(every.map((r) => [`${r.resourceType}/${r.id}`, JSON.stringify(r.identifier ?? r.resourceType)]));
-  const all = every.filter((r) => r.resourceType !== 'Patient' && r.resourceType !== 'Provenance' && ![r.identifier ?? []].flat().some((i) => i.system?.endsWith('-archive') || i.system === 'urn:ga-server:id:file'));
-  return all.map((r) => {
-    const { id: _i, meta, extension, ...rest } = r as Resource & { extension?: { url: string }[] };
-    const ext = extension?.filter((e) => e.url !== ARRIVED);
-    return JSON.stringify({ ...rest, tag: meta?.tag, ...(ext?.length && { extension: ext }) }, (k, v) => (k === 'reference' && idOf.has(v) ? idOf.get(v) : sorted(k, v)));
-  }).map((x) => x.replaceAll(pid, 'PATIENT').replace(/\|[0-9a-f]{64}/g, '|HASH').replace(/"Binary\/[^"]+"/g, '"Binary"')).sort();
-}
-const report = (r: unknown) => { const { seconds: _s, ...rest } = r as { seconds?: number }; return rest; };
-
-// A job run in a CLI child that SIGKILLs itself right after its first create once lastBatch is `at` (the gateway crashing mid-batch).
-async function crash(config: string, dir: string, id: string, at: number, creates = 1): Promise<void> {
-  const c = spawn('node', ['--import', join(import.meta.dirname, 'import-job-crash.ts'), 'src/cli.ts', 'import-job', id], {
-    env: { PATH: process.env.PATH!, GA_CONFIG: config, GA_TEST_JOB: join(dir, 'imports', id, 'job.json'), GA_TEST_KILL_AT: String(at), GA_TEST_KILL_CREATES: String(creates) },
-  });
-  let err = '';
-  c.stderr.on('data', (d) => (err += d));
-  const sig = await new Promise((ok) => c.on('close', (_code, s) => ok(s)));
-  expect(sig, err).toBe('SIGKILL');
-}
-
 test('startJob records the job and the worker imports it to done', async () => {
   const a = await store();
   const job = startJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50 });
