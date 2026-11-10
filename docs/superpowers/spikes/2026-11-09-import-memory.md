@@ -51,3 +51,14 @@ The 3,650-day export is written in 146 batches of 500. Each 60-minute run was cu
   - V8's young generation and code space sit outside `--max-old-space-size` (heapTotal up to 93 MiB).
 - The constants are unchanged; Task 5's worker-thread measurement decides them.
 - Time: the engine's per-Observation `code`+`date` content-match search takes 81% of request time and slows from about 1.4 to about 75 ms per call as the store grows. Batch time goes from 13 s to 88 s, so a full 2 GB import still takes hours.
+
+### Retained heap per year (fix round 1)
+
+The synthetic export now writes sleep as watchOS 9+ does: one in-bed span and 35 stage segments a night (Core, Deep, Core, REM, Awake), about 1,570 Records a day. Below is the heap that the read keeps alive across the whole export (the `Readings` key set plus all `Daily` state). It is measured as heapUsed with both objects held minus heapUsed after they are released, each after a full GC, with heap cap 64 and America/New_York.
+
+| Export | Before (sleep intervals with four strings each) | After (instants, shared offset/source/stage strings) |
+|---|---|---|
+| 365 days (10,220 asleep and 365 in-bed intervals, 5,110 reading keys) | 4.7 MiB | 2.6 MiB |
+| 1,095 days | 14.7 MiB (4.9 MiB/yr) | 7.6 MiB (2.5 MiB/yr) |
+
+At this rate, 10 years keep about 25 MiB live on top of the working set of a batch (15–20 MiB measured). The 2 GB runs above used the earlier four-segment sleep shape; they were not repeated for this change.
