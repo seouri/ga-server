@@ -1,7 +1,8 @@
 // Preload for tests/import-jobs.test.ts: SIGKILL this process (a gateway crash) at a chosen point of an import job.
 // GA_TEST_KILL_AT: only while the job's lastBatch is this. Then GA_TEST_KILL_CREATES: right after that many creates; or
 // GA_TEST_KILL_TYPE: right after creating that resource type; or GA_TEST_KILL_FILE: right after storing the file of that name;
-// or GA_TEST_KILL_UNLOCK: right after the import lock is released (a batch fully written, its checkpoint not yet saved).
+// or GA_TEST_KILL_UNLOCK: right after the import lock is released (a batch fully written, its checkpoint not yet saved); or
+// GA_TEST_KILL_PENDING_FILES: right after a checkpoint lists files a batch is about to store (before the first is stored).
 import fs, { readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { MedplumClient } from '@medplum/core';
@@ -24,6 +25,15 @@ MedplumClient.prototype.createResourceIfNoneExist = async function (this: Medplu
   if (env.GA_TEST_KILL_FILE && (args[0] as { content?: { attachment?: { title?: string } }[] }).content?.[0]?.attachment?.title === env.GA_TEST_KILL_FILE) die();
   return r;
 } as typeof once;
+
+if (env.GA_TEST_KILL_PENDING_FILES) {
+  const rename = fs.renameSync;
+  fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    rename(from, to);
+    if (String(to) === env.GA_TEST_JOB && (JSON.parse(readFileSync(String(to), 'utf8')) as { pending?: { files?: string[] } }).pending?.files?.length) die();
+  }) as typeof fs.renameSync;
+  syncBuiltinESMExports();
+}
 
 if (env.GA_TEST_KILL_UNLOCK) {
   const rm = fs.rmSync;

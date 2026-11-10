@@ -6,8 +6,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
 import type { MedplumClient } from '@medplum/core';
-import { BATCH, type Pending } from './apple/import.ts';
+import { BATCH_SIZE, type Pending } from './batches.ts';
 import { addNotImported } from './ccda.ts';
+import type { MapEntry } from './conceptmap.ts';
 import { type GaConfig, getClient, loadConfig } from './config.ts';
 import { addReport, type ImportReport } from './engine.ts';
 import { detectKind, importAny, type ImportKind } from './import.ts';
@@ -31,6 +32,8 @@ export type JobRecord = {
   report?: unknown;
   pending?: Pending;
   archived?: string; // the first attempt's archive outcome (a retry finds the archive already present)
+  epicOrg?: string | null; // EHI: the first attempt's Epic org number (null: none), which shapes its batches
+  learned?: Record<string, MapEntry[]>; // EHI: the concepts the first attempt learned from the whole export
   message?: string;
   attempts: number; // attempts since the last committed batch
 };
@@ -62,7 +65,7 @@ export function recordJob(dir: string, upload: string, opts: { tz?: string; pati
   mkdirSync(jobDir(dir, id), { recursive: true, mode: 0o700 });
   const j = save(dir, {
     id, upload: join(jobDir(dir, id), `upload${extname(upload)}`), tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId,
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, batchSize: opts.batchSize ?? BATCH, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, batchSize: opts.batchSize ?? BATCH_SIZE, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
   });
   renameSync(upload, j.upload);
   return j;
@@ -147,6 +150,8 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     // An earlier attempt's outcome wins. shortcut: a crash between the archive upload and this save reads 'already-present' on
     // the retry; derive it from the archive's own record if that matters.
     onArchived: (archived) => { j = save(dir, { archived, ...j! }); },
+    epicOrg: j.epicOrg, onEpicOrg: (epicOrg) => { j = save(dir, { ...j!, epicOrg }); },
+    learned: j.learned, onLearned: (learned) => { j = save(dir, { ...j!, learned }); },
     onBatch: (index, r) => { j = save(dir, { ...j!, lastBatch: index, report: sum(j!.report as Report | undefined, r), pending: undefined, attempts: 0 }); },
   });
   // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest

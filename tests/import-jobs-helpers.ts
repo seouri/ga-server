@@ -47,12 +47,13 @@ export async function snapshot(client: MedplumClient, pid: string): Promise<stri
 export const report = (r: unknown) => { const { seconds: _s, ...rest } = r as { seconds?: number }; return rest; };
 
 // A job attempt in a CLI child that SIGKILLs itself at a chosen point (a gateway crash): see tests/import-job-crash.ts.
-export async function crash(config: string, dir: string, id: string, kill: { at?: number; creates?: number; type?: string; file?: string; unlock?: boolean }): Promise<void> {
+export async function crash(config: string, dir: string, id: string, kill: { at?: number; creates?: number; type?: string; file?: string; unlock?: boolean; pendingFiles?: boolean }): Promise<void> {
   const env: Record<string, string> = { PATH: process.env.PATH!, GA_CONFIG: config, GA_TEST_JOB: join(dir, 'imports', id, 'job.json') };
   if (kill.at !== undefined) env.GA_TEST_KILL_AT = String(kill.at);
   if (kill.creates) env.GA_TEST_KILL_CREATES = String(kill.creates);
   if (kill.type) env.GA_TEST_KILL_TYPE = kill.type;
   if (kill.file) env.GA_TEST_KILL_FILE = kill.file;
+  if (kill.pendingFiles) env.GA_TEST_KILL_PENDING_FILES = '1';
   if (kill.unlock) env.GA_TEST_KILL_UNLOCK = '1';
   const c = spawn('node', ['--import', join(import.meta.dirname, 'import-job-crash.ts'), join(import.meta.dirname, '..', 'src', 'cli.ts'), 'import-job', id], { env });
   let err = '';

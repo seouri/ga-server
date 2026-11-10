@@ -1,5 +1,6 @@
 import type { MedplumClient } from '@medplum/core';
-import { type AppleBatchOpts, importAppleHealth } from './apple/import.ts';
+import { importAppleHealth } from './apple/import.ts';
+import type { BatchOpts } from './batches.ts';
 import { isAppleHealthExport } from './apple/read.ts';
 import { importPath } from './ccda.ts';
 import { GaError, type GaConfig } from './config.ts';
@@ -17,7 +18,7 @@ export function detectKind(path: string): ImportKind {
 }
 
 // opts.tz: EHI export zone (already validated by the caller). The batch options resume an import (src/import-jobs.ts).
-export async function importAny(client: MedplumClient, cfg: GaConfig, path: string, opts: { tz?: string } & AppleBatchOpts = {}): Promise<unknown> {
+export async function importAny(client: MedplumClient, cfg: GaConfig, path: string, opts: { tz?: string } & BatchOpts = {}): Promise<unknown> {
   const kind = detectKind(path);
   if (kind === 'pdf') throw new GaError(`PDFs are extracted by your agent: ask it to import ${path}, or pass --llm api`);
   if (kind === 'apple') return importAppleHealth(client, cfg, path, cfg.patientId, opts);

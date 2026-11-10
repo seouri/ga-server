@@ -8,7 +8,7 @@ import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId, CcdaTimestampOrBoolean } from '../vendor/medplum-ccda/types.ts';
-import type { AppleBatchOpts } from './apple/import.ts';
+import type { BatchOpts } from './batches.ts';
 import { type GaConfig, GaError } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
@@ -324,8 +324,9 @@ export function addNotImported(total: NotImported[], rows: NotImported[]): NotIm
 
 // A file is a batch (src/import-jobs.ts): skipThrough skips the files up to that index, onBatch follows each committed file.
 // shortcut: a file redone after a crash inside it reports what the crashed attempt wrote as skipped (its records are exact): the
-// C-CDA keys come from the whole document, so its new records cannot be listed before writing as EHI's are.
-export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId, opts: Pick<AppleBatchOpts, 'skipThrough' | 'onBatch'> = {}): Promise<ImportReport> {
+// C-CDA keys come from the whole document, so its new records cannot be listed before writing as EHI's are. Upgrade: save the
+// document's batchKeys (engine.ts) as pending before its first write, as EHI does, if a resumed C-CDA count matters.
+export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId, opts: Pick<BatchOpts, 'skipThrough' | 'onBatch'> = {}): Promise<ImportReport> {
   const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   const files = ccdaFiles(path);
   if (!files.length) return total;

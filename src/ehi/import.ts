@@ -2,10 +2,10 @@ import { existsSync, readdirSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
-import { type AppleBatchOpts, BATCH, type Pending } from '../apple/import.ts';
+import { type BatchOpts, BATCH_SIZE, held, keyOf } from '../batches.ts';
 import { archiveFolder } from '../archive.ts';
 import { learner } from '../concept-apply.ts';
-import { loadMaps, upsertEntries } from '../conceptmap.ts';
+import { loadMaps, type MapEntry, upsertEntries } from '../conceptmap.ts';
 import type { GaConfig } from '../config.ts';
 import { storeDocument } from '../document.ts';
 import { addReport, COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
@@ -24,11 +24,12 @@ import { EhiTables, exportInfo } from './read.ts';
 
 const ARCHIVE = 'urn:ga-server:id:ehi-archive';
 const PATIENT: Resource = { resourceType: 'Patient', id: PATIENT_REF.reference.split('/')[1] }; // no PATIENT mapper: collapses onto the GA patient
-// A batch of notes or messages also ends at about this much JSON, so a batch of long notes stays small.
+// A batch also ends at about this much JSON, so a batch of long notes or messages stays small.
 const BATCH_BYTES = 1 << 20;
 
-export async function ehiContext(client: MedplumClient, dir: string, patientId: string, timeZone?: string): Promise<EhiCtx> {
-  return { ...exportInfo(dir, timeZone), epicOrgNumber: await epicOrgNumber(client, patientId) };
+// epicOrg: the org number an earlier attempt read (null: none), so a resumed import cuts the same batches.
+export async function ehiContext(client: MedplumClient, dir: string, patientId: string, timeZone?: string, epicOrg?: string | null): Promise<EhiCtx> {
+  return { ...exportInfo(dir, timeZone), epicOrgNumber: epicOrg === undefined ? await epicOrgNumber(client, patientId) : epicOrg ?? undefined };
 }
 
 // Counts from reading the export: the same on every attempt (each attempt reads the whole export).
@@ -50,7 +51,8 @@ const LINK_KEYS = ['conditionNoName', 'labResultsLinked', 'labResultsUnidentifie
 type File = { path: string; type?: string; note?: string }; // note: the id of the note it belongs to
 type Batch = { index: number; resources: Resource[]; files: File[] };
 
-// Groups (a report with its results, a day's doses, a thread) are never cut; a batch ends at `size` items or BATCH_BYTES.
+// Groups (a report with its results, a day's doses, a thread) are never cut; a batch, of any phase, ends at `size` items or at
+// BATCH_BYTES of JSON (records rarely reach it).
 function* cut<T>(items: Iterable<T>, size: number, weigh: (x: T) => [n: number, bytes: number]): Generator<T[]> {
   let buf: T[] = [];
   let n = 0;
@@ -133,20 +135,24 @@ async function link(client: MedplumClient, resources: Resource[], patientId: str
 
 // The engine learns concepts from the records it gets; in batches each would learn from its own records only. So they are learned
 // from all of the export's records first, as one batch did (the engine's per-batch learning is off: SourceInfo.prelearned).
-async function learnAll(client: MedplumClient, dir: string, ctx: EhiCtx, patientId: string, size: number, source: SourceInfo): Promise<void> {
+// Returns the entries (by source key), undefined when the maps could not be read; a resumed job passes them back (BatchOpts.learned)
+// rather than reading the store, which by then holds the crashed attempt's records.
+async function learnAll(client: MedplumClient, dir: string, ctx: EhiCtx, patientId: string, size: number, source: SourceInfo): Promise<Record<string, MapEntry[]> | undefined> {
   const maps = await loadMaps(client, true).catch((e: Error) => void console.error(`concept maps not read: ${e.message}`));
   if (!maps) return;
   const l = learner(maps);
   for (const g of cut(records(new EhiTables(dir), ctx, readCounts()), size, weight)) {
     for (const r of (await link(client, g.flat(), patientId)).resources) l.add(r, source);
   }
-  for (const [key, entries] of l.entries()) await upsertEntries(client, key, entries).catch((e: Error) => console.error(`concept map ${key} not updated: ${e.message}`));
+  return Object.fromEntries(l.entries());
 }
 
 // A reference to a record of this export in an earlier batch (a visit, a dose, a thread's first message) points at that record,
 // found by its EHI identifier: the engine resolves references within one batch only. Local ids are `<TABLE>-<pk>` (ids.ts).
-// shortcut: a record the engine linked to another source's record without adding its EHI identifier (a conflict with a person's
-// edit) is not found, so a reference to it is left unresolved and the record pointing at it is invalid, as a dangling reference.
+// shortcut: unlike one batch, a record the engine kept without adding its EHI identifier is not found: one linked to another
+// source's record that a person edited (conflict), or merged onto an agent-written equal value (conflict on the content path).
+// One batch maps a reference to it; here the reference stays local and the record pointing at it is counted invalid. Upgrade:
+// keep the engine's id map for this export's records across batches (rebuilt on resume), if such conflicts show up.
 const LOCAL = /^(\w+)\/([A-Z][A-Z_]*)-(.+)$/;
 async function resolveRefs(client: MedplumClient, resources: Resource[], ctx: EhiCtx, patientId: string): Promise<void> {
   const here = new Set(resources.map((r) => `${r.resourceType}/${r.id}`));
@@ -161,29 +167,13 @@ async function resolveRefs(client: MedplumClient, resources: Resource[], ctx: Eh
   walkReferences(resources, (ref) => found.get(ref));
 }
 
-// What GA holds now of these records, by EHI identifier (`system|value`) -> source date.
-const keyOf = (r: Resource) => {
-  const i = [(r as { identifier?: { system?: string; value?: string } | { system?: string; value?: string }[] }).identifier ?? []].flat()[0];
-  return `${i?.system}|${i?.value}`;
-};
-async function held(client: MedplumClient, resources: Resource[], patientId: string): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  for (const type of new Set(resources.map((r) => r.resourceType))) {
-    const keys = [...new Set(resources.filter((r) => r.resourceType === type).map(keyOf))];
-    // A value with a comma is looked up alone, as the engine does (a comma separates values in a search).
-    const lists = [...keys.filter((k) => k.includes(',')).map((k) => [k]), ...Array.from({ length: Math.ceil(keys.filter((k) => !k.includes(',')).length / 40) }, (_, i) => keys.filter((k) => !k.includes(',')).slice(i * 40, i * 40 + 40))];
-    const want = new Set(keys);
-    for (const list of lists) {
-      for await (const page of client.searchResourcePages(type as 'Observation', { [COMPARTMENT[type]]: `Patient/${patientId}`, identifier: list.join(','), _count: '1000', _elements: 'identifier,extension' }, { cache: 'no-cache' })) {
-        for (const r of page) {
-          const date = (r as { extension?: { url: string; valueDateTime?: string }[] }).extension?.find((e) => e.url === SRC_DATE)?.valueDateTime ?? '';
-          for (const i of [r.identifier ?? []].flat()) if (want.has(`${i.system}|${i.value}`)) out.set(`${i.system}|${i.value}`, date);
-        }
-      }
-    }
-  }
-  return out;
-}
+// What GA holds now of these records, by any identifier (`system|value`) -> source date.
+const srcDates = (client: MedplumClient, resources: Resource[], patientId: string) =>
+  held(client, patientId, resources, {
+    elements: () => 'identifier,extension',
+    keys: (r) => [(r as { identifier?: unknown }).identifier ?? []].flat().map((i) => `${(i as { system?: string }).system}|${(i as { value?: string }).value}`),
+    value: (r) => (r as { extension?: { url: string; valueDateTime?: string }[] }).extension?.find((e) => e.url === SRC_DATE)?.valueDateTime ?? '',
+  });
 const fileStored = async (client: MedplumClient, path: string, patientId: string) => {
   const hash = await sha256File(path);
   return { hash, stored: !!(await client.searchOne('DocumentReference', `identifier=urn:ga-server:id:file|${hash}&subject=Patient/${patientId}`, { cache: 'no-cache' })) };
@@ -194,13 +184,13 @@ const fileStored = async (client: MedplumClient, path: string, patientId: string
 // crash inside the batch counts what the crashed attempt wrote as that attempt did.
 // shortcut: a record the crashed attempt linked to another source's record (merged, updated) or flagged counts as created or
 // updated (Ruling 10); the records are exact.
-async function writeBatch(client: MedplumClient, b: Batch, ctx: EhiCtx, patientId: string, source: SourceInfo, opts: AppleBatchOpts): Promise<ImportReport & { skips: LinkCounts }> {
+async function writeBatch(client: MedplumClient, b: Batch, ctx: EhiCtx, patientId: string, source: SourceInfo, opts: BatchOpts): Promise<ImportReport & { skips: LinkCounts }> {
   const { resources, counts } = await link(client, b.resources, patientId);
   await resolveRefs(client, resources, ctx, patientId);
   const redo = opts.redo?.index === b.index ? opts.redo : undefined;
   return withImportLock(async () => {
     const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
-    const have = await held(client, resources, patientId);
+    const have = await srcDates(client, resources, patientId);
     if (!redo) {
       const files = [];
       for (const f of b.files) if (f.type) files.push(await fileStored(client, f.path, patientId));
@@ -218,7 +208,8 @@ async function writeBatch(client: MedplumClient, b: Batch, ctx: EhiCtx, patientI
         continue;
       }
       const { docRef, created, fileHash } = await storeDocument(client, f.path, patientId, f.type);
-      if (created || redoFiles.delete(fileHash)) report.created++; // a file stored by the crashed attempt: created, once per content
+      const pending = redoFiles.delete(fileHash); // whether stored now or by the crashed attempt: created once per content
+      if (created || pending) report.created++;
       else report.skipped++;
       const note = f.note && (resources.find((r) => r.id === f.note) as DocumentReference | undefined);
       if (note) note.relatesTo = [...(note.relatesTo ?? []), { code: 'transforms', target: { reference: `DocumentReference/${docRef.id}` } }];
@@ -243,7 +234,7 @@ export async function importEhi(
   dir: string,
   patientId = cfg.patientId,
   timeZone?: string,
-  opts: AppleBatchOpts = {},
+  opts: BatchOpts = {},
 ): Promise<
   ImportReport & {
     skippedTables: number;
@@ -251,13 +242,16 @@ export async function importEhi(
     skips: ReturnType<typeof skipsOf> & ReadCounts['files'] & { tables: EhiTables['skipped'] };
   }
 > {
-  const ctx = await ehiContext(client, dir, patientId, timeZone);
+  const ctx = await ehiContext(client, dir, patientId, timeZone, opts.epicOrg);
+  if (opts.epicOrg === undefined) await opts.onEpicOrg?.(ctx.epicOrgNumber ?? null);
   // First, so the original is kept even if a later step fails (idempotent: found by its manifest on a re-run).
   const archived = await archiveFolder(client, dir, patientId, ARCHIVE);
   await opts.onArchived?.(archived);
-  const size = opts.batchSize ?? BATCH;
+  const size = opts.batchSize ?? BATCH_SIZE;
   const source: SourceInfo = { kind: 'ehi', file: dir, date: ctx.date, writer: 'importer' };
-  await learnAll(client, dir, ctx, patientId, size, source);
+  const learned = opts.learned ?? await learnAll(client, dir, ctx, patientId, size, source);
+  if (learned && !opts.learned) await opts.onLearned?.(learned); // saved before the upsert, which a redo repeats (it only adds)
+  for (const [key, entries] of Object.entries(learned ?? {})) await upsertEntries(client, key, entries).catch((e: Error) => console.error(`concept map ${key} not updated: ${e.message}`));
   const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   const linked: LinkCounts = { conditionNoName: 0, labResultsLinked: 0, labResultsUnidentified: 0, immunizationsEpicLinked: 0, immAdminMatched: 0, immAdminUnmatched: 0 };
   const t = new EhiTables(dir);
@@ -286,7 +280,7 @@ export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCt
   const resources: Resource[] = [];
   const counts: LinkCounts = { conditionNoName: 0, labResultsLinked: 0, labResultsUnidentified: 0, immunizationsEpicLinked: 0, immAdminMatched: 0, immAdminUnmatched: 0 };
   const c = readCounts();
-  for (const g of cut(records(t, ctx, c), BATCH, weight)) {
+  for (const g of cut(records(t, ctx, c), BATCH_SIZE, weight)) {
     const l = await link(client, g.flat(), patientId);
     resources.push(...l.resources);
     for (const k of LINK_KEYS) counts[k] += l.counts[k];

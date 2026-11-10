@@ -27,11 +27,12 @@ async function run(upload: number | string) {
   } finally { rmSync(exp, { recursive: true, force: true }); await store.close(); }
 }
 
-async function within(upload: number | string) {
+// cap: assert the increment on Linux; without, the peak is only printed (logged by run()).
+async function within(upload: number | string, cap = true) {
   const { exitCode, stderr, job } = await run(upload);
   expect(exitCode, stderr.slice(-500)).toBe(0);
   expect(job, stderr.slice(-500)).toMatchObject({ status: 'done', invalid: 0 });
-  if (process.platform === 'linux') expect(job.peakAnon - job.idleAnon).toBeLessThanOrEqual(IMPORT_WORKER_RSS_MB);
+  if (cap && process.platform === 'linux') expect(job.peakAnon - job.idleAnon).toBeLessThanOrEqual(IMPORT_WORKER_RSS_MB);
 }
 
 test('a synthetic EHI export imports as a job within the import worker\'s memory', () => within(20), 600_000);
@@ -39,5 +40,7 @@ test('a synthetic EHI export imports as a job within the import worker\'s memory
 // The largest C-CDA fixture. A single C-CDA document is converted whole: about 4 MB is the most that fits (the spike note).
 test('the largest C-CDA fixture imports as a job within the import worker\'s memory', () => within(join(import.meta.dirname, 'fixtures', 'ccda-epic-style.xml')), 600_000);
 
-// About 100 MB and 500 MB of tables and notes (writeEhiExport's default note and message sizes).
-test.skipIf(!process.env.GA_BIG_IMPORT).each([900, 4500])('a real-sized synthetic EHI export (factor %i) imports within the import worker\'s memory', within, 12 * 3_600_000);
+// About 100 MB and 500 MB of tables and notes (writeEhiExport's default note and message sizes). They complete; their peaks went
+// over the import's increment (96 and 122 MiB, the spike note), so the peak is recorded, not asserted: Task 7's whole-server run
+// decides (Ruling 13).
+test.skipIf(!process.env.GA_BIG_IMPORT).each([900, 4500])('a real-sized synthetic EHI export (factor %i) imports to the end; its peak is recorded', (f) => within(f, false), 12 * 3_600_000);

@@ -22,12 +22,21 @@ const FX = join(import.meta.dirname, 'fixtures');
 const oldConfig = process.env.GA_CONFIG;
 let zip: string;
 let ehi: string;
+let ehiDup: string;
 let work: string;
 beforeAll(async () => {
   work = mkdtempSync(join(tmpdir(), 'ga-jobs-fx-'));
   zip = await appleZip(work, 10);
   ehi = join(work, 'ehi');
   await writeEhiExport(ehi, 6, { noteKB: 3, plainKB: 2, messageKB: 2 });
+  // The same with an IMM_ADMIN dose of another name and lot on an IMMUNE dose's date: a possible duplicate of it (R18).
+  ehiDup = join(work, 'ehi-dup');
+  cpSync(ehi, ehiDup, { recursive: true });
+  const tsv = join(ehiDup, 'EHITables', 'IMM_ADMIN.tsv');
+  const [head, row] = readFileSync(tsv, 'utf8').split('\r\n');
+  const cols = head.split('\t');
+  const dup = row.split('\t').map((v, i) => ({ IMM_TYPE_ID_NAME: '', IMM_TYPE_FREE_TEXT: 'Other name', IMM_DATE: '1/15/2026 12:00:00 AM', IMM_LOT_NUMBER: 'LOT2' })[cols[i]] ?? v);
+  writeFileSync(tsv, `${readFileSync(tsv, 'utf8')}${dup.join('\t')}\r\n`);
 });
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 const stores: TempStore[] = [];
@@ -210,6 +219,26 @@ test('a C-CDA folder is a batch per document: a crash in the second resumes from
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
 
+// A sync between attempts can give GA its first Epic records: the resumed job keeps the first attempt's org number (none), so its
+// identifiers and batches stay those of the attempt it resumes.
+test('an EHI job keeps its first attempt\'s Epic org number when the store gains one before the resume', async () => {
+  const seed = (pid: string) => ({ resourceType: 'Condition' as const, subject: { reference: `Patient/${pid}` }, code: { text: 'Seed' }, identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.99.2.7.2.768076', value: 'seed-1' }] });
+  const opts = { tz: 'America/New_York', batchSize: 7 };
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, ehi), { patientId: a.pid, ...opts });
+  await crash(a.config, a.dir, job.id, { at: 2, creates: 3 });
+  expect(jobStatus(a.dir, job.id)).toMatchObject({ epicOrg: null, learned: expect.any(Object) });
+  await a.client.createResource(seed(a.pid));
+  expect(resumeJobs(a.dir)).toBe(1);
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const b = await store();
+  const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, ehi), { patientId: b.pid, ...opts }).id);
+  await b.client.createResource(seed(b.pid));
+  expect(report(done.report)).toEqual(report(whole.report));
+  expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
+}, 300_000);
+
 // An EHI export resumed after a crash at each kind of point (records, a note batch after its Rich Text files, a message thread, a
 // media file, a batch written but not checkpointed) gives the records and the report of an uninterrupted job.
 test.each([
@@ -219,8 +248,10 @@ test.each([
   ['mid-thread', 'synthetic', { type: 'Communication' }],
   ['a media file', 'synthetic', { file: 'scan.pdf' }],
   ['after a batch, before its checkpoint', 'synthetic', { at: 2, unlock: true }],
+  ['before a note batch stores its (identical) Rich Text files', 'synthetic', { pendingFiles: true }],
+  ['between a dose and its IMM_ADMIN possible duplicate', 'duplicate', { type: 'Immunization' }],
 ] as const)('EHI job: a crash %s resumes exactly', async (_, which, kill) => {
-  const src = which === 'fixture' ? join(FX, 'ehi') : ehi;
+  const src = which === 'fixture' ? join(FX, 'ehi') : which === 'duplicate' ? ehiDup : ehi;
   const batchSize = which === 'fixture' ? undefined : 7;
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, src), { patientId: a.pid, tz: 'America/New_York', batchSize });
@@ -232,6 +263,7 @@ test.each([
   const b = await store();
   const whole = await settled(b.dir, startJob(b.dir, upload(b.dir, src), { patientId: b.pid, tz: 'America/New_York', batchSize }).id);
   expect(whole.status, whole.message).toBe('done');
+  if (which === 'duplicate') expect(whole.report).toMatchObject({ skips: { immAdminPossibleDuplicate: 1 } });
   expect(report(done.report)).toEqual(report(whole.report));
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);

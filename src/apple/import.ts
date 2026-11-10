@@ -2,7 +2,8 @@ import type { MedplumClient } from '@medplum/core';
 import type { Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
-import { addReport, COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
+import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
+import { addReport, importResources, type ImportReport } from '../engine.ts';
 import { sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
 import { appleBatches, type Batch } from './batches.ts';
@@ -17,38 +18,13 @@ const projection = (r: Record<string, unknown>) =>
 const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
-// What GA already holds from Apple Health for this patient among these resources (every type but the Patient): first
-// identifier -> projection. One search per type and chunk of identifiers (a chunk's URL stays near 4 KB).
-const CHUNK = 40;
-export async function existing(client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  for (const type of new Set(resources.map((r) => r.resourceType).filter((t) => t !== 'Patient'))) {
-    const ids = [...new Set(resources.filter((r) => r.resourceType === type).map((r) => firstId(r as never)))];
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      for await (const page of client.searchResourcePages(type as 'Observation', {
-        [COMPARTMENT[type]]: `Patient/${patientId}`, _tag: TAGGED, identifier: ids.slice(i, i + CHUNK).join(','), _count: '1000',
-        _elements: FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier',
-      }, { cache: 'no-cache' })) {
-        for (const r of page) out.set(firstId(r as never), projection(r as never));
-      }
-    }
-  }
-  return out;
-}
+// What GA already holds from Apple Health for this patient among these resources: first identifier -> projection.
+export const existing = (client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> =>
+  held(client, patientId, resources, {
+    tag: TAGGED, keys: (r) => [firstId(r as never)], value: (r) => projection(r as never),
+    elements: (type) => (FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier'),
+  });
 
-export const BATCH = 500;
-// A batch's new and changed records by first identifier, saved before it writes (Pending), so a redo after a crash inside
-// it counts the records that attempt wrote as created/updated, not unchanged.
-export type Pending = { index: number; created: string[]; updated: string[]; files?: string[]; skips?: Record<string, number> }; // files, skips: EHI
-export type AppleBatchOpts = {
-  batchSize?: number;
-  timeZone?: string; // where days are cut (default: this machine's zone)
-  skipThrough?: number;
-  redo?: Pending;
-  beforeWrite?: (p: Pending) => Promise<void> | void; // inside the batch's lock, before its first write
-  onBatch?: (index: number, report: ImportReport & { unchanged?: number }) => Promise<void> | void;
-  onArchived?: (archived: 'stored' | 'already-present') => Promise<void> | void;
-};
 const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
 
 // Reads the export and writes it batch by batch, each under the import lock with its own unchanged check. skipThrough:
@@ -58,7 +34,7 @@ export async function importAppleHealth(
   cfg: GaConfig,
   dir: string,
   patientId = cfg.patientId,
-  opts: AppleBatchOpts = {},
+  opts: BatchOpts = {},
 ): Promise<ImportReport & { archived: 'stored' | 'already-present'; unchanged: number; seconds: number; skips: Record<string, unknown> }> {
   const t0 = Date.now();
   const archived = await archiveFolder(client, dir, patientId, 'urn:ga-server:id:apple-health-archive');
@@ -66,7 +42,7 @@ export async function importAppleHealth(
   const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
-  const it = appleBatches(dir, { size: opts.batchSize ?? BATCH, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
+  const it = appleBatches(dir, { size: opts.batchSize ?? BATCH_SIZE, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
   let n: IteratorResult<Batch, { skips: Record<string, unknown> }>;
   try {
     n = await it.next();
