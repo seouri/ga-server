@@ -44,6 +44,10 @@ test('extractWithApi parses tool output into resources', async () => {
   expect(calls[0].system).toContain('Never invent values');
 });
 
+test('refuses TIFF for --llm api', async () => {
+  await expect(extractWithApi('/x/a.tiff', 'k', stub({}) as any)).rejects.toThrow('convert the TIFF to PNG first');
+});
+
 test('extractWithApi rejects a response with no tool output', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ga-llm-'));
   const file = join(dir, 'r.png');

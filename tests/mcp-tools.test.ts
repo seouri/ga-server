@@ -2,9 +2,16 @@ import { expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
-import { buildMcpServer, pageParams, portalWarning } from '../src/mcp.ts';
+import { buildMcpServer, importExtracted, pageParams, portalWarning } from '../src/mcp.ts';
 
 const s = (o: object) => ({ source: 'h', name: 'Hosp', status: 'active', stale: true, enabledTypes: [], ...o });
+
+test('importExtracted accepts a TIFF source file (reaches the file check, not the type check)', async () => {
+  const obs = { resourceType: 'Observation', status: 'final', code: { text: 'Synthetic' } } as never;
+  await expect(importExtracted({} as never, {} as never, [obs], '/nonexistent/scan.tiff')).rejects.toThrow('sourceFile not found');
+  await expect(importExtracted({} as never, {} as never, [obs], '/nonexistent/scan.TIF')).rejects.toThrow('sourceFile not found');
+  await expect(importExtracted({} as never, {} as never, [obs], '/nonexistent/scan.gif')).rejects.toThrow('sourceFile must be a PDF or image');
+});
 
 test('portalWarning: none without stale sources; fix per status and transport', () => {
   expect(portalWarning([], false)).toBeUndefined();

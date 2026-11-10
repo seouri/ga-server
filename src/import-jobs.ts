@@ -43,6 +43,7 @@ export type JobRecord = {
 export type Run = (dir: string, id: string) => Promise<void>;
 
 const MAX_ATTEMPTS = 3;
+export const CLI_ONLY = 'this is an Epic FHIR export or a DICOM study: import it with ga import on the computer running GA';
 export const JOB_BUSY = 'this import job is already running (in ga-gateway or another `ga import-job`): try again later';
 const ID = /^[A-Za-z0-9_-]{12}$/;
 const jobDir = (dir: string, id: string): string => join(dir, 'imports', id);
@@ -201,6 +202,7 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     }
     if (/\.zip$/i.test(j.upload)) rmSync(j.upload, { force: true }); // unzipped: the folder is enough to resume
     j = save(dir, { ...j, kind: detectKind(j.root!) });
+    if (j.kind === 'fhir-export' || j.kind === 'dicom') throw new GaError(CLI_ONLY); // inside a zip: seen only after unzipping
     const cfg = deps.cfg ?? loadConfig();
     const client = deps.client ?? (await getClient(cfg));
     const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {
