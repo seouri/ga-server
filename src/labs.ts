@@ -79,9 +79,8 @@ export async function searchAll(client: MedplumClient, type: ResourceType, q: Re
   return out;
 }
 
-// Every non-Apple Observation: loaded once so what's new derives its subsets in memory, or page by page (eachObservation).
+// Every non-Apple Observation, page by page.
 const nonApple = (patientId: string) => ({ subject: `Patient/${patientId}`, '_tag:not': `${TAG}|src-apple-health` });
-export const loadObservations = (client: MedplumClient, patientId: string) => searchAll(client, 'Observation', nonApple(patientId)) as Promise<Observation[]>;
 export const eachObservation = (client: MedplumClient, patientId: string, page: (rs: Observation[]) => void) => eachPage(client, 'Observation', nonApple(patientId), page);
 
 // The pages of a search, as they come; the next one is fetched only when asked for.

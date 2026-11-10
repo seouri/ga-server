@@ -346,7 +346,7 @@ test('mergeCopies: nested fields merge, arrays union, the newer wins a leaf, a p
 });
 
 test('a hospital or PDF result that takes over an Apple copy is no longer tagged Apple: lab readers see it', async () => {
-  const { loadObservations } = await import('../src/labs.ts');
+  const { eachObservation } = await import('../src/labs.ts');
   await onStore(async ({ client }) => {
     const pid = (await client.createResource({ resourceType: 'Patient' })).id as string;
     const obs = (id: string) => ({ resourceType: 'Observation', id, status: 'final', subject: { reference: `Patient/${pid}` }, effectiveDateTime: '2024-03-01T08:00:00Z',
@@ -357,7 +357,9 @@ test('a hospital or PDF result that takes over an Apple copy is no longer tagged
     const [o, ...more] = await client.searchResources('Observation', { subject: `Patient/${pid}` });
     expect(more).toHaveLength(0);
     expect(o.meta?.tag?.map((t) => t.code)).not.toContain('src-apple-health');
-    expect(await loadObservations(client, pid)).toHaveLength(1);
+    let n = 0;
+    await eachObservation(client, pid, (os) => { n += os.length; });
+    expect(n).toBe(1);
   });
 });
 

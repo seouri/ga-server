@@ -7,8 +7,8 @@ import { defaultConfigPath } from './config.ts';
 import { isPlanned } from './current.ts';
 import { arrivedAt, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
-import { fit, highLow, isPanel, labRow, loadObservations, olderInGroup, searchAll } from './labs.ts';
-import { concept, listRows, loadLists, medCode, medKeys, medMap } from './lists.ts';
+import { eachObservation, eachPage, fit, highLow, isPanel, labRow, olderInGroup } from './labs.ts';
+import { concept, listsByKind, medCode, medKeys, medMap } from './lists.ts';
 import { writeAtomic } from './smart/store.ts';
 import { healthMaintenance, raiseNow, type Item } from './maintenance.ts';
 import { messageText, noteText, snippet } from './notes.ts';
@@ -47,11 +47,19 @@ export function clinicalDate(r: Resource): string | undefined {
 
 
 export function tally(arrived: Resource[], asOf: string) {
+  const t = tallier(asOf);
+  arrived.forEach(t.add);
+  return t.result();
+}
+
+// tally as a fold, so the arrivals need not be held.
+function tallier(asOf: string) {
   const cutoff = addDays(asOf, -365);
   const byKind: Partial<Record<Kind, number>> = {};
   const sources = new Set<string>();
-  let historical = 0, noRangeGiven = 0;
-  for (const r of arrived) {
+  let total = 0, historical = 0, noRangeGiven = 0;
+  const add = (r: Resource) => {
+    total++;
     const k = kindOf(r);
     byKind[k] = (byKind[k] ?? 0) + 1;
     const d = clinicalDate(r);
@@ -61,8 +69,8 @@ export function tally(arrived: Resource[], asOf: string) {
     for (const i of [(r as { identifier?: { system?: string } | { system?: string }[] }).identifier ?? []].flat()) { // singular on QuestionnaireResponse
       if (i.system?.startsWith('urn:ga-server:id:smart:')) sources.add(i.system.slice('urn:ga-server:id:smart:'.length));
     }
-  }
-  return { total: arrived.length, historical, noRangeGiven, byKind, sources: [...sources] };
+  };
+  return { add, result: () => ({ total, historical, noRangeGiven, byKind, sources: [...sources] }) };
 }
 
 // Types the engine creates, with their patient search parameter.
@@ -77,13 +85,18 @@ const TYPES: [Resource['resourceType'], 'subject' | 'patient'][] = [
 const APPLE_FIELDS = 'meta,extension,identifier,effectiveDateTime,effectivePeriod,issued';
 export async function arrivedSince(client: MedplumClient, patientId: string, since: string): Promise<Resource[]> {
   const out: Resource[] = [];
+  await eachArrived(client, patientId, since, (rs) => out.push(...rs));
+  return out;
+}
+
+// arrivedSince page by page, in the same order: one type after another.
+async function eachArrived(client: MedplumClient, patientId: string, since: string, page: (rs: Resource[]) => void): Promise<void> {
   const apple = `${TAG}|src-apple-health`;
   for (const [type, param] of TYPES) {
     const base = { [param]: `Patient/${patientId}`, _lastUpdated: `ge${since}` };
     const qs = type === 'Observation' ? [{ ...base, '_tag:not': apple }, { ...base, _tag: apple, _elements: APPLE_FIELDS }] : [base];
-    for (const q of qs) out.push(...(await searchAll(client, type as ResourceType, q)).filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; }));
+    for (const q of qs) await eachPage(client, type as ResourceType, q, (rs) => page(rs.filter((r) => { const a = arrivedAt(r); return a !== undefined && a >= since; })));
   }
-  return out;
 }
 
 const lastSeenFile = (dir: string) => join(dir, 'whats-new.json');
@@ -136,7 +149,7 @@ function labFold(asOf: string) {
     const items = (xs: Flagged[]) => xs.map(({ title, date, value, range, flag, source, id }): ReviewItem => {
       const p = id === undefined ? undefined : prev(id, date);
       return { kind: 'lab', title, date, detail: { value, range, flag, previous: p && { date: p.date, value: p.value } }, source, id };
-    }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+    }).sort(byDate);
     return { recent: items(recent), items };
   };
   return { add, result };
@@ -148,14 +161,26 @@ const sourceOf = (r: Resource) => (r.meta?.source ? basename(r.meta.source) : un
 // A first-import burst lists only active drugs or ones dated within a year; older ones stay in the tally.
 export function medicationItems(arrived: Resource[], all: Resource[], since: string, asOf: string): ReviewItem[] {
   const meds = medMap(all);
-  const keysOf = (r: Resource) => { const { cc, owner } = medCode(r, meds); return medKeys(cc, owner); };
-  const before = new Set(all.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).flatMap(keysOf));
-  const cutoff = addDays(asOf, -365);
+  return newMedications(arrived.filter((r) => mayBeNew(r, asOf)), meds, new Set(beforeKeys(all, meds, since)), asOf);
+}
+
+const keysOf = (r: Resource, meds: Map<string, Resource>) => { const { cc, owner } = medCode(r, meds); return medKeys(cc, owner); };
+// The drug keys of records that arrived before `since` (or before arrivals were tracked).
+const beforeKeys = (rs: Resource[], meds: Map<string, Resource>, since: string) =>
+  rs.filter((r) => { const a = arrivedAt(r); return r.resourceType !== 'Medication' && (a === undefined || a < since); }).flatMap((r) => keysOf(r, meds));
+// Whether r can be a new medication, before its drug is compared: so only those need be kept.
+// not-taken (e.g. a no-medications entry) and entered-in-error are no medication the person started.
+function mayBeNew(r: Resource, asOf: string): boolean {
+  const date = clinicalDate(r), status = (r as { status?: string }).status;
+  return !isPlanned(r) && status !== 'not-taken' && status !== 'entered-in-error' && (status === 'active' || (!!date && date >= addDays(asOf, -365)));
+}
+
+// arrived: records that mayBeNew; meds: Medication by `Medication/<id>`; before: beforeKeys of every medication record.
+function newMedications(arrived: Resource[], meds: Map<string, Resource>, before: Set<string>, asOf: string): ReviewItem[] {
   const seen = new Set<string>();
   return arrived.flatMap((r): ReviewItem[] => {
-    const keys = keysOf(r), date = clinicalDate(r), status = (r as { status?: string }).status;
-    // not-taken (e.g. a no-medications entry) and entered-in-error are no medication the person started
-    if (isPlanned(r) || status === 'not-taken' || status === 'entered-in-error' || !keys.length || keys.some((k) => before.has(k) || seen.has(k)) || !(status === 'active' || (date && date >= cutoff))) return [];
+    const keys = keysOf(r, meds), date = clinicalDate(r), status = (r as { status?: string }).status;
+    if (!keys.length || keys.some((k) => before.has(k) || seen.has(k))) return [];
     keys.forEach((k) => seen.add(k));
     const rx = keys.find((k) => k.startsWith('rx:'));
     return [{ kind: 'new medication', title: concept(medCode(r, meds).cc) ?? 'Medication', date, detail: { rxnorm: rx?.slice(3), status }, source: sourceOf(r), id: r.id }];
@@ -203,6 +228,14 @@ export function followUpItems(items: Item[], asOf: string): ReviewItem[] {
   });
 }
 
+const byDate = (a: ReviewItem, b: ReviewItem) => (b.date ?? '').localeCompare(a.date ?? '');
+
+// The first n of rows sorted by `by` (stable), as pages of rows arrive, and how many there were.
+function top<R>(n: number, by: (a: R, b: R) => number) {
+  const t = { rows: [] as R[], total: 0, add: (rs: R[]) => { t.total += rs.length; t.rows = [...t.rows, ...rs].sort(by).slice(0, n); } };
+  return t;
+}
+
 // New clinical notes and MyChart messages, newest first, with their opening text: a clinician's plan ("repeat labs in 6 weeks") often
 // lives only here, so the agent reads them and offers record_followup. Source files and archives have no note text and are skipped.
 export function noteItems(arrived: Resource[]): ReviewItem[] {
@@ -213,7 +246,7 @@ export function noteItems(arrived: Resource[]): ReviewItem[] {
     const date = (isMsg ? r.sent ?? r.received : r.resourceType === 'DocumentReference' ? r.date : undefined)?.slice(0, 10);
     const title = isMsg ? `Message${r.sender?.display ? ` from ${r.sender.display}` : ''}` : concept((r as { type?: CodeableConcept }).type) ?? 'Clinical note';
     return [{ kind: 'note or message', title, date, detail: { text: snippet(body) }, source: sourceOf(r), id: `${r.resourceType}/${r.id}` }];
-  }).sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+  }).sort(byDate);
 }
 
 const ORDER: ReviewItem['kind'][] = ['lab', 'new medication', 'medication status', 'problem status', 'note or message', 'health maintenance'];
@@ -225,7 +258,8 @@ export const part = <T,>(p: Promise<T>): Promise<T | { error: string }> => p.cat
 const failed = (v: unknown): v is { error: string } => typeof v === 'object' && v !== null && !Array.isArray(v) && 'error' in v;
 
 // Budgets (characters) that together stay under the remote 150k tool-result cap, so `note` and the label quotes are never cut.
-const ITEMS = 30_000, LABELS = 50_000, OUT_OF_RANGE = 15_000, LISTS = 6_000, OMITTED_NAMES = 25, ERROR = 200;
+// NOTES: interleave and the 200-row cut take at most the first 200 of a kind; one more keeps a cut kind cut.
+const ITEMS = 30_000, NOTES = 201, LABELS = 50_000, OUT_OF_RANGE = 15_000, LISTS = 6_000, OMITTED_NAMES = 25, ERROR = 200;
 
 // At most 200 rows and `budget` characters; total is the count before the cut.
 const cut = <R,>(all: R[], budget: number) => { const { rows, truncated } = fit(all, 200, false, budget); return { rows, total: all.length, ...(truncated && { truncated: true as const }) }; };
@@ -249,29 +283,52 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   const asOf = opts.asOf ?? now.toLocaleDateString('en-CA');
   const stored = opts.since ? undefined : readLastSeen(opts.dir);
   const since = opts.since ?? stored ?? addDays(asOf, -90);
-  // One non-Apple Observation load serves the labs section and health maintenance.
-  const obsP = loadObservations(client, patientId);
-  const listsP = eps.then((e) => loadLists(client, patientId, e));
+  // Every source is read page by page and folded: only what the answer carries is kept.
+  const arrivedP = (async () => {
+    const t = tallier(asOf), labs: Flagged[] = [], meds: Resource[] = [], notes = top(NOTES, byDate);
+    await eachArrived(client, patientId, since, (page) => {
+      for (const r of page) {
+        t.add(r);
+        const kind = kindOf(r);
+        if (kind === 'lab results' && r.resourceType === 'Observation') { const x = flagged(r, asOf); if (x) labs.push(x); }
+        if (kind === 'medications' && mayBeNew(r, asOf)) meds.push(r);
+      }
+      notes.add(noteItems(page));
+    });
+    return { tally: t.result(), labs, meds, notes };
+  })();
+  // The lists' rows, plus what new medications and status changes need of them: the Medications, and the drugs known before `since`.
+  const meds = new Map<string, Resource>(), before = new Set<string>();
+  const listsP = eps.then((e) => listsByKind(client, patientId, e, (page) => {
+    for (const [k, m] of medMap(page)) meds.set(k, m);
+    for (const k of beforeKeys(page, meds, since)) before.add(k);
+  }));
+  const labsP = (async () => {
+    const f = labFold(asOf);
+    await eachObservation(client, patientId, (os) => { for (const o of os) if (hasCategory(o, 'laboratory') || hasTag(o, 'extracted-by-llm')) f.add(o); });
+    return f.result();
+  })();
   const [arrived, lists, labs, status, upkeep] = await Promise.all([
-    part(arrivedSince(client, patientId, since)),
+    part(arrivedP),
     part(listsP),
-    part(obsP.then((o) => o.filter((r) => hasCategory(r, 'laboratory') || hasTag(r, 'extracted-by-llm')))),
-    part(statusItems(client, patientId, since, listsP.then((l) => l.all, () => []))), // names of referenced drugs come from the lists
-    part(obsP.then((o) => healthMaintenance(client, patientId, asOf, undefined, o))),
+    part(labsP),
+    part(statusItems(client, patientId, since, listsP.then(() => [...meds.values()], () => []))), // names of referenced drugs come from the lists
+    part(healthMaintenance(client, patientId, asOf)),
   ]);
-  const isObs = (r: Resource): r is Observation => r.resourceType === 'Observation';
   const errors: Record<string, string> = {};
   const get = <T,>(v: T | { error: string }): T => { if (failed(v)) throw new Error(v.error); return v; };
   const run = (name: string, f: () => ReviewItem[]): ReviewItem[] => {
     try { return f(); } catch (e) { errors[name] = message(e); return []; }
   };
   const all = [
-    ...run('labs', () => labItems(get(arrived).filter(isObs).filter((o) => kindOf(o) === 'lab results'), get(labs), asOf)),
-    ...run('new medications', () => medicationItems(get(arrived).filter((r) => kindOf(r) === 'medications'), get(lists).all, since, asOf)),
+    ...run('labs', () => get(labs).items(get(arrived).labs)),
+    ...run('new medications', () => (get(lists), newMedications(get(arrived).meds, meds, before, asOf))),
     ...run('status changes', () => get(status)),
-    ...run('notes and messages', () => noteItems(get(arrived))),
+    ...run('notes and messages', () => get(arrived).notes.rows),
     ...run('follow-ups', () => followUpItems(get(upkeep).items, asOf)),
   ];
+  // Notes beyond the first NOTES were dropped as they came; they still count.
+  const itemsTotal = all.length + (failed(arrived) ? 0 : arrived.notes.total - arrived.notes.rows.length);
   const kept = fit(interleave(all), 200, false, ITEMS);
   const items = kept.rows.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
   const dir = opts.dir && join(opts.dir, 'labels');
@@ -285,8 +342,8 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
     if ((size += JSON.stringify(c).length) <= LABELS) return [c];
     return ++omitted <= OMITTED_NAMES ? [{ drug: c.drug, label: { status: 'omitted: too large' } }] : [];
   });
-  const names = (kind: 'medications' | 'problems') => failed(lists) ? lists : cut(listRows(lists.all, lists.ctx, kind).filter((r) => r.currency === 'current').map((r) => r.name), LISTS);
-  const outOfRange = failed(labs) ? labs : cut(labItems(labs, labs, asOf), OUT_OF_RANGE);
+  const names = (kind: 'medications' | 'problems') => failed(lists) ? lists : cut(lists[kind].filter((r) => r.currency === 'current').map((r) => r.name), LISTS);
+  const outOfRange = failed(labs) ? labs : cut(labs.recent, OUT_OF_RANGE);
   const context = { currentMedications: names('medications'), activeProblems: names('problems'), recentOutOfRange: outOfRange };
   const truncated = !!kept.truncated || omitted > 0 || [context.currentMedications, context.activeProblems, outOfRange].some((c) => 'truncated' in c);
   let seen: { seen: boolean; seenReason?: string } | undefined;
@@ -301,7 +358,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   return {
     note: NOTE, since, ...(!opts.since && !stored && { firstRun: true as const }), ...seen,
     ...(!failed(upkeep) && upkeep.byTheWay && { byTheWay: upkeep.byTheWay }),
-    tally: failed(arrived) ? arrived : tally(arrived, asOf), items, itemsTotal: all.length, ...(kept.truncated && { truncated: true as const }),
+    tally: failed(arrived) ? arrived : arrived.tally, items, itemsTotal, ...(kept.truncated && { truncated: true as const }),
     ...(Object.keys(errors).length && { sectionErrors: errors }), medicationCheck, ...(omitted > OMITTED_NAMES && { medicationCheckOmitted: omitted }), context,
   };
 }

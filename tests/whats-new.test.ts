@@ -355,6 +355,26 @@ test('new notes and messages are listed with their opening text; source files ar
   expect(items[0].detail.text).toContain('repeat your lab panel in 6 weeks');
 });
 
+// whatsNew keeps only the first notes as pages arrive: the same items, total and cut as listing every note.
+test('whatsNew: notes over several pages are listed and counted as if all were held', async () => {
+  const { noteItems } = await import('../src/whats-new.ts');
+  const b64 = (t: string) => Buffer.from(t).toString('base64');
+  const note = (i: number) => ({ resourceType: 'DocumentReference', id: `d${i}`, status: 'current', date: `2026-${String(1 + (i * 7) % 10).padStart(2, '0')}-01`, type: { text: `Note ${i}` },
+    content: [{ attachment: { contentType: 'text/plain', data: b64(`Text ${i}`) } }], extension: [ARRIVED_EXT] }) as Resource;
+  const pages = [0, 1, 2].map((p) => Array.from({ length: 150 }, (_, i) => note(p * 150 + i)));
+  const client = {
+    search: async () => ({ resourceType: 'Bundle', entry: [] }), searchOne: async () => undefined, readHistory: async () => ({ entry: [] }),
+    searchResourcePages: async function* (type: string, q: Record<string, string>) { if (type === 'DocumentReference' && q._lastUpdated) yield* pages; },
+    readResource: async () => ({ resourceType: 'Patient', birthDate: '1980-01-01', gender: 'female' }),
+  } as unknown as MedplumClient;
+  const r = await whatsNew(client, 'p', Promise.resolve([]), { since: '2026-11-01', asOf: '2026-11-07', fetch: (async () => new Response('', { status: 404 })) as typeof fetch, dir: mkdtempSync(join(tmpdir(), 'ga-wn-')) });
+  const notes = r.items.filter((i) => i.kind === 'note or message');
+  expect(notes.length).toBeGreaterThan(100);
+  expect(notes).toEqual(noteItems(pages.flat()).slice(0, notes.length));
+  expect(r.itemsTotal).toBe(450 + r.items.filter((i) => i.kind === 'health maintenance').length);
+  expect(r.truncated).toBe(true);
+});
+
 test('medicationItems: a C-CDA planned medication is not a new medication; a portal one is', () => {
   const since = '2026-11-01T00:00:00Z';
   const req = (id: string, code: string) => ({ resourceType: 'MedicationRequest', id, status: 'active', intent: 'plan', medicationCodeableConcept: { text: `Drug ${id}` },

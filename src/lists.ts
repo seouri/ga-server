@@ -135,7 +135,8 @@ export async function loadLists(client: MedplumClient, patientId: string, eps: E
 }
 
 // The three lists' rows (as listRows), read page by page: each page is made rows and dropped, so only the rows are kept.
-export async function listsByKind(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<Record<Kind, ListRow[]>> {
+// onPage: each page's records (its included Medications too), for a caller that derives more from them.
+export async function listsByKind(client: MedplumClient, patientId: string, eps: Endpoint[], onPage?: (page: Resource[]) => void): Promise<Record<Kind, ListRow[]>> {
   const ctx = currencyContext([], eps, await newestEpicImport(client, patientId));
   const s = searches(patientId);
   const read = async (kind: Kind) => {
@@ -144,6 +145,7 @@ export async function listsByKind(client: MedplumClient, patientId: string, eps:
       for await (const b of bundles(client, type, q)) {
         const page = (b.entry ?? []).flatMap((e) => (e.resource ? [e.resource] : []));
         listItems(page, medMap(page), ctx, kind).forEach(g.add);
+        onPage?.(page);
       }
     }
     return g.rows();
