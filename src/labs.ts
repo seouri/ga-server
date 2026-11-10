@@ -84,23 +84,33 @@ const nonApple = (patientId: string) => ({ subject: `Patient/${patientId}`, '_ta
 export const loadObservations = (client: MedplumClient, patientId: string) => searchAll(client, 'Observation', nonApple(patientId)) as Promise<Observation[]>;
 export const eachObservation = (client: MedplumClient, patientId: string, page: (rs: Observation[]) => void) => eachPage(client, 'Observation', nonApple(patientId), page);
 
+// The pages of a search, as they come; the next one is fetched only when asked for.
+export async function* bundles<T extends Resource>(client: MedplumClient, type: ResourceType, q: URLSearchParams): AsyncGenerator<Bundle<T>> {
+  let b = await client.search(type as 'Observation', q, { cache: 'no-cache' }) as unknown as Bundle<T>;
+  for (;;) {
+    yield b;
+    const next: string | undefined = b.link?.find((l) => l.relation === 'next')?.url;
+    if (!next) return;
+    // Follow by path: the link's host is Medplum's configured base, which the gateway container may not reach.
+    b = await client.get<Bundle<T>>(next.replace(/^\w+:\/\/[^/]+\//, ''), { cache: 'no-cache' });
+  }
+}
+
 export async function collect<T extends Resource, R>(
   client: MedplumClient, type: ResourceType, q: URLSearchParams, row: (r: T) => R | undefined, limit: number, scan = Infinity,
 ): Promise<{ rows: R[]; more: boolean }> {
   const rows: R[] = [];
   let read = 0;
-  let b: Bundle<T> | undefined = await client.search(type as 'Observation', q, { cache: 'no-cache' }) as unknown as Bundle<T>;
-  for (;;) {
+  for await (const b of bundles<T>(client, type, q)) {
     for (const e of b.entry ?? []) {
       read++;
       const r = e.resource && row(e.resource);
       if (r !== undefined) rows.push(r);
     }
-    const next: string | undefined = b.link?.find((l) => l.relation === 'next')?.url;
+    const next = b.link?.some((l) => l.relation === 'next');
     if (rows.length > limit || read >= scan || !next) return { rows, more: rows.length > limit || !!next };
-    // Follow by path: the link's host is Medplum's configured base, which the gateway container may not reach.
-    b = await client.get<Bundle<T>>(next.replace(/^\w+:\/\/[^/]+\//, ''), { cache: 'no-cache' });
   }
+  return { rows, more: false };
 }
 
 // At most `limit` rows and BUDGET characters, so the remote cap never cuts JSON mid-row.
