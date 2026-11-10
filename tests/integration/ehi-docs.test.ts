@@ -18,6 +18,7 @@ const EHI = join(import.meta.dirname, '..', 'fixtures', 'ehi');
 const ctx: EhiCtx = { ...exportInfo(EHI), org: 'synthetic-health-docs' };
 let client: MedplumClient;
 let pid: string;
+let docsPid: string | undefined;
 
 beforeAll(async () => {
   client = await getClient(loadConfig());
@@ -26,13 +27,15 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await cleanupTestMaps(client);
-  for (const d of await client.searchResources('DocumentReference', { subject: `Patient/${pid}` }, { cache: 'no-cache' })) {
-    for (const c of d.content ?? []) {
-      const bin = c.attachment.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
-      if (bin) await client.deleteResource('Binary', bin);
+  for (const p of [pid, docsPid ?? []].flat()) {
+    for (const d of await client.searchResources('DocumentReference', { subject: `Patient/${p}` }, { cache: 'no-cache' })) {
+      for (const c of d.content ?? []) {
+        const bin = c.attachment.url?.match(/(?:Binary|storage)\/([^/?]+)/)?.[1];
+        if (bin) await client.deleteResource('Binary', bin);
+      }
     }
+    await cleanupTestPatient(client, p);
   }
-  await cleanupTestPatient(client, pid);
 });
 
 async function importHistory() {
@@ -52,11 +55,14 @@ test('history and medication records are valid FHIR and re-import is a no-op', a
   expect(await importHistory()).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
 });
 
+// Its own patient: the history records above would meet the export's own as possible duplicates.
 test('the import stores notes, messages and media once, readable', async () => {
+  const pid = await createTestPatient(client);
+  docsPid = pid;
   const first = await importEhi(client, { patientId: pid } as GaConfig, EHI, pid, ctx.timeZone);
   expect(first).toMatchObject({ invalid: 0, possibleDuplicates: 0 });
   expect(first.created).toBeGreaterThanOrEqual(7); // 3 notes, 2 messages, 1 RTF file, 1 media (+ the Encounter when new)
-  const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${ctx.org}|HNO_INFO|1001` }, { cache: 'no-cache' });
+  const notes = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${exportInfo(EHI).org}|HNO_INFO|1001` }, { cache: 'no-cache' });
   expect(notes).toHaveLength(1);
   // The note holds its text; the RTF is its own stored file, linked by relatesTo.
   const [text, ...more] = notes[0].content;
@@ -74,7 +80,7 @@ test('the import stores notes, messages and media once, readable', async () => {
   await new Promise((r) => setTimeout(r, 1100));
   const again = await importEhi(client, { patientId: pid } as GaConfig, EHI, pid, ctx.timeZone);
   expect(again).toMatchObject({ created: 0, updated: 0, invalid: 0, possibleDuplicates: 0 });
-  const [same] = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${ctx.org}|HNO_INFO|1001` }, { cache: 'no-cache' });
+  const [same] = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:ehi:${exportInfo(EHI).org}|HNO_INFO|1001` }, { cache: 'no-cache' });
   expect(same.relatesTo).toEqual(notes[0].relatesTo); // the same stored RTF, no second upload
 });
 

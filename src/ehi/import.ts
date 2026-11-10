@@ -279,7 +279,7 @@ const skipsOf = (linked: LinkCounts, c: ReadCounts) => ({
   healthMaintenanceNoDate: c.hm.skippedNoDate, questionnairesEmpty: c.quest.skippedEmpty,
 });
 
-// The records with the linking passes applied and their counts, unwritten (the real-data dry pass).
+// The records with the linking passes applied (and the Patient they point at) and their counts, unwritten (the real-data dry pass).
 export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCtx, patientId: string) {
   const resources: Resource[] = [];
   const counts: LinkCounts = { conditionNoName: 0, labResultsLinked: 0, labResultsUnidentified: 0, immunizationsEpicLinked: 0, immAdminMatched: 0, immAdminUnmatched: 0 };
@@ -289,5 +289,5 @@ export async function prepareEhi(client: MedplumClient, t: EhiTables, ctx: EhiCt
     resources.push(...l.resources);
     for (const k of LINK_KEYS) counts[k] += l.counts[k];
   }
-  return { resources, skips: skipsOf(counts, c) };
+  return { resources: [PATIENT, ...resources], skips: skipsOf(counts, c) };
 }
