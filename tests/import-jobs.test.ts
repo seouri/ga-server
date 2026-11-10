@@ -162,6 +162,8 @@ test('three failed attempts mark the job failed with the last error and keep roo
 test('a batch that kills the whole process every time ends failed after three restarts, with the out-of-memory message', async () => {
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const path = join(a.dir, 'imports', job.id, 'job.json');
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), message: 'waiting for the import lock: another import or sync is running' })); // stale
   const host = `const { resumeJobs, jobStatus } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
     resumeJobs(process.argv[1], { run: async () => process.kill(process.pid, 'SIGKILL') });
     for (;;) { if (jobStatus(process.argv[1], process.argv[2]).status !== 'running') process.exit(0); await new Promise((r) => setTimeout(r, 20)); }`;

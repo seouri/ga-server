@@ -98,7 +98,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
       if (j?.status !== 'running') return;
       // No message: each attempt ended with GA itself (a container killed out of memory, most likely), not with an error.
       if (j.attempts >= MAX_ATTEMPTS) return void save(dir, { ...j, status: 'failed', message: j.message ?? `GA stopped during each of the last ${MAX_ATTEMPTS} attempts, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
-      save(dir, { ...j, attempts: j.attempts + 1 });
+      save(dir, { ...j, attempts: j.attempts + 1, message: undefined }); // a failed attempt saves its own; an earlier one is stale
       try {
         await run(dir, id);
       } catch (e) {
