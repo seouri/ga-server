@@ -13,7 +13,7 @@ import { archiveFolder, manifestHash } from '../src/archive.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
 import { GaError } from '../src/config.ts';
-import { inWorker, JOB_BUSY, type JobRecord, jobStatus, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
+import { inWorker, JOB_BUSY, type JobRecord, jobStatus, listJobs, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
 import { IMPORT_BUSY, takeLock } from '../src/lock.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
 import { writeEhiExport } from './fixtures-gen/ehi.ts';
@@ -330,6 +330,17 @@ test('an archive step cut short leaves no second tarball: the retry reuses its f
   writeFileSync(join(stale, 'apple_health_export.tar.gz'), 'cut short');
   expect(await archiveFolder(a.client, src, a.pid, 'urn:ga-server:id:apple-health-archive')).toBe('stored');
   expect(readdirSync(join(a.s.dir, 'tmp'))).toEqual([]);
+});
+
+// save() renames without fsync: a power loss can leave an empty job.json. The gateway must still start.
+test('an empty job.json is skipped: the other jobs resume and the list leaves it out', async () => {
+  const a = await store();
+  const bad = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  writeFileSync(join(a.dir, 'imports', bad.id, 'job.json'), '');
+  const good = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  expect(jobStatus(a.dir, bad.id)).toBeUndefined();
+  expect(listJobs(a.dir).map((j) => j.id)).toEqual([good.id]);
+  expect(resumeJobs(a.dir, { run: async () => {}, busyRetryMs: 60_000 })).toBe(1);
 });
 
 test('runJob in the calling thread (ga import-job) imports a recorded job', async () => {

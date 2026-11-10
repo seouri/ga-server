@@ -46,9 +46,17 @@ const ID = /^[A-Za-z0-9_-]{12}$/;
 const jobDir = (dir: string, id: string): string => join(dir, 'imports', id);
 const stopMark = (dir: string, id: string): string => join(jobDir(dir, id), 'stopped');
 
+// An unreadable record (save renames without fsync, so a power loss can leave it empty) is skipped, never thrown: resumeJobs
+// runs at every gateway start.
 export function jobStatus(dir: string, id: string): JobRecord | undefined {
   const f = join(jobDir(dir, id), 'job.json');
-  return ID.test(id) && existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')) as JobRecord) : undefined;
+  if (!ID.test(id) || !existsSync(f)) return undefined;
+  try {
+    return JSON.parse(readFileSync(f, 'utf8')) as JobRecord;
+  } catch (e) {
+    console.error(`import job ${id}: job.json unreadable, skipped (${(e as Error).message})`);
+    return undefined;
+  }
 }
 export const listJobs = (dir: string): JobRecord[] =>
   existsSync(join(dir, 'imports')) ? readdirSync(join(dir, 'imports')).flatMap((id) => jobStatus(dir, id) ?? []) : [];
