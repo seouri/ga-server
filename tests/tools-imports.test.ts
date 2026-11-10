@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MedplumClient } from '@medplum/core';
+import { runJob } from '../src/import-jobs.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
 import { acceptUpload, newUpload } from '../src/gateway/uploads.ts';
 
@@ -37,7 +38,9 @@ async function setup(o: { fileHosts?: string[] } = {}) {
   };
   const server = new McpServer({ name: 't', version: '0' });
   const deps = { client: {} as MedplumClient, cfg: { patientId: 'real' } as never, patientId: 'p', remote: { publicUrl: PUBLIC, clientName: 'c', dir, log: async () => {} } };
-  registerImportTools(server, deps, fake as never);
+  // Each job attempt in this thread with the fake importer (a worker thread would load the real one).
+  const run = (d: string, id: string) => runJob(d, id, { importAny: fake.importAny as never, client: {} as MedplumClient, cfg: deps.cfg });
+  registerImportTools(server, deps, { ...fake, run } as never);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const c = new Client({ name: 't', version: '0' });
   await Promise.all([server.connect(a), c.connect(b)]);

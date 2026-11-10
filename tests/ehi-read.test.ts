@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,20 +8,42 @@ const dir = join(import.meta.dirname, 'fixtures/ehi');
 
 describe('EHI reader', () => {
   it('quotes kept literally, LF inside a field kept', () => {
-    const rows = new EhiTables(dir).rows('MSG_TXT');
+    const rows = [...new EhiTables(dir).rows('MSG_TXT')];
     expect(rows.map((r) => r.MSG_TXT)).toEqual(['plain line', 'say "x', '"quoted" start not split', 'line1\nline2']);
     expect(rows[0]).toMatchObject({ MESSAGE_ID: '900002', LINE: '1' });
   });
 
   it('missing and empty tables are skipped and counted', () => {
     const t = new EhiTables(dir);
-    expect(t.rows('HM_ENC_DATE')).toEqual([]);
-    expect(t.rows('NO_SUCH_TABLE')).toEqual([]);
+    expect([...t.rows('HM_ENC_DATE')]).toEqual([]);
+    expect([...t.rows('NO_SUCH_TABLE')]).toEqual([]);
     expect(t.skipped).toEqual([
       { table: 'HM_ENC_DATE', reason: 'empty' },
       { table: 'NO_SUCH_TABLE', reason: 'missing' },
     ]);
-    expect(t.rows('ORDER_RESULTS')[0].COMPONENT_ID_NAME).toBe('LDL CALCULATED');
+    expect([...t.rows('ORDER_RESULTS')][0].COMPONENT_ID_NAME).toBe('LDL CALCULATED');
+  });
+
+  // A table is read a chunk at a time (here 5 bytes), never whole: a row, a CRLF or a character can straddle two chunks.
+  const table = (body: string) => {
+    const d = mkdtempSync(join(tmpdir(), 'ehi-stream-'));
+    mkdirSync(join(d, 'EHITables'));
+    writeFileSync(join(d, 'EHITables', 'T.tsv'), `\uFEFFK\tV\r\n${body}`);
+    return new EhiTables(d, 5);
+  };
+  it('streams rows across chunks: a split CRLF or character, an LF in a field, a last row without CRLF', () => {
+    const rows = Array.from(table('1\tthe patient\u2019s\r\n2\ta\nb\r\n\r\n3\tlast').rows('T'), (r) => ({ K: r.K, V: r.V })); // an empty cell reads ''
+    expect(rows).toEqual([{ K: '1', V: 'the patient\u2019s' }, { K: '2', V: 'a\nb' }, { K: '', V: '' }, { K: '3', V: 'last' }]);
+  });
+
+  it('index groups rows by key in first-seen order and reads a group back from its byte ranges', () => {
+    const t = table('a\t1\r\na\t2\r\nb\t3\r\na\t4\r\n\t5\r\n');
+    const ix = t.index('T', (r) => r.K || undefined);
+    expect([...ix.keys()]).toEqual(['a', 'b']);
+    expect(ix.get('a')).toHaveLength(4); // two [start, end) runs: rows 1-2, and row 4
+    expect(t.read('T', ix.get('a')!).map((r) => r.V)).toEqual(['1', '2', '4']);
+    expect(t.read('T', ix.get('b')!).map((r) => [r.K, r.V])).toEqual([['b', '3']]);
+    expect([...table('').index('T', (r) => r.K).keys()]).toEqual([]);
   });
 
   it('isEhiExport detects the fixture and rejects a C-CDA folder', () => {

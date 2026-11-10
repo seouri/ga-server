@@ -466,7 +466,7 @@ export async function importResources(
     mapsRead = false;
     return new Map();
   });
-  const learned = mapsRead ? learnable(ordered, source, maps) : new Map<string, MapEntry[]>();
+  const learned = mapsRead && !source.prelearned ? learnable(ordered, source, maps) : new Map<string, MapEntry[]>();
   for (const [key, entries] of learned) {
     // One read-modify-write per source, serially; a failed map write never fails the import.
     await upsertEntries(client, key, entries).catch((e: Error) => console.error(`concept map ${key} not updated: ${e.message}`));

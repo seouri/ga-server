@@ -3,7 +3,7 @@ import type { DiagnosticReport, Identifier, Observation, Quantity, Resource } fr
 import { EPIC_OID } from '../identity.ts';
 import { ehiDate } from './dates.ts';
 import { type EhiCtx, ehiId, encounterRef, epicId, localId, PATIENT_REF } from './ids.ts';
-import type { EhiTables } from './read.ts';
+import type { EhiTables, Row } from './read.ts';
 
 const NUM = /^-?\d+(\.\d+)?$/;
 
@@ -17,14 +17,14 @@ function status(s: string): Observation['status'] {
 // DiagnosticReport per ORDER_PROC, Observation per ORDER_RESULTS line. The export has no LOINC codes, only LOINC
 // long names (recon b): kept as a display without a code, so nothing reads as a code; the component name is code.text.
 // A line with neither a component name nor a LOINC long name says nothing: skipped, counted in counts.skippedNoName.
-export function mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }): Resource[] {
+// Yields each report with its results (one group: the report points at them), then results whose order is not in ORDER_PROC.
+export function* mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }): Generator<Resource[]> {
   const enc = encounterRef(t);
-  const byOrder = new Map<string, Observation[]>();
-  for (const r of t.rows('ORDER_RESULTS')) {
-    if (!r.COMPONENT_ID_NAME && !r.COMPON_LNC_ID_LNC_LONG_NAME) {
-      counts.skippedNoName++;
-      continue;
-    }
+  const byOrder = t.index('ORDER_RESULTS', (r) => {
+    if (r.COMPONENT_ID_NAME || r.COMPON_LNC_ID_LNC_LONG_NAME) return r.ORDER_PROC_ID;
+    counts.skippedNoName++;
+  });
+  const result = (r: Row): Observation => {
     const pk = `${r.ORDER_PROC_ID}-${r.LINE}`;
     const unit = r.REFERENCE_UNIT || undefined;
     const q = (v: string): Quantity => ({ value: Number(v), ...(unit && { unit }) });
@@ -35,7 +35,7 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }
     const effectiveDateTime = ehiDate(r.COMP_OBS_INST_TM || r.RESULT_DATE, ctx);
     const encounter = enc(r.PAT_ENC_CSN_ID);
     const long = r.COMPON_LNC_ID_LNC_LONG_NAME;
-    const o = {
+    return {
       resourceType: 'Observation',
       id: localId('ORDER_RESULTS', pk),
       identifier: [ehiId(ctx, 'ORDER_RESULTS', pk)], // R7: results carry no link identifier
@@ -50,16 +50,16 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }
       ...(r.RESULT_FLAG_C_NAME && { interpretation: [{ text: r.RESULT_FLAG_C_NAME }] }),
       ...(range && { referenceRange: [range] }),
     } as Observation;
-    byOrder.set(r.ORDER_PROC_ID, [...(byOrder.get(r.ORDER_PROC_ID) ?? []), o]);
-  }
-  const reports = t.rows('ORDER_PROC').map((r) => {
+  };
+  const reported = new Set<string>();
+  for (const r of t.rows('ORDER_PROC')) {
     const id = r.ORDER_PROC_ID;
-    const results = byOrder.get(id) ?? [];
+    const results = t.read('ORDER_RESULTS', byOrder.get(id) ?? []).map(result);
     const lab = r.LAB_STATUS_C_NAME;
     const encounter = enc(r.PAT_ENC_CSN_ID);
     const name = r.PROC_ID_PROC_NAME || r.DESCRIPTION;
     const effectiveDateTime = results.find((o) => o.effectiveDateTime)?.effectiveDateTime ?? ehiDate(r.ORDERING_DATE, ctx);
-    return {
+    yield [{
       resourceType: 'DiagnosticReport',
       id: localId('ORDER_PROC', id),
       identifier: [ehiId(ctx, 'ORDER_PROC', id), ...epicId(ctx, 'order', id)],
@@ -69,9 +69,10 @@ export function mapLabs(t: EhiTables, ctx: EhiCtx, counts = { skippedNoName: 0 }
       ...(encounter && { encounter }),
       ...(effectiveDateTime && { effectiveDateTime }),
       ...(results.length && { result: results.map((o) => ({ reference: `Observation/${o.id}` })) }),
-    } as DiagnosticReport;
-  });
-  return [...reports, ...[...byOrder.values()].flat()];
+    } as DiagnosticReport, ...(reported.has(id) ? [] : results)]; // an order listed twice: its results once
+    reported.add(id);
+  }
+  for (const [id, ranges] of byOrder) if (!reported.has(id)) for (const r of t.read('ORDER_RESULTS', ranges)) yield [result(r)];
 }
 
 const norm = (s: string | undefined) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

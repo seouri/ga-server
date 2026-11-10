@@ -47,14 +47,19 @@ function base(rec: AhRecord, key: string, code: Observation['code'], category: s
   return o;
 }
 
+// Each reading goes to `emit` as soon as it is read (first source wins), blood pressure at result(): a later half of the
+// same reading replaces an earlier one, so a pair is only final once the export is read. Without `emit`, result() returns them all.
 export class Readings {
-  private out = new Map<string, Observation>();
+  private out: Observation[] = [];
+  private seen = new Set<string>();
   private bpHalves = new Map<string, { sys?: AhRecord; dia?: AhRecord }>();
   private skips = { sameReadingTwoSources: 0, bpUnpaired: 0, unexpectedUnit: 0 };
+  private emit: (o: Observation) => void;
+  constructor(emit?: (o: Observation) => void) { this.emit = emit ?? ((o) => this.out.push(o)); }
 
   private put(key: string, o: Observation) {
-    if (this.out.has(key)) this.skips.sameReadingTwoSources++;
-    else this.out.set(key, o);
+    if (this.seen.has(key)) this.skips.sameReadingTwoSources++;
+    else { this.seen.add(key); this.emit(o); }
   }
 
   add(rec: AhRecord): boolean {
@@ -98,6 +103,6 @@ export class Readings {
       this.put(key, o);
     }
     this.bpHalves.clear();
-    return { resources: [...this.out.values()], skips: { ...this.skips } };
+    return { resources: this.out, skips: { ...this.skips } };
   }
 }

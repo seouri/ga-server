@@ -34,7 +34,7 @@ const xml = () => readFileSync(join(dir, 'export.xml'), 'utf8');
 const put = (s: string) => writeFileSync(join(dir, 'export.xml'), s);
 
 test('first import', async () => {
-  const r = await importAppleHealth(client, cfg, dir, pid);
+  const r = await importAppleHealth(client, cfg, dir, pid, { batchSize: 3 }); // several batches: lock, identifier search per batch
   firstCreated = r.created;
   expect(r.created).toBeGreaterThan(0);
   expect(r.possibleDuplicates).toBe(0);
@@ -76,10 +76,10 @@ test('cli routes apple folders', () => {
   expect(r.stderr).toContain('usage: ga import <apple-health-folder>');
 });
 
-test('existing pages by lastUpdated windows when a window is too big', async () => {
-  const all = await existing(client, pid);
-  expect(all.size).toBeGreaterThan(3);
-  expect(await existing(client, pid, 2)).toEqual(all);
+test('existing finds the stored records of a batch by identifier', async () => {
+  const stored = await client.searchResources('Observation', { subject: `Patient/${pid}`, _tag: 'urn:ga-server:tag|src-apple-health', _count: '1000' }, { cache: 'no-cache' });
+  expect(stored.length).toBeGreaterThan(3);
+  expect((await existing(client, pid, stored)).size).toBe(stored.length);
 });
 
 test('newer export updates a changed allergy', async () => {

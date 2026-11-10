@@ -7,17 +7,17 @@ const cc = (system: string, code: string): CodeableConcept => ({ coding: [{ syst
 const category = (code: string) => [cc('http://terminology.hl7.org/CodeSystem/condition-category', code)];
 const clinical = (code: string) => cc('http://terminology.hl7.org/CodeSystem/condition-clinical', code);
 
-export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
-  const problems = t.rows('PROBLEM_LIST');
-  const enc = encounterRef(t);
+export function* mapConditions(t: EhiTables, ctx: EhiCtx): Generator<Resource> {
   // PAT_ENC_DX has only DX_ID; its only name source in the export is the linked problem (DX_LINK_PROB_ID).
-  const nameOf = new Map(problems.filter((p) => p.DESCRIPTION).map((p) => [p.PROBLEM_LIST_ID, p.DESCRIPTION]));
-  const dx = t.rows('PAT_ENC_DX').map((r): Condition => {
+  const nameOf = new Map<string, string>();
+  for (const p of t.rows('PROBLEM_LIST')) if (p.DESCRIPTION) nameOf.set(p.PROBLEM_LIST_ID, p.DESCRIPTION);
+  const enc = encounterRef(t);
+  for (const r of t.rows('PAT_ENC_DX')) {
     const pk = `${r.PAT_ENC_CSN_ID}-${r.LINE}`;
     const name = nameOf.get(r.DX_LINK_PROB_ID);
     const recordedDate = ehiDate(r.CONTACT_DATE, ctx);
     const encounter = enc(r.PAT_ENC_CSN_ID);
-    return {
+    yield {
       resourceType: 'Condition',
       id: localId('PAT_ENC_DX', pk),
       // R12: the visit diagnosis's own Epic id; C-CDA visit diagnoses carry it.
@@ -27,9 +27,9 @@ export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
       subject: PATIENT_REF,
       ...(encounter && { encounter }),
       ...(recordedDate && { recordedDate }),
-    };
-  });
-  const pl = problems.map((r): Condition => {
+    } as Condition;
+  }
+  for (const r of t.rows('PROBLEM_LIST')) {
     const id = r.PROBLEM_LIST_ID;
     const st = r.PROBLEM_STATUS_C_NAME;
     const onsetDateTime = ehiDate(r.NOTED_DATE, ctx);
@@ -37,7 +37,7 @@ export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
     const recordedDate = ehiDate(r.DATE_OF_ENTRY, ctx);
     const deleted = /deleted/i.test(st);
     const resolved = !deleted && (/resolved/i.test(st) || !!abatementDateTime);
-    return {
+    yield {
       resourceType: 'Condition',
       id: localId('PROBLEM_LIST', id),
       identifier: [ehiId(ctx, 'PROBLEM_LIST', id), ...epicId(ctx, 'problem', id)],
@@ -49,7 +49,6 @@ export function mapConditions(t: EhiTables, ctx: EhiCtx): Resource[] {
       ...(onsetDateTime && { onsetDateTime }),
       ...(abatementDateTime && !deleted && { abatementDateTime }),
       ...(recordedDate && { recordedDate }),
-    };
-  });
-  return [...dx, ...pl];
+    } as Condition;
+  }
 }

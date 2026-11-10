@@ -2,6 +2,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
+import { threadId } from 'node:worker_threads';
 import { defaultConfigPath, GaError } from './config.ts';
 
 const LOCK_STALE_MS = 2 * 3_600_000;
@@ -20,7 +21,7 @@ export async function takeLock(f: string, waitMs: number): Promise<string | unde
   for (const end = Date.now() + waitMs; ; ) {
     try {
       const fd = openSync(f, 'wx', 0o600);
-      writeSync(fd, JSON.stringify({ pid: process.pid, host: hostname(), started: Date.now() }));
+      writeSync(fd, JSON.stringify({ pid: process.pid, thread: threadId, host: hostname(), started: Date.now() }));
       closeSync(fd);
       return f;
     } catch (e) {
@@ -47,6 +48,15 @@ export async function takeLock(f: string, waitMs: number): Promise<string | unde
 
 // One import or sync writes at a time, so two never both create the same record (an EHI import and the daily sync).
 // shortcut: another host's lock is freed after 2 h, which a very large Apple Health import can outlast; upgrade to a heartbeat if seen.
+// A worker thread that died (out of memory, terminated) skips its finally and leaves a lock with this live pid: free it.
+export function freeThreadLock(thread: number, dir = dirname(defaultConfigPath())): void {
+  const f = join(dir, 'import.lock');
+  try {
+    const held = JSON.parse(readFileSync(f, 'utf8')) as { pid?: number; thread?: number; host?: string };
+    if (held.host === hostname() && held.pid === process.pid && held.thread === thread) rmSync(f, { force: true });
+  } catch {} // no lock, or mid-write by its holder: not ours
+}
+
 export const IMPORT_WAIT_MS = 10 * 60_000;
 export const IMPORT_BUSY = 'another import or sync is running: try again later';
 export async function withImportLock<T>(fn: () => Promise<T>, opts: { dir?: string; waitMs?: number } = {}): Promise<T> {

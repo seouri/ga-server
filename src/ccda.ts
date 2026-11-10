@@ -8,6 +8,7 @@ import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts
 import * as OID from '../vendor/medplum-ccda/oids.ts';
 import { sanitizeNullFlavors } from '../vendor/medplum-ccda/sanitize.ts';
 import type { CcdaObservation, CcdaReference, CcdaSection, CcdaTemplateId, CcdaTimestampOrBoolean } from '../vendor/medplum-ccda/types.ts';
+import type { BatchOpts } from './batches.ts';
 import { type GaConfig, GaError } from './config.ts';
 import { RXNORM } from './concepts.ts';
 import { addReport, importResources, type ImportReport, type NotImported } from './engine.ts';
@@ -312,7 +313,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
 }
 
 // Sums rows of one section, template and reason (several documents of one import).
-function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[] {
+export function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[] {
   for (const r of rows) {
     const same = total.find((t) => t.section === r.section && t.templateId === r.templateId && t.reason === r.reason);
     if (same) same.entries += r.entries;
@@ -321,20 +322,26 @@ function addNotImported(total: NotImported[], rows: NotImported[]): NotImported[
   return total;
 }
 
-export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId): Promise<ImportReport> {
+// A file is a batch (src/import-jobs.ts): skipThrough skips the files up to that index, onBatch follows each committed file.
+// shortcut: a file redone after a crash inside it reports what the crashed attempt wrote as skipped (its records are exact): the
+// C-CDA keys come from the whole document, so its new records cannot be listed before writing as EHI's are. Upgrade: save the
+// document's batchKeys (engine.ts) as pending before its first write, as EHI does, if a resumed C-CDA count matters.
+export async function importPath(client: MedplumClient, cfg: GaConfig, path: string, patientId = cfg.patientId, opts: Pick<BatchOpts, 'skipThrough' | 'onBatch'> = {}): Promise<ImportReport> {
   const total: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
   const files = ccdaFiles(path);
   if (!files.length) return total;
   const notImported: NotImported[] = (total.notImported = []);
-  return withImportLock(async () => {
-    for (const file of files) {
-      const xml = readFileSync(file, 'utf8');
-      const converted = convertCcdaLocal(xml);
+  for (const [i, file] of files.entries()) {
+    if (i <= (opts.skipThrough ?? -1)) continue;
+    const xml = readFileSync(file, 'utf8');
+    const converted = convertCcdaLocal(xml);
+    const r = await withImportLock(async () => {
       const { fileHash } = await storeDocument(client, file, patientId, 'application/xml');
-      const r = await importResources(client, converted.resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
-      addReport(total, r);
-      addNotImported(notImported, converted.notImported);
-    }
-    return total;
-  });
+      return importResources(client, converted.resources, { kind: 'ccda', file, org: custodian(xml), date: ccdaDate(xml), writer: 'importer' }, patientId, fileHash);
+    });
+    addReport(total, r);
+    addNotImported(notImported, converted.notImported);
+    await opts.onBatch?.(i, { ...r, notImported: converted.notImported });
+  }
+  return total;
 }

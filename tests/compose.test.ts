@@ -36,3 +36,9 @@ test('ga-store and ga-backup-store are in the sqlite profile; nothing requires g
 test('compose has no fhir-converter', () => {
   expect(compose).not.toMatch(/fhir-converter|profiles: \['ccda'\]/);
 });
+
+test('only ga-gateway has a fixed hostname: a recreated gateway knows its own dead import lock, and ga-sync (same low pid in its container) never shares it', () => {
+  const service = (name: string) => compose.split(/^  (?=\S)/m).find((b) => b.startsWith(`${name}:`)) ?? '';
+  expect(service('ga-gateway')).toMatch(/\n\s+hostname: ga-gateway\n/);
+  expect(service('ga-sync')).not.toMatch(/hostname:/);
+});

@@ -40,35 +40,47 @@ export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resou
 
 const KEYS = new Set(['Recorded Date', 'Classification', 'Symptoms']);
 
-export function mapEcgs(dir: string): { resources: Resource[]; skips: { ecgUnparsed: number } } {
+function ecg(folder: string, f: string, n: number): Resource[] | undefined {
+  const text = readFileSync(join(folder, f), 'utf8');
+  const h: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    if (/^[-\d.,\s]+$/.test(line) && /\d/.test(line)) break; // first sample row: header is over
+    const i = line.indexOf(',');
+    const k = line.slice(0, i);
+    if (i > 0 && KEYS.has(k)) h[k] = line.slice(i + 1).trim().replace(/^"(.*)"$/, '$1');
+  }
+  if (!h['Recorded Date'] || !h.Classification) return undefined;
+  const recorded = appleDate(h['Recorded Date']);
+  const id = `apple-ecg-${n}`;
+  return [{
+    resourceType: 'DocumentReference', id, status: 'current', subject: SUBJECT, type: { text: 'Apple Watch ECG' }, date: recorded,
+    content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(text).toString('base64'), title: basename(f) } }],
+    identifier: [{ system: APPLE, value: sha(`ecg|${text}`) }],
+  }, {
+    resourceType: 'Observation', status: 'final', code: { text: 'Apple Watch ECG classification' }, subject: SUBJECT,
+    valueString: h.Classification, effectiveDateTime: recorded,
+    derivedFrom: [{ reference: `DocumentReference/${id}` }],
+    identifier: [{ system: APPLE, value: sha(`ecg-class|${recorded}`) }],
+    ...(h.Symptoms && { note: [{ text: h.Symptoms }] }),
+  } as Resource];
+}
+
+// One item per ECG file: its identifiers now, its DocumentReference and classification when built (the file is read again
+// then, so a folder of ECGs is never held at once).
+export function ecgItems(dir: string): { items: { keys: string[]; build: () => Resource[] }[]; skips: { ecgUnparsed: number } } {
   const folder = join(dir, 'electrocardiograms');
   const files = existsSync(folder) ? readdirSync(folder).filter((f) => f.endsWith('.csv')).sort() : [];
-  const out: Resource[] = [];
+  const items: { keys: string[]; build: () => Resource[] }[] = [];
   let ecgUnparsed = 0;
   files.forEach((f, n) => {
-    const text = readFileSync(join(folder, f), 'utf8');
-    const h: Record<string, string> = {};
-    for (const line of text.split(/\r?\n/)) {
-      if (/^[-\d.,\s]+$/.test(line) && /\d/.test(line)) break; // first sample row: header is over
-      const i = line.indexOf(',');
-      const k = line.slice(0, i);
-      if (i > 0 && KEYS.has(k)) h[k] = line.slice(i + 1).trim().replace(/^"(.*)"$/, '$1');
-    }
-    if (!h['Recorded Date'] || !h.Classification) { ecgUnparsed++; return; }
-    const recorded = appleDate(h['Recorded Date']);
-    const id = `apple-ecg-${n}`;
-    out.push({
-      resourceType: 'DocumentReference', id, status: 'current', subject: SUBJECT, type: { text: 'Apple Watch ECG' }, date: recorded,
-      content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(text).toString('base64'), title: basename(f) } }],
-      identifier: [{ system: APPLE, value: sha(`ecg|${text}`) }],
-    });
-    out.push({
-      resourceType: 'Observation', status: 'final', code: { text: 'Apple Watch ECG classification' }, subject: SUBJECT,
-      valueString: h.Classification, effectiveDateTime: recorded,
-      derivedFrom: [{ reference: `DocumentReference/${id}` }],
-      identifier: [{ system: APPLE, value: sha(`ecg-class|${recorded}`) }],
-      ...(h.Symptoms && { note: [{ text: h.Symptoms }] }),
-    });
+    const rs = ecg(folder, f, n);
+    if (!rs) { ecgUnparsed++; return; }
+    items.push({ keys: rs.map((r) => `${APPLE}|${(r as { identifier: Identifier[] }).identifier[0].value}`), build: () => ecg(folder, f, n) as Resource[] });
   });
-  return { resources: out, skips: { ecgUnparsed } };
+  return { items, skips: { ecgUnparsed } };
+}
+
+export function mapEcgs(dir: string): { resources: Resource[]; skips: { ecgUnparsed: number } } {
+  const { items, skips } = ecgItems(dir);
+  return { resources: items.flatMap((i) => i.build()), skips };
 }
