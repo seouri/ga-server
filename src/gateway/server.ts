@@ -31,6 +31,7 @@ import { createReplier } from '../notify/reply.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
 import { sweepExpired } from './adapter.ts';
+import { resumeJobs } from '../import-jobs.ts';
 import { MAX_UPLOAD, UploadTooLarge, acceptUpload, cleanUploads, uploadLinkValid } from './uploads.ts';
 
 type Remote = Omit<NonNullable<ToolDeps['remote']>, 'log'>;
@@ -424,6 +425,8 @@ export async function serveGateway(): Promise<void> {
   }
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
+  const resumed = resumeJobs(gatewayDir());
+  if (resumed) console.log(`resuming ${resumed} import${resumed > 1 ? 's' : ''}`);
   const model = process.env.GA_LLM_MODEL;
   console.log(`ga-gateway listening on ${host}:${PORT}${model ? ` (share questions: ${model})` : ' (share questions off: no GA_LLM_MODEL)'}`);
   console.log(publicUrl ? `remote access on: ${publicUrl}/mcp` : 'remote access off: set GA_PUBLIC_URL');

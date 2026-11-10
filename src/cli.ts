@@ -45,6 +45,8 @@ try {
       const cfg = loadConfig();
       console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz })));
     }
+  } else if (process.argv[2] === 'import-job' && process.argv[3] && process.argv.length === 4) {
+    await (await import('./import-jobs.ts')).runJob(gatewayDir(), process.argv[3]); // internal: one attempt of an import_file job, in this process
   } else if (process.argv[2] === 'migrate' && process.argv.slice(3).every((a) => a === '--delete-old' || a === '--accept')) {
     const { deleteOld, migrate } = await import('./migrate.ts');
     const accept = process.argv.includes('--accept');

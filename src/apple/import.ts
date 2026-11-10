@@ -36,7 +36,19 @@ export async function existing(client: MedplumClient, patientId: string, resourc
   return out;
 }
 
-const BATCH = 500;
+export const BATCH = 500;
+// A batch's new and changed records by first identifier, saved before it writes (Pending), so a redo after a crash inside
+// it counts the records that attempt wrote as created/updated, not unchanged.
+export type Pending = { index: number; created: string[]; updated: string[] };
+export type AppleBatchOpts = {
+  batchSize?: number;
+  timeZone?: string; // where days are cut (default: this machine's zone)
+  skipThrough?: number;
+  redo?: Pending;
+  beforeWrite?: (p: Pending) => Promise<void> | void; // inside the batch's lock, before its first write
+  onBatch?: (index: number, report: ImportReport & { unchanged?: number }) => Promise<void> | void;
+  onArchived?: (archived: 'stored' | 'already-present') => Promise<void> | void;
+};
 const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
 
 // Reads the export and writes it batch by batch, each under the import lock with its own unchanged check. skipThrough:
@@ -46,14 +58,15 @@ export async function importAppleHealth(
   cfg: GaConfig,
   dir: string,
   patientId = cfg.patientId,
-  opts: { batchSize?: number; skipThrough?: number; onBatch?: (index: number, report: ImportReport & { unchanged: number }) => Promise<void> } = {},
+  opts: AppleBatchOpts = {},
 ): Promise<ImportReport & { archived: 'stored' | 'already-present'; unchanged: number; seconds: number; skips: Record<string, unknown> }> {
   const t0 = Date.now();
   const archived = await archiveFolder(client, dir, patientId, 'urn:ga-server:id:apple-health-archive');
+  await opts.onArchived?.(archived);
   const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
-  const it = appleBatches(dir, { size: opts.batchSize ?? BATCH, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  const it = appleBatches(dir, { size: opts.batchSize ?? BATCH, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
   let n: IteratorResult<Batch, { skips: Record<string, unknown> }>;
   try {
     n = await it.next();
@@ -62,15 +75,23 @@ export async function importAppleHealth(
       if (index <= (opts.skipThrough ?? -1)) continue;
       const report = await withImportLock(async () => {
         const have = await existing(client, patientId, resources);
-        let same = 0;
+        const redo = opts.redo?.index === index ? { created: new Set(opts.redo.created), updated: new Set(opts.redo.updated) } : undefined;
+        const p: Pending = { index, created: [], updated: [] };
+        let same = 0, created = 0, updated = 0;
         const rest = resources.filter((r) => {
           if (r.resourceType === 'Patient' || r.resourceType === 'AllergyIntolerance') return true;
-          const hit = have.get(firstId(r as never)) === projection(r as never);
-          if (hit) same++;
-          return !hit;
+          const id = firstId(r as never), had = have.get(id);
+          if (had !== projection(r as never)) {
+            (had === undefined ? p.created : p.updated).push(id);
+            return true;
+          }
+          // shortcut: what a crashed attempt wrote counts as created/updated, never merged or flagged; exact for Apple's own records.
+          if (redo?.created.has(id)) created++; else if (redo?.updated.has(id)) updated++; else same++;
+          return false;
         });
+        if (!redo) await opts.beforeWrite?.(p); // a redo keeps the first attempt's lists
         const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
-        return { ...written, unchanged: same };
+        return { ...written, created: written.created + created, updated: written.updated + updated, unchanged: same };
       });
       addReport(total, report);
       unchanged += report.unchanged;

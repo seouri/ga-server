@@ -1,35 +1,32 @@
 // Import tools for chat apps (remote servers only): upload links, background export imports, and ga_import by fileId.
 // Remote ga_import never takes a local path: file-path imports stay stdio-only.
-import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import type { Resource } from '@medplum/fhirtypes';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { GaError } from '../config.ts';
 import { gatewayDir } from '../gateway/store.ts';
-import { newFileId, newUpload, storeUpload, unzipSafe, uploadPath } from '../gateway/uploads.ts';
-import { importAny } from '../import.ts';
+import { newFileId, newUpload, storeUpload, uploadPath } from '../gateway/uploads.ts';
+import { type JobRecord, jobStatus, listJobs, type Run, startJob } from '../import-jobs.ts';
 import { fail, importExtracted, text, type ToolDeps } from '../mcp.ts';
 
 // Empty until a ChatGPT download host is verified in acceptance testing: until then ChatGPT uses upload_link too.
 const FILE_HOSTS = (JSON.parse(readFileSync(new URL('../../config/chat-apps.json', import.meta.url), 'utf8')) as { fileHosts?: string[] }).fileHosts ?? [];
-const MAX_JOBS = 100;
-type Job = { status: 'running' | 'done' | 'failed'; started: string; report?: unknown; message?: string };
-const jobs = new Map<string, Job>(); // shortcut: in memory, lost on restart; persist if imports must survive a gateway restart
+// What import_status shows of a job record: no paths, no checkpoint internals.
+const view = (j: JobRecord) => ({ jobId: j.id, status: j.status, started: j.started, batchesDone: j.lastBatch + 1, attempts: j.attempts, report: j.report, message: j.message });
 
 // ChatGPT passes attached files as {download_url, file_name} for the params named in _meta["openai/fileParams"].
 const FILE = z.object({ download_url: z.string(), file_name: z.string() }).optional();
 const CHATGPT = { 'openai/fileParams': ['file'] };
 type File = { download_url: string; file_name: string };
 
-const fns = { importExtracted, importAny, fetch: globalThis.fetch as (u: URL, i: RequestInit) => Promise<Response>, fileHosts: undefined as string[] | undefined };
+const fns = { importExtracted, run: undefined as Run | undefined, fetch: globalThis.fetch as (u: URL, i: RequestInit) => Promise<Response>, fileHosts: undefined as string[] | undefined };
 export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partial<typeof fns> = {}): void {
   const { client, cfg, patientId, remote } = deps;
   if (!remote) throw new GaError('import tools need a remote server');
   const dir = remote.dir ?? gatewayDir();
-  const { importExtracted: extract, importAny: importPath, fetch: get, fileHosts } = { ...fns, ...f };
+  const { importExtracted: extract, run, fetch: get, fileHosts } = { ...fns, ...f };
   const hosts = fileHosts ?? FILE_HOSTS;
 
   // Fetched only over https from a listed host, never following redirects, into a new upload with the same 2 GB cap.
@@ -112,27 +109,7 @@ export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partia
         }
         const path = await stored(fileId, file);
         if (/\.(pdf|png|jpe?g)$/i.test(path)) throw new GaError('this is a PDF or image: read it in the chat and call ga_import with this fileId');
-        const jobId = randomBytes(9).toString('base64url');
-        const job: Job = { status: 'running', started: new Date().toISOString() };
-        if (jobs.size >= MAX_JOBS) jobs.delete(jobs.keys().next().value!);
-        jobs.set(jobId, job);
-        void (async () => {
-          let tmp: string | undefined;
-          try {
-            let root = path;
-            if (/\.zip$/i.test(path)) {
-              mkdirSync(join(dir, 'uploads'), { recursive: true, mode: 0o700 });
-              tmp = mkdtempSync(join(dir, 'uploads', 'unzip-'));
-              root = await unzipSafe(path, tmp);
-            }
-            job.report = await importPath(client, { ...cfg, patientId }, root, { tz });
-            job.status = 'done';
-          } catch (e) {
-            Object.assign(job, { status: 'failed', message: e instanceof Error ? e.message : String(e) });
-          } finally {
-            if (tmp) rmSync(tmp, { recursive: true, force: true });
-          }
-        })();
+        const jobId = startJob(dir, path, { tz, patientId, run }).id;
         return text({ jobId, next: 'The import runs in the background: call import_status with this jobId.' });
       } catch (e) {
         return fail(e);
@@ -143,14 +120,14 @@ export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partia
   server.registerTool(
     'import_status',
     {
-      description: 'Status of background imports: running, done (with the import report) or failed (with the message). Without jobId: all of them. Jobs are lost when GA restarts.',
+      description: 'Status of background imports: running (batches done so far; it resumes by itself after a GA restart), done (with the import report) or failed (with the message). Without jobId: all of them.',
       inputSchema: { jobId: z.string().optional() },
       annotations: { readOnlyHint: true },
     },
     async ({ jobId }) => {
-      if (jobId === undefined) return text({ jobs: [...jobs].map(([id, j]) => ({ jobId: id, ...j })) });
-      const j = jobs.get(jobId);
-      return j ? text({ jobId, ...j }) : fail(new GaError('unknown jobId (jobs are lost when GA restarts)'));
+      if (jobId === undefined) return text({ jobs: listJobs(dir).map(view) });
+      const j = jobStatus(dir, jobId);
+      return j ? text(view(j)) : fail(new GaError('unknown jobId'));
     },
   );
 }

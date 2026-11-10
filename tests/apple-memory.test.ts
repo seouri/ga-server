@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { IMPORT_CHILD_HEAP_MB, IMPORT_CHILD_RSS_MB } from '../src/limits.ts';
+import { IMPORT_WORKER_HEAP_MB, IMPORT_WORKER_RSS_MB } from '../src/limits.ts';
 import { writeAppleExport } from './fixtures-gen/apple.ts';
 import { peakRss } from './memory.ts';
 import { tempStore } from './temp-store.ts';
@@ -30,7 +30,7 @@ test('a 60-day synthetic export imports and reports its peak memory', async () =
 }, 300_000);
 
 test.skipIf(!process.env.GA_BIG_IMPORT)('a 2 GB export imports within the child cap', async () => {
-  const r = await run(3650, IMPORT_CHILD_HEAP_MB);
+  const r = await run(3650, IMPORT_WORKER_HEAP_MB);
   expect(r.exitCode, r.stderr.slice(0, 500)).toBe(0);
-  expect(r.peakMiB).toBeLessThanOrEqual(IMPORT_CHILD_RSS_MB);
+  expect(r.peakMiB).toBeLessThanOrEqual(IMPORT_WORKER_RSS_MB);
 }, 3_600_000);
