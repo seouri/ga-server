@@ -53,6 +53,8 @@ const LIMITS: [string, string, number][] = [
   // System searches (the type is the _type list): the union of the types, sorted whole per page (search.ts shortcut).
   ['Observation,Condition', '_type=Observation,Condition&_count=20', 10],
   ['Observation,Condition', '_type=Observation,Condition&_sort=-_lastUpdated&_count=20', 20],
+  // A system-only token (system|) of a type with no records: it scanned every index row (idx_v holds only rows with a value).
+  ['Basic', 'subject=Patient/PID&code=http://example.org/reminder|', 10],
 ];
 
 test.each(LIMITS)('%s?%s stays under its limit', (type, q, limit) => {
