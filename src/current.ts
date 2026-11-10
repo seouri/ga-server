@@ -9,7 +9,7 @@ export type Ctx = { lastSuccess: Map<string, number>; newestImport: number; port
 
 const SMART_ID = 'urn:ga-server:id:smart:';
 // Whole-record Epic imports. A portal sync raises the cutoff only for the types it syncs (Ctx.portal), never through its records.
-export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi']);
+export const EPIC_TAGS = new Set(['src-ccda', 'src-ehi', 'src-fhir-export']);
 // A portal's medication list confirms (or not) medications of either type: C-CDA writes MedicationStatement, EHI and portals MedicationRequest.
 const kind = (type: string) => (type === 'MedicationStatement' ? 'MedicationRequest' : type);
 

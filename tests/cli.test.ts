@@ -73,3 +73,15 @@ test('ga migrate-store --yes refuses to switch before touching services (full FH
   expect(r.stderr).toContain('The SQLite store switches once full FHIR spec support is done');
   expect(r.status).toBe(1);
 });
+
+test('fhir-export import needs --fhir-base', () => {
+  const json = join(dir, 'ehr-data.json');
+  writeFileSync(json, '{}');
+  expect(cli({}, 'import', json).stderr).toMatch('usage: ga import <fhir-export.json> --fhir-base <FHIR base URL>');
+});
+
+test('rejects a --fhir-base that is not a URL', () => {
+  const json = join(dir, 'ehr-data.json');
+  writeFileSync(json, '{}');
+  expect(cli({}, 'import', json, '--fhir-base', 'nope').stderr).toMatch('--fhir-base needs a URL');
+});

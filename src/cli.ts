@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { GaError, getClient, loadConfig } from './config.ts';
-import { detectKind, importAny } from './import.ts';
+import { detectKind, DOCUMENT_EXT, importAny } from './import.ts';
 import { enrollLink } from './gateway/passkey.ts';
 import { gatewayDir } from './gateway/store.ts';
 import { extractWithApi } from './llm.ts';
@@ -16,7 +16,7 @@ try {
   } else if (process.argv[2] === 'import' && process.argv[3]) {
     const file = process.argv[3];
     const api = process.argv[4] === '--llm' && process.argv[5] === 'api';
-    if (/\.(pdf|png|jpe?g)$/i.test(file)) {
+    if (DOCUMENT_EXT.test(file)) {
       if (!api) throw new GaError(`PDFs are extracted by your agent: ask it to import ${file}, or pass --llm api`);
       const key = process.env.ANTHROPIC_API_KEY;
       if (!key) throw new GaError('--llm api requires the ANTHROPIC_API_KEY environment variable');
@@ -27,6 +27,7 @@ try {
     } else {
       const kind = detectKind(file);
       let tz: string | undefined;
+      let fhirBase: string | undefined;
       if (kind === 'ehi') {
         // R17: the zone the export's local times are in: --tz, else GA_EHI_TZ, else this machine's zone (exportInfo).
         const args = process.argv.slice(4);
@@ -41,9 +42,21 @@ try {
             throw new GaError(`--tz needs an IANA time zone, e.g. America/New_York: ${tz}`);
           }
         }
-      } else if (kind === 'apple' && process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
+      } else if (kind === 'fhir-export') {
+        const args = process.argv.slice(4);
+        const usage = 'usage: ga import <fhir-export.json> --fhir-base <FHIR base URL>';
+        if (args.length === 1 && args[0].startsWith('--fhir-base=')) fhirBase = args[0].slice(12);
+        else if (args.length === 2 && args[0] === '--fhir-base') fhirBase = args[1];
+        else throw new GaError(usage);
+        try {
+          new URL(fhirBase);
+        } catch {
+          throw new GaError('--fhir-base needs a URL, e.g. https://fhir.example.org/api/FHIR/R4/');
+        }
+      } else if (kind === 'dicom' && process.argv.length > 4) throw new GaError('usage: ga import <dicom-folder>');
+      else if (kind === 'apple' && process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
       const cfg = loadConfig();
-      console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz })));
+      console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz, fhirBase })));
     }
   } else if (process.argv[2] === 'import-job' && process.argv[3] && process.argv.length === 4) {
     await (await import('./import-jobs.ts')).runJob(gatewayDir(), process.argv[3]); // internal: one attempt of an import_file job, in this process

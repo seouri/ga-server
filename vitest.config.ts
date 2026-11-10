@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     testTimeout: 30000,
     projects: [
-      { test: { name: 'unit', include: ['tests/**/*.test.ts', 'src/store/test/**/*.test.ts', 'vendor/**/test/*.test.ts'], exclude: ['tests/integration/**', '**/node_modules/**'], testTimeout: 30000 } },
+      { test: { name: 'unit', include: ['tests/**/*.test.ts', 'src/store/test/**/*.test.ts', 'vendor/**/test/*.test.ts', 'tools/**/test/*.test.ts'], exclude: ['tests/integration/**', '**/node_modules/**'], testTimeout: 30000 } },
       { test: { name: 'integration', include: ['tests/integration/**/*.test.ts'], setupFiles: ['tests/integration/store-setup.ts'], fileParallelism: false, testTimeout: 30000 } },
     ],
   },

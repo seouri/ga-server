@@ -3,7 +3,7 @@ import type { Extension, Identifier, Observation, Resource } from '@medplum/fhir
 import { GaError } from './config.ts';
 
 export type SourceInfo = {
-  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'smart';
+  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'smart' | 'fhir-export' | 'dicom';
   file: string;
   org?: string; // C-CDA custodian organisation name; keys the source's ConceptMap (src/conceptmap.ts)
   date: string;
@@ -29,7 +29,7 @@ export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 // From a hospital source (EHI export, C-CDA, portal sync). A PDF or photo does not say where a reading was taken.
-export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart'].some((c) => hasTag(r, c));
+export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart', 'src-fhir-export', 'src-dicom'].some((c) => hasTag(r, c));
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
@@ -100,8 +100,10 @@ export const EPIC_OID = 'urn:oid:1.2.840.114350.';
 
 const OWN_ID: Partial<Record<SourceInfo['kind'], { name: string; ok: (system: string) => boolean }>> = {
   ehi: { name: 'EHI', ok: (x) => x.startsWith('urn:ga-server:id:ehi:') },
-  'apple-health': { name: 'Apple Health', ok: (x) => x === APPLE },
+  'apple-health': { name: 'Apple Health', ok: (x) => x === APPLE || x.startsWith('urn:ga-server:id:smart:') },
   smart: { name: 'SMART', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
+  'fhir-export': { name: 'FHIR export', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
+  dicom: { name: 'DICOM', ok: (x) => x === 'urn:dicom:uid' },
 };
 
 export function stableIdentifier(r: Resource, s: SourceInfo, fileHash: string, patientId = '', resolve?: (ref: string) => string | undefined): Identifier {

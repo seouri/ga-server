@@ -122,7 +122,7 @@ function merge(ex: unknown, inc: unknown): unknown {
   return isObj(ex) && isObj(inc) && coded(ex) && !ex.text && inc.text ? { ...ex, text: inc.text } : ex;
 }
 export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
-  if (s.kind !== 'ehi' && s.kind !== 'smart') return incomingRes;
+  if (s.kind !== 'ehi' && s.kind !== 'smart' && s.kind !== 'fhir-export' && s.kind !== 'apple-health') return incomingRes;
   return onSource(existing, incomingRes, fillSource);
 }
 function fillSource<T extends Resource>(existing: T, incomingRes: T): T {
@@ -676,7 +676,7 @@ export async function importResources(
       t.seen += (report.seen ?? 0) - (before.seen ?? 0);
     }
   }
-  if (source.kind === 'ccda' || source.kind === 'ehi') {
+  if (source.kind === 'ccda' || source.kind === 'ehi' || source.kind === 'fhir-export') {
     const newest = Math.max(...ordered.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
     // newestEpicImport seeds the stored date from a scan when there is none, so an older import never hides a newer one.
     await storeNewestImport(client, patientId, Math.max(newest, await newestEpicImport(client, patientId)));

@@ -26,6 +26,16 @@ describe('detectKind', () => {
     writeFileSync(join(d, 'a.xml'), '<x/>');
     expect(detectKind(d)).toBe('ccda');
   });
+  it('detects a .json file as fhir-export', () => expect(detectKind(join(tmp(), 'ehr-data.json'))).toBe('fhir-export'));
+  it('detects a folder with DICOMDIR as dicom', () => {
+    const d = tmp();
+    writeFileSync(join(d, 'DICOMDIR'), '');
+    expect(detectKind(d)).toBe('dicom');
+  });
+  it('treats .tif and .tiff as documents', () => {
+    expect(detectKind('/x/a.tiff')).toBe('pdf');
+    expect(detectKind('/x/a.TIF')).toBe('pdf');
+  });
   it('zip is refused', () => {
     expect(() => detectKind('a.zip')).toThrow(/unzip export.zip first/);
   });

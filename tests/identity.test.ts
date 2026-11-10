@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
-import type { Observation, Resource } from '@medplum/fhirtypes';
-import { APPLE, contentKey, LAST_SEEN, sameDay, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
+import type { Condition, Observation, Resource } from '@medplum/fhirtypes';
+import { APPLE, contentKey, isClinic, LAST_SEEN, TAG, sameDay, stableIdentifier, stamp, type SourceInfo } from '../src/identity.ts';
 
 const ccda: SourceInfo = { kind: 'ccda', file: 'a.xml', date: '2024-07-26T00:00:00Z', writer: 'importer' };
 const pdf: SourceInfo = { kind: 'pdf', file: 'b.pdf', date: '2024-08-01', writer: 'agent', llm: true };
@@ -140,4 +140,13 @@ test('an id-less C-CDA entry keys alike in two documents that number its narrati
   expect(key(nka('#al1'))).not.toBe(key({ ...nka('#al1'), clinicalStatus: { text: 'resolved' } } as Resource));
   // two id-less entries of one document named only by text (the library puts a referenced name in code.text) stay two
   expect(key({ ...nka('#al1'), code: { text: 'Peanuts' } } as Resource)).not.toBe(key({ ...nka('#al2'), code: { text: 'Shellfish' } } as Resource));
+});
+
+test('fhir-export takes the smart identifier as its own', () =>
+  expect(stableIdentifier({ resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }] } as Condition, { kind: 'fhir-export', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toEqual({ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }));
+test('apple-health accepts a leading smart identifier', () =>
+  expect(stableIdentifier({ resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }] } as Condition, { kind: 'apple-health', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toEqual({ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }));
+test('fhir-export and dicom records are clinic records', () => {
+  expect(isClinic({ resourceType: 'Observation', meta: { tag: [{ system: TAG, code: 'src-fhir-export' }] } } as Resource)).toBe(true);
+  expect(isClinic({ resourceType: 'ImagingStudy', meta: { tag: [{ system: TAG, code: 'src-dicom' }] } } as Resource)).toBe(true);
 });
