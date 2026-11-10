@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { Readings } from '../src/apple/readings.ts';
 import type { AhClinical, AhRecord } from '../src/apple/read.ts';
 import { mapClinical, mapEcgs } from '../src/apple/clinical.ts';
-import { APPLE } from '../src/identity.ts';
+import { APPLE, sha256 } from '../src/identity.ts';
 
 const q = (t: string) => `HKQuantityTypeIdentifier${t}`;
 const rec = (type: string, value: string, unit: string, sourceName = 'Phone', d = '2026-01-02T08:00:00-05:00'): AhRecord => ({ type: q(type), value, unit, sourceName, startDate: d, endDate: d });
@@ -112,6 +112,12 @@ describe('Apple daily', () => {
     expect(rings[0].component).toHaveLength(3);
     expect(skips.activityEmptyDays).toBe(1);
     expect(resources.filter((o) => o.code.text === 'Sleep, nightly (Apple Health)')[0].effectivePeriod!.end).toBe('2026-03-02T03:00:00-05:00');
+  });
+  // An impossible date (a hand-edited export) keeps the text and identifier the importer wrote before sleep times became instants.
+  it('an impossible sleep date keeps its written text and identifier', () => {
+    const [o] = daily([sl('AsleepCore', 'W', '2020-02-30T23:00:00-05:00', '2020-02-31T06:00:00-05:00')]).resources;
+    expect(o.identifier![0].value).toBe(sha256('daily|sleep|2020-02-30T23:00:00-05:00'));
+    expect(o.effectivePeriod).toEqual({ start: '2020-02-30T23:00:00-05:00', end: '2020-02-31T06:00:00-05:00' });
   });
   it('is deterministic and splits nights by 3h gap', () => {
     const rs = [sl('AsleepCore', 'W', '2026-03-01T23:00:00-05:00', '2026-03-02T02:00:00-05:00'), sl('AsleepREM', 'W', '2026-03-02T06:00:00-05:00', '2026-03-02T07:00:00-05:00')];

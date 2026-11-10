@@ -25,11 +25,13 @@ const STAGES: Record<string, string> = { Core: 'Core sleep', Deep: 'Deep sleep',
 const GAP = 3 * 3600e3;
 
 // One sleep interval, small: a long export holds tens of thousands (staged sleep is ~35 segments a night). Times are
-// instants plus their written offset (shared strings), from which appleDate's text is rebuilt exactly (whole seconds).
-type Iv = { s: number; e: number; so: string; eo: string; src: string; stage: string };
+// instants plus their written offset (shared strings), from which appleDate's text is rebuilt exactly (whole seconds); the text
+// itself only when it is not rebuilt (an impossible date such as Feb 30, which Date.parse rolls over), so its identifier stays.
+type Iv = { s: number; e: number; so: string; eo: string; src: string; stage: string; sw?: string; ew?: string };
 const OFFSET = /[+-]\d\d:\d\d$/;
 const written = (ms: number, off: string) =>
   `${new Date(ms + (off[0] === '-' ? -1 : 1) * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6))) * 60000).toISOString().slice(0, 19)}${off}`;
+const unless = (ms: number, off: string, text: string) => (Number.isFinite(ms) && written(ms, off) === text ? undefined : text);
 const merge = (ivs: { s: number; e: number }[]) => {
   const out: { s: number; e: number }[] = [];
   for (const i of [...ivs].sort((a, b) => a.s - b.s)) {
@@ -94,6 +96,9 @@ export class Daily {
         s: Date.parse(rec.startDate), e: Date.parse(rec.endDate), so: this.intern(OFFSET.exec(rec.startDate)?.[0] ?? ''), eo: this.intern(OFFSET.exec(rec.endDate)?.[0] ?? ''),
         src: this.intern(rec.sourceName), stage: this.intern(m[2]),
       };
+      const sw = unless(iv.s, iv.so, rec.startDate), ew = unless(iv.e, iv.eo, rec.endDate);
+      if (sw) iv.sw = sw; // set only when needed: no extra fields on the usual interval
+      if (ew) iv.ew = ew;
       (m[1] === 'InBed' ? this.inBed : this.asleep).push(iv);
       return true;
     }
@@ -141,7 +146,7 @@ export class Daily {
     const ends = clusters.map((c) => Math.max(...c.map((i) => i.e)));
     for (const [n, c] of clusters.entries()) {
       const first = c[0], last = c.reduce((a, b) => (b.e > a.e ? b : a));
-      const sStr = written(first.s, first.so), eStr = written(last.e, last.eo);
+      const sStr = first.sw ?? written(first.s, first.so), eStr = last.ew ?? written(last.e, last.eo);
       const wake = this.localDay(eStr);
       const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake);
       o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${sStr}`) }]; // wake day can repeat (naps)
