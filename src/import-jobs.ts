@@ -56,7 +56,7 @@ export function jobStatus(dir: string, id: string): JobRecord | undefined {
   try {
     return JSON.parse(readFileSync(f, 'utf8')) as JobRecord;
   } catch (e) {
-    console.error(`import job ${id}: job.json unreadable, skipped (${(e as Error).message})`);
+    console.error(`import job ${id}: ${f} unreadable, skipped (${(e as Error).message}); delete ${jobDir(dir, id)} to free its files`);
     return undefined;
   }
 }
