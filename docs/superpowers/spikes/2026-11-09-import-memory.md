@@ -35,3 +35,19 @@ Outside the heap: the archive phase holds 265 MiB of ArrayBuffers (whole-file re
 
 The 512 MB server budget is 190 MiB for gateway plus child. With the gateway at about 104 MiB idle the child gets 86 MiB, but an empty child with the importer loaded is already 107 MiB on Linux (72 MiB on macOS). The 190 MiB split cannot hold even for an empty child on the target OS, before any data. Controller to rule: options are cutting the child baseline (lazy-load the importer modules; the TypeScript stripping loader and `@medplum/*` are most of it), a leaner gateway, or a bigger budget.
 Set meanwhile to the budget target: `IMPORT_CHILD_HEAP_MB = 64`, `IMPORT_CHILD_RSS_MB = 86` in `src/limits.ts`. Today's importer fails both by a wide margin.
+
+## After Task 3 (batched importer, heap cap 64 MB, real temp SQLite store)
+
+The 3,650-day export is written in 146 batches of 500. Each 60-minute run was cut off by its time limit; a `skipThrough 101` run reads the whole file and writes batches 102–145, which covers the end-of-read state and the daily, sleep and tail batches.
+
+| Run | Linux VmHWM (node:26.13.0-alpine) | macOS peak RSS (ps) | Peak heapUsed (sampled) |
+|---|---|---|---|
+| From batch 0, 60 min (batches written: 77 Linux, 83 macOS) | 206 MiB | 235 MiB (archive phase) | 41–43 MiB |
+| Whole read + batches 102–145 | 257 MiB (tail writes; 185 at end of read) | 218 MiB | 41 MiB (34 at end of read) |
+
+- The 64 MB heap cap holds for the whole read, with no out-of-memory error. The live heap is about 15–20 MiB while reading readings and about 33 MiB at the end of the read, which is 10 years of daily state plus the reading-key set.
+- RSS sits far above `IMPORT_CHILD_RSS_MB = 86`. Two things cause it:
+  - the empty-child baseline is 107 MiB;
+  - V8's young generation and code space sit outside `--max-old-space-size` (heapTotal up to 93 MiB).
+- The constants are unchanged; Task 5's worker-thread measurement decides them.
+- Time: the engine's per-Observation `code`+`date` content-match search takes 81% of request time and slows from about 1.4 to about 75 ms per call as the store grows. Batch time goes from 13 s to 88 s, so a full 2 GB import still takes hours.
