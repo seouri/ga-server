@@ -31,7 +31,7 @@ import { createReplier } from '../notify/reply.ts';
 import { logRemote, remoteTools } from './remote-log.ts';
 import { gatewayDir, readJson } from './store.ts';
 import { sweepExpired } from './adapter.ts';
-import { resumeJobs } from '../import-jobs.ts';
+import { exitOnStop, resumeJobs } from '../import-jobs.ts';
 import { MAX_UPLOAD, UploadTooLarge, acceptUpload, cleanUploads, uploadLinkValid } from './uploads.ts';
 
 type Remote = Omit<NonNullable<ToolDeps['remote']>, 'log'>;
@@ -425,6 +425,7 @@ export async function serveGateway(): Promise<void> {
   }
   const host = process.env.GA_SHARE_HOST || '127.0.0.1';
   await new Promise<void>((ok) => server.listen(PORT, host, ok));
+  exitOnStop();
   const resumed = resumeJobs(gatewayDir());
   if (resumed) console.log(`resuming ${resumed} import${resumed > 1 ? 's' : ''}`);
   const model = process.env.GA_LLM_MODEL;

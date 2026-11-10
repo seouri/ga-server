@@ -1,5 +1,5 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -186,6 +186,23 @@ test('a batch that kills the whole process every time ends failed after three re
   }
   expect(kills).toBe(3);
   expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'failed', attempts: 3, message: expect.stringMatching(/^GA stopped during the last attempt, most likely out of memory: .*import it with `ga import` on a computer with more memory$/) });
+}, 60_000);
+
+// docker restart, a deploy, a reboot: SIGTERM mid-attempt. The attempt is given back, so restarts never fail a healthy job.
+test('a gateway stopped with SIGTERM mid-attempt four times keeps the job running with its attempt given back', async () => {
+  const a = await store();
+  const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid });
+  const host = `const { exitOnStop, resumeJobs } = await import(${JSON.stringify(join(import.meta.dirname, '..', 'src', 'import-jobs.ts'))});
+    exitOnStop();
+    resumeJobs(process.argv[1], { run: () => { console.log('running'); return new Promise(() => {}); } });
+    setInterval(() => {}, 1000);`;
+  for (let i = 0; i < 4; i++) {
+    const c = spawn('node', ['--input-type=module', '-e', host, a.dir, job.id], { env: { PATH: process.env.PATH!, GA_CONFIG: a.config } });
+    c.stdout.on('data', (d) => { if (String(d).includes('running')) c.kill('SIGTERM'); });
+    const [code, sig] = await new Promise<unknown[]>((ok) => c.on('close', (...x) => ok(x)));
+    expect({ i, code, sig }).toEqual({ i, code: 0, sig: null });
+    expect(jobStatus(a.dir, job.id)).toMatchObject({ status: 'running', attempts: 1 });
+  }
 }, 60_000);
 
 test('a job that made progress gets three fresh attempts after it', async () => {

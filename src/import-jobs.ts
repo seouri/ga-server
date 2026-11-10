@@ -42,6 +42,7 @@ export type Run = (dir: string, id: string) => Promise<void>;
 const MAX_ATTEMPTS = 3;
 const ID = /^[A-Za-z0-9_-]{12}$/;
 const jobDir = (dir: string, id: string): string => join(dir, 'imports', id);
+const stopMark = (dir: string, id: string): string => join(jobDir(dir, id), 'stopped');
 
 export function jobStatus(dir: string, id: string): JobRecord | undefined {
   const f = join(jobDir(dir, id), 'job.json');
@@ -78,11 +79,27 @@ export function startJob(dir: string, upload: string, opts: { tz?: string; patie
   return j;
 }
 
-// At gateway start: every job still running gets its attempts again. Returns how many.
+// At gateway start: every job still running gets its attempts again. Returns how many. An attempt that a stop (exitOnStop)
+// ended is given back; one that a kill ended (out of memory, most likely) still counts.
 export function resumeJobs(dir: string, opts: Supervision = {}): number {
   const running = listJobs(dir).filter((j) => j.status === 'running');
-  for (const j of running) supervise(dir, j.id, opts);
+  for (const j of running) {
+    const stopped = existsSync(stopMark(dir, j.id));
+    save(dir, { ...j, attempts: stopped ? Math.max(0, j.attempts - 1) : j.attempts });
+    rmSync(stopMark(dir, j.id), { force: true });
+    supervise(dir, j.id, opts);
+  }
   return running.length;
+}
+
+// The gateway's SIGTERM/SIGINT (docker restart, a deploy, a reboot): marks the attempt in progress as stopped, for resumeJobs
+// to give back. A file of its own, so it never races a checkpoint the worker is saving.
+let current: { dir: string; id: string } | undefined;
+export function exitOnStop(): void {
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) process.once(sig, () => {
+    if (current) writeFileSync(stopMark(current.dir, current.id), '');
+    process.exit(0);
+  });
 }
 
 // One job at a time; each attempt is counted before it starts, so a gateway crash mid-attempt counts too. An attempt that
@@ -99,6 +116,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
       // No message: the last attempt ended with GA itself (a container killed out of memory, most likely), not with an error.
       if (j.attempts >= MAX_ATTEMPTS) return void save(dir, { ...j, status: 'failed', message: j.message ?? `GA stopped during the last attempt, most likely out of memory: too large to import within this server's memory; import it with \`ga import\` on a computer with more memory` });
       save(dir, { ...j, attempts: j.attempts + 1, message: undefined }); // a failed attempt saves its own; an earlier one is stale
+      current = { dir, id };
       try {
         await run(dir, id);
       } catch (e) {
@@ -111,7 +129,7 @@ function supervise(dir: string, id: string, opts: Supervision): void {
         save(dir, { ...now, attempts: Math.max(0, now.attempts - 1), message: 'waiting for the import lock: another import or sync is running' });
         setTimeout(() => supervise(dir, id, opts), opts.busyRetryMs ?? BUSY_RETRY_MS).unref();
         return;
-      }
+      } finally { current = undefined; }
     }
   }).catch(() => {}); // a broken record must not stop the queue
 }
