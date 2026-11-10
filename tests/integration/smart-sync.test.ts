@@ -119,7 +119,7 @@ describe('syncSource', () => {
     expect(r.fetched).toMatchObject({ Condition: 2, Observation: 5 });
     dryCounts = r.perType ?? {};
     expect(Object.fromEntries(Object.entries(dryCounts).map(([t, c]) => [t, c.created]))).toEqual({
-      Condition: 2, DocumentReference: 3, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5,
+      Condition: 2, DocumentReference: 4, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5,
     });
     expect(Object.values(dryCounts).every((c) => c.flagged === 0)).toBe(true);
     expect(await compartment(pid)).toEqual([]);
@@ -140,7 +140,7 @@ describe('syncSource', () => {
     src = { ...src, enabledTypes: ENABLED };
     const r = await syncSource(client, dir, src, pid, { now: t1 });
     expect(r.status).toBe('active');
-    expect(r.report).toMatchObject({ created: 13, updated: 0, invalid: 0 });
+    expect(r.report).toMatchObject({ created: 14, updated: 0, invalid: 0 });
     expect(r.perType).toEqual(dryCounts);
     const doc = (await compartment(pid)).find((x) => smartIds(x, src.key)[0]?.value === 'DocumentReference/doc-pdf') as DocumentReference;
     expect(binId(doc.content[0].attachment.url)).toBeTruthy(); // Medplum presigns Binary/<id> on read
@@ -158,12 +158,15 @@ describe('syncSource', () => {
   it('an unchanged second sync creates and updates nothing and advances last-seen on medications and problems only', async () => {
     const before = await compartment(pid);
     const binsBefore = bins(before);
-    expect(binsBefore).toHaveLength(1);
+    expect(binsBefore).toHaveLength(2);
+    const created = vi.spyOn(client, 'createBinary');
     const r = await syncSource(client, dir, src, pid, { now: t2 });
+    expect(created).not.toHaveBeenCalled(); // the regenerated summary document keeps its stored copy
+    created.mockRestore();
     expect(r.status).toBe('active');
     expect(r.report).toMatchObject({ created: 0, updated: 0, invalid: 0, seen: 3 });
     const mine = (await compartment(pid)).filter((x) => smartIds(x, src.key).length);
-    expect(mine).toHaveLength(12);
+    expect(mine).toHaveLength(13);
     const dated = ['MedicationRequest', 'Condition'];
     expect(mine.filter((x) => dated.includes(x.resourceType))).toHaveLength(3);
     for (const x of mine) {

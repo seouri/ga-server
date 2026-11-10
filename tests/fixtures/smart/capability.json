@@ -17,6 +17,8 @@
       { "type": "Immunization", "interaction": [{ "code": "read" }] },
       { "type": "Medication", "interaction": [{ "code": "read" }] },
       { "type": "Practitioner", "interaction": [{ "code": "read" }, { "code": "search-type" }] },
+      { "type": "CarePlan", "interaction": [{ "code": "read" }, { "code": "search-type" }], "searchParam": [{ "name": "patient", "type": "reference" }, { "name": "category", "type": "token" }] },
+      { "type": "Specimen", "interaction": [{ "code": "read" }, { "code": "search-type" }], "searchParam": [{ "name": "_id", "type": "token" }] },
       { "type": "Binary", "interaction": [{ "code": "read" }] }
     ]
   }]

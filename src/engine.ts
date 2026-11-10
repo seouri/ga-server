@@ -1,5 +1,5 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
@@ -71,11 +71,19 @@ const isApple = (r: R) => idList(r).some((i) => i.system === APPLE);
 const hasNonApple = (r: R) => idList(r).some((i) => i.system !== APPLE);
 const canon = (x: unknown) => JSON.stringify(x, sorted);
 
+// The Binary id behind an attachment URL: GA writes Binary/<id>, Medplum reads it back as a presigned storage/<id>/... URL.
+export const binaryId = (u: string): string | undefined => /(?:^|\/)(?:Binary|storage)\/([^/?]+)/.exec(u)?.[1];
+
 // Equality ignores id, meta, our bookkeeping extensions, identifiers and GA-added codings; identifiers only need
 // incoming ⊆ existing, because existing accumulates extra identifiers from merges.
 function body(r: R): unknown {
-  const { id: _i, meta: _m, identifier: _id, extension, ...rest } = stripConcept(r);
+  // issued alone is no change: Epic stamps some Observations with the time of each request.
+  const { id: _i, meta: _m, identifier: _id, issued: _is, extension, ...rest } = stripConcept(r) as R & { issued?: string };
   const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN && e.url !== ARRIVED);
+  if (r.resourceType === 'DocumentReference') {
+    const content = (r as DocumentReference).content?.map((c) => (c.attachment.url ? { ...c, attachment: { ...c.attachment, url: binaryId(c.attachment.url) ?? c.attachment.url } } : c));
+    Object.assign(rest, { content });
+  }
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 

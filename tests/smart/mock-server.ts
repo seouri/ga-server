@@ -201,7 +201,7 @@ export async function startMock(opts: MockOpts): Promise<MockSmart> {
 }
 
 const FIX = new URL('../fixtures/smart/', import.meta.url);
-const BIN_TYPES: Record<string, string> = { html: 'text/html', rtf: 'text/rtf', pdf: 'application/pdf' };
+const BIN_TYPES: Record<string, string> = { html: 'text/html', rtf: 'text/rtf', pdf: 'application/pdf', xml: 'application/xml' };
 const PAGE = 2;
 const REJECTED = new Set(['Observation|exam', 'Condition|health-concern']); // Epic answers 400 for categories it doesn't support
 const SEARCH_EXTRA = new Set(['patient', 'category', '_page']);
@@ -213,6 +213,7 @@ export function serveFixtures(m: MockSmart): { requests: string[] } {
   const fix = (f: string) => readFileSync(new URL(f, FIX), 'utf8').replaceAll('{{base}}', base);
   const db = (JSON.parse(fix('resources.json')) as { entry: { resource: { resourceType: string; id: string } & Record<string, unknown> }[] }).entry.map((e) => e.resource);
   const requests: string[] = [];
+  let served = 0;
   const guard = (h: Handler): Handler => (req, res, url) => {
     requests.push(url.pathname + url.search);
     if (!m.authorized(req)) return json(res, 401, { resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'login' }] });
@@ -249,7 +250,9 @@ export function serveFixtures(m: MockSmart): { requests: string[] } {
     const [id, ext] = f.split('.');
     m.route(`/fhir/Binary/${id}`, guard((_q, res) => {
       res.writeHead(200, { 'content-type': BIN_TYPES[ext] });
-      res.end(readFileSync(new URL(`binaries/${f}`, FIX)));
+      const bytes = readFileSync(new URL(`binaries/${f}`, FIX));
+      // Like Epic's summary document, generated anew (new id, time, version) on every request.
+      res.end(ext === 'xml' ? Buffer.concat([bytes, Buffer.from(`<!-- ${++served} -->\n`)]) : bytes);
     }));
   }
   return { requests };

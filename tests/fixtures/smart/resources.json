@@ -79,6 +79,10 @@
       "content": [{ "attachment": { "contentType": "text/rtf", "url": "{{base}}/Binary/n2", "title": "RTF Note" } }] } },
     { "resource": { "resourceType": "DocumentReference", "id": "doc-pdf", "meta": { "lastUpdated": "2026-09-01T11:00:00Z" }, "status": "current",
       "type": { "text": "Outside Record" }, "subject": { "reference": "Patient/synthetic-patient-1" },
-      "content": [{ "attachment": { "contentType": "application/pdf", "url": "Binary/p1", "title": "Scanned Letter" } }] } }
+      "content": [{ "attachment": { "contentType": "application/pdf", "url": "Binary/p1", "title": "Scanned Letter" } }] } },
+    { "resource": { "resourceType": "DocumentReference", "id": "doc-ccd", "status": "current",
+      "type": { "text": "Summary of episode note" }, "category": [{ "coding": [{ "code": "summary-document" }] }],
+      "subject": { "reference": "Patient/synthetic-patient-1" },
+      "content": [{ "attachment": { "contentType": "application/xml", "url": "Binary/c1" } }] } }
   ]
 }

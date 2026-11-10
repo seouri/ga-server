@@ -11,6 +11,7 @@ import type { SourceRec } from './store.ts';
 const CATEGORIES: Record<string, string[]> = {
   Observation: ['laboratory', 'vital-signs', 'social-history', 'survey', 'exam', 'imaging', 'procedure', 'activity', 'therapy'],
   Condition: ['problem-list-item', 'encounter-diagnosis', 'health-concern'],
+  CarePlan: ['38717003', '734163000'], // Epic requires one: longitudinal, encounter (the only ones a patient app may read)
 };
 
 // A PDF or image a DocumentReference points at; uploadBinaries (sync.ts) stores it. Never inlined: Medplum's max JSON size is 1 MB.
@@ -83,6 +84,7 @@ export async function fetchAll(
   const offered = (cap.rest ?? [])
     .flatMap((x) => x.resource ?? [])
     .filter((x) => Object.hasOwn(COMPARTMENT, x.type) && x.interaction?.some((i) => i.code === 'search-type'))
+    .filter((x) => !x.searchParam || x.searchParam.some((p) => p.name === 'patient')) // Epic: Media, Specimen search by _id only
     .map((x) => x.type)
     .filter((t) => !types || types.includes(t));
 

@@ -36,7 +36,7 @@ A source's name for these commands is its key (the FHIR host with `-` for `.`, s
 
 ## What syncs and what doesn't
 
-Synced: every patient-scoped type the portal offers (problems, diagnoses, labs, vitals, medications, immunizations, allergies, procedures, encounters, reports, clinical notes and more). Records already in GA from C-CDA or EHI imports are linked, not copied; re-fetching unchanged data changes nothing.
+Synced: every patient-scoped type the portal offers (problems, diagnoses, labs, vitals, medications, immunizations, allergies, procedures, encounters, reports, clinical notes and more). Records already in GA from C-CDA or EHI imports are linked, not copied; re-fetching unchanged data changes nothing. A record whose only difference is its `issued` time counts as unchanged, from any source, imports included: Epic stamps some observations with the time of each request. A corrected result still updates, since its value or status changes too. A portal's summary document (C-CDA) is kept as first stored: Epic builds it anew on every request, so a newer copy never replaces it; its data arrives as separate records.
 
 Not synced: MyChart messages and some note types (they keep coming from EHI exports); Quest and LabCorp results not ordered through Epic; Apple Health (import its export); PDFs (`/ga-import`).
 

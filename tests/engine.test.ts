@@ -34,6 +34,16 @@ test('equal content skips', () => {
   expect(decide(existing(obs, src('2024-01-01')), stamp(obs, src('2024-06-01'), ID))).toBe('skip'); // other types: no churn
 });
 
+test('a newer copy that differs only in when it was issued, or in its stored attachment URL form, skips', () => {
+  const obs = { resourceType: 'Observation', status: 'final', code: { text: 'x' }, issued: '2024-01-01T00:00:00Z' } as Resource;
+  // Epic stamps some Observations' issued with the time of each request.
+  expect(decide(existing(obs, src('2024-01-01')), stamp({ ...obs, issued: '2024-06-01T00:00:00Z' } as Resource, src('2024-06-01'), ID))).toBe('skip');
+  const doc = (url: string) => ({ resourceType: 'DocumentReference', status: 'current', content: [{ attachment: { url, hash: 'h' } }] }) as Resource;
+  const ex = existing(doc('https://store.example/storage/b1/file.pdf?Signature=s'), src('2024-01-01'));
+  expect(decide(ex, stamp(doc('Binary/b1'), src('2024-06-01'), ID))).toBe('skip'); // Medplum presigns on read
+  expect(decide(ex, stamp(doc('Binary/b2'), src('2024-06-01'), ID))).toBe('update');
+});
+
 test('newer different content updates', () => {
   const ex = existing(ms('active'), src('2024-01-01'));
   expect(decide(ex, stamp(ms('stopped'), src('2024-06-01'), ID))).toBe('update');

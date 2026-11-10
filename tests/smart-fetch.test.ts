@@ -29,16 +29,17 @@ describe('fetchAll', () => {
     expect(keys(resources)).toEqual(
       [
         'Condition/cond-dx', 'Condition/cond-pl',
-        'DocumentReference/doc-html', 'DocumentReference/doc-pdf', 'DocumentReference/doc-rtf',
+        'DocumentReference/doc-ccd', 'DocumentReference/doc-html', 'DocumentReference/doc-pdf', 'DocumentReference/doc-rtf',
         'Encounter/enc1', 'Medication/med1', 'MedicationRequest/mr1',
         'Observation/both1', 'Observation/lab1', 'Observation/lab2', 'Observation/lab3', 'Observation/vs1',
         `Patient/${P}`,
       ].sort(),
     );
     expect(requests).toContain(`/fhir/Observation?patient=${P}&category=laboratory&_page=2`);
-    expect(byType).toEqual({ Condition: 2, DocumentReference: 3, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5, Patient: 1 });
+    expect(byType).toEqual({ Condition: 2, DocumentReference: 4, Encounter: 1, Medication: 1, MedicationRequest: 1, Observation: 5, Patient: 1 });
     expect(skipped).toEqual({ 'Observation:exam': 'HTTP 400', 'Condition:health-concern': 'HTTP 400' });
-    expect(requests.some((r) => r.startsWith('/fhir/Practitioner') || r.startsWith('/fhir/Immunization'))).toBe(false);
+    expect(requests.some((r) => r.startsWith('/fhir/Practitioner') || r.startsWith('/fhir/Immunization') || r.startsWith('/fhir/Specimen'))).toBe(false);
+    expect(requests).toContain(`/fhir/CarePlan?patient=${P}&category=38717003`); // Epic: CarePlan search needs a category
     const html = find<DocumentReference>(resources, 'DocumentReference/doc-html');
     expect(text(html)).toContain('Synthetic follow-up note &amp; plan.');
   });
@@ -172,13 +173,13 @@ describe('mapForGa', () => {
     // PDF: never inline; a pending Binary upload whose ref is the attachment url.
     const pdf = find<DocumentReference>(resources, 'DocumentReference/doc-pdf').content[0].attachment;
     expect(pdf.data).toBeUndefined();
-    expect(binaries).toHaveLength(1);
-    expect(binaries[0].ref).toBe(pdf.url);
-    expect(binaries[0].contentType).toBe('application/pdf');
-    expect(binaries[0].data.subarray(0, 8).toString()).toBe('%PDF-1.4');
+    expect(binaries.map((b) => b.contentType).sort()).toEqual(['application/pdf', 'application/xml']);
+    const b = binaries.find((x) => x.ref === pdf.url)!;
+    expect(b.contentType).toBe('application/pdf');
+    expect(b.data.subarray(0, 8).toString()).toBe('%PDF-1.4');
     expect(pdf.title).toBe('Scanned Letter');
-    expect(pdf.hash).toBe(createHash('sha1').update(binaries[0].data).digest('base64'));
-    expect(pdf.size).toBe(binaries[0].data.length);
+    expect(pdf.hash).toBe(createHash('sha1').update(b.data).digest('base64'));
+    expect(pdf.size).toBe(b.data.length);
 
     // Input untouched.
     expect(find<DocumentReference>(fetched, 'DocumentReference/doc-pdf').content[0].attachment.data).toBeDefined();
