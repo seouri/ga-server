@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ServerResponse } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DiagnosticReport, DocumentReference, Encounter, MedicationRequest, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { fetchAll, mapForGa } from '../src/smart/fetch.ts';
@@ -119,26 +120,46 @@ describe('fetchAll', () => {
     expect(find<DiagnosticReport>(out, 'DiagnosticReport/dr1').presentedForm?.[0].contentType).toBe('text/plain; charset=utf-8');
   });
 
-  // A body that fails to download (5xx, bad JSON) is skipped like a 404; the rest of the sync goes on.
-  it('a failed Binary download is skipped, not fatal', async () => {
-    for (const bad of [(res: import('node:http').ServerResponse) => void res.writeHead(500).end(), (res: import('node:http').ServerResponse) => {
-      res.writeHead(200, { 'content-type': 'application/fhir+json' });
-      res.end('{not json');
-    }]) {
-      const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
-      serveFixtures(m2);
-      m2.route('/fhir/metadata', (_q, res) =>
-        void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
-      );
-      const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
-      m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: dr('dr1', 'broken') }, { resource: dr('dr2', 'n1') }] })));
-      m2.route('/fhir/Binary/broken', (_q, res) => bad(res));
-      const got = await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']);
+  // A body that fails for now (5xx, bad JSON) defers its record: left out of this sync (the stored copy stays), retried next time.
+  // A 404 is permanent: the record comes url-only, as before. The rest of the sync goes on either way.
+  const reportsMock = async (ids: [string, string][], bad: (res: ServerResponse) => void) => {
+    const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+    const { requests: reqs } = serveFixtures(m2);
+    m2.route('/fhir/metadata', (_q, res) =>
+      void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
+    );
+    const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
+    m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: ids.map(([id, bin]) => ({ resource: dr(id, bin) })) })));
+    const broken: string[] = [];
+    m2.route('/fhir/Binary/broken', (_q, res, url) => { broken.push(url.pathname); bad(res); });
+    for (const i of [1, 2, 3, 4]) m2.route(`/fhir/Binary/broken${i}`, (_q, res, url) => { broken.push(url.pathname); bad(res); });
+    try {
+      return { got: await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']), broken, reqs };
+    } finally {
       await m2.close();
-      expect(got.skipped.Binary).toMatch(/^1 failed/);
-      expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
+    }
+  };
+  it('a transient Binary failure defers its record; a 404 keeps it url-only', async () => {
+    const e500 = (res: ServerResponse) => void res.writeHead(500).end();
+    const badJson = (res: ServerResponse) => { res.writeHead(200, { 'content-type': 'application/fhir+json' }); res.end('{not json'); };
+    for (const bad of [e500, badJson]) {
+      const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], bad);
+      expect(got.skipped.Binary).toMatch(/^1 deferred/);
+      expect(keys(got.resources)).not.toContain('DiagnosticReport/dr1');
       expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr2').presentedForm?.[0].data).toBeTruthy();
     }
+    const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], (res) => void res.writeHead(404).end());
+    expect(got.skipped.Binary).toBe('1 failed, last HTTP 404');
+    expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
+  });
+
+  it('after 3 transient failures in a row, the rest of the bodies wait for the next sync', async () => {
+    const ids: [string, string][] = [['dr1', 'broken1'], ['dr2', 'broken2'], ['dr3', 'broken3'], ['dr4', 'broken4'], ['dr5', 'n1']];
+    const { got, broken, reqs } = await reportsMock(ids, (res) => void res.writeHead(503).end());
+    expect(broken).toHaveLength(3);
+    expect(reqs.filter((r) => r.startsWith('/fhir/Binary/n1'))).toEqual([]);
+    expect(keys(got.resources).filter((k) => k.startsWith('DiagnosticReport'))).toEqual([]);
+    expect(got.skipped.Binary).toMatch(/^5 deferred/);
   });
 });
 

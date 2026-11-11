@@ -1,5 +1,5 @@
 // SMART sync against the synthetic mock server and the local Medplum, always on throwaway test patients.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -342,5 +342,54 @@ describe('readStatus', () => {
   it('lists nothing for a patient without sources', async () => {
     const pid = await newPatient();
     expect(await readStatus(client, pid)).toEqual([]);
+  });
+});
+
+describe('a body download that fails for now', () => {
+  it('leaves the stored note as it was; the next sync stores the new body', async () => {
+    const pid = await newPatient();
+    const { publicJwks } = await ensureKeys(dir);
+    const mock = await startMock({ clientId, jwks: publicJwks });
+    serveFixtures(mock);
+    let lastUpdated = '2026-01-01T00:00:00Z';
+    let body: Buffer | undefined = Buffer.from('%PDF-1.4\nsynthetic note v1\n');
+    const doc = () => ({ resourceType: 'DocumentReference', id: 'doc-flaky', meta: { lastUpdated }, status: 'current', type: { text: 'Synthetic note' }, subject: { reference: `Patient/${P}` },
+      content: [{ attachment: { contentType: 'application/pdf', url: `${mock.fhirBase}/Binary/flaky` } }] });
+    mock.route('/fhir/DocumentReference', (req, res) => {
+      if (!mock.authorized(req)) return void res.writeHead(401).end();
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: doc(), search: { mode: 'match' } }] }));
+    });
+    mock.route('/fhir/Binary/flaky', (req, res) => {
+      if (!mock.authorized(req)) return void res.writeHead(401).end();
+      if (!body) return void res.writeHead(500).end();
+      res.writeHead(200, { 'content-type': 'application/pdf' }).end(body);
+    });
+    const src: SourceRec = { key: newKey('flaky'), name: 'Flaky Hospital', fhirBase: mock.fhirBase, patient: P, enabledTypes: ['DocumentReference'] };
+    fresh(src.key, mock);
+    const stored = async () => (await compartment(pid)).filter((x) => x.resourceType === 'DocumentReference') as DocumentReference[];
+    const sha = (b: Buffer) => createHash('sha1').update(b).digest('base64');
+    try {
+      expect((await syncSource(client, dir, src, pid, { now: new Date(Date.now() - 120_000) })).status).toBe('active');
+      const [v1] = await stored();
+      expect(v1.content[0].attachment.hash).toBe(sha(Buffer.from('%PDF-1.4\nsynthetic note v1\n')));
+      // Epic edits the note; this sync's download fails: the stored note keeps its body.
+      lastUpdated = '2026-02-01T00:00:00Z';
+      body = undefined;
+      expect((await syncSource(client, dir, src, pid, { now: new Date(Date.now() - 60_000) })).status).toBe('active');
+      const [v2] = await stored();
+      expect(binId(v2.content[0].attachment.url)).toBe(binId(v1.content[0].attachment.url));
+      expect(v2.content[0].attachment.hash).toBe(v1.content[0].attachment.hash);
+      expect(v2.meta?.versionId).toBe(v1.meta?.versionId);
+      // The download works again: the new body is stored.
+      body = Buffer.from('%PDF-1.4\nsynthetic note v2\n');
+      expect((await syncSource(client, dir, src, pid, { now: new Date() })).status).toBe('active');
+      const docs = await stored();
+      expect(docs).toHaveLength(1);
+      expect(docs[0].content[0].attachment.hash).toBe(sha(body));
+      const old = binId(v1.content[0].attachment.url);
+      if (old && old !== binId(docs[0].content[0].attachment.url)) await client.deleteResource('Binary', old).catch(() => undefined);
+    } finally {
+      await mock.close();
+    }
   });
 });

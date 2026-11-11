@@ -119,14 +119,23 @@ export async function fetchAll(
   }
 
   // Note and report bodies: Binary/<id> attachments are fetched into attachment.data (base64); mapForGa decides what they become.
-  for (const r of got.values()) {
-    for (const a of attachmentsOf(r)) {
-      if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !URL.canParse(a.url, `${base}/`) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
-      // One body that fails (4xx, 5xx, timeout, bad JSON) is skipped, not the whole sync; a refused token (401) still aborts.
-      let res: Response, type: string, buf: Buffer, fhir: { resourceType?: string; data?: string; contentType?: string } | undefined;
+  // A permanent refusal (403, 404...) leaves the attachment url-only. A failure for now (5xx, timeout, network, bad JSON) defers
+  // the whole record: left out of this sync, so the stored copy keeps its body and the next sync retries. After DEAD such
+  // failures in a row the Binary endpoint counts as down: the remaining bodies wait too. A refused token (401) aborts.
+  const DEAD = 3;
+  let streak = 0, deferred = 0, lastReason = '';
+  const fetchable = (a: Attachment) =>
+    !!a.url && !a.data && /(^|\/)Binary\/[^/]+$/.test(a.url) && URL.canParse(a.url, `${base}/`) && new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`);
+  for (const [k, r] of [...got]) {
+    const atts = attachmentsOf(r).filter(fetchable);
+    let defer = atts.length > 0 && streak >= DEAD;
+    for (const a of atts) {
+      if (defer) break;
+      let type: string, buf: Buffer, fhir: { resourceType?: string; data?: string; contentType?: string } | undefined;
       try {
-        res = await get(a.url, 'Binary', a.contentType ?? '*/*');
+        const res = await get(a.url as string, 'Binary', a.contentType ?? '*/*');
         if (!res.ok) {
+          streak = 0; // the server answered
           await fail('Binary', res);
           continue;
         }
@@ -136,10 +145,12 @@ export async function fetchAll(
         fhir = /json/.test(type) ? await parse<{ resourceType?: string; data?: string; contentType?: string }>(buf.toString('utf8'), 'Binary') : undefined;
       } catch (e) {
         if (e instanceof GaError && e.message === 'Binary: HTTP 401') throw e;
-        failures.Binary = (failures.Binary ?? 0) + 1;
-        skipped.Binary = `${failures.Binary} failed, last ${e instanceof GaError ? e.message.replace(/^Binary: /, '') : (e as Error).name === 'TimeoutError' ? 'timeout' : 'download error'}`;
-        continue;
+        streak++;
+        lastReason = e instanceof GaError ? e.message.replace(/^Binary: /, '') : (e as Error).name === 'TimeoutError' ? 'timeout' : 'download error';
+        defer = true;
+        break;
       }
+      streak = 0;
       if (fhir?.resourceType === 'Binary') {
         a.data = fhir.data;
         a.contentType ??= fhir.contentType;
@@ -148,7 +159,12 @@ export async function fetchAll(
         a.contentType ??= type || undefined;
       }
     }
+    if (defer) {
+      got.delete(k);
+      deferred++;
+    }
   }
+  if (deferred) skipped.Binary = [`${deferred} deferred to the next sync, last ${lastReason}`, skipped.Binary].filter(Boolean).join('; ');
 
   const resources = [...got.values()];
   const byType: Record<string, number> = {};
