@@ -3,6 +3,7 @@
 import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Extension, Resource } from '@medplum/fhirtypes';
 import { field, TARGET, trusted, type Unmapped } from './concept-apply.ts';
+import type { GaConfig } from './config.ts';
 import { mapTerm } from './concept-map-term.ts';
 import { CPT, ICD10CM } from './concepts.ts';
 import { loadMaps, lookup, termKey } from './conceptmap.ts';
@@ -48,7 +49,7 @@ async function linked(client: MedplumClient, dups: Resource[], t: Unmapped): Pro
 }
 
 export async function autoMap(
-  client: MedplumClient, patientId: string, terms: Unmapped[], deps: { fetch?: typeof fetch; lookup?: boolean } = {},
+  client: MedplumClient, patientId: string, terms: Unmapped[], deps: { fetch?: typeof fetch; lookup?: boolean; map?: boolean } = {},
 ): Promise<{ autoMapped: number; terms: Reviewed[] }> {
   const out: Reviewed[] = terms.map((t) => ({ ...t, candidates: [] }));
   if (deps.lookup === false) return { autoMapped: 0, terms: out };
@@ -56,7 +57,8 @@ export async function autoMap(
   const left = () => ({ autoMapped: mapped.size, terms: out.filter((t) => !mapped.has(t)) });
   const maps = await loadMaps(client, true).catch(() => undefined);
   if (!maps) return left(); // a failure never fails the import, sync or tool call that ran this
-  const todo = out.filter((t) => TARGET[t.type] && !lookup(maps, t.source, t.key)).sort((a, b) => b.count - a.count).slice(0, MAX_TERMS);
+  // map false (the review list): candidates for every term, mapped or not, and nothing written.
+  const todo = out.filter((t) => TARGET[t.type] && (deps.map === false || !lookup(maps, t.source, t.key))).sort((a, b) => b.count - a.count).slice(0, MAX_TERMS);
   // Possible duplicates of each type, read once: their DUP_OF record may already carry the term's code.
   const dups = new Map<string, Promise<Resource[]>>();
   const dupsOf = (type: string) => {
@@ -69,7 +71,7 @@ export async function autoMap(
     const more = t.type === 'Condition' ? await searchCodes(ICD10CM, t.name, { fetch: deps.fetch }) : [];
     const link = await linked(client, await dupsOf(t.type), t);
     t.candidates = [...(link ? [link] : []), ...[...searched, ...more].filter((c) => !(link && c.system === link.system && c.code === link.code))];
-    if (!pick || (link && (link.system !== pick.system || link.code !== pick.code))) return; // a differing linked code: the agent judges
+    if (deps.map === false || !pick || (link && (link.system !== pick.system || link.code !== pick.code))) return; // a differing linked code: the agent judges
     try {
       const r = await mapTerm(client, patientId, { source: t.source, name: t.name, unit: t.unit, key: t.key, type: t.type, system: pick.system, code: pick.code, display: pick.display, equivalence: 'equivalent', confident: true }, 'GA (automatic)', { fetch: deps.fetch });
       if (r.status === 'mapped' || r.status === 'no records') mapped.add(t);
@@ -82,4 +84,12 @@ export async function autoMap(
     for (let t = queue.shift(); t; t = queue.shift()) await one(t).catch(() => undefined); // that term stays for the agent
   }));
   return left();
+}
+
+// After an import: GA maps what it can of the report's unmapped terms and returns the rest with candidates (and autoMapped).
+export async function afterImport<T>(client: MedplumClient, cfg: GaConfig, report: T, deps: { fetch?: typeof fetch } = {}): Promise<T> {
+  const unmapped = (report as { unmapped?: unknown } | undefined)?.unmapped;
+  if (!Array.isArray(unmapped) || !unmapped.length) return report;
+  const r = await autoMap(client, cfg.patientId, unmapped as Unmapped[], { fetch: deps.fetch, lookup: cfg.terminologyLookup !== false });
+  return { ...report, unmapped: r.terms, autoMapped: r.autoMapped };
 }

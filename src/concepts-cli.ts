@@ -4,6 +4,8 @@ import type { DocumentReference, Observation, Provenance, Resource } from '@medp
 import { isDeepStrictEqual } from 'node:util';
 import { basename } from 'node:path';
 import { codeRecord, countUnmapped, learner, TARGET, type Unmapped } from './concept-apply.ts';
+import { autoMap } from './concept-auto.ts';
+import type { Candidate } from './terminology.ts';
 import { custodian } from './ccda.ts';
 import { GaError } from './config.ts';
 import { loadMaps, lookup, type Maps, sourceKey, termKey, upsertEntries } from './conceptmap.ts';
@@ -84,7 +86,8 @@ export async function* scan(client: MedplumClient, patientId: string, types: str
 }
 
 // review: only records up for review (unmapped or suggested), for a term first mapped now; a correction re-reads every record of the source.
-export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string; review?: boolean } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number }> {
+// Without source (ga concepts apply) it ends by auto-mapping the review list (fetch, lookup: as autoMap); map_concept passes a source.
+export async function applyAll(client: MedplumClient, patientId: string, opts: { source?: string; key?: string; type?: string; review?: boolean; fetch?: typeof fetch; lookup?: boolean } = {}): Promise<{ scanned: number; matched: number; coded: number; suggested: number; unmapped: number; changed: number; autoMapped?: number }> {
   let maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
   if (!opts.source) {
@@ -131,7 +134,9 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
       if (await recode(r, info)) n.changed++;
     }
   }
-  return n;
+  if (opts.source) return n;
+  const terms = await reviewList(client, patientId, 'unmapped', opts.type, { lookup: false });
+  return { ...n, autoMapped: (await autoMap(client, patientId, terms, opts)).autoMapped };
 }
 
 const dateOf = (r: Resource): string | undefined => {
@@ -140,7 +145,8 @@ const dateOf = (r: Resource): string | undefined => {
   return typeof d === 'string' ? d.slice(0, 10) : undefined;
 };
 
-export async function reviewList(client: MedplumClient, patientId: string, status: 'unmapped' | 'suggested', type?: string): Promise<(Unmapped & { examples: string[] })[]> {
+// Candidates (autoMap's search, nothing written) for the 25 most frequent rows; the rest get [].
+export async function reviewList(client: MedplumClient, patientId: string, status: 'unmapped' | 'suggested', type?: string, deps: { fetch?: typeof fetch; lookup?: boolean } = {}): Promise<(Unmapped & { examples: string[]; candidates: Candidate[] })[]> {
   if (type && !TYPES.includes(type)) throw new GaError(`type must be one of ${TYPES.join(', ')}`);
   const maps = await loadMaps(client, true);
   const infoOf = sourceResolver(client, patientId, () => maps);
@@ -164,10 +170,12 @@ export async function reviewList(client: MedplumClient, patientId: string, statu
   // scan come back in storage order, so nothing may depend on which record came first.
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   const by = (r: Unmapped) => `${r.source}\u0000${r.type}\u0000${r.key}`;
-  return rows.sort((a, b) => b.count - a.count || cmp(by(a), by(b))).map(({ dates, spellings, name: _n, unit: _u, ...u }) => {
+  const list = rows.sort((a, b) => b.count - a.count || cmp(by(a), by(b))).map(({ dates, spellings, name: _n, unit: _u, ...u }) => {
     const [name, unit] = JSON.parse([...spellings].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]))[0][0]) as [string, string | null];
     return { ...u, name, ...(unit !== null && { unit }), examples: [...dates].sort().reverse().slice(0, 3) };
   });
+  const top = (await autoMap(client, patientId, list.slice(0, 25), { ...deps, map: false })).terms;
+  return list.map((r, i) => ({ ...r, candidates: top[i]?.candidates ?? [] }));
 }
 
 export type AgentMapping = { source: string; type: string; term: string; system?: string; code?: string; display?: string; equivalence: string; confident: boolean; when?: string };

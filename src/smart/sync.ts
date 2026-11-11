@@ -4,7 +4,8 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
-import { GaError } from '../config.ts';
+import { afterImport } from '../concept-auto.ts';
+import { type GaConfig, GaError, loadConfig } from '../config.ts';
 import { binaryId, importResources, type ImportReport } from '../engine.ts';
 import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
@@ -146,6 +147,14 @@ export async function writeEndpoint(
 }
 
 const lastUpdated = (r: Resource): string | undefined => r.meta?.lastUpdated;
+// The off switch for automatic mapping; an unreadable config keeps term names on the machine.
+const lookupConfig = (): GaConfig => {
+  try {
+    return loadConfig();
+  } catch {
+    return { patientId: '', terminologyLookup: false };
+  }
+};
 
 export async function syncSource(
   client: MedplumClient,
@@ -214,7 +223,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
         '',
       );
     };
-    const report = dryRun ? await write() : await withImportLock(write);
+    const report = dryRun ? await write() : await afterImport(client, { ...lookupConfig(), patientId }, await withImportLock(write));
     if (!dryRun) {
       try {
         writeAtomic(join(dir, deferralsFile), JSON.stringify(fetched.deferrals));

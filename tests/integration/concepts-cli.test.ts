@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { MedplumClient } from '@medplum/core';
-import type { Observation } from '@medplum/fhirtypes';
+import type { Observation, Procedure } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { CONCEPT_SRC } from '../../src/concept-apply.ts';
 import { applyAll, reviewList, scan } from '../../src/concepts-cli.ts';
-import { LOINC } from '../../src/concepts.ts';
+import { LOINC, SNOMED } from '../../src/concepts.ts';
 import { upsertEntries } from '../../src/conceptmap.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
@@ -42,15 +42,15 @@ test('applyAll codes the uncoded same-source term, is idempotent, leaves exclude
   await client.createResource(lab('Odd analyte', '2024-03-05'));
   const apple = await client.createResource<Observation>({ ...lab('Heart rate, daily mean', '2024-01-01'), identifier: [], meta: TAGS('apple-health') });
 
-  const first = await applyAll(client, pid);
+  const first = await applyAll(client, pid, { lookup: false });
   expect(first).toMatchObject({ coded: 1, unmapped: 2, changed: 3 });
   expect(gaCode(await client.readResource('Observation', same.id as string))?.code).toBe('2345-7');
   expect(gaCode(await client.readResource('Observation', apple.id as string))).toBeUndefined();
-  expect((await applyAll(client, pid)).changed).toBe(0);
+  expect((await applyAll(client, pid, { lookup: false })).changed).toBe(0);
 
-  const list = await reviewList(client, pid, 'unmapped');
-  expect(list).toEqual([{ source: `smart:${key}`, type: 'Observation', key: 'odd analyte|mg/dl', name: 'Odd analyte', unit: 'mg/dL', count: 2, examples: ['2024-03-05', '2024-03-01'] }]);
-  expect(await reviewList(client, pid, 'suggested')).toEqual([]);
+  const list = await reviewList(client, pid, 'unmapped', undefined, { lookup: false });
+  expect(list).toEqual([{ source: `smart:${key}`, type: 'Observation', key: 'odd analyte|mg/dl', name: 'Odd analyte', unit: 'mg/dL', count: 2, examples: ['2024-03-05', '2024-03-01'], candidates: [] }]);
+  expect(await reviewList(client, pid, 'suggested', undefined, { lookup: false })).toEqual([]);
 
   await upsertEntries(client, `smart:${key}`, [{ key: 'glucose|mg/dl', target: { system: LOINC, code: '2339-0' }, equivalence: 'equivalent', confident: true, by: 'agent' }]);
   const r = await applyAll(client, pid, { source: `smart:${key}`, key: 'glucose|mg/dl' });
@@ -88,7 +88,7 @@ test('C-CDA records are keyed by the custodian read from the stored source file;
       ? (type: string, q: Record<string, string>, o: object) => { if (type === 'DocumentReference') docQueries.push(JSON.stringify(q)); return t.searchResourcePages(type as 'DocumentReference', q, o); }
       : Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p)),
   });
-  await applyAll(spy, pid);
+  await applyAll(spy, pid, { lookup: false });
   expect(docQueries).toHaveLength(1);
   expect(JSON.parse(docQueries[0])).toMatchObject({ contenttype: 'application/xml', _sort: '_lastUpdated' });
   expect(gaCode(await client.readResource('Observation', a.id as string))?.code).toBe('2345-7');
@@ -104,7 +104,7 @@ test('a record with several source tags takes the one whose key has a map, else 
   const ids = (s: string, h: string) => [`urn:ga-server:id:smart:${s}`, `urn:ga-server:id:ehi:${h}`];
   const hit = await client.createResource(withSrc(lab('Glucose', '2024-06-01'), ['smart', 'ehi'], 'x', ids(k, ehiKey())));
   const none = await client.createResource(withSrc(lab('Glucose', '2024-06-02'), ['smart', 'ehi'], 'x', ids(`good-${randomUUID()}`, ehiKey())));
-  await applyAll(client, pid);
+  await applyAll(client, pid, { lookup: false });
   expect(gaCode(await client.readResource('Observation', hit.id as string))?.code).toBe('2345-7');
   expect((await client.readResource('Observation', none.id as string)).meta?.tag?.some((t) => t.code?.startsWith('concept-'))).toBe(false);
 });
@@ -190,4 +190,41 @@ test('review: a first mapping reads only records up for review; a correction rea
   expect(gaCode(await client.readResource('Observation', quiet.id as string))).toBeUndefined();
   expect((await applyAll(client, pid, { source: `smart:${k}`, key: 'glucose|mg/dl', type: 'Observation' })).changed).toBe(1);
   expect(gaCode(await client.readResource('Observation', quiet.id as string))?.code).toBe('2345-7');
+});
+
+// Synthetic SNOMED answers: search by filter word, $lookup by code. Anything else (a LOINC search) gets an unreadable answer.
+const NAMES: Record<string, string> = { '73761001': 'Colonoscopy', '263135001': 'Pinning of fracture' };
+const fakeFetch = (async (input: string | URL) => {
+  const u = new URL(String(input));
+  if (u.pathname.endsWith('/ValueSet/$expand')) {
+    const term = (u.searchParams.get('filter') ?? '').toLowerCase();
+    const hits = Object.entries(NAMES).filter(([, d]) => d.toLowerCase().split(' ').some((w) => term.includes(w)));
+    return new Response(JSON.stringify({ expansion: { contains: hits.map(([code, display]) => ({ code, display })) } }));
+  }
+  return new Response(JSON.stringify({ parameter: [{ name: 'display', valueString: NAMES[u.searchParams.get('code') ?? ''] ?? 'Synthetic' }] }));
+}) as typeof fetch;
+const proc = (text: string, k: string, tags: string[] = []): Procedure => ({
+  resourceType: 'Procedure', status: 'completed', subject: { reference: `Patient/${pid}` }, code: { text }, performedDateTime: '2024-09-01',
+  identifier: [{ system: `urn:ga-server:id:smart:${k}`, value: `Procedure/${randomUUID()}` }],
+  meta: { source: 'https://example.org/fhir', tag: ['src-smart', ...tags].map((code) => ({ system: 'urn:ga-server:tag', code })) },
+});
+
+test('concepts_to_review lists candidates', async () => {
+  const k = `good-${randomUUID()}`;
+  await client.createResource(proc('Pinning of finger fracture', k, ['concept-unmapped']));
+  const row = (await reviewList(client, pid, 'unmapped', 'Procedure', { fetch: fakeFetch })).find((r) => r.source === `smart:${k}`);
+  expect(row?.candidates).toEqual([{ system: SNOMED, code: '263135001', display: 'Pinning of fracture' }]);
+  // The terminology services down: the rows still come back, without candidates.
+  const offline = (async () => { throw new Error('offline'); }) as typeof fetch;
+  const down = (await reviewList(client, pid, 'unmapped', 'Procedure', { fetch: offline })).find((r) => r.source === `smart:${k}`);
+  expect(down?.candidates).toEqual([]);
+});
+
+test('concepts apply auto-maps stored terms', async () => {
+  const k = `good-${randomUUID()}`;
+  const colo = await client.createResource(proc('Colonoscopy', k));
+  const r = await applyAll(client, pid, { fetch: fakeFetch });
+  expect(r.autoMapped).toBeGreaterThanOrEqual(1);
+  const got = await client.readResource('Procedure', colo.id as string);
+  expect(got.code?.coding?.find((c) => c.extension?.some((e) => e.url === CONCEPT_SRC))).toMatchObject({ system: SNOMED, code: '73761001' });
 });

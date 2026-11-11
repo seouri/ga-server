@@ -14,6 +14,7 @@ import type { MapEntry } from './conceptmap.ts';
 import { GaError, type GaConfig, getClient, loadConfig } from './config.ts';
 import { addReport, type ImportReport } from './engine.ts';
 import { detectKind, importAny, type ImportKind } from './import.ts';
+import { afterImport } from './concept-auto.ts';
 import { IMPORT_WORKER_HEAP_MB, IMPORT_WORKER_YOUNG_MB } from './limits.ts';
 import { freeThreadLock, IMPORT_BUSY, takeLock } from './lock.ts';
 import { unzipSafe } from './gateway/uploads.ts';
@@ -211,7 +212,8 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     }
     const cfg = deps.cfg ?? loadConfig();
     const client = deps.client ?? (await getClient(cfg));
-    const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {
+    const mine = { ...cfg, patientId: j.patientId ?? cfg.patientId };
+    const result = await (deps.importAny ?? importAny)(client, mine, j.root!, {
       tz: j.tz, timeZone: j.timeZone, batchSize: j.batchSize, skipThrough: j.lastBatch, redo: j.pending,
       beforeWrite: (pending) => { j = save(dir, { ...j!, pending }); },
       // An earlier attempt's outcome wins. shortcut: a crash between the archive upload and this save reads 'already-present' on
@@ -224,7 +226,8 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     // The counts are the checkpoint's (every batch once), and so are the skips counted per batch (EHI's linking passes); the rest
     // (other skips, seconds) is this attempt's.
     const r = result as { skips?: object }, c = j.report as Report | undefined;
-    const report = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
+    const whole = c ? { ...r, ...c, ...((r.skips || c.skips) && { skips: { ...r.skips, ...c.skips } }), ...(j.archived && { archived: j.archived }) } : result;
+    const report = await afterImport(client, mine, whole); // on the whole job's terms, not only this attempt's
     save(dir, { ...j, status: 'done', report, pending: undefined, message: undefined, note: undefined });
     for (const p of [into, j.upload]) rmSync(p, { recursive: true, force: true });
   } finally {

@@ -24,7 +24,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
     async ({ status, type, since }) => {
       try {
         if (status === 'agent') return text({ mappings: (await agentMappings(client, since)).filter((m) => !type || m.type === type) });
-        return text({ terms: await reviewList(client, patientId, status, type) });
+        return text({ terms: await reviewList(client, patientId, status, type, { fetch: deps.fetch, lookup: deps.cfg.terminologyLookup !== false }) });
       } catch (e) {
         return fail(e);
       }

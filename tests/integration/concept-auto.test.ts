@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Procedure } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import type { Procedure, Resource } from '@medplum/fhirtypes';
+import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { CONCEPT_SRC, type Unmapped } from '../../src/concept-apply.ts';
-import { autoMap } from '../../src/concept-auto.ts';
+import { autoMap, type Reviewed } from '../../src/concept-auto.ts';
 import { mapTerm } from '../../src/concept-map-term.ts';
 import { CPT, SNOMED } from '../../src/concepts.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { DUP_OF } from '../../src/engine.ts';
+import { importExtracted } from '../../src/mcp.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 let client: MedplumClient;
@@ -153,4 +157,29 @@ test('a linked code equal to the exact match is auto-mapped', async () => {
   const res = await autoMap(client, pid, [r], { fetch: f });
   expect(res.autoMapped).toBe(1);
   expect(gaCode(await client.readResource('Procedure', dup.id as string))?.code).toBe('73761001');
+});
+
+// A throwaway PDF (unique bytes: a file is imported once) and a Procedure whose name never equals a candidate, so the
+// install-wide pdf map gets no entry.
+const pdf = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-auto-'));
+  const file = join(dir, 'report.pdf');
+  writeFileSync(file, `%PDF-1.4 synthetic ${randomUUID()}`);
+  return file;
+};
+const extracted = () => [{ resourceType: 'Procedure', status: 'completed', code: { text: `Colonoscopy ${randomUUID().slice(0, 8)}` }, performedDateTime: '2024-01-01' }] as Resource[];
+
+test('ga_import returns candidates and autoMapped', async () => {
+  const { f } = fake();
+  const r = await importExtracted(client, loadConfig(), extracted(), pdf(), undefined, pid, { fetch: f }) as unknown as { autoMapped: number; unmapped: Reviewed[] };
+  expect(r.autoMapped).toBe(0);
+  expect(r.unmapped).toHaveLength(1);
+  expect(r.unmapped[0].candidates[0]).toEqual({ system: SNOMED, code: '73761001', display: 'Colonoscopy' });
+});
+
+test('terminologyLookup false makes no request', async () => {
+  const spy = vi.fn(fake().f);
+  const r = await importExtracted(client, { ...loadConfig(), terminologyLookup: false }, extracted(), pdf(), undefined, pid, { fetch: spy }) as unknown as { unmapped: Reviewed[] };
+  expect(spy).not.toHaveBeenCalled();
+  expect(r.unmapped.map((t) => t.candidates)).toEqual([[]]);
 });

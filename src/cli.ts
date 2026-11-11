@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { afterImport } from './concept-auto.ts';
 import { GaError, getClient, loadConfig } from './config.ts';
 import { detectKind, DOCUMENT_EXT, importAny } from './import.ts';
 import { enrollLink } from './gateway/passkey.ts';
@@ -53,7 +54,8 @@ try {
       } else if (kind === 'dicom' && process.argv.length > 4) throw new GaError('usage: ga import <dicom-folder>');
       else if (kind === 'apple' && process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
       const cfg = loadConfig();
-      console.log(JSON.stringify(await importAny(await getClient(cfg), cfg, file, { tz, fhirBase })));
+      const client = await getClient(cfg);
+      console.log(JSON.stringify(await afterImport(client, cfg, await importAny(client, cfg, file, { tz, fhirBase }))));
     }
   } else if (process.argv[2] === 'import-job' && process.argv[3] && process.argv.length === 4) {
     await (await import('./import-jobs.ts')).runJob(gatewayDir(), process.argv[3]); // internal: one attempt of an import_file job, in this process
@@ -125,7 +127,8 @@ try {
     const client = await getClient(cfg);
     const pid = cfg.patientId as string;
     const [arg, , since] = process.argv.slice(3);
-    console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped')));
+    const lookup = cfg.terminologyLookup !== false;
+    console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid, { lookup }) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped', undefined, { lookup })));
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
     throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }

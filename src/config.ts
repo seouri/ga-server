@@ -19,6 +19,7 @@ export type GaConfig = {
   store?: 'medplum' | 'sqlite'; // which store GA uses (default medplum); the GA_STORE environment variable overrides it
   storeUrl?: string; // GA's SQLite store; default http://127.0.0.1:8120/
   adminPassword?: string; // rotated by ga setup; also the Medplum app (http://localhost:3000) login for admin@example.com
+  terminologyLookup?: boolean; // false keeps term names on the machine: no code search, no automatic mapping
 };
 
 // Resolved from this module, not cwd: agents spawn `ga` from arbitrary directories.

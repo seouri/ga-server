@@ -81,7 +81,7 @@ export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partia
     },
     async ({ resources, fileId, file, documentDate }) => {
       try {
-        return text(await extract(client, cfg, resources as unknown as Resource[], await stored(fileId, file), documentDate, patientId));
+        return text(await extract(client, cfg, resources as unknown as Resource[], await stored(fileId, file), documentDate, patientId, { fetch: deps.fetch }));
       } catch (e) {
         return fail(e);
       }
