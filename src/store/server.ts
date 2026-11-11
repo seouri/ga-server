@@ -512,8 +512,8 @@ function capability(): string {
           ...(type === 'Patient' && { operation: [{ name: 'everything', definition: 'http://hl7.org/fhir/OperationDefinition/Patient-everything' }] }),
           ...(type === 'CodeSystem' && { operation: [
             ...['lookup', 'validate-code', 'subsumes'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/CodeSystem-${name}` })),
-            // Medplum's own operation; it publishes no OperationDefinition url, so this one follows its pattern.
-            { name: 'import', definition: 'https://medplum.com/fhir/OperationDefinition/codesystem-import' },
+            // Medplum's own operation, which has no published OperationDefinition url: an identifier of this store's.
+            { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/CodeSystem-import' },
           ] }),
         }),
     }],
