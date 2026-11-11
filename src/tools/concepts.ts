@@ -1,25 +1,13 @@
 // Concept-layer agent tools, both transports (spec "Agent tools"): the review list, and map_concept, which validates a code,
 // writes the source map entry (by agent: it replaces any earlier one, which is how corrections work), re-applies it and records Provenance.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { Provenance, Resource } from '@medplum/fhirtypes';
 import { z } from 'zod';
-import { CPT } from '../concepts.ts';
-import { field, TARGET } from '../concept-apply.ts';
-import { validate, wellFormed } from '../concept-validate.ts';
-import { agentMappings, applyAll, reviewList } from '../concepts-cli.ts';
-import { inScope, loadMaps, lookup, termKey, upsertEntry } from '../conceptmap.ts';
-import { GaError } from '../config.ts';
+import { TARGET } from '../concept-apply.ts';
+import { mapTerm } from '../concept-map-term.ts';
+import { agentMappings, reviewList } from '../concepts-cli.ts';
 import { fail, text, type ToolDeps } from '../mcp.ts';
 
 const TYPES = Object.keys(TARGET) as [string, ...string[]];
-
-// A stand-in record carrying only what the term key and scope read; category laboratory so that, for Observations,
-// only the name rules (Apple summaries, health maintenance, ECG) decide scope.
-const termOf = (type: string, name: string, unit?: string): Resource => {
-  const cc = { text: name };
-  if (type === 'Observation') return { resourceType: 'Observation', status: 'final', code: cc, category: [{ coding: [{ code: 'laboratory' }] }], ...(unit && { valueQuantity: { unit } }) };
-  return { resourceType: type, [field(type)]: cc } as unknown as Resource;
-};
 
 export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
   const { client, patientId, remote } = deps;
@@ -68,40 +56,10 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
       },
       annotations: { destructiveHint: true },
     },
-    async ({ source, name, unit, key: given, type, system, code, display, equivalence, confident }) => {
+    async (args) => {
       const who = remote?.clientName ?? server.server.getClientVersion()?.name ?? 'Claude Code'; // the client is known only after initialize
       try {
-        // Refusals first: nothing is sent or written for them.
-        if (system === CPT) throw new GaError('CPT is licensed and cannot be checked: map procedures to SNOMED CT');
-        const term = termOf(type, name, unit);
-        const derived = termKey(term);
-        if (!derived || !inScope(term)) throw new GaError(`${type} "${name}" is not in the concept layer's scope (GA's own Apple Health summaries, health maintenance and the ECG are never mapped)`);
-        // A given key may only add the specimen to the key derived from name and unit.
-        if (given !== undefined && given !== derived && !given.startsWith(`${derived}|`)) throw new GaError(`key "${given}" is not a key of ${type} "${name}"${unit ? ` (${unit})` : ''}`);
-        const key = given ?? derived;
-        const unmatched = equivalence === 'unmatched';
-        if (!unmatched && !TARGET[type].includes(system)) throw new GaError(`${type} takes ${TARGET[type].join(', ')}, not ${system}`);
-        if (!unmatched && !wellFormed(system, code)) throw new GaError(`"${code}" is not a ${system} code`);
-        const v = unmatched ? { ok: true } : await validate(system, code, { fetch: deps.fetch });
-        if (!v.ok && v.reason !== 'validation unavailable') throw new GaError(`${v.reason}: not mapped`); // the code does not exist
-        const sure = confident && v.ok && !v.reason; // an unavailable or skipped validation is applied as suggested
-        const correction = !!lookup(await loadMaps(client, true), source, key); // a term mapped before may be coded on any record
-        const map = await upsertEntry(client, source, {
-          key, equivalence, confident: sure, by: 'agent',
-          ...(!unmatched && { target: { system, code, display: v.display ?? display } }),
-        });
-        // Provenance right after the map write: every mapping has one, even if re-applying fails.
-        await client.createResource<Provenance>({
-          resourceType: 'Provenance',
-          target: [{ reference: `ConceptMap/${map?.id}` }],
-          recorded: new Date().toISOString(),
-          activity: { coding: [{ system: 'urn:ga-server:activity', code: 'map_concept' }] },
-          agent: [{ who: { display: who } }],
-          reason: [{ text: `${source} "${key}" (${type}): ${unmatched ? 'unmatched' : `${system}|${code} ${equivalence}${sure ? '' : ', suggested'}`}` }],
-        });
-        const { changed, matched } = await applyAll(client, patientId, { source, key, type, review: !correction });
-        if (!matched) return text({ changed, status: 'no records', reason: `no ${type} records of "${key}" from ${source}; the mapping is kept for later imports` });
-        return text({ changed, status: unmatched ? 'unmatched' : sure && equivalence === 'equivalent' ? 'mapped' : 'suggested', ...(v.reason && { reason: v.reason }) });
+        return text(await mapTerm(client, patientId, args, who, { fetch: deps.fetch }));
       } catch (e) {
         return fail(e);
       }
