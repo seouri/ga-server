@@ -664,6 +664,13 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
     });
   });
 
+  // Review Focus 2: a large built-in ValueSet (a whole v3 CodeSystem) pages as Medplum does.
+  test('a large built-in ValueSet pages by count and offset [store-plan-2]', () => same(sides, async (s) => {
+    const r = await exp(s, 'url=http://terminology.hl7.org/ValueSet/v3-RoleCode&count=10&offset=10');
+    expect([r.status, r.body.expansion.total, contains(r)?.length]).toEqual([200, 11, 10]);
+    return r;
+  }));
+
   // Where the store follows R4 and Medplum does not (README "Deliberate differences from Medplum").
   describe('differs on purpose', () => {
     test('differs on purpose: compose.exclude removes codes from $expand and $validate-code [store-plan-2]', async () => {

@@ -137,6 +137,7 @@ describe('$expand of the built-ins', () => {
     expect([first.expansion?.contains?.length, next.expansion?.contains?.length]).toEqual([10, 10]);
     expect(first.expansion?.total).toBe(11); // Medplum's total: the rows fetched (count + 1)
     expect(codes(first)?.filter((c) => codes(next)?.includes(c))).toEqual([]);
+    expect(codes(next)).toEqual(codes(expandValueSet(store, structuredClone(v), { count: 20 }))?.slice(10)); // the next 10
   });
 
   it('Marital status: two CodeSystems, one whole and one enumerated', () => {
