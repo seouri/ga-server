@@ -807,7 +807,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem by URL | skipped | terminology | access policy |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and synonym designations | ported | terminology |  |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | skipped | terminology | not yet ported (Task 4): its last step is ValueSet $expand |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Rejects excessively large batches | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | ported | terminology |  |
 | server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports basic mappings from resource | skipped | terminology | in-process function, no HTTP request (importConceptMap) |

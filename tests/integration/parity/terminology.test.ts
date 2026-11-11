@@ -3,7 +3,7 @@
 // servers, so records are found by url). Then the ported Medplum operation tests, one describe per file, sharing one login.
 // Medplum's database assertions (assertCodeExists, assertPropertyExists, assertCodeMissing) become $lookup calls.
 import { randomUUID } from 'node:crypto';
-import type { CodeSystem, Parameters, ParametersParameter } from '@medplum/fhirtypes';
+import type { CodeSystem, Parameters, ParametersParameter, ValueSet } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { SQLITE } from '../helpers.ts';
 import { both, paritySides, q, same, search, type Side } from './harness.ts';
@@ -522,6 +522,23 @@ describe.skipIf(SQLITE)('built-in terminology (parity)', () => {
         { name: 'designation', part: [{ name: 'value', valueString: 'Listening' }] },
         { name: 'designation', part: [{ name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'auscultation (intervention)' }] }]));
       return [res, found];
+    }));
+
+    test('CodeSystem $import › Attaches imported properties to primary coding instead of synonym [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = [await imports(s, cs, concept('12345', 'Test code'), { name: 'designation', part: [{ name: 'code', valueCode: '12345' }, { name: 'value', valueString: 'Test designation' }] }),
+        await imports(s, cs, concept('12345', 'Test code')), await imports(s, cs, prop('12345', 'parent', '98765'))];
+      expect(res.map((r) => r.status)).toEqual([200, 200, 200]);
+      // assertPropertyExists on the primary coding: $lookup lists the property (a synonym's would not show)
+      const found = await look(s, cs, '12345');
+      expect(found.body.parameter).toContainEqual({ name: 'property', part: [{ name: 'code', valueCode: 'parent' }, { name: 'value', valueCode: '98765' },
+        { name: 'description', valueString: 'A SNOMED CT concept id that has the target of a direct is-a relationship from the concept' }] });
+      const vs = await s.create<ValueSet>({ resourceType: 'ValueSet', url: `http://example.com/ValueSet/${suffix}`, status: 'active',
+        compose: { include: [{ system: cs.url, filter: [{ property: 'parent', op: '=', value: '98765' }] }] } });
+      const expanded = await call(s, 'GET', `ValueSet/$expand?url=${vs.url}`);
+      expect([expanded.status, expanded.body.expansion?.contains?.length]).toEqual([200, 1]);
+      delete expanded.body.expansion.timestamp;
+      return [res, found, expanded];
     }));
 
     test('CodeSystem $import › Rejects excessively large batches [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
