@@ -20,7 +20,7 @@ const SETUP = `const { getClient, loadConfig } = await import(${url('../../src/c
   const { setup } = await import(${url('../../src/setup.ts')});
   const { assertTestProject, emptyTestProject, retryLimited } = await import(${url('./helpers.ts')});
   const { baseUrl } = loadConfig();
-  const cfg = await retryLimited(() => setup(baseUrl, { projectName: 'ga-test', out: process.env.GA_CONFIG }));
+  const cfg = await retryLimited(() => setup(baseUrl, { projectName: 'ga-test', noRotate: true, out: process.env.GA_CONFIG }));
   const client = await getClient(cfg);
   await assertTestProject(client);
   await emptyTestProject(client); // what a run that stopped half-way left`;
@@ -31,8 +31,13 @@ const EMPTY = `const { getClient, loadConfig } = await import(${url('../../src/c
 export default function globalSetup(): (() => void) | undefined {
   if (storeKind() === 'sqlite') return undefined;
   const livePath = defaultConfigPath();
-  const live = JSON.parse(readFileSync(livePath, 'utf8')) as GaConfig;
-  if (storeKind(live) === 'sqlite') return undefined; // GA_STORE=medplum overrides a config's "store": "sqlite"
+  const need = `integration tests need baseUrl and adminPassword in ${livePath} to make the ga-test project`;
+  let live: GaConfig;
+  try {
+    live = JSON.parse(readFileSync(livePath, 'utf8')) as GaConfig;
+  } catch {
+    throw new Error(need);
+  }
   // A killed run leaves its temp config (it holds the admin password): remove this user's leftovers. Runs are one at a time.
   for (const d of readdirSync(tmpdir())) {
     if (!d.startsWith('ga-int-run-')) continue;
@@ -40,7 +45,7 @@ export default function globalSetup(): (() => void) | undefined {
     try { if (lstatSync(p).isDirectory() && lstatSync(p).uid === process.getuid?.()) rmSync(p, { recursive: true, force: true }); } catch { /* gone or not ours */ }
   }
   // Without the stored password ga setup would try the seeded default and rotate the admin password away from the live config.
-  if (!live.baseUrl || !live.adminPassword) throw new Error(`integration tests need baseUrl and adminPassword in ${livePath} to make the ga-test project`);
+  if (!live.baseUrl || !live.adminPassword) throw new Error(need);
   const dir = mkdtempSync(join(tmpdir(), 'ga-int-run-'));
   const path = join(dir, 'config.json');
   writeFileSync(path, JSON.stringify({ baseUrl: live.baseUrl, adminPassword: live.adminPassword }), { mode: 0o600 });

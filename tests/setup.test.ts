@@ -44,3 +44,27 @@ test('setup on the store refuses to overwrite a config it cannot parse', async (
   await expect(setup('http://127.0.0.1:9/')).rejects.toThrow(/cannot read/);
   expect(readFileSync(join(dir, 'config.json'), 'utf8')).toBe('{"clientSecret": "s",');
 });
+
+test('noRotate refuses to rotate the default password', async () => {
+  const { createServer } = await import('node:http');
+  const tried: string[] = [];
+  const srv = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      tried.push((JSON.parse(body || '{}') as { password?: string }).password ?? '');
+      res.writeHead(400, { 'content-type': 'application/fhir+json' });
+      res.end(JSON.stringify({ resourceType: 'OperationOutcome', id: 'bad-request', issue: [{ severity: 'error', code: 'invalid', details: { text: 'Invalid password' } }] }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const url = `http://127.0.0.1:${(srv.address() as { port: number }).port}/`;
+    vi.stubEnv('GA_STORE', 'medplum');
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ baseUrl: url, adminPassword: 'stored-wrong' }));
+    await expect(setup(url, { projectName: 'ga-test', noRotate: true })).rejects.toThrow(/not trying the default/);
+    expect(tried).toEqual(['stored-wrong']);
+  } finally {
+    srv.close();
+  }
+});
