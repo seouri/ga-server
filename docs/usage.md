@@ -110,6 +110,8 @@ Known limit (rare, not fixed): Health Records are identified by their hospital's
 
 `--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-import/extract.md`, also `/ga-import <file>` in Claude Code, and [AGENTS.md](../AGENTS.md)).
 
+GA looks up codes for new terms by searching the standard vocabularies, which sends the term's name (not values) to the National Library of Medicine and HL7's tx.fhir.org. To stop that and the automatic mapping, set `"terminologyLookup": false` in `.ga/config.json`; `ga migrate` never maps automatically either way. See [concepts.md](concepts.md).
+
 ## Review flags and limits
 
 - `possible-duplicate`: the same test on the same day, at the same moment with a different value, at another time with the same number (two sources' times for one result), or with no time of day on one side. Both are kept and point at each other (`urn:ga-server:ext:possible-duplicate-of`). Find them with `fhir_search` `{resourceType: "Observation", params: {_tag: "urn:ga-server:tag|possible-duplicate"}}`, or search `_tag=urn:ga-server:tag|possible-duplicate` in the app.

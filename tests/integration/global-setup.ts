@@ -53,6 +53,8 @@ export default function globalSetup(): (() => void) | undefined {
   process.env.GA_CONFIG = process.env.GA_INT_RUN_CONFIG = path;
   try {
     child(SETUP, process.env);
+    // Lookup off (ga setup writes a fresh config): no fixture name reaches the terminology services; tests that want it pass a stub fetch and turn it on.
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), terminologyLookup: false }), { mode: 0o600 });
   } catch (e) {
     rmSync(dir, { recursive: true, force: true });
     throw e;

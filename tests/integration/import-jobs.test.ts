@@ -18,13 +18,16 @@ beforeAll(async () => {
   ehi = join(work, 'ehi');
   await writeEhiExport(ehi, 6, { noteKB: 3, plainKB: 2, messageKB: 2 });
 });
+// With lookup off, afterImport returns every unmapped term without candidates (with it on, the services would answer some).
+const noCandidates = (r: unknown) => ((r as { unmapped?: { candidates?: unknown[] }[] }).unmapped ?? []).every((u) => u.candidates?.length === 0);
+
 afterAll(() => {
   rmSync(work, { recursive: true, force: true });
   restoreConfig();
 });
 
 test.skipIf(SQLITE)('a job killed inside batch 3 resumes on Medplum like an uninterrupted run', { timeout: 900_000 }, async () => {
-  const { cfg, dir } = await testProject(); // GA_CONFIG now points at the ga-test project's config, which workers inherit
+  const { cfg, dir } = await testProject(); // GA_CONFIG now points at the ga-test project's config (lookup off), which workers inherit
   const client = await getClient(cfg);
   const pid = cfg.patientId as string;
   const gw = join(dir, 'gateway');
@@ -41,6 +44,7 @@ test.skipIf(SQLITE)('a job killed inside batch 3 resumes on Medplum like an unin
     const whole = await settled(gw, startJob(gw, upload(gw, zip), { patientId: pid, batchSize: 50 }).id, 600_000);
     expect(whole.status, whole.message).toBe('done');
     expect(report(done.report)).toEqual(report(whole.report));
+    expect(noCandidates(done.report) && noCandidates(whole.report)).toBe(true);
     expect(resumed).toEqual(await snapshot(client, pid));
   } finally { await emptyTestProject(client); }
 });
@@ -64,6 +68,7 @@ test.skipIf(SQLITE)('an EHI job killed in a note batch, after its Rich Text file
     const whole = await settled(gw, startJob(gw, upload(gw, ehi), opts).id, 600_000);
     expect(whole.status, whole.message).toBe('done');
     expect(report(done.report)).toEqual(report(whole.report));
+    expect(noCandidates(done.report) && noCandidates(whole.report)).toBe(true);
     expect(resumed).toEqual(await snapshot(client, pid));
   } finally { await emptyTestProject(client); }
 });

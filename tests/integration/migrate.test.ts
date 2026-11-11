@@ -6,7 +6,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, wr
 import { join } from 'node:path';
 import { MedplumClient } from '@medplum/core';
 import type { Observation, ProjectMembership, Provenance, Resource } from '@medplum/fhirtypes';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { importAppleHealth } from '../../src/apple/import.ts';
 import { importPath } from '../../src/ccda.ts';
 import { loadMaps, lookup, mapUrl, upsertEntry } from '../../src/conceptmap.ts';
@@ -51,7 +51,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     await importPath(old, legacy, join(src, 'ccda', 'summary.xml'));
     await importEhi(old, legacy, join(src, 'ehi'));
     await importAppleHealth(old, legacy, join(src, 'apple'));
-    await importExtracted(old, legacy, [
+    await importExtracted(old, { ...legacy, terminologyLookup: false }, [
       { resourceType: 'Observation', id: 'o1', status: 'final', code: { text: 'Synthetic marker' }, effectiveDateTime: '2024-01-02', valueQuantity: { value: 42, unit: 'mg/dL', system: 'http://unitsofmeasure.org', code: 'mg/dL' } },
       { resourceType: 'DiagnosticReport', status: 'final', code: { text: 'Synthetic panel' }, result: [{ reference: 'Observation/o1' }] },
       { resourceType: 'Condition', code: { text: 'Synthetic condition' } },
@@ -65,7 +65,16 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     await logRemote(old, 'fhir_search', 'test app');
     writeAtomic(join(dir, 'share', 'shares.json'), JSON.stringify([share, { ...share, id: 'share2', patientId: 'someone-else' }]), 0o600);
 
-    const { rows } = await retryLimited(() => migrate({ projectName: 'ga-test' }));
+    // Migration copies records: it never searches the terminology services (its PDF re-import runs with lookup off).
+    const realFetch = globalThis.fetch;
+    const termCalls: string[] = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (/nlm\.nih\.gov|tx\.fhir\.org/.test(url)) termCalls.push(url);
+      return realFetch(input, init);
+    });
+    const { rows } = await retryLimited(() => migrate({ projectName: 'ga-test' })).finally(() => spy.mockRestore());
+    expect(termCalls).toEqual([]);
     const now = loadConfig();
     clients.push(now);
     expect(now.projectId).not.toBe(made.projectId);

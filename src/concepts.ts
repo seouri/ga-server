@@ -50,6 +50,13 @@ export const cvxFor = (name: string): Coding | undefined => {
   const v = cvx.find((x) => x.short.toLowerCase() === name.trim().toLowerCase());
   return v && { system: CVX, code: v.code, display: v.short };
 };
+// Table entries sharing the most words with a vaccine name (review candidates; exact names the importer already codes).
+export const cvxLike = (name: string, limit = 5): Coding[] => {
+  const q = new Set(words(name).split(' ').filter((w) => w && w !== 'vaccine'));
+  return cvx.map((v) => ({ v, n: words(v.short).split(' ').filter((w) => q.has(w)).length }))
+    .filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.v.short.length - b.v.short.length).slice(0, limit)
+    .map(({ v }) => ({ system: CVX, code: v.code, display: v.short }));
+};
 export const cvxShort = (code: string): string | undefined => cvx.find((x) => x.code === code)?.short;
 
 // A code (or, uncoded, its text) of a vital concept: an uncategorised PDF result read as a vital sign, not a lab.

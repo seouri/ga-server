@@ -551,6 +551,13 @@ describe('concept tools', () => {
     expect((await records('Zeta fix')).every((o) => ga(o)[0]?.code === '2339-0')).toBe(true);
   });
 
+  test('map_concept refuses a CPT target and writes nothing', async () => {
+    const r = await inCall(inproc, 'map_concept', map('Zeta fix', { system: 'http://www.ama-assn.org/go/cpt', code: '80061' }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('map procedures to SNOMED CT');
+    expect((await records('Zeta fix')).every((o) => ga(o)[0]?.code === '2339-0')).toBe(true);
+  });
+
   test('a specimen-bearing term is mapped by its key; a key not of that name and unit is refused; no records gives status no records', async () => {
     const no = await inCall(inproc, 'map_concept', map('Zeta urine'));
     expect(JSON.parse(no.text)).toMatchObject({ changed: 0, status: 'no records' });

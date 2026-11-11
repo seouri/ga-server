@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { timed } from './perf.ts';
 import { type GaConfig, GaError, getClient } from './config.ts';
 import { storeDocument } from './document.ts';
+import { afterImport } from './concept-auto.ts';
 import { importResources, type ImportReport } from './engine.ts';
 import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
@@ -48,6 +49,7 @@ export async function importExtracted(
   sourceFile: string,
   documentDate?: string,
   patientId = cfg.patientId,
+  deps: { fetch?: typeof fetch } = {},
 ): Promise<ImportReport> {
   if (documentDate !== undefined) {
     const day = documentDate.slice(0, 10);
@@ -101,7 +103,7 @@ export async function importExtracted(
   const paired = new Set(imms.filter((_, n) => pairs[n]));
   const report = await withImportLock(() => importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash));
   report.merged += paired.size;
-  return report;
+  return afterImport(client, { ...cfg, patientId }, report, deps);
 }
 
 // Trust boundary: agent output must not pre-set GA bookkeeping (tags, source date, GA identifiers).
@@ -488,7 +490,7 @@ export function buildMcpServer(deps: ToolDeps): McpServer {
     },
     async ({ resources, sourceFile, documentDate }) => {
       try {
-        return text(await importExtracted(client, cfg, resources as unknown as Resource[], sourceFile, documentDate, patientId));
+        return text(await importExtracted(client, cfg, resources as unknown as Resource[], sourceFile, documentDate, patientId, { fetch: deps.fetch }));
       } catch (e) {
         return fail(e);
       }

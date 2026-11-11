@@ -127,7 +127,9 @@ export async function throwawayConfig(): Promise<{ dir: string; baseUrl: string;
 export async function testProject(name = 'ga-test'): Promise<{ dir: string; baseUrl: string; session: MedplumClient; cfg: GaConfig }> {
   if (SQLITE) return { dir: dirname(defaultConfigPath()), baseUrl: loadConfig().storeUrl as string, session: undefined as unknown as MedplumClient, cfg: loadConfig() };
   const t = await throwawayConfig();
-  return { ...t, cfg: await retryLimited(() => setup(t.baseUrl, { projectName: name })) };
+  const cfg = { ...(await retryLimited(() => setup(t.baseUrl, { projectName: name }))), terminologyLookup: false };
+  writeFileSync(join(t.dir, 'config.json'), JSON.stringify(cfg), { mode: 0o600 }); // lookup off, as in the run's config (ga setup wrote a fresh one)
+  return { ...t, cfg };
 }
 
 // Everything GA clients wrote into a ga-test* project (records, files, maps, Provenance, logs), read and deleted through

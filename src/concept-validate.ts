@@ -23,9 +23,25 @@ export async function validate(system: string, code: string, deps: { fetch?: typ
     const short = cvxShort(code);
     return short ? { ok: true, display: short } : unknown('CVX');
   }
-  if (system !== LOINC && system !== RXNORM) return { ok: true, reason: 'not validated' }; // SNOMED, ICD-10, CPT, HCPCS: GA ships no content
-  if (!wellFormed(system, code)) return unknown(system === LOINC ? 'LOINC' : 'RxNorm'); // the code goes into a URL
+  const NAME: Record<string, string> = { [LOINC]: 'LOINC', [RXNORM]: 'RxNorm', [SNOMED]: 'SNOMED CT', [ICD10CM]: 'ICD-10-CM' };
+  if (!NAME[system]) return { ok: true, reason: 'not validated' }; // CPT, HCPCS: licensed, GA ships no content
+  if (!wellFormed(system, code)) return unknown(NAME[system]); // the code goes into a URL
   try {
+    if (system === SNOMED) {
+      try {
+        const { parameter } = (await get(f, `https://tx.fhir.org/r4/CodeSystem/$lookup?system=http://snomed.info/sct&code=${code}`)) as { parameter?: { name: string; valueString?: string }[] };
+        return { ok: true, display: parameter?.find((p) => p.name === 'display')?.valueString };
+      } catch (e) {
+        if ((e as Error).message === 'HTTP 404') return unknown('SNOMED CT'); // the server says the code does not exist
+        throw e;
+      }
+    }
+    if (system === ICD10CM) {
+      // Prefix search again: only an exact code counts. The list holds billable codes only, so a category code (E11) is missing too.
+      const [, codes, , rows] = (await get(f, `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?terms=${code}&sf=code&df=code,name`)) as [number, string[], unknown, string[][]];
+      const i = codes?.indexOf(code) ?? -1;
+      return i < 0 ? { ok: false, reason: 'not a billable ICD-10-CM code: use a more specific code or SNOMED CT' } : { ok: true, display: rows[i].at(-1) };
+    }
     if (system === LOINC) {
       // The search matches prefixes: only an exact code counts.
       const [, codes, , names] = (await get(f, `https://clinicaltables.nlm.nih.gov/api/loinc_items/v3/search?terms=${code}&sf=LOINC_NUM&df=LONG_COMMON_NAME`)) as [number, string[], unknown, string[][]];

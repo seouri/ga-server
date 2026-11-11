@@ -53,7 +53,7 @@ async function store() {
   stores.push(s);
   const pid = (await s.client.createResource({ resourceType: 'Patient' })).id as string;
   const config = join(s.dir, 'config.json');
-  writeFileSync(config, JSON.stringify({ store: 'sqlite', storeUrl: s.base, patientId: pid }), { mode: 0o600 });
+  writeFileSync(config, JSON.stringify({ store: 'sqlite', storeUrl: s.base, patientId: pid, terminologyLookup: false }), { mode: 0o600 });
   process.env.GA_CONFIG = config;
   return { s, client: s.client, pid, config, dir: join(s.dir, 'gateway') };
 }

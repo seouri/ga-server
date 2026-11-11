@@ -14,7 +14,7 @@ GA gives every record a standard code, so a question about LDL finds every LDL r
 | Vaccines | CVX |
 | Medications | RxNorm |
 | Problems | SNOMED CT or ICD-10-CM |
-| Procedures | SNOMED CT, CPT or HCPCS |
+| Procedures | SNOMED CT (CPT only when the source sent it), HCPCS |
 
 GA never changes or removes what the source wrote. It adds the standard code beside it and marks where the code came from.
 
@@ -25,8 +25,9 @@ GA tries these in order, at every import:
 1. **The source's own code.** Most hospital results already carry one.
 2. **Fixed tables in GA:** the standard codes for vital signs (blood pressure, weight, heart rate and the rest) and the CDC's vaccine codes.
 3. **What GA learned from that source.** When a hospital codes "LOW DENSITY LIPOPROTEIN CHOL" itself, GA remembers it, so that hospital's uncoded copies of the same test get the same code. Each source has its own list (a FHIR ConceptMap): one hospital's names never decide another's.
-4. **Your agent.** Whatever is left, mostly from PDFs, your agent maps with `map_concept`, right after it imports the file. GA checks the code exists (LOINC and RxNorm with the National Library of Medicine, sending only the code) and records who mapped it and when.
-5. **Unmapped.** No code yet: the term waits in the review list.
+4. **GA's own search.** GA looks the term's name up in the standard vocabularies (the National Library of Medicine's services and HL7's terminology server) and maps it itself when exactly one code is an exact match. This sends the term's name, not your values; to turn it off set `"terminologyLookup": false` in `.ga/config.json`.
+5. **Your agent.** Whatever is left, mostly from PDFs, your agent maps with `map_concept`, choosing from the ranked candidates GA offers, right after it imports the file. GA checks the code exists (sending only the code) and records who mapped it and when. Your agent asks you only when two candidates would change an answer, in plain words.
+6. **Unmapped.** No code yet: the term waits in the review list.
 
 ## Sure or suggested
 
@@ -36,7 +37,7 @@ Some tests have more than one standard code. LDL can be calculated or measured d
 
 ## Reviewing
 
-Ask your agent ("what did you map?", "what still has no code?"), or from the repo folder:
+The list is an audit trail: it shows what GA and your agent mapped, as well as what is still open. Every open term is listed; the 25 most frequent come with ranked candidates (one marked "linked record" is the code of a record GA already linked as a possible duplicate). Ask your agent ("what did you map?", "what still has no code?"), or from the repo folder:
 
 ```sh
 node src/cli.ts concepts                     # terms with no standard code

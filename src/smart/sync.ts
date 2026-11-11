@@ -4,7 +4,8 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Endpoint, Extension, Resource } from '@medplum/fhirtypes';
-import { GaError } from '../config.ts';
+import { afterImport } from '../concept-auto.ts';
+import { type GaConfig, GaError, loadConfig } from '../config.ts';
 import { binaryId, importResources, type ImportReport } from '../engine.ts';
 import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
@@ -146,6 +147,14 @@ export async function writeEndpoint(
 }
 
 const lastUpdated = (r: Resource): string | undefined => r.meta?.lastUpdated;
+// The off switch for automatic mapping; an unreadable config keeps term names on the machine.
+const lookupConfig = (): GaConfig => {
+  try {
+    return loadConfig();
+  } catch {
+    return { patientId: '', terminologyLookup: false };
+  }
+};
 
 export async function syncSource(
   client: MedplumClient,
@@ -232,14 +241,17 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       ...(dryRun && { dryRun: true }),
     };
     if (opts.dryRun) return ok; // an explicit --dry-run writes nothing at all
+    let error: string | undefined;
     try {
       // Never enabled: a status-only Endpoint, so agents see the source (off, not_enabled: stale) without any patient data.
       await writeEndpoint(client, dir, src, patientId, pending ? 'off' : 'active', at, pending ? 'not_enabled' : undefined);
     } catch {
       console.error(`smart sync ${src.key}: status_write_error`);
-      return { ...ok, error: 'status_write_error' }; // the import itself succeeded
+      error = 'status_write_error'; // the import itself succeeded
     }
-    return ok;
+    // Automatic mapping only after the Endpoint: until it has this sync's last success, every record's new last-seen reads as unconfirmed.
+    const mapped = dryRun ? ok : { ...ok, report: await afterImport(client, { ...lookupConfig(), patientId }, report).catch(() => report) };
+    return error ? { ...mapped, error } : mapped;
   } catch (e) {
     if (e instanceof GaError && e.message === IMPORT_BUSY) return busy(client, src, patientId);
     // Error codes only: messages from servers or the engine may carry content.
