@@ -37,7 +37,7 @@ afterAll(async () => {
 it('imports study, overview PDF and archive', async () => {
   const r = await importDicom(client, cfg, dir, patientId);
   expect(r).toMatchObject({ studies: 1, documents: 1, unsupported: 1, archive: 'stored' });
-  expect(r.skipped).toBeGreaterThanOrEqual(2); // DICOMDIR, Preview.jpg
+  expect(r.notDicom).toBeGreaterThanOrEqual(2); // DICOMDIR, Preview.jpg
   const doc = await client.searchOne('DocumentReference', { identifier: 'urn:ga-server:id:dicom-archive|', subject: `Patient/${patientId}` });
   expect(doc).toBeDefined();
   const study = await client.searchOne('ImagingStudy', { identifier: 'urn:dicom:uid|urn:oid:1.2.3', subject: `Patient/${patientId}` });
@@ -45,5 +45,5 @@ it('imports study, overview PDF and archive', async () => {
   const pdf = await client.searchOne('DocumentReference', { identifier: 'urn:dicom:uid|urn:oid:1.2.3.8.1', subject: `Patient/${patientId}` });
   expect(pdf?.context?.related?.[0]?.reference).toBe(`ImagingStudy/${study?.id}`);
 });
-it('re-import is a no-op', async () => expect(await importDicom(client, cfg, dir, patientId)).toMatchObject({ created: 0, updated: 0, documents: 0, archive: 'already-present' }));
+it('re-import is a no-op', async () => expect(await importDicom(client, cfg, dir, patientId)).toMatchObject({ created: 0, updated: 0, skipped: 1, documents: 0, archive: 'already-present' }));
 it('never shares the archive', () => expect(NEVER_DOCS.has('urn:ga-server:id:dicom-archive')).toBe(true));
