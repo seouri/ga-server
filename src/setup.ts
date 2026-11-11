@@ -17,10 +17,11 @@ const PROJECT = 'Guardian Angel'; // Medplum requires 4-72 characters
 export const ACCESS_POLICY: AccessPolicy = { resourceType: 'AccessPolicy', name: 'ga-server-cli', resource: GA_STORE_TYPES.map((resourceType) => ({ resourceType })) };
 
 // Logs in as admin with the stored rotated password, else the seeded default; rotates the default away.
-// out: where the config is written (ga migrate writes config.next.json); projectName: tests use throwaway projects.
+// out: where the config is written (ga migrate writes config.next.json); projectName: tests use throwaway projects;
+// noRotate: only the stored password is tried, never the seeded default (which would be rotated away): the integration run's guard.
 export async function setup(
   baseUrl = 'http://localhost:8103/',
-  { out = defaultConfigPath(), projectName = PROJECT }: { out?: string; projectName?: string } = {},
+  { out = defaultConfigPath(), projectName = PROJECT, noRotate = false }: { out?: string; projectName?: string; noRotate?: boolean } = {},
 ): Promise<GaConfig> {
   let written: GaConfig | undefined;
   try {
@@ -51,7 +52,7 @@ export async function setup(
   const pkce = { codeChallenge: createHash('sha256').update(verifier).digest('base64url'), codeChallengeMethod: 'S256' as const };
   let login;
   let password = '';
-  for (const p of [stored?.adminPassword, DEFAULT_PASSWORD]) {
+  for (const p of noRotate ? [stored?.adminPassword] : [stored?.adminPassword, DEFAULT_PASSWORD]) {
     if (!p) continue;
     try {
       login = await medplum.startLogin({ email: ADMIN, password: p, projectId: known, ...pkce });
@@ -62,6 +63,7 @@ export async function setup(
       if (!(e instanceof OperationOutcomeError) || getStatus(e.outcome) !== 400) throw e;
     }
   }
+  if (!login && noRotate) throw new GaError(`admin login failed: the password in ${path} does not match; not trying the default password, which would rotate the admin password away`);
   if (!login) throw new GaError(`admin login failed: the password in ${path} does not match and the default was already changed (restore your backup of that file)`);
   // One membership (Super Admin only) logs straight in; several list memberships to pick from.
   const named = (login.memberships ?? []).filter((m) => m.project?.display === projectName);
