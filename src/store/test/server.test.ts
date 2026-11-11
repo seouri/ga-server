@@ -942,6 +942,22 @@ describe('store server: Medplum-compatible routes', () => {
     expect((await call('GET', 'CodeSystem/$import')).status).toBe(404); // POST only, as Medplum
   });
 
+  it('ValueSet operations: $expand by url, id or inline valueSet; $validate-code type and instance level; typed query values', async () => {
+    await call('POST', 'CodeSystem', { resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/vs-ops', concept: [{ code: 'A', display: 'Alpha' }, { code: 'B', display: 'Beta' }] });
+    const vs = (await call('POST', 'ValueSet', { resourceType: 'ValueSet', status: 'active', url: 'http://example.com/vs', compose: { include: [{ system: 'http://example.com/vs-ops' }] } })).json;
+    const codes = (j: any) => j.expansion.contains.map((c: { code: string }) => c.code);
+    expect(codes((await call('GET', 'ValueSet/$expand?url=http://example.com/vs&offset=1')).json)).toEqual(['B']);
+    expect(codes((await call('GET', `ValueSet/${vs.id}/$expand?filter=alp`)).json)).toEqual(['A']);
+    expect(codes((await call('POST', 'ValueSet/$expand', { resourceType: 'Parameters', parameter: [{ name: 'valueSet', resource: { ...vs, id: undefined } }, { name: 'count', valueInteger: 1 }] })).json)).toEqual(['A']);
+    const result = (j: any) => j.parameter.find((p: { name: string }) => p.name === 'result').valueBoolean;
+    expect(result((await call('GET', 'ValueSet/$validate-code?url=http://example.com/vs&system=http://example.com/vs-ops&code=B')).json)).toBe(true);
+    expect(result((await call('POST', `ValueSet/${vs.id}/$validate-code`, { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/vs-ops', code: 'C' } }] })).json)).toBe(false);
+    const text = async (path: string) => { const g = await call('GET', path); return [g.status, g.json?.issue?.[0]?.details?.text]; };
+    expect(await text('ValueSet/$expand?url=http://example.com/vs&count=x')).toEqual([400, "Invalid value 'x' provided for integer parameter 'count'"]);
+    expect(await text('ValueSet/$expand?valueSet=x')).toEqual([400, 'Complex parameter valueSet (ValueSet) cannot be passed via query string']);
+    expect(await text('ValueSet/$expand?url=http://example.com/missing')).toEqual([400, 'ValueSet http://example.com/missing not found']);
+  });
+
   it('GET metadata describes this store: types, interactions, search parameters (composites whose components R4 defines), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
     expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
@@ -953,6 +969,7 @@ describe('store server: Medplum-compatible routes', () => {
     expect(rest.resource.find((r: { type: string }) => r.type === 'ResearchStudy').searchParam.map((p: { name: string }) => p.name)).not.toContain('progress-status-state-actual');
     expect(rest.resource.find((r: { type: string }) => r.type === 'Patient').operation[0].name).toBe('everything');
     expect(rest.resource.find((r: { type: string }) => r.type === 'CodeSystem').operation.map((o: { name: string }) => o.name)).toEqual(['lookup', 'validate-code', 'subsumes', 'import']);
+    expect(rest.resource.find((r: { type: string }) => r.type === 'ValueSet').operation.map((o: { name: string }) => o.name)).toEqual(['expand', 'validate-code']);
     for (const t of ['ValueSet', 'Questionnaire', 'Subscription']) expect(rest.resource.some((r: { type: string }) => r.type === t), t).toBe(true);
     expect(rest.resource.length).toBeGreaterThan(140);
   });

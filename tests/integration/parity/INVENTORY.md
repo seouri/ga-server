@@ -479,66 +479,66 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads string and Buffer stream chunks into a Buffer | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Returns undefined and destroys the stream when the max byte count is exceeded | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | searchPatientCompartment › Successfully paginates through resource types | ported | existing | the helper's paging over HTTP ($everything _count/_offset) |
-| server/src/fhir/operations/expand.test.ts | Expand › No ValueSet URL | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › ValueSet not found | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › No logical definition | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › No filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Multiple filters | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Invalid filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Filter token limit | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Success | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Success with count and offset | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › No duplicates | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Marital status | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Handle punctuation | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Handle empty string after punctuation | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › No null `display` field | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › User uploaded ValueSet | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › CodeSystem resolution | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › ValueSet that uses expansion instead of compose | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error for recursive definition | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Subsumption | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error when CodeSystem not found | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Prefers current Project version of common CodeSystem | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › No ValueSet URL | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › ValueSet not found | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › No logical definition | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › No filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Multiple filters | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Invalid filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Filter token limit | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Success | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Success with count and offset | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › No duplicates | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Marital status | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Handle punctuation | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Handle empty string after punctuation | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › No null `display` field | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › User uploaded ValueSet | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › CodeSystem resolution | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › ValueSet that uses expansion instead of compose | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error for recursive definition | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Subsumption | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error when CodeSystem not found | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Prefers current Project version of common CodeSystem | ported | terminology |  |
 | server/src/fhir/operations/expand.test.ts | Expand › Prefers CodeSystem from linked Projects in link order | skipped | terminology | linked projects or project scoping |
 | server/src/fhir/operations/expand.test.ts | Expand › Does not leak extended metadata when multiple ValueSets share a URL | skipped | terminology | linked projects or project scoping |
-| server/src/fhir/operations/expand.test.ts | Expand › Expands ValueSet with explicit concepts from fragment CodeSystem | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error when property filter is invalid for CodeSystem | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Includes ancestor code in is-a filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with is-a | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Excludes ancestor code in descendent-of filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with descendent-of | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › %s ValueSet shape has correct filter behavior › $name | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › $name | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Sort order is deterministic when rows tie on relevance | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Pagination is stable across offset windows | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Expands ValueSet with explicit concepts from fragment CodeSystem | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error when property filter is invalid for CodeSystem | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Includes ancestor code in is-a filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with is-a | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Excludes ancestor code in descendent-of filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with descendent-of | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › %s ValueSet shape has correct filter behavior › $name | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › $name | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Sort order is deterministic when rows tie on relevance | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Pagination is stable across offset windows | ported | terminology |  |
 | server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › countCandidatesBounded returns min(actual, limit) | skipped | terminology | in-process function, no HTTP request (countCandidatesBounded) |
 | server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › descendant and ancestor strategies return identical members | skipped | terminology | in-process function, no HTTP request (expansionQuery) |
-| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption with filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Filter out abstract codes | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with multiple values | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=true | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=false | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Reference to other ValueSet | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display text override | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Minimum filter size for hierarchical expansion | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Expand with empty filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Expand with trailing quote | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Exact code match | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Exact code match with abstract filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Include pre-expanded ValueSet | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Resolve synonyms | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Condenses multiple synonyms in expansion | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption with filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Filter out abstract codes | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with multiple values | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=true | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=false | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Reference to other ValueSet | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Display text override | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Minimum filter size for hierarchical expansion | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Expand with empty filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Expand with trailing quote | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Exact code match | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Exact code match with abstract filter | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Include pre-expanded ValueSet | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Resolve synonyms | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Condenses multiple synonyms in expansion | ported | terminology |  |
 | server/src/fhir/operations/expand.test.ts | Expand › addExpansionItems() allows items out of order | skipped | terminology | in-process function, no HTTP request (addExpansionItems) |
-| server/src/fhir/operations/expand.test.ts | Expand › Searches translated designations | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Only returns one (default) matching translation | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/expand.test.ts | Expand › Honors ValueSet designation overrides | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Searches translated designations | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Only returns one (default) matching translation | ported | terminology |  |
+| server/src/fhir/operations/expand.test.ts | Expand › Honors ValueSet designation overrides | ported | terminology |  |
 | server/src/fhir/operations/expand.test.ts | Expand › Base resources are not shadowed for Super Admin | skipped | terminology | needs a Super Admin |
-| server/src/fhir/operations/expand.test.ts | Expand › Display language › $name | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Display language › $name | ported | terminology |  |
 | server/src/fhir/operations/expand.test.ts | Expand › Display language › Ancestor and descendant strategies agree under displayLanguage | skipped | terminology | in-process function, no HTTP request (expansionQuery) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display language › Paging counts codes, not translation rows | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Display language › Paging counts codes, not translation rows | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Success | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Renders description for relationship and simple properties | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Coding parameter | ported | terminology |  |

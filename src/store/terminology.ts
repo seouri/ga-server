@@ -40,7 +40,7 @@ const DEFINITIONS_VERSION = JSON.parse(readFileSync(new URL('../package.json', D
 
 // Prepared statements per database, by SQL.
 const cache = new WeakMap<DatabaseSync, Map<string, StatementSync>>();
-const prep = (db: DatabaseSync) => (sql: string): StatementSync => {
+export const prep = (db: DatabaseSync) => (sql: string): StatementSync => {
   let m = cache.get(db);
   if (!m) cache.set(db, (m = new Map()));
   let st = m.get(sql);
@@ -309,8 +309,20 @@ export function validateCodeCs(store: Store, p: Params): Parameters {
   return { resourceType: 'Parameters', parameter: [{ name: 'result', valueBoolean: !!found }, ...(found?.display ? [{ name: 'display', valueString: found.display }] : [])] };
 }
 
-// CodeSystem $subsumes over the is-a parent property: a recursive walk up from each code; `union` drops rows already seen, so
-// a cycle ends. A code subsumes itself (equivalent).
+export type Arg = string | number | null;
+// The is-a walk over parent property `prop` of CodeSystem `rid`, from the rows of `code`, as a CTE `walk` of coding rows: 'up'
+// to the ancestors (from a row or the canonical row of a synonym), 'down' to the descendants (Medplum's findAncestor and
+// addDescendants). `union` drops rows already seen, so a cycle ends. The caller appends the select over `walk`.
+export function hierarchy(dir: 'up' | 'down', rid: number, prop: number, code: string): { sql: string; args: Arg[] } {
+  const [on, to] = dir === 'up' ? ['cp.coding = walk.id or cp.coding = walk.synonymOf', 'cp.target'] : ['cp.target = walk.id', 'cp.coding'];
+  return {
+    sql: `with recursive walk as (select * from coding where system = ? and code = ?
+      union select c.* from walk join coding_property cp on ${on} join coding c on c.id = ${to} where cp.property = ? and c.system = ?)`,
+    args: [rid, code, prop, rid],
+  };
+}
+
+// CodeSystem $subsumes over the is-a parent property: the walk up from each code (hierarchy). A code subsumes itself (equivalent).
 export function subsumes(store: Store, p: Params): Parameters {
   refuse(p, '$subsumes', ['codingA', 'codingB']);
   const system = p.get('system');
@@ -320,12 +332,11 @@ export function subsumes(store: Store, p: Params): Parameters {
   if (!a || !b) throw bad('Must specify codeA and codeB parameters');
   const parent = parentProperty(cs);
   const prop = (prep(store.db)('select id from codesystem_property where system = ? and code = ?').get(rid, parent.code) as { id: number } | undefined)?.id;
-  const under = (base: string, ancestor: string) => prop !== undefined && !!prep(store.db)(`with recursive up(id, code, synonymOf) as (
-      select id, code, synonymOf from coding where system = ?1 and code = ?2
-      union
-      select c.id, c.code, c.synonymOf from up join coding_property cp on cp.coding = up.id or cp.coding = up.synonymOf
-        join coding c on c.id = cp.target where cp.property = ?3 and c.system = ?1
-    ) select 1 from up where code = ?4 limit 1`).get(rid, base, prop, ancestor);
+  const under = (base: string, ancestor: string) => {
+    if (prop === undefined) return false;
+    const up = hierarchy('up', rid, prop, base);
+    return !!prep(store.db)(`${up.sql} select 1 from walk where code = ? limit 1`).get(...up.args, ancestor);
+  };
   const subsumedBy = under(a, b), subsumesB = under(b, a);
   const outcome = subsumedBy && subsumesB ? 'equivalent' : subsumesB ? 'subsumes' : subsumedBy ? 'subsumed-by' : 'not-subsumed';
   return { resourceType: 'Parameters', parameter: [{ name: 'outcome', valueCode: outcome }] };

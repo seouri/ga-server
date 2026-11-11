@@ -14,6 +14,7 @@ import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { components, IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
+import { expand, validateCodeVs } from './expand.ts';
 import { type Params, codeSystemImport, lookup, params, subsumes, validateCodeCs } from './terminology.ts';
 
 // Binaries stream to disk, so their limit (serveStore's maxBinaryBytes) can be gigabytes; JSON bodies are read whole.
@@ -278,6 +279,8 @@ const OPERATIONS: Record<string, { methods: string[]; run: (store: Store, p: Par
   'CodeSystem/$validate-code': { methods: ['GET', 'POST'], run: validateCodeCs },
   'CodeSystem/$subsumes': { methods: ['GET', 'POST'], run: subsumes },
   'CodeSystem/$import': { methods: ['POST'], run: codeSystemImport },
+  'ValueSet/$expand': { methods: ['GET', 'POST'], run: expand },
+  'ValueSet/$validate-code': { methods: ['GET', 'POST'], run: validateCodeVs },
 };
 
 // An operation's input: the GET query (empty values skipped, as Medplum) or the POST body, a Parameters validated as a resource.
@@ -515,6 +518,7 @@ function capability(): string {
             // Medplum's own operation, which has no published OperationDefinition url: an identifier of this store's.
             { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/CodeSystem-import' },
           ] }),
+          ...(type === 'ValueSet' && { operation: ['expand', 'validate-code'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/ValueSet-${name}` })) }),
         }),
     }],
   });
