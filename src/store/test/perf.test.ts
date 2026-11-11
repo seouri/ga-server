@@ -23,7 +23,8 @@ let dir: string, store: Store, pid: string, rssBefore: number;
 beforeAll(() => {
   rssBefore = process.memoryUsage().rss;
   dir = mkdtempSync(join(tmpdir(), 'store-perf-'));
-  store = new Store(join(dir, 'store.db')); // no types: every R4 type
+  // No types: every R4 type. No built-in terminology: its seed's memory is terminology-memory.test.ts's, and these searches never touch it.
+  store = new Store(join(dir, 'store.db'), { terminology: [] });
   const org = store.create({ resourceType: 'Organization', name: 'Perf Clinic' }).resource.id!;
   pid = store.create({ resourceType: 'Patient', birthDate: '1980-02-03', managingOrganization: { reference: `Organization/${org}` } }).resource.id!;
   const now = Date.now();
