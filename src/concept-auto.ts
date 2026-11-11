@@ -4,7 +4,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Extension, Resource } from '@medplum/fhirtypes';
 import { field, TARGET, trusted, type Unmapped } from './concept-apply.ts';
 import { mapTerm } from './concept-map-term.ts';
-import { ICD10CM } from './concepts.ts';
+import { CPT, ICD10CM } from './concepts.ts';
 import { loadMaps, lookup, termKey } from './conceptmap.ts';
 import { COMPARTMENT, DUP_OF } from './engine.ts';
 import { hasTag } from './identity.ts';
@@ -38,7 +38,9 @@ async function linked(client: MedplumClient, dups: Resource[], t: Unmapped): Pro
       const [type, id] = (ref.valueReference?.reference ?? '').split('/');
       const other = await client.readResource(type as 'Procedure', id).catch(() => undefined);
       const cc = other && (other as unknown as Record<string, CodeableConcept | undefined>)[field(type)];
-      const c = other && trusted(other, cc?.coding).find((x) => x.code && TARGET[t.type]?.includes(x.system ?? ''));
+      // The type's first vocabulary first; never CPT (licensed: map_concept refuses it).
+      const codes = other ? trusted(other, cc?.coding).filter((x) => x.code && x.system !== CPT && TARGET[t.type]?.includes(x.system ?? '')) : [];
+      const c = codes.find((x) => x.system === TARGET[t.type][0]) ?? codes[0];
       if (c) return { system: c.system as string, code: c.code as string, display: c.display ?? cc?.text ?? '', from: 'linked record' };
     }
   }
@@ -50,7 +52,10 @@ export async function autoMap(
 ): Promise<{ autoMapped: number; terms: Reviewed[] }> {
   const out: Reviewed[] = terms.map((t) => ({ ...t, candidates: [] }));
   if (deps.lookup === false) return { autoMapped: 0, terms: out };
-  const maps = await loadMaps(client, true);
+  const mapped = new Set<Reviewed>();
+  const left = () => ({ autoMapped: mapped.size, terms: out.filter((t) => !mapped.has(t)) });
+  const maps = await loadMaps(client, true).catch(() => undefined);
+  if (!maps) return left(); // a failure never fails the import, sync or tool call that ran this
   const todo = out.filter((t) => TARGET[t.type] && !lookup(maps, t.source, t.key)).sort((a, b) => b.count - a.count).slice(0, MAX_TERMS);
   // Possible duplicates of each type, read once: their DUP_OF record may already carry the term's code.
   const dups = new Map<string, Promise<Resource[]>>();
@@ -58,14 +63,13 @@ export async function autoMap(
     if (!dups.has(type)) dups.set(type, client.searchResources(type as 'Procedure', { [COMPARTMENT[type]]: `Patient/${patientId}`, _tag: 'urn:ga-server:tag|possible-duplicate', _count: '1000' }, { cache: 'no-cache' }).catch(() => []));
     return dups.get(type) as Promise<Resource[]>;
   };
-  const mapped = new Set<Reviewed>();
   const one = async (t: Reviewed) => {
     const searched = await searchCodes(TARGET[t.type][0], t.name, { fetch: deps.fetch });
     const pick = pickAuto(t.name, searched); // only the first vocabulary may be auto-mapped
     const more = t.type === 'Condition' ? await searchCodes(ICD10CM, t.name, { fetch: deps.fetch }) : [];
     const link = await linked(client, await dupsOf(t.type), t);
     t.candidates = [...(link ? [link] : []), ...[...searched, ...more].filter((c) => !(link && c.system === link.system && c.code === link.code))];
-    if (!pick) return;
+    if (!pick || (link && (link.system !== pick.system || link.code !== pick.code))) return; // a differing linked code: the agent judges
     try {
       const r = await mapTerm(client, patientId, { source: t.source, name: t.name, unit: t.unit, key: t.key, type: t.type, system: pick.system, code: pick.code, display: pick.display, equivalence: 'equivalent', confident: true }, 'GA (automatic)', { fetch: deps.fetch });
       if (r.status === 'mapped' || r.status === 'no records') mapped.add(t);
@@ -75,7 +79,7 @@ export async function autoMap(
   };
   const queue = [...todo];
   await Promise.all(Array.from({ length: IN_FLIGHT }, async () => {
-    for (let t = queue.shift(); t; t = queue.shift()) await one(t);
+    for (let t = queue.shift(); t; t = queue.shift()) await one(t).catch(() => undefined); // that term stays for the agent
   }));
-  return { autoMapped: mapped.size, terms: out.filter((t) => !mapped.has(t)) };
+  return left();
 }

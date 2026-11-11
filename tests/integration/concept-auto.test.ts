@@ -5,7 +5,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { CONCEPT_SRC, type Unmapped } from '../../src/concept-apply.ts';
 import { autoMap } from '../../src/concept-auto.ts';
 import { mapTerm } from '../../src/concept-map-term.ts';
-import { SNOMED } from '../../src/concepts.ts';
+import { CPT, SNOMED } from '../../src/concepts.ts';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { DUP_OF } from '../../src/engine.ts';
 import { cleanupTestMaps, cleanupTestPatient, createTestPatient } from './helpers.ts';
@@ -113,4 +113,44 @@ test('offers the code of a linked duplicate first', async () => {
   const r = await autoMap(client, pid, [{ source: 'pdf', type: 'Procedure', key: `Procedure|${name.toLowerCase()}`, name, count: 1 }], { fetch: f });
   expect(r.autoMapped).toBe(0);
   expect(r.terms[0].candidates[0]).toMatchObject({ system: SNOMED, code: '73761001', from: 'linked record' });
+});
+
+// A smart-source record of `name` tagged possible-duplicate, linked (DUP_OF) to a portal record carrying `codings`.
+const linkedPair = async (name: string, codings: { system: string; code: string }[]) => {
+  const key = smart();
+  const portal = await client.createResource<Procedure>({ ...proc(name, smart()), code: { text: name, coding: codings }, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-smart' }] } });
+  const base = proc(name, key);
+  const dup = await client.createResource<Procedure>({
+    ...base, extension: [{ url: DUP_OF, valueReference: { reference: `Procedure/${portal.id}` } }],
+    meta: { ...base.meta, tag: [...(base.meta?.tag ?? []), { system: 'urn:ga-server:tag', code: 'possible-duplicate' }] },
+  });
+  return { dup, row: row(`smart:${key}`, name) };
+};
+
+test('the linked candidate is the SNOMED code, never CPT', async () => {
+  const both = await linkedPair('Colonoscopy screening', [{ system: CPT, code: '45378' }, { system: SNOMED, code: '73761001' }]);
+  const cptOnly = await linkedPair('Colonoscopy screening', [{ system: CPT, code: '45378' }]);
+  const { f } = fake();
+  const a = await autoMap(client, pid, [both.row], { fetch: f });
+  expect(a.terms[0].candidates[0]).toMatchObject({ system: SNOMED, code: '73761001', from: 'linked record' });
+  const b = await autoMap(client, pid, [cptOnly.row], { fetch: f });
+  expect(b.terms[0].candidates.some((c) => c.from || c.system === CPT)).toBe(false);
+});
+
+test('a linked code that differs from the exact match is left for the agent', async () => {
+  const { dup, row: r } = await linkedPair('Colonoscopy', [{ system: SNOMED, code: '446521004' }]);
+  const { f } = fake();
+  const res = await autoMap(client, pid, [r], { fetch: f });
+  expect(res.autoMapped).toBe(0);
+  expect(res.terms[0].candidates.map((c) => c.code)).toEqual(['446521004', '73761001']);
+  expect(res.terms[0].candidates[0].from).toBe('linked record');
+  expect(gaCode(await client.readResource('Procedure', dup.id as string))).toBeUndefined();
+});
+
+test('a linked code equal to the exact match is auto-mapped', async () => {
+  const { dup, row: r } = await linkedPair('Colonoscopy', [{ system: SNOMED, code: '73761001' }]);
+  const { f } = fake();
+  const res = await autoMap(client, pid, [r], { fetch: f });
+  expect(res.autoMapped).toBe(1);
+  expect(gaCode(await client.readResource('Procedure', dup.id as string))?.code).toBe('73761001');
 });
