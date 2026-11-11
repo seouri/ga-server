@@ -2,7 +2,7 @@
 
 One row per Medplum test (a `test.each` counts once, by its title template). Columns: file (path below `packages/`), title (describe path joined with " › "), status, feature, note.
 
-- status: `ported` (a parity test titled `<title> [<file>]` exists), `skipped` (note says why), `plan-2` (terminology), `plan-3` (GraphQL).
+- status: `ported` (a parity test titled `<title> [<file>]` exists), `skipped` (note says why), `plan-2` (terminology, all triaged by Task 1 of plan 2; none left), `plan-3` (GraphQL).
 - feature: `existing`, `summary`, `type`, `include`, `chain`, `modifier`, `composite`, `filter`, `meta`, `terminology`, `graphql`, `platform`.
 - A note `not yet ported (Task N)` names the task that ports the row; the last task fails any row still carrying it.
 - `tests/parity-inventory.test.ts` checks this file against the parity tests.
@@ -479,119 +479,119 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Reads string and Buffer stream chunks into a Buffer | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | Patient Everything inline attachments helpers › Returns undefined and destroys the stream when the max byte count is exceeded | skipped | platform | inline attachments setting / Medplum helper |
 | server/src/fhir/operations/patienteverything.test.ts | searchPatientCompartment › Successfully paginates through resource types | ported | existing | the helper's paging over HTTP ($everything _count/_offset) |
-| server/src/fhir/operations/expand.test.ts | Expand › No ValueSet URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › ValueSet not found | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › No logical definition | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › No filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Multiple filters | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Invalid filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Filter token limit | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Success | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Success with count and offset | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › No duplicates | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Marital status | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Handle punctuation | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Handle empty string after punctuation | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › No null `display` field | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › User uploaded ValueSet | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › CodeSystem resolution | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › ValueSet that uses expansion instead of compose | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error for recursive definition | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Subsumption | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error when CodeSystem not found | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Prefers current Project version of common CodeSystem | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Prefers CodeSystem from linked Projects in link order | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Does not leak extended metadata when multiple ValueSets share a URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Expands ValueSet with explicit concepts from fragment CodeSystem | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Returns error when property filter is invalid for CodeSystem | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Includes ancestor code in is-a filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with is-a | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Excludes ancestor code in descendent-of filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with descendent-of | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › %s ValueSet shape has correct filter behavior › $name | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › $name | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Sort order is deterministic when rows tie on relevance | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Pagination is stable across offset windows | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › countCandidatesBounded returns min(actual, limit) | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › descendant and ancestor strategies return identical members | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption with filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Filter out abstract codes | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with multiple values | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=true | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=false | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Reference to other ValueSet | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display text override | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Minimum filter size for hierarchical expansion | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Expand with empty filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Expand with trailing quote | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Exact code match | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Exact code match with abstract filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Include pre-expanded ValueSet | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Resolve synonyms | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Condenses multiple synonyms in expansion | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › addExpansionItems() allows items out of order | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Searches translated designations | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Only returns one (default) matching translation | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Honors ValueSet designation overrides | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Base resources are not shadowed for Super Admin | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display language › $name | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display language › Ancestor and descendant strategies agree under displayLanguage | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/expand.test.ts | Expand › Display language › Paging counts codes, not translation rows | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Success | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Renders description for relationship and simple properties | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Coding parameter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Not found | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › No full coding specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Checks project | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Lookup using specific CodeSystem version | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Prefers complete CodeSystem over example even when example is newer | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Excludes retired CodeSystem from selection | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET instance endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance system URL mismatch | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Instance endpoint with coding | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance coding system mismatch | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Correctly renders imported properties of different types | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Outputs translated designations | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Explicitly included code succeeds | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter included code succeeds: %j | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter excluded code fails | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result on display mismatch | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result when no coding matches | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns error when no coding specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter with multiple values | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code when only example CodeSystem is present | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Does not validate display without authoritative CodeSystem | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET instance endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Instance endpoint with coding | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code against an include with multiple filters | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates system-less coding matched by a later include | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Success | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Coding parameter | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Not found | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › No full coding specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Checks project | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Falls back to validating system URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Lookup using specific CodeSystem version | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET instance endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance system URL mismatch | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Instance endpoint with coding | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance coding system mismatch | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Returns specified displayLanguage | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › validateCodings | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumes | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumed by | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Equivalent | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Not subsumed | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Returns error on incomplete input | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET instance endpoint | plan-2 | terminology | deferred to plan 2 (terminology) |
+| server/src/fhir/operations/expand.test.ts | Expand › No ValueSet URL | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › ValueSet not found | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › No logical definition | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › No filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Multiple filters | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Invalid filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Filter token limit | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Success | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Success with count and offset | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › No duplicates | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Marital status | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Handle punctuation | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Handle empty string after punctuation | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › No null `display` field | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › User uploaded ValueSet | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › CodeSystem resolution | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › ValueSet that uses expansion instead of compose | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error for recursive definition | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Subsumption | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error when CodeSystem not found | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Prefers current Project version of common CodeSystem | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Prefers CodeSystem from linked Projects in link order | skipped | terminology | linked projects or project scoping |
+| server/src/fhir/operations/expand.test.ts | Expand › Does not leak extended metadata when multiple ValueSets share a URL | skipped | terminology | linked projects or project scoping |
+| server/src/fhir/operations/expand.test.ts | Expand › Expands ValueSet with explicit concepts from fragment CodeSystem | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Returns error when property filter is invalid for CodeSystem | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Includes ancestor code in is-a filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with is-a | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Excludes ancestor code in descendent-of filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Hierarchy filters › Text filter with descendent-of | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › %s ValueSet shape has correct filter behavior › $name | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › $name | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Sort order is deterministic when rows tie on relevance | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Code prefix filter › Pagination is stable across offset windows | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › countCandidatesBounded returns min(actual, limit) | skipped | terminology | in-process function, no HTTP request (countCandidatesBounded) |
+| server/src/fhir/operations/expand.test.ts | Expand › Cost-based parent-filter strategy › descendant and ancestor strategies return identical members | skipped | terminology | in-process function, no HTTP request (expansionQuery) |
+| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Recursive subsumption with filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Filter out abstract codes | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with multiple values | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=true | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Property filter with exists=false | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Reference to other ValueSet | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Display text override | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Minimum filter size for hierarchical expansion | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Expand with empty filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Expand with trailing quote | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Exact code match | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Exact code match with abstract filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Include pre-expanded ValueSet | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Resolve synonyms | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Condenses multiple synonyms in expansion | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › addExpansionItems() allows items out of order | skipped | terminology | in-process function, no HTTP request (addExpansionItems) |
+| server/src/fhir/operations/expand.test.ts | Expand › Searches translated designations | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Only returns one (default) matching translation | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Honors ValueSet designation overrides | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Base resources are not shadowed for Super Admin | skipped | terminology | needs a Super Admin |
+| server/src/fhir/operations/expand.test.ts | Expand › Display language › $name | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/expand.test.ts | Expand › Display language › Ancestor and descendant strategies agree under displayLanguage | skipped | terminology | in-process function, no HTTP request (expansionQuery) |
+| server/src/fhir/operations/expand.test.ts | Expand › Display language › Paging counts codes, not translation rows | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Success | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Renders description for relationship and simple properties | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Coding parameter | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Not found | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › No full coding specified | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Checks project | skipped | terminology | project scoping: another project cannot see the CodeSystem |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Lookup using specific CodeSystem version | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Prefers complete CodeSystem over example even when example is newer | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Excludes retired CodeSystem from selection | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance system URL mismatch | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Instance endpoint with coding | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance coding system mismatch | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Correctly renders imported properties of different types | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Outputs translated designations | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Explicitly included code succeeds | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter included code succeeds: %j | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter excluded code fails | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result on display mismatch | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result when no coding matches | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns error when no coding specified | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter with multiple values | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code when only example CodeSystem is present | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Does not validate display without authoritative CodeSystem | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET endpoint | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET instance endpoint | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Instance endpoint with coding | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code against an include with multiple filters | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates system-less coding matched by a later include | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Success | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Coding parameter | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Not found | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › No full coding specified | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Checks project | skipped | terminology | project scoping: another project cannot see the CodeSystem |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Falls back to validating system URL | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Lookup using specific CodeSystem version | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance system URL mismatch | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Instance endpoint with coding | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance coding system mismatch | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Returns specified displayLanguage | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › validateCodings | skipped | terminology | in-process function, no HTTP request (validateCodings) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumes | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumed by | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Equivalent | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Not subsumed | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Returns error on incomplete input | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch success | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch invalid bundle | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID | ported | existing |  |
@@ -775,54 +775,54 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Parallel Links | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Search Based Link | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Nested Search Links | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Success %s | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Allows GET request | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by source ValueSet | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Filter on target system | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No match | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No map specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Code without system | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Ambiguous coding provided | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No source coding | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Not found by %s | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Unmapped code handling | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles empty CodeableConcept | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles implicit system | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No mapping groups specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Complex SNOMED to ICD mapping | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Renders mapping comment | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and properties separately | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and associated relationships | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code system | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code for property | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown property | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on non-SuperAdmin user | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows access by Project admin | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to linked Project systems | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows Super Admin to import into base CodeSystem by ID | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to base CodeSystem by ID | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem by URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and synonym designations | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Rejects excessively large batches | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports basic mappings from resource | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports mapping metadata | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports concept mappings and attributes | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports by ID without extended mode | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires admin privileges | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Prevents writes by Project admin to linked Project ConceptMap | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Allows selecting ConceptMap by URL | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires ConceptMap to be specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Cannot overspecify ConceptMap | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires source code to be specified | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Ignores unspecified source code in ConceptMap resource | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Handles ConceptMap with no valid mappings | plan-2 | terminology | deferred to plan 2 (terminology) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Import does not clobber or duplicate inline mappings | plan-2 | terminology | deferred to plan 2 (terminology) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Success %s | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by URL | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Allows GET request | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by source ValueSet | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Filter on target system | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No match | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No map specified | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Code without system | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Ambiguous coding provided | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No source coding | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Not found by %s | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Unmapped code handling | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles empty CodeableConcept | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles implicit system | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No mapping groups specified | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Complex SNOMED to ICD mapping | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Renders mapping comment | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and properties separately | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and associated relationships | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code system | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code for property | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown property | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on non-SuperAdmin user | skipped | terminology | needs a Super Admin |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows access by Project admin | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to linked Project systems | skipped | terminology | linked projects or project scoping |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows Super Admin to import into base CodeSystem by ID | skipped | terminology | needs a Super Admin |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to base CodeSystem by ID | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem | skipped | terminology | access policy |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem by URL | skipped | terminology | access policy |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and synonym designations | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Rejects excessively large batches | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports basic mappings from resource | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
+| server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports mapping metadata | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports concept mappings and attributes | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports by ID without extended mode | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires admin privileges | skipped | terminology | needs a non-admin project member |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Prevents writes by Project admin to linked Project ConceptMap | skipped | terminology | linked projects or project scoping |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Allows selecting ConceptMap by URL | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires ConceptMap to be specified | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Cannot overspecify ConceptMap | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires source code to be specified | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Ignores unspecified source code in ConceptMap resource | skipped | terminology | in-process function, no HTTP request (reads Medplum mapping tables) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Handles ConceptMap with no valid mappings | skipped | terminology | in-process function, no HTTP request (reads Medplum mapping tables) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Import does not clobber or duplicate inline mappings | skipped | terminology | not yet ported (Task 5) |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Forbidden | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Expunge single resource | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Expunge $project project as $name $outcome | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |
