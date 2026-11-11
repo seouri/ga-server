@@ -4,12 +4,16 @@
 // Coding_Property and CodeSystem_Property tables), the built-in HL7 terminology (seeded once, read-only) and findTerminology.
 // Ported from Medplum 5.2.14 packages/server/src/fhir: lookups/coding.ts (which concepts become rows),
 // operations/codesystemimport.ts (importCodeSystem), operations/utils/terminology.ts (findTerminologyResource's ordering,
-// getParentProperty) and operations/rebuild-base-definitions.ts (the seed; a later entry replaces an earlier one by url).
+// getParentProperty, findAncestor) and operations/rebuild-base-definitions.ts (the seed; a later entry replaces an earlier one by url);
+// the operations from operations/codesystemlookup.ts, codesystemvalidatecode.ts, subsumes.ts, codesystemimport.ts and
+// utils/parameters.ts (parseInputParameters' cardinality texts).
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { TERMINOLOGY_BUNDLE_FILES } from '@medplum/definitions';
-import type { Bundle, CodeSystem, CodeSystemConcept, CodeSystemConceptProperty, CodeSystemProperty, ConceptMap, ValueSet } from '@medplum/fhirtypes';
+import type {
+  Bundle, CodeSystem, CodeSystemConcept, CodeSystemConceptProperty, CodeSystemProperty, Coding, ConceptMap, Parameters, ParametersParameter, ValueSet,
+} from '@medplum/fhirtypes';
 import { storedTypes } from './definitions.ts';
 import { writeIndex } from './search.ts';
 import { type Store, StoreError } from './store.ts';
@@ -48,9 +52,10 @@ export type ImportedProperty = { code: string; property: string; value: string }
 export type Designation = { code: string; language?: string; value: string };
 
 // The concept rows of CodeSystem `rid`, replaced (an update drops the old rows first).
+// Other content modes keep their rows (concepts $import wrote), as Medplum's CodingTable.
 export function indexCodeSystem(db: DatabaseSync, rid: number, cs: CodeSystem): void {
-  dropCodeSystem(db, rid);
   if (!INDEXED.has(cs.content)) return;
+  dropCodeSystem(db, rid);
   const concepts: { code: string; display?: string }[] = [], properties: ImportedProperty[] = [], designations: Designation[] = [];
   const parentCode = cs.property?.find((p) => p.uri === PARENT)?.code ?? cs.hierarchyMeaning ?? 'parent';
   const add = (c: CodeSystemConcept): void => {
@@ -186,4 +191,170 @@ export function findTerminology<T extends CodeSystem | ValueSet | ConceptMap>(st
 export function parentProperty(cs: CodeSystem): CodeSystemProperty {
   if (cs.hierarchyMeaning !== 'is-a') throw new StoreError(400, [{ text: `Invalid filter: CodeSystem ${cs.url} does not have an is-a hierarchy` }]);
   return cs.property?.find((p) => p.uri === PARENT) ?? { code: cs.hierarchyMeaning, uri: PARENT, type: 'code' };
+}
+
+// An operation's input: `id` for an instance-level call; get/coding read one value (more than one is 400, as Medplum's
+// parseInputParameters), all reads every one. Built from a POST Parameters body, or from a GET query (each value a valueString:
+// fromQuery makes a Coding parameter 400, as Medplum).
+export type Params = { id?: string; get(name: string): string | undefined; coding(name: string): Coding | undefined; all(name: string): ParametersParameter[] };
+
+const bad = (text: string) => new StoreError(400, [{ text }]);
+// A parameter's primitive value, whatever its value[x] type.
+export const paramValue = (p?: ParametersParameter): string | undefined => {
+  for (const [k, v] of Object.entries(p ?? {})) if (k.startsWith('value') && ['string', 'number', 'boolean'].includes(typeof v)) return String(v);
+  return undefined;
+};
+
+export function params(parameter: ParametersParameter[] = [], id?: string, fromQuery = false): Params {
+  const all = (name: string) => parameter.filter((x) => x.name === name);
+  const one = (name: string) => {
+    const v = all(name);
+    if (v.length > 1) throw bad(`Expected 0..1 value(s) for input parameter ${name}, but ${v.length} provided`);
+    return v[0];
+  };
+  return {
+    id, all, get: (name) => paramValue(one(name)),
+    coding(name) {
+      const v = one(name);
+      if (v && fromQuery) throw bad(`Complex parameter ${name} (Coding) cannot be passed via query string`);
+      return v?.valueCoding;
+    },
+  };
+}
+
+// Inputs R4 defines that these operations do not implement (Medplum ignores them): 400 naming the first one given.
+const refuse = (p: Params, op: string, names: string[]): void => {
+  const n = names.find((x) => p.all(x).length);
+  if (n) throw bad(`${op}: parameter ${n} is not supported`);
+};
+const notFound = () => new StoreError(404, [{ text: 'Not found' }]);
+const bare = (url: string) => url.replace(/\|[^|]*$/, ''); // url|version without the version (findTerminology reads it)
+
+// The operation's CodeSystem: CodeSystem/<id> (404 Not found, 410 if deleted), else findTerminology's choice for the url.
+function codeSystem(store: Store, p: Params, url?: string, version?: string): { rid: number; cs: CodeSystem & { id: string } } {
+  const id = p.id ?? findTerminology<CodeSystem>(store, 'CodeSystem', url!, version).id;
+  const row = prep(store.db)("select rid, json from resources where type = 'CodeSystem' and id = ?").get(id) as { rid: number; json: string } | undefined;
+  if (!row) { store.readRow('CodeSystem', id, true); throw notFound(); }
+  return { rid: row.rid, cs: JSON.parse(row.json) };
+}
+
+const TRUE = ['true', 't', '1'], FALSE = ['false', 'f', '0'];
+// A property row's value as its declared type (Medplum's toTypedValue); a boolean that is neither is a server error, as Medplum.
+function typedValue(value: string, type: string | null): ParametersParameter {
+  if (type === 'boolean') {
+    const v = value.toLowerCase();
+    if (!TRUE.includes(v) && !FALSE.includes(v)) throw new Error(`Invalid value for boolean property: ${value}`);
+    return { name: 'value', valueBoolean: TRUE.includes(v) };
+  }
+  if (type === 'integer') return { name: 'value', valueInteger: Number.parseInt(value, 10) };
+  if (type === 'decimal') return { name: 'value', valueDecimal: Number.parseFloat(value) };
+  const t = type ?? 'string';
+  return { name: 'value', [`value${t[0].toUpperCase()}${t.slice(1)}`]: value };
+}
+
+// CodeSystem $lookup: name, display, designations (synonym rows), then properties (a code-valued one described by its
+// target's display). The CodeSystem by id, `system` (with `version`) or the coding's system; 404 when the code is not in it.
+export function lookup(store: Store, p: Params): Parameters {
+  refuse(p, '$lookup', ['date', 'displayLanguage', 'property']);
+  const system = p.get('system'), given = p.coding('coding'), code = p.get('code'), url = system ?? given?.system;
+  if (!p.id && !url) throw bad('No code system specified');
+  const { rid, cs } = codeSystem(store, p, url, p.get('version'));
+  let coding: Coding;
+  if (given) {
+    if (!given.code) throw bad('No code specified');
+    coding = given;
+  } else if (code) coding = { system: system ? bare(system) : cs.url, code };
+  else throw bad('No coding specified');
+  if (coding.system && coding.system !== cs.url) throw notFound();
+  const rows = prep(store.db)(`select c.display, c.synonymOf, c.language, p.code, p.type, p.description, cp.value, t.display targetDisplay
+    from coding c left join coding_property cp on cp.coding = c.id left join codesystem_property p on p.id = cp.property left join coding t on t.id = cp.target
+    where c.system = ? and c.code = ? order by c.id, cp.rowid`).all(rid, coding.code!) as Record<string, string | null>[];
+  if (!rows.length) throw notFound();
+  const out: ParametersParameter[] = [], name = cs.title ?? cs.name ?? cs.url, display = rows.find((r) => !r.synonymOf)?.display;
+  if (name) out.push({ name: 'name', valueString: name });
+  if (display) out.push({ name: 'display', valueString: display });
+  for (const r of rows) {
+    if (r.synonymOf) out.push({ name: 'designation', part: [...(r.language ? [{ name: 'language', valueCode: r.language }] : []), { name: 'value', valueString: r.display! }] });
+  }
+  for (const r of rows) {
+    if (r.synonymOf || !r.code || !r.value) continue;
+    const description = r.targetDisplay ?? r.description;
+    out.push({ name: 'property', part: [{ name: 'code', valueCode: r.code }, typedValue(r.value, r.type), ...(description ? [{ name: 'description', valueString: description }] : [])] });
+  }
+  return { resourceType: 'Parameters', parameter: out };
+}
+
+// CodeSystem $validate-code: result (and the display: the coding's own, else the code's, in `displayLanguage` when given). A url
+// no CodeSystem has is checked against the coding's system only, as Medplum.
+export function validateCodeCs(store: Store, p: Params): Parameters {
+  refuse(p, '$validate-code', ['codeSystem', 'codeableConcept', 'date', 'abstract', 'display']);
+  const given = p.coding('coding'), code = p.get('code'), url = p.get('url') ?? given?.system, language = p.get('displayLanguage');
+  let target: ReturnType<typeof codeSystem> | undefined;
+  if (p.id) target = codeSystem(store, p);
+  else if (url) {
+    try { target = codeSystem(store, p, url, p.get('version')); } catch (e) { if (!(e instanceof StoreError && e.status === 400)) throw e; }
+  }
+  if (!target && !url) throw bad('No code system specified');
+  let coding: Coding;
+  if (given) coding = given;
+  else if (code) coding = { system: url ? bare(url) : target!.cs.url, code };
+  else throw bad('No coding specified');
+  let found: Coding | undefined;
+  if (!target) found = coding.system === bare(url!) ? coding : undefined;
+  else if (coding.code && (!coding.system || coding.system === target.cs.url)) {
+    const row = prep(store.db)(`select display from coding where system = ? and code = ? and ${language ? 'language = ?' : 'synonymOf is null'} limit 1`)
+      .get(target.rid, coding.code, ...(language ? [language] : [])) as { display: string | null } | undefined;
+    if (row) found = { ...coding, display: coding.display ?? row.display ?? undefined };
+  }
+  return { resourceType: 'Parameters', parameter: [{ name: 'result', valueBoolean: !!found }, ...(found?.display ? [{ name: 'display', valueString: found.display }] : [])] };
+}
+
+// CodeSystem $subsumes over the is-a parent property: a recursive walk up from each code; `union` drops rows already seen, so
+// a cycle ends. A code subsumes itself (equivalent).
+export function subsumes(store: Store, p: Params): Parameters {
+  refuse(p, '$subsumes', ['codingA', 'codingB']);
+  const system = p.get('system');
+  if (!p.id && !system) throw bad('No code system specified');
+  const { rid, cs } = codeSystem(store, p, system, p.get('version'));
+  const a = p.get('codeA'), b = p.get('codeB');
+  if (!a || !b) throw bad('Must specify codeA and codeB parameters');
+  const parent = parentProperty(cs);
+  const prop = (prep(store.db)('select id from codesystem_property where system = ? and code = ?').get(rid, parent.code) as { id: number } | undefined)?.id;
+  const under = (base: string, ancestor: string) => prop !== undefined && !!prep(store.db)(`with recursive up(id, code, synonymOf) as (
+      select id, code, synonymOf from coding where system = ?1 and code = ?2
+      union
+      select c.id, c.code, c.synonymOf from up join coding_property cp on cp.coding = up.id or cp.coding = up.synonymOf
+        join coding c on c.id = cp.target where cp.property = ?3 and c.system = ?1
+    ) select 1 from up where code = ?4 limit 1`).get(rid, base, prop, ancestor);
+  const subsumedBy = under(a, b), subsumesB = under(b, a);
+  const outcome = subsumedBy && subsumesB ? 'equivalent' : subsumesB ? 'subsumes' : subsumedBy ? 'subsumed-by' : 'not-subsumed';
+  return { resourceType: 'Parameters', parameter: [{ name: 'outcome', valueCode: outcome }] };
+}
+
+// Medplum's CodeSystem $import (project-admin semantics): concepts, properties and designations into a stored CodeSystem,
+// by id or `system`, in one transaction; the answer is the CodeSystem. A built-in is 403, as Medplum answers a project admin
+// by id (by url Medplum finds only the project's own and answers 400 not found).
+export function codeSystemImport(store: Store, p: Params): CodeSystem {
+  const many = (name: string) => {
+    const v = p.all(name);
+    if (v.length > 1000) throw bad(`Expected 0..1000 value(s) for input parameter ${name}, but ${v.length} provided`);
+    return v;
+  };
+  const part = (x: ParametersParameter, name: string, required = true) => {
+    const v = paramValue(x.part?.find((y) => y.name === name));
+    if (v === undefined && required) throw bad(`Expected 1 value(s) for input parameter ${name}, but 0 provided`);
+    return v;
+  };
+  const concepts = many('concept').map((x) => {
+    if (!x.valueCoding?.code) throw bad('Expected a concept Coding with a code');
+    return x.valueCoding;
+  });
+  const properties = many('property').map((x) => ({ code: part(x, 'code')!, property: part(x, 'property')!, value: part(x, 'value')! }));
+  const designations = many('designation').map((x) => ({ code: part(x, 'code')!, language: part(x, 'language', false), value: part(x, 'value')! }));
+  const system = p.get('system');
+  if (!p.id && !system) throw bad('No code system specified');
+  const { rid, cs } = codeSystem(store, p, system);
+  if (isBuiltin(store.db, rid)) throw new StoreError(403, [{ text: 'Forbidden' }]);
+  store.transaction(() => importCodeSystem(store.db, rid, cs, concepts, properties, designations));
+  return cs;
 }

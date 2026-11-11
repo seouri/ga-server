@@ -1,5 +1,5 @@
 // The store over local HTTP in Medplum's REST shape (/fhir/R4/<Type>[/<id>[/_history[/<vid>]]], _search, PATCH, conditional
-// PUT/PATCH/DELETE, history, Patient/$everything, metadata, Binary, batch and transaction),
+// PUT/PATCH/DELETE, history, Patient/$everything, the CodeSystem terminology operations, metadata, Binary, batch and transaction),
 // so a MedplumClient in another process reads and writes it. The one process that owns the SQLite file runs this.
 // Every request but GET /healthz needs `Authorization: Bearer <token>` (the token file, created on first serve).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -14,6 +14,7 @@ import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { components, IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
+import { type Params, codeSystemImport, lookup, params, subsumes, validateCodeCs } from './terminology.ts';
 
 // Binaries stream to disk, so their limit (serveStore's maxBinaryBytes) can be gigabytes; JSON bodies are read whole.
 export const JSON_LIMIT = 16 << 20, DEFAULT_BINARY_LIMIT = 2 * 1024 ** 3;
@@ -227,6 +228,12 @@ function dispatch(store: Store, r: Req): Answer {
   if (r.query.has('_type') && ((method === 'GET' && !id) || (method === 'POST' && id === '_search' && !op))) return systemSearch(store, r);
   if (type === 'Binary') throw new HttpError(400, 'Binary is only served at Binary/<id>, not in a batch');
   if (!storedTypes().includes(type)) throw new HttpError(400, 'Unknown resource type'); // Medplum's text
+  // Type-level (Type/$op) and instance-level (Type/<id>/$op) operations, as Medplum routes them.
+  const name = id?.[0] === '$' && !op ? id : op?.[0] === '$' && !vid ? op : undefined;
+  const operation = name && OPERATIONS[`${type}/${name}`];
+  if (operation && operation.methods.includes(method)) {
+    return { status: 200, json: JSON.stringify(operation.run(store, operationParams(store, r, name === id ? undefined : id))) };
+  }
   if (!id) {
     if (method === 'GET') return { status: 200, json: store.searchJson(type, [...query], r.base) };
     if (method === 'POST') {
@@ -263,6 +270,22 @@ function dispatch(store: Store, r: Req): Answer {
   if (method === 'PATCH') return written(patch(store, type, id, r), 200);
   if (method === 'DELETE') { store.delete(type, id, r.ifMatch); return { status: 200, outcome: OK }; }
   throw new HttpError(405, `${method} not allowed`);
+}
+
+// Operations by Type/$name, with the methods Medplum routes for each.
+const OPERATIONS: Record<string, { methods: string[]; run: (store: Store, p: Params) => Resource }> = {
+  'CodeSystem/$lookup': { methods: ['GET', 'POST'], run: lookup },
+  'CodeSystem/$validate-code': { methods: ['GET', 'POST'], run: validateCodeCs },
+  'CodeSystem/$subsumes': { methods: ['GET', 'POST'], run: subsumes },
+  'CodeSystem/$import': { methods: ['POST'], run: codeSystemImport },
+};
+
+// An operation's input: the GET query (empty values skipped, as Medplum) or the POST body, a Parameters validated as a resource.
+function operationParams(store: Store, r: Req, id?: string): Params {
+  if (r.method === 'GET') return params([...r.query].filter(([, v]) => v).map(([name, v]) => ({ name, valueString: v })), id, true);
+  const p = resourceOf(r, 'Parameters') as Parameters;
+  store.validate(p);
+  return params(p.parameter, id);
 }
 
 // $validate takes the resource, or a Parameters holding it as `resource` (as Medplum).
@@ -487,6 +510,11 @@ function capability(): string {
           conditionalCreate: true, conditionalUpdate: true, conditionalDelete: 'single',
           searchParam: Object.values(getSearchParameters(type) ?? {}).filter((p) => p.type !== 'special' && (p.type !== 'composite' || !!components(type, p))).map((p) => ({ name: p.code, type: p.type })),
           ...(type === 'Patient' && { operation: [{ name: 'everything', definition: 'http://hl7.org/fhir/OperationDefinition/Patient-everything' }] }),
+          ...(type === 'CodeSystem' && { operation: [
+            ...['lookup', 'validate-code', 'subsumes'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/CodeSystem-${name}` })),
+            // Medplum's own operation; it publishes no OperationDefinition url, so this one follows its pattern.
+            { name: 'import', definition: 'https://medplum.com/fhir/OperationDefinition/codesystem-import' },
+          ] }),
         }),
     }],
   });

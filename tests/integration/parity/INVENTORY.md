@@ -539,22 +539,22 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/expand.test.ts | Expand › Display language › $name | skipped | terminology | not yet ported (Task 4) |
 | server/src/fhir/operations/expand.test.ts | Expand › Display language › Ancestor and descendant strategies agree under displayLanguage | skipped | terminology | in-process function, no HTTP request (expansionQuery) |
 | server/src/fhir/operations/expand.test.ts | Expand › Display language › Paging counts codes, not translation rows | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Success | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Renders description for relationship and simple properties | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Coding parameter | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Not found | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › No full coding specified | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Success | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Renders description for relationship and simple properties | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Coding parameter | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Not found | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › No full coding specified | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Checks project | skipped | terminology | project scoping: another project cannot see the CodeSystem |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Lookup using specific CodeSystem version | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Prefers complete CodeSystem over example even when example is newer | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Excludes retired CodeSystem from selection | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET endpoint | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance system URL mismatch | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Instance endpoint with coding | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance coding system mismatch | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Correctly renders imported properties of different types | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Outputs translated designations | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Lookup using specific CodeSystem version | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Prefers complete CodeSystem over example even when example is newer | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Excludes retired CodeSystem from selection | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET endpoint | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › GET instance endpoint | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance system URL mismatch | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Instance endpoint with coding | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance coding system mismatch | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Correctly renders imported properties of different types | ported | terminology |  |
+| server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Outputs translated designations | ported | terminology |  |
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Explicitly included code succeeds | skipped | terminology | not yet ported (Task 4) |
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter included code succeeds: %j | skipped | terminology | not yet ported (Task 4) |
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter excluded code fails | skipped | terminology | not yet ported (Task 4) |

@@ -925,6 +925,23 @@ describe('store server: Medplum-compatible routes', () => {
     expect([again.status, again.headers.get('location')]).toEqual([200, null]);
   });
 
+  it('CodeSystem operations: type and instance level, GET query and POST Parameters, in a batch; complex or repeated query values are 400', async () => {
+    const cs = (await call('POST', 'CodeSystem', { resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/ops', concept: [{ code: 'A', display: 'Alpha' }] })).json;
+    const display = (j: any) => j.parameter.find((p: { name: string }) => p.name === 'display')?.valueString;
+    expect(display((await call('GET', 'CodeSystem/$lookup?system=http://example.com/ops&code=A')).json)).toBe('Alpha');
+    expect(display((await call('GET', `CodeSystem/${cs.id}/$lookup?code=A`)).json)).toBe('Alpha');
+    expect(display((await call('POST', 'CodeSystem/$validate-code', { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/ops', code: 'A' } }] })).json)).toBe('Alpha');
+    const imported = await call('POST', `CodeSystem/${cs.id}/$import`, { resourceType: 'Parameters', parameter: [{ name: 'concept', valueCoding: { code: 'B', display: 'Beta' } }] });
+    expect([imported.status, imported.json.resourceType, imported.json.id]).toEqual([200, 'CodeSystem', cs.id]);
+    const b = await tx('batch', [{ request: { method: 'GET', url: `CodeSystem/${cs.id}/$lookup?code=B` } }]);
+    expect(display(b.json.entry[0].resource)).toBe('Beta');
+    const text = async (method: string, path: string, body?: unknown) => { const g = await call(method, path, body); return [g.status, g.json?.issue?.[0]?.details?.text]; };
+    expect(await text('GET', 'CodeSystem/$lookup?coding=x')).toEqual([400, 'Complex parameter coding (Coding) cannot be passed via query string']);
+    expect(await text('GET', 'CodeSystem/$lookup?system=http://example.com/ops&code=A&code=B')).toEqual([400, 'Expected 0..1 value(s) for input parameter code, but 2 provided']);
+    expect(await text('POST', 'CodeSystem/$lookup', { resourceType: 'Patient' })).toEqual([400, 'Expected a Parameters']);
+    expect((await call('GET', 'CodeSystem/$import')).status).toBe(404); // POST only, as Medplum
+  });
+
   it('GET metadata describes this store: types, interactions, search parameters (composites whose components R4 defines), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
     expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
@@ -935,6 +952,7 @@ describe('store server: Medplum-compatible routes', () => {
     expect(obsCap.searchParam).toContainEqual({ name: 'code-value-quantity', type: 'composite' });
     expect(rest.resource.find((r: { type: string }) => r.type === 'ResearchStudy').searchParam.map((p: { name: string }) => p.name)).not.toContain('progress-status-state-actual');
     expect(rest.resource.find((r: { type: string }) => r.type === 'Patient').operation[0].name).toBe('everything');
+    expect(rest.resource.find((r: { type: string }) => r.type === 'CodeSystem').operation.map((o: { name: string }) => o.name)).toEqual(['lookup', 'validate-code', 'subsumes', 'import']);
     for (const t of ['ValueSet', 'Questionnaire', 'Subscription']) expect(rest.resource.some((r: { type: string }) => r.type === t), t).toBe(true);
     expect(rest.resource.length).toBeGreaterThan(140);
   });

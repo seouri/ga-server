@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { CodeSystem } from '@medplum/fhirtypes';
+import type { CodeSystem, Parameters, ParametersParameter } from '@medplum/fhirtypes';
 import { IndexFormatError, Store, StoreError } from '../store.ts';
-import { findTerminology, isBuiltin, parentProperty } from '../terminology.ts';
+import { codeSystemImport, findTerminology, isBuiltin, lookup, params, parentProperty, subsumes, validateCodeCs } from '../terminology.ts';
 
 const err = (f: () => unknown): StoreError => { try { f(); } catch (e) { return e as StoreError; } throw new Error('did not throw'); };
 const cs = (o: Partial<CodeSystem> = {}): CodeSystem => ({ resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/cs', ...o });
@@ -14,6 +14,11 @@ const rid = (s: Store, id: string): number => (s.db.prepare("select rid from res
 const codings = (s: Store, r: number) => s.db.prepare('select code, display, language, synonymOf is not null syn from coding where system = ? order by code, syn, display').all(r)
   .map((x) => ({ ...x }));
 const count = (s: Store, type: string): number => s.search(type, [['_summary', 'count']], '').total!;
+// An operation's input as a POST Parameters body gives it.
+const P = (parameter: ParametersParameter[], id?: string) => params(parameter, id);
+const out = (p: Parameters, name: string) => p.parameter?.find((x) => x.name === name);
+const prop = (code: string, property: string, value: string): ParametersParameter =>
+  ({ name: 'property', part: [{ name: 'code', valueCode: code }, { name: 'property', valueCode: property }, { name: 'value', valueString: value }] });
 
 describe('concept index (no built-ins)', () => {
   let dir: string, store: Store;
@@ -97,6 +102,91 @@ describe('concept index (no built-ins)', () => {
     expect([e.status, e.outcome.issue?.[0]?.details?.text]).toEqual([400, 'Invalid filter: CodeSystem http://example.com/cs does not have an is-a hierarchy']);
   });
 
+  it('cyclic is-a parents end', () => {
+    const { resource } = store.create(cs({ hierarchyMeaning: 'is-a', property: [{ code: 'parent', uri: 'http://hl7.org/fhir/concept-properties#parent', type: 'code' }],
+      concept: [{ code: 'A', property: [{ code: 'parent', valueCode: 'B' }] }, { code: 'B', property: [{ code: 'parent', valueCode: 'A' }] }, { code: 'C' }] }));
+    const run = (a: string, b: string) => out(subsumes(store, P([{ name: 'codeA', valueCode: a }, { name: 'codeB', valueCode: b }], resource.id)), 'outcome')?.valueCode;
+    expect([run('A', 'B'), run('A', 'C'), run('C', 'C')]).toEqual(['equivalent', 'not-subsumed', 'equivalent']);
+  });
+
+  it('$subsumes: subsumes, subsumed-by, by system; 400 without codes or an is-a hierarchy', () => {
+    store.create(cs({ hierarchyMeaning: 'is-a', concept: [{ code: 'P', concept: [{ code: 'C', concept: [{ code: 'G' }] }] }, { code: 'X' }] }));
+    const run = (a: string, b: string) => out(subsumes(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'codeA', valueCode: a }, { name: 'codeB', valueCode: b }])), 'outcome')?.valueCode;
+    expect([run('P', 'G'), run('G', 'P'), run('G', 'X')]).toEqual(['subsumes', 'subsumed-by', 'not-subsumed']);
+    expect(err(() => subsumes(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'codeA', valueCode: 'P' }]))).outcome.issue?.[0]?.details?.text)
+      .toBe('Must specify codeA and codeB parameters');
+    expect(err(() => subsumes(store, P([{ name: 'codeA', valueCode: 'P' }, { name: 'codeB', valueCode: 'P' }]))).outcome.issue?.[0]?.details?.text).toBe('No code system specified');
+    store.create(cs({ url: 'http://example.com/flat', concept: [{ code: 'A' }] }));
+    expect(err(() => subsumes(store, P([{ name: 'system', valueUri: 'http://example.com/flat' }, { name: 'codeA', valueCode: 'A' }, { name: 'codeB', valueCode: 'A' }]))).status).toBe(400);
+  });
+
+  it('$lookup by system and code returns name, display, designations and properties', () => {
+    const { resource } = store.create(cs({ title: 'T', hierarchyMeaning: 'is-a', property: [{ code: 'rank', type: 'integer', description: 'Rank' }, { code: 'abstract', type: 'boolean' }],
+      concept: [{ code: 'P', display: 'Parent', concept: [{ code: 'C', display: 'Child', designation: [{ language: 'fr', value: 'Enfant' }, { value: 'Kid' }],
+        property: [{ code: 'abstract', valueBoolean: true }] }] }] }));
+    codeSystemImport(store, P([prop('C', 'rank', '7')], resource.id));
+    const r = lookup(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'C' }]));
+    expect(r.parameter).toEqual([
+      { name: 'name', valueString: 'T' },
+      { name: 'display', valueString: 'Child' },
+      { name: 'designation', part: [{ name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'Enfant' }] },
+      { name: 'designation', part: [{ name: 'value', valueString: 'Kid' }] },
+      { name: 'property', part: [{ name: 'code', valueCode: 'abstract' }, { name: 'value', valueBoolean: true }] },
+      { name: 'property', part: [{ name: 'code', valueCode: 'is-a' }, { name: 'value', valueCode: 'P' }, { name: 'description', valueString: 'Parent' }] },
+      { name: 'property', part: [{ name: 'code', valueCode: 'rank' }, { name: 'value', valueInteger: 7 }, { name: 'description', valueString: 'Rank' }] },
+    ]);
+    const status = (f: () => unknown) => { const e = err(f); return [e.status, e.outcome.issue?.[0]?.details?.text]; };
+    expect(status(() => lookup(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'nope' }])))).toEqual([404, 'Not found']);
+    expect(status(() => lookup(store, P([{ name: 'code', valueCode: 'C' }])))).toEqual([400, 'No code system specified']);
+    expect(status(() => lookup(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }])))).toEqual([400, 'No coding specified']);
+    expect(status(() => lookup(store, P([{ name: 'coding', valueCoding: { system: 'http://other' , code: 'C' } }], resource.id)))).toEqual([404, 'Not found']);
+    expect(status(() => lookup(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'C' }, { name: 'date', valueDateTime: '2020' }]))))
+      .toEqual([400, '$lookup: parameter date is not supported']);
+  });
+
+  it('$lookup and $validate-code honour url|version', () => {
+    store.create(cs({ version: '1', concept: [{ code: 'A', display: 'One' }] }));
+    store.create(cs({ version: '2', concept: [{ code: 'A', display: 'Two' }] }));
+    expect(out(lookup(store, P([{ name: 'system', valueUri: 'http://example.com/cs|1' }, { name: 'code', valueCode: 'A' }])), 'display')?.valueString).toBe('One');
+    expect(validateCodeCs(store, P([{ name: 'url', valueUri: 'http://example.com/cs|1' }, { name: 'code', valueCode: 'A' }])).parameter)
+      .toEqual([{ name: 'result', valueBoolean: true }, { name: 'display', valueString: 'One' }]);
+  });
+
+  it('$validate-code: by url, coding, id, displayLanguage; falls back to the system url', () => {
+    const { resource } = store.create(cs({ concept: [{ code: 'A', display: 'Alpha', designation: [{ language: 'fr', value: 'Alpha (fr)' }] }] }));
+    const v = (ps: ParametersParameter[], id?: string) => validateCodeCs(store, P(ps, id)).parameter;
+    expect(v([{ name: 'url', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'A' }])).toEqual([{ name: 'result', valueBoolean: true }, { name: 'display', valueString: 'Alpha' }]);
+    expect(v([{ name: 'url', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'B' }])).toEqual([{ name: 'result', valueBoolean: false }]);
+    expect(v([{ name: 'coding', valueCoding: { code: 'A' } }, { name: 'displayLanguage', valueCode: 'fr' }], resource.id)).toEqual([{ name: 'result', valueBoolean: true }, { name: 'display', valueString: 'Alpha (fr)' }]);
+    expect(v([{ name: 'coding', valueCoding: { code: 'A' } }, { name: 'displayLanguage', valueCode: 'de' }], resource.id)).toEqual([{ name: 'result', valueBoolean: false }]);
+    expect(v([{ name: 'url', valueUri: 'incorrect' }, { name: 'code', valueCode: 'A' }], resource.id)).toEqual([{ name: 'result', valueBoolean: false }]);
+    expect(v([{ name: 'coding', valueCoding: { system: 'http://unknown', code: 'A' } }])).toEqual([{ name: 'result', valueBoolean: true }]);
+    expect(v([{ name: 'url', valueUri: 'http://other' }, { name: 'coding', valueCoding: { system: 'http://unknown', code: 'A' } }])).toEqual([{ name: 'result', valueBoolean: false }]);
+    expect(err(() => v([{ name: 'code', valueCode: 'A' }])).outcome.issue?.[0]?.details?.text).toBe('No code system specified');
+    expect(err(() => v([{ name: 'url', valueUri: 'http://example.com/cs' }, { name: 'code', valueCode: 'A' }, { name: 'display', valueString: 'x' }])).outcome.issue?.[0]?.details?.text)
+      .toBe('$validate-code: parameter display is not supported');
+  });
+
+  it('$import adds concepts and properties to a stored CodeSystem; an unknown code rolls back; the CodeSystem is returned', () => {
+    const { resource } = store.create(cs({ content: 'not-present', hierarchyMeaning: 'is-a', property: [{ code: 'parent', uri: 'http://hl7.org/fhir/concept-properties#parent', type: 'code' }] }));
+    const r = rid(store, resource.id!);
+    const res = codeSystemImport(store, P([{ name: 'system', valueUri: 'http://example.com/cs' }, { name: 'concept', valueCoding: { code: 'A', display: 'Alpha' } },
+      { name: 'concept', valueCoding: { code: 'B', display: 'Beta' } }, prop('B', 'parent', 'A'),
+      { name: 'designation', part: [{ name: 'code', valueCode: 'A' }, { name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'Alpha (fr)' }] }]));
+    expect(res).toEqual(resource);
+    expect(codings(store, r).map((c) => `${c.code}:${c.display}`)).toEqual(['A:Alpha', 'A:Alpha (fr)', 'B:Beta']);
+    expect(out(subsumes(store, P([{ name: 'codeA', valueCode: 'A' }, { name: 'codeB', valueCode: 'B' }], resource.id)), 'outcome')?.valueCode).toBe('subsumes');
+    const e = err(() => codeSystemImport(store, P([{ name: 'concept', valueCoding: { code: 'Z' } }, prop('nope', 'parent', 'A')], resource.id)));
+    expect([e.status, e.outcome.issue?.[0]?.details?.text]).toEqual([400, 'Unknown code: http://example.com/cs|nope']);
+    expect(codings(store, r).map((c) => c.code)).not.toContain('Z');
+    const many = Array.from({ length: 1001 }, (_, i) => ({ name: 'concept', valueCoding: { code: `${i}` } }));
+    expect(err(() => codeSystemImport(store, P(many, resource.id))).outcome.issue?.[0]?.details?.text).toBe('Expected 0..1000 value(s) for input parameter concept, but 1001 provided');
+    expect(err(() => codeSystemImport(store, P([{ name: 'concept', valueCoding: { code: 'A' } }]))).outcome.issue?.[0]?.details?.text).toBe('No code system specified');
+    // an update of a CodeSystem whose content is not indexed keeps the imported concepts, as Medplum
+    store.update({ ...resource, title: 'renamed' } as CodeSystem);
+    expect(codings(store, r).map((c) => c.code)).toEqual(['A', 'A', 'B']);
+  });
+
   it('old index version is refused', () => {
     const file = join(dir, 'old.db');
     new Store(file, { terminology: [] }).close();
@@ -139,6 +229,28 @@ describe('built-in terminology', () => {
     const mine = store.create(cs({ url, content: 'example', concept: [{ code: 'X' }] })).resource;
     try {
       expect(findTerminology(store, 'CodeSystem', url).id).toBe(mine.id);
+    } finally { store.delete('CodeSystem', mine.id!); }
+  });
+
+  it('$subsumes over a built-in: v3-RoleCode', () => {
+    const run = (a: string, b: string) => out(subsumes(store, P([{ name: 'system', valueUri: 'http://terminology.hl7.org/CodeSystem/v3-RoleCode' },
+      { name: 'codeA', valueCode: a }, { name: 'codeB', valueCode: b }])), 'outcome')?.valueCode;
+    expect([run('SIB', 'ITWINBRO'), run('WIFE', 'SIGOTHR'), run('INLAW', 'INLAW'), run('BRO', 'VET')]).toEqual(['subsumes', 'subsumed-by', 'equivalent', 'not-subsumed']);
+  });
+
+  it('$import into a built-in is 403, by id and by system url', () => {
+    const url = 'http://terminology.hl7.org/CodeSystem/v3-RoleCode', v3 = findTerminology<CodeSystem>(store, 'CodeSystem', url);
+    const concept = { name: 'concept', valueCoding: { code: 'ZZ-injected' } };
+    for (const p of [P([concept], v3.id), P([{ name: 'system', valueUri: url }, concept])]) {
+      const e = err(() => codeSystemImport(store, p));
+      expect([e.status, e.outcome.issue?.[0]?.code, e.outcome.issue?.[0]?.details?.text]).toEqual([403, 'forbidden', 'Forbidden']);
+    }
+    expect(store.db.prepare("select count(*) n from coding where code = 'ZZ-injected'").get()).toEqual({ n: 0 });
+    // a stored CodeSystem with that url is the one written
+    const mine = store.create(cs({ url, content: 'not-present' })).resource;
+    try {
+      codeSystemImport(store, P([{ name: 'system', valueUri: url }, concept]));
+      expect(store.db.prepare("select system from coding where code = 'ZZ-injected'").get()).toEqual({ system: rid(store, mine.id!) });
     } finally { store.delete('CodeSystem', mine.id!); }
   });
 
