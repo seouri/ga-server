@@ -81,11 +81,14 @@ export async function uploadBinaries(client: MedplumClient, resources: Resource[
     for (const a of atts) {
       const b = a.url && byRef.get(a.url);
       if (!b) continue;
-      // Stored inline by an older import (before pending Binaries): the same bytes keep that inline form, no new Binary.
+      // Stored inline by an older import (before pending Binaries): the same bytes stay inline, no new Binary. Only the bytes
+      // (and their stored hash and size) come from the stored copy; title, contentType and the rest are the incoming ones.
       const inline = stored.find((x) => x.data && createHash('sha1').update(Buffer.from(x.data, 'base64')).digest('base64') === a.hash);
       if (inline) {
-        for (const k of Object.keys(a)) delete (a as Record<string, unknown>)[k];
-        Object.assign(a, inline);
+        delete a.url;
+        a.data = inline.data;
+        if (inline.hash) a.hash = inline.hash; else delete a.hash;
+        if (inline.size !== undefined) a.size = inline.size; else delete a.size;
         continue;
       }
       // Medplum may answer with a presigned storage URL: store the Binary/<id> form either way.

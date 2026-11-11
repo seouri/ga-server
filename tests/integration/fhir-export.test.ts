@@ -197,12 +197,15 @@ describe('patient-less exports', () => {
     try {
       expect(await importFhirExport(client, cfg, file, pid, { fhirBase: BASE })).toMatchObject({ created: 0, updated: 0 });
       expect(await importFhirExport(client, cfg, file, pid, { fhirBase: BASE })).toMatchObject({ created: 0, updated: 0 });
+      // Same bytes with a new title: only the bytes come from the stored copy, the title from the file.
+      const titled = writeExport('report-inline-titled.json', [{ resourceType: 'Patient', id: 'p1' }, { ...report, id: 'dr-inline', subject: { reference: 'Patient/p1' }, presentedForm: [{ ...report.presentedForm[0], title: 'Echo report' }] }] as Resource[]);
+      await importFhirExport(client, cfg, titled, pid, { fhirBase: BASE });
       expect(created).not.toHaveBeenCalled();
     } finally {
       created.mockRestore();
     }
     const dr = await client.searchOne('DiagnosticReport', { identifier: `${ID}|DiagnosticReport/dr-inline`, subject: `Patient/${pid}` }, { cache: 'no-cache' });
-    expect(dr?.presentedForm?.[0]).toMatchObject({ data: pdf });
+    expect(dr?.presentedForm?.[0]).toMatchObject({ data: pdf, title: 'Echo report', contentType: 'application/pdf' });
     expect(dr?.presentedForm?.[0]?.url).toBeUndefined();
   }));
 });
