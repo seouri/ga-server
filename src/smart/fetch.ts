@@ -130,8 +130,9 @@ export async function fetchAll(
   // A permanent refusal (403, 404...) leaves the attachment url-only. A failure for now (5xx, 408, 429, timeout, network, bad
   // JSON, an empty body or not a Binary) defers the whole record: left out of this sync, so the stored copy keeps its body and the
   // next sync retries. After DEAD such failures in a row the Binary endpoint counts as down: the remaining bodies wait too,
-  // unrequested, their deferral entries unchanged. Records already deferred go first, then the rest; newest lastUpdated first
-  // within each, so retries and new or changed records use a rate-limited quota before unchanged ones (which skip anyway).
+  // unrequested, their deferral entries unchanged (a new one counts 0 tries). Records already deferred go first, fewest tries
+  // first, then the rest; newest lastUpdated first within each, so every waiting record gets its turn and new or changed records
+  // use a rate-limited quota before unchanged ones (which skip anyway).
   // deferrals (the caller keeps it): per record whose own download failed for now, how many syncs in a row and since when; one
   // that failed in MAX_DEFER syncs over at least a day comes url-only instead, so a body that always fails never hides a record
   // for good. A bare number (older format) counts from now. A refused token (401) aborts.
@@ -146,8 +147,8 @@ export async function fetchAll(
   const fetchable = (a: Attachment) =>
     !!a.url && !a.data && /(^|\/)Binary\/[^/]+$/.test(a.url) && URL.canParse(a.url, `${base}/`) && new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`);
   const when = (r: Resource) => Date.parse(r.meta?.lastUpdated ?? '') || -Infinity;
-  const retry = (k: string) => (Object.hasOwn(deferrals, k) ? 0 : 1);
-  for (const [k, r] of [...got].sort(([ka, a], [kb, b]) => retry(ka) - retry(kb) || when(b) - when(a))) {
+  const tries = (k: string) => prevOf(k)?.n ?? Infinity; // Infinity - Infinity is NaN: falls through to lastUpdated
+  for (const [k, r] of [...got].sort(([ka, a], [kb, b]) => tries(ka) - tries(kb) || when(b) - when(a))) {
     const atts = attachmentsOf(r).filter(fetchable);
     let defer = atts.length > 0 && streak >= DEAD;
     let tried = false; // this record's own download failed for now (not just the DEAD stop)
@@ -176,7 +177,7 @@ export async function fetchAll(
           try {
             j = JSON.parse(buf.toString('utf8'));
           } catch {
-            if (/application\/fhir\+json/i.test(type)) throw new GaError('Binary: invalid JSON');
+            if (/application\/(fhir\+json|json\+fhir)/i.test(type)) throw new GaError('Binary: invalid JSON');
           }
           if (j && typeof j === 'object' && 'resourceType' in j) fhir = j as FhirBinary;
         }
@@ -207,7 +208,7 @@ export async function fetchAll(
     got.delete(k);
     deferredKeys.push(k);
     if (tried) nextDeferrals[k] = { n: (prev?.n ?? 0) + 1, since: prev?.since ?? now.toISOString() };
-    else if (prev) nextDeferrals[k] = prev; // never requested this sync: its count waits
+    else nextDeferrals[k] = prev ?? { n: 0, since: now.toISOString() }; // never requested this sync: its count waits
   }
   skipped.Binary = [
     deferredKeys.length && `${deferredKeys.length} deferred to the next sync, last ${lastReason}`,

@@ -387,7 +387,7 @@ describe('a body download that fails for now', () => {
       rmSync(file);
       expect((await syncSource(client, dir, src, pid, { dryRun: true })).status).toBe('active');
       expect(existsSync(file)).toBe(false);
-      for (const corrupt of ['[1]', '"x"', '{"DocumentReference/doc-flaky": "x"}']) {
+      for (const corrupt of ['null', '[1]', '"x"', '{"DocumentReference/doc-flaky": "x"}']) {
         writeFileSync(file, corrupt);
         expect((await syncSource(client, dir, src, pid, { now: new Date(Date.now() - 30_000) })).status).toBe('active');
         expect(counts()['DocumentReference/doc-flaky']).toMatchObject({ n: 1 });

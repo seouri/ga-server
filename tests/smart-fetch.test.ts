@@ -221,6 +221,19 @@ describe('fetchAll', () => {
     expect(got.skipped.Binary).not.toMatch(/url-only/);
   });
 
+  it('a Binary endpoint down for good: every record still arrives (url-only) after enough syncs, none starved by the stop', async () => {
+    const ids: [string, string, string?][] = ['broken', 'broken1', 'broken2', 'broken3', 'broken4'].map((b, i) => [`dr${i + 1}`, b, `2026-06-0${5 - i}T00:00:00Z`]);
+    let deferrals: NonNullable<Parameters<typeof fetchAll>[4]>['deferrals'] = {};
+    const arrived = new Set<string>();
+    for (let s = 0; s < 12; s++) {
+      const now = new Date(Date.parse('2026-06-10T00:00:00Z') + s * 12 * 3_600_000);
+      const { got } = await reportsMock(ids, (res) => void res.writeHead(503).end(), { now, deferrals });
+      for (const k of keys(got.resources)) if (k.startsWith('DiagnosticReport')) arrived.add(k);
+      deferrals = got.deferrals;
+    }
+    expect([...arrived].sort()).toEqual(['DiagnosticReport/dr1', 'DiagnosticReport/dr2', 'DiagnosticReport/dr3', 'DiagnosticReport/dr4', 'DiagnosticReport/dr5']);
+  });
+
   it('a JSON attachment that is not a FHIR resource is stored as bytes; unparseable fhir+json still defers', async () => {
     const asJson = (body: string, type = 'application/json') => (res: ServerResponse) => void res.writeHead(200, { 'content-type': type }).end(body);
     for (const body of ['{"note":"synthetic"}', 'not json at all']) {
