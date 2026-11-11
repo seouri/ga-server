@@ -792,24 +792,24 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No mapping groups specified | skipped | terminology | not yet ported (Task 5) |
 | server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Complex SNOMED to ICD mapping | skipped | terminology | not yet ported (Task 5) |
 | server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Renders mapping comment | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and properties separately | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and associated relationships | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code system | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code for property | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown property | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and properties separately | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and associated relationships | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code system | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code for property | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown property | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on non-SuperAdmin user | skipped | terminology | needs a Super Admin |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows access by Project admin | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to linked Project systems | skipped | terminology | linked projects or project scoping |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows access by Project admin | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to linked Project systems | ported | terminology | differs on purpose: a built-in is 403 by url too |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Allows Super Admin to import into base CodeSystem by ID | skipped | terminology | needs a Super Admin |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to base CodeSystem by ID | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Prevents writes by Project admin to base CodeSystem by ID | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem | skipped | terminology | access policy |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Requires update permission on own Project CodeSystem by URL | skipped | terminology | access policy |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and synonym designations | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Rejects excessively large batches | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and synonym designations | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Attaches imported properties to primary coding instead of synonym | skipped | terminology | not yet ported (Task 4): its last step is ValueSet $expand |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Rejects excessively large batches | ported | terminology |  |
+| server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | ported | terminology |  |
 | server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports basic mappings from resource | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
 | server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports mapping metadata | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
 | server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports concept mappings and attributes | skipped | terminology | not yet ported (Task 5) |

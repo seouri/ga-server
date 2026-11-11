@@ -106,6 +106,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 - `:identifier` applies to reference parameters only, `:of-type` to tokens on an Identifier, `:above`/`:below` to uris (token `:above`/`:below` are terminology, below): elsewhere 400 (Medplum ignores `:identifier`, `:above`, `:of-type` on strings and references, and `:contains`, `:of-type` on uris, and answers 200).
 - A terminology operation's `url|version` (`system`, `url`) selects that version, as an R4 canonical means (Medplum 5.2.14 drops the `|version` and uses the newest version; its `$lookup` then answers 404).
 - R4 inputs the CodeSystem operations do not implement are 400 `<operation>: parameter <name> is not supported` (Medplum ignores them): `$lookup` `date`, `displayLanguage`, `property`; `$validate-code` `codeSystem`, `codeableConcept`, `date`, `abstract`, `display`; `$subsumes` `codingA`, `codingB`.
+- `CodeSystem/$import` with a `system` that names a built-in (and no stored CodeSystem) is 403 `Forbidden`, as by id (Medplum finds only the project's own CodeSystems by url and answers 400 `CodeSystem <url> not found`).
 - An operation's POST body must be a `Parameters` (400 `Expected a Parameters`); Medplum also reads a plain JSON object of parameter names.
 - No `_deleted` parameter: the store keeps no deleted records (Medplum's soft delete), so `_deleted` is an unknown parameter (400).
 - No login, users, projects or access policies: one bearer token; meant for loopback or a private network only, not as a public FHIR server.

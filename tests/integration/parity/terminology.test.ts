@@ -390,4 +390,160 @@ describe.skipIf(SQLITE)('built-in terminology (parity)', () => {
       expect(store).toEqual([400, '$subsumes: parameter codingA is not supported']);
     });
   });
+
+  // codesystemimport.test.ts. Medplum's beforeEach replaces its one http://snomed.info/sct CodeSystem; here each test makes its
+  // own with a unique url. Medplum's Super Admin calls are made by the parity project's admin (project-admin semantics, R7).
+  describe('CodeSystem $import', () => {
+    const snomedJSON: CodeSystem = {
+      resourceType: 'CodeSystem', url: 'http://snomed.info/sct', name: 'SNOMEDCT_US', title: 'SNOMED CT (US Edition)', status: 'active', experimental: false,
+      hierarchyMeaning: 'is-a', versionNeeded: false, content: 'not-present',
+      property: [{ code: 'parent', uri: 'http://hl7.org/fhir/concept-properties#parent', description: 'A SNOMED CT concept id that has the target of a direct is-a relationship from the concept', type: 'code' },
+        { code: 'active', type: 'boolean' }],
+    };
+    let suffix: string;
+    beforeAll(async () => {
+      // An import into a built-in by a Super Admin would write Medplum's server-wide R4 tables, which no cleanup undoes.
+      const me = (await sides[0].call('GET', '../../auth/me')).json;
+      expect(me?.project?.id).toBeTruthy();
+      expect(me.project.superAdmin).toBeFalsy();
+    });
+    const snomed = (s: Side) => s.create<CodeSystem>({ ...snomedJSON, url: `http://snomed.info/sct-${suffix}` });
+    const imp = (s: Side, ...parameter: ParametersParameter[]) => call(s, 'POST', 'CodeSystem/$import', P(...parameter));
+    const imports = (s: Side, cs: CodeSystem, ...parameter: ParametersParameter[]) => imp(s, { name: 'system', valueUri: cs.url }, ...parameter);
+    const concept = (code: string, display?: string): ParametersParameter => ({ name: 'concept', valueCoding: { code, display } });
+    // Medplum's assertCodeExists / assertPropertyExists / assertCodeMissing, by $lookup: the code's display, designations and properties.
+    const look = (s: Side, cs: { id?: string }, code: string) => call(s, 'GET', `CodeSystem/${cs.id}/$lookup?code=${encodeURIComponent(code)}`);
+    const run = <T>(fn: (s: Side) => Promise<T>) => () => { suffix = randomUUID(); return same(sides, fn).then(() => undefined); };
+
+    test('CodeSystem $import › Imports concepts and properties separately [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, concept('37931006', 'Auscultation (procedure)'), concept('315306007', 'Examination by method (procedure)'));
+      const res2 = await imports(s, cs, prop('37931006', 'parent', '315306007'));
+      expect([res.status, res2.status]).toEqual([200, 200]);
+      const found = await look(s, cs, '37931006');
+      expect(found.body.parameter).toEqual(expect.arrayContaining([{ name: 'display', valueString: 'Auscultation (procedure)' },
+        { name: 'property', part: [{ name: 'code', valueCode: 'parent' }, { name: 'value', valueCode: '315306007' }, { name: 'description', valueString: 'Examination by method (procedure)' }] }]));
+      expect((await look(s, cs, '315306007')).status).toBe(200);
+      return [res, res2, found];
+    }));
+
+    test('CodeSystem $import › Imports concepts and associated relationships [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, concept('184598004', 'Needle biopsy of brain (procedure)'), concept('702707005', 'Biopsy of head (procedure)'),
+        concept('118690002', 'Procedure on head (procedure)'), concept('71388002', 'Procedure (procedure)'),
+        prop('184598004', 'parent', '702707005'), prop('702707005', 'parent', '118690002'), prop('118690002', 'parent', '71388002'));
+      expect(res.status).toBe(200);
+      const found = await look(s, cs, '702707005');
+      // the relationship's target is set: its display describes the property
+      expect(found.body.parameter).toContainEqual({ name: 'property', part: [{ name: 'code', valueCode: 'parent' }, { name: 'value', valueCode: '118690002' },
+        { name: 'description', valueString: 'Procedure on head (procedure)' }] });
+      return [res, found];
+    }));
+
+    test('CodeSystem $import › Returns error on unknown code system [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const res = await imp(s, { name: 'system', valueUri: 'http://example.com/unknown' }, concept('1', 'Aspirin'));
+      expect([res.status, res.body.issue?.[0]?.code]).toEqual([400, 'invalid']);
+      return res;
+    }));
+
+    test('CodeSystem $import › Returns error on unknown code for property [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, prop('not a real code', 'parent', '71388002'));
+      expect([res.status, res.body.issue?.[0]?.code]).toEqual([400, 'invalid']);
+      return res;
+    }));
+
+    test('CodeSystem $import › Returns error on unknown property [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, concept('184598004', 'Needle biopsy of brain (procedure)'), prop('184598004', 'not a real property', '71388002'));
+      expect([res.status, res.body.issue?.[0]?.code]).toEqual([400, 'invalid']);
+      const after = await look(s, cs, '184598004'); // the import is one transaction
+      expect(after.status).toBe(404);
+      return [res, after];
+    }));
+
+    test('CodeSystem $import › Allows access by Project admin [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, concept('184598004', 'Needle biopsy of brain (procedure)'));
+      expect(res.status).toBe(200);
+      const found = await look(s, cs, '184598004');
+      expect(found.status).toBe(200);
+      return [res, found];
+    }));
+
+    // Medplum (ownProjectOnly) does not see another project's CodeSystem by url: 400 not found. The store has no projects; the url
+    // names a built-in, and a write to a built-in is 403 (R2), as Medplum answers the same import by id.
+    test('differs on purpose: CodeSystem $import › Prevents writes by Project admin to linked Project systems [server/src/fhir/operations/codesystemimport.test.ts]', async () => {
+      const [medplum, store] = await both(sides, async (s) => {
+        const res = await imp(s, { name: 'system', valueUri: ROLE_CODE }, concept('NIBL', 'nibling'));
+        return [res.status, res.body.issue?.[0]?.code, res.body.issue?.[0]?.details?.text];
+      });
+      expect(medplum).toEqual([400, 'invalid', `CodeSystem ${ROLE_CODE} not found`]);
+      expect(store).toEqual([403, 'forbidden', 'Forbidden']);
+      await same(sides, async (s) => {
+        const base = (await search(s, q('CodeSystem', ['url', ROLE_CODE]))).entry?.[0]?.resource as CodeSystem;
+        const r = await look(s, base, 'NIBL');
+        expect(r.status).toBe(404);
+        return r;
+      });
+    });
+
+    test('CodeSystem $import › Prevents writes by Project admin to base CodeSystem by ID [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const base = (await search(s, q('CodeSystem', ['url', ROLE_CODE]))).entry?.[0]?.resource as CodeSystem;
+      expect(base?.id).toBeDefined();
+      const code = `ZZ${suffix}`;
+      const res = await call(s, 'POST', `CodeSystem/${base.id}/$import`, P(concept(code, 'Injected concept')), { 'x-medplum': 'extended' });
+      expect(res.status).toBe(403);
+      const missing = await look(s, base, code);
+      expect(missing.status).toBe(404);
+      return [res, missing];
+    }));
+
+    const byId = (headers: Record<string, string>) => run(async (s) => {
+      const cs = await s.create<CodeSystem>({ ...snomedJSON, url: `http://example.com/CodeSystem/${suffix}` });
+      const code = `ZZ${suffix}`;
+      const res = await call(s, 'POST', `CodeSystem/${cs.id}/$import`, P(concept(code, 'Own project concept')), headers);
+      expect(res.status).toBe(200);
+      const found = await look(s, cs, code);
+      expect(found.status).toBe(200);
+      return [res, found];
+    });
+    test('CodeSystem $import › Imports into own Project CodeSystem by ID [server/src/fhir/operations/codesystemimport.test.ts]', byId({ 'x-medplum': 'extended' }));
+    test('CodeSystem $import › Imports into own Project CodeSystem by ID without extended mode [server/src/fhir/operations/codesystemimport.test.ts]', byId({}));
+
+    test('CodeSystem $import › Imports concepts and synonym designations [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, concept('37931006', 'Auscultation (procedure)'),
+        { name: 'designation', part: [{ name: 'code', valueCode: '37931006' }, { name: 'value', valueString: 'Listening' }] },
+        { name: 'designation', part: [{ name: 'code', valueCode: '37931006' }, { name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'auscultation (intervention)' }] });
+      expect(res.status).toBe(200);
+      const found = await look(s, cs, '37931006');
+      expect(found.body.parameter).toEqual(expect.arrayContaining([{ name: 'display', valueString: 'Auscultation (procedure)' },
+        { name: 'designation', part: [{ name: 'value', valueString: 'Listening' }] },
+        { name: 'designation', part: [{ name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'auscultation (intervention)' }] }]));
+      return [res, found];
+    }));
+
+    test('CodeSystem $import › Rejects excessively large batches [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const res = await imports(s, cs, ...Array.from({ length: 1001 }, (_, i) => ({ name: 'concept', valueCoding: { code: i.toString() } })));
+      expect(res.status).toBe(400);
+      expect(res.body.issue?.[0]).toStrictEqual({ code: 'invalid', details: { text: 'Expected 0..1000 value(s) for input parameter concept, but 1001 provided' }, severity: 'error' });
+      return res;
+    }));
+
+    test('CodeSystem $import › Accepts batch of max size [server/src/fhir/operations/codesystemimport.test.ts]', run(async (s) => {
+      const cs = await snomed(s);
+      const parameter: ParametersParameter[] = [];
+      for (let i = 0; i < 1000; i++) {
+        parameter.push({ name: 'concept', valueCoding: { code: i.toString() } }, prop(i.toString(), 'active', '1'),
+          { name: 'designation', part: [{ name: 'code', valueCode: i.toString() }, { name: 'language', valueCode: 'en-GB' }, { name: 'value', valueString: i.toLocaleString('en-GB') }] });
+      }
+      const res = await imports(s, cs, ...parameter);
+      expect(res.status).toBe(200);
+      const found = await look(s, cs, '999');
+      expect(found.status).toBe(200);
+      return [res, found];
+    }), 120_000);
+  });
 });
