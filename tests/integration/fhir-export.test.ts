@@ -1,4 +1,5 @@
 // Epic FHIR export import against the local Medplum, on a throwaway test patient.
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,8 +7,9 @@ import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getClient, loadConfig, type GaConfig } from '../../src/config.ts';
+import { importResources } from '../../src/engine.ts';
 import { importFhirExport } from '../../src/fhir-export/import.ts';
-import { NEWEST_IMPORT } from '../../src/identity.ts';
+import { APPLE, NEWEST_IMPORT } from '../../src/identity.ts';
 import { currentList } from '../../src/lists.ts';
 import { sourceKey } from '../../src/smart/auth.ts';
 import { cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
@@ -52,6 +54,29 @@ describe('importFhirExport', () => {
     const r = await importFhirExport(client, cfg, MINI, patientId, { fhirBase: BASE });
     expect(r.created).toBe(0);
     expect(r.updated).toBe(0);
+  });
+  // A real Epic export has no meta.lastUpdated at all: its records are fill-only with no source date. One identical to an Apple
+  // clinical copy takes that copy over: the export's tag, no source date (the Apple export date removed), the Apple id kept.
+  it('a file with no lastUpdated takes over an identical apple-only copy', async () => {
+    const id = `a-${randomUUID()}`;
+    const body = { resourceType: 'Condition', id, code: { text: 'synthetic apple problem' }, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/condition-clinical', code: 'active' }] } };
+    const apple = { ...body, subject: { reference: `Patient/${patientId}` }, identifier: [{ system: ID, value: `Condition/${id}` }, { system: APPLE, value: `${BASE}Condition/${id}` }] } as Resource;
+    await importResources(client, [apple], { kind: 'apple-clinical', file: '/synthetic/export.xml', date: '2025-11-10T00:00:00Z', writer: 'importer', fillOnly: () => true }, patientId, '');
+    const tmp = mkdtempSync(join(tmpdir(), 'fhir-export-apple-'));
+    const file = join(tmp, 'ehr.json');
+    writeFileSync(file, JSON.stringify({ fhir: { Patient: [{ resourceType: 'Patient', id: 'p1' }], Condition: [{ ...body, subject: { reference: 'Patient/p1' } }] } }));
+    try {
+      expect(await importFhirExport(client, cfg, file, patientId, { fhirBase: BASE })).toMatchObject({ updated: 1, created: 0 });
+      const c = await client.searchOne('Condition', { identifier: `${ID}|Condition/${id}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
+      const tags = c?.meta?.tag?.map((t) => t.code);
+      expect(tags).toContain('src-fhir-export');
+      expect(tags).not.toContain('src-apple-clinical');
+      expect(c?.extension?.some((e) => e.url === 'urn:ga-server:ext:source-date')).toBe(false);
+      expect(c?.identifier?.map((i) => i.system)).toContain(APPLE);
+      expect(await importFhirExport(client, cfg, file, patientId, { fhirBase: BASE })).toMatchObject({ updated: 0, created: 0 });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
   it('an added note updates the record', async () => {
     await importFhirExport(client, cfg, MINI_NOTE, patientId, { fhirBase: BASE });

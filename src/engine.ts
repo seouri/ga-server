@@ -569,9 +569,18 @@ export async function importResources(
     // The same holds for a FHIR export copy without lastUpdated and an Apple clinical copy, onto a record another source wrote
     // (a src-<x> tag other than its own, or an EHI, C-CDA or PDF identifier).
     const srcTags = (r: R) => (r.meta?.tag ?? []).filter((t) => t.system === TAG && t.code?.startsWith('src-')).map((t) => t.code!);
-    // A record only Apple wrote is not another source's here: a fill-only hospital copy (an Epic export has no lastUpdated) takes it over.
+    // A hospital clinical copy only Apple wrote is not another source's here: a fill-only hospital copy (an Epic export has no
+    // lastUpdated) takes it over, but only when it loses nothing the Apple copy has (identical or richer; a rebuilt record never
+    // replaces Apple's content, dates or extensions).
+    const losesNothing = (ex: R) => {
+      const b = body(ex) as O;
+      const fb = body(fillFrom(ex, coded, source)) as O;
+      return Object.keys(b).every((k) => weaker(fb[k], b[k]));
+    };
+    const appleTakeover = (ex: R) =>
+      hospitalOntoApple(ex) && srcTags(ex)[0] === 'src-apple-clinical' && !idList(ex).some((i) => OTHER_SOURCE(i.system ?? '')) && losesNothing(ex);
     const fillOnly = (ex: R) =>
-      !!source.fillOnly?.(incoming) && !(hospitalOntoApple(ex) && !idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))) &&
+      !!source.fillOnly?.(incoming) && !appleTakeover(ex) &&
       (source.kind === 'smart'
         ? idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))
         : (source.kind === 'fhir-export' || source.kind === 'apple-clinical') &&
