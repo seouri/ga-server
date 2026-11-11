@@ -101,7 +101,7 @@ export async function setup(
     patientId: patient.id as string,
     projectId,
     adminPassword: rotate ? randomBytes(24).toString('base64url') : password,
-    ...(written?.terminologyLookup === false && { terminologyLookup: false }), // the person's off switch survives a re-run
+    terminologyLookup: written?.terminologyLookup ?? true, // written so the person sees it; their off switch survives a re-run
   };
   // Saved before the change: if the change fails, the next run falls back to the default and rotates again.
   writeConfig(out, cfg);
@@ -124,7 +124,7 @@ function writeConfig(out: string, cfg: GaConfig): void {
 // the config (Medplum's, for a rollback; storeUrl) are kept.
 async function setupStore(out: string, stored: GaConfig | undefined): Promise<GaConfig> {
   const patient = await selfPatient(await getClient({ ...(stored ?? ({} as GaConfig)), store: 'sqlite' }));
-  const cfg: GaConfig = { ...stored, patientId: patient.id as string, store: 'sqlite' };
+  const cfg: GaConfig = { ...stored, patientId: patient.id as string, store: 'sqlite', terminologyLookup: stored?.terminologyLookup ?? true };
   writeConfig(out, cfg);
   return cfg;
 }

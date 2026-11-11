@@ -27,7 +27,7 @@ test('setup on the store creates exactly one self Patient (twice) and writes a c
   expect(patients.map((p) => p.id)).toEqual([first.patientId]);
   expect(patients[0].identifier).toEqual([{ system: 'urn:ga-server:id:patient', value: 'self' }]);
   const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
-  expect(cfg).toEqual({ patientId: first.patientId, store: 'sqlite' });
+  expect(cfg).toEqual({ patientId: first.patientId, store: 'sqlite', terminologyLookup: true }); // the lookup choice is written, so the person sees it
   expect(statSync(join(dir, 'config.json')).mode & 0o777).toBe(0o600);
 });
 
@@ -35,7 +35,7 @@ test('a setup re-run on the store keeps the other config keys (Medplum rollback,
   const before = { baseUrl: 'http://localhost:8103/', clientId: 'c', clientSecret: 's', patientId: 'old', projectId: 'pr', converterUrl: 'http://old:8104/', storeUrl: 'http://store:8120/', adminPassword: 'pw' };
   writeFileSync(join(dir, 'config.json'), JSON.stringify(before));
   const cfg = await setup('http://127.0.0.1:9/');
-  expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toEqual({ ...before, patientId: cfg.patientId, store: 'sqlite' });
+  expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toEqual({ ...before, patientId: cfg.patientId, store: 'sqlite', terminologyLookup: true });
   expect(cfg.patientId).not.toBe('old');
 });
 
@@ -118,4 +118,10 @@ test('noRotate never changes a stored default password', async () => {
   } finally {
     srv.close();
   }
+});
+
+test('a setup re-run keeps the person\'s terminologyLookup off switch', async () => {
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ patientId: 'old', store: 'sqlite', terminologyLookup: false }));
+  await setup('http://127.0.0.1:9/');
+  expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).terminologyLookup).toBe(false);
 });

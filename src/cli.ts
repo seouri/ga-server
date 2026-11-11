@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { afterImport } from './concept-auto.ts';
-import { GaError, getClient, loadConfig } from './config.ts';
+import { defaultConfigPath, GaError, getClient, loadConfig } from './config.ts';
 import { detectKind, DOCUMENT_EXT, importAny } from './import.ts';
 import { enrollLink } from './gateway/passkey.ts';
 import { gatewayDir } from './gateway/store.ts';
@@ -14,6 +14,9 @@ try {
   if (process.argv[2] === 'setup') {
     const cfg = await setup();
     console.log(`GA ready. Patient/${cfg.patientId}`);
+    console.log(cfg.terminologyLookup === false
+      ? 'Code lookup is off: term names stay on this machine.'
+      : `Code lookup is on: to find standard codes, GA sends term names (never values, dates or ids) to NLM and HL7's tx.fhir.org. To turn it off, set "terminologyLookup": false in ${defaultConfigPath()}.`);
   } else if (process.argv[2] === 'import' && process.argv[3]) {
     const file = process.argv[3];
     const api = process.argv[4] === '--llm' && process.argv[5] === 'api';
