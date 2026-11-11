@@ -31,7 +31,7 @@ export const PATIENT_COMPARTMENT = [
 export const COMPARTMENT_TYPES = PATIENT_COMPARTMENT.filter((t) => !NEVER.has(t));
 // Archives and imported source files (C-CDA, EHI media, PDFs): untrimmed demographics, MRN, insurance and out-of-scope data.
 // Only the records extracted from them are shared; their Binary is never followed because they never enter `resources`.
-export const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:file']);
+export const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:dicom-archive', 'urn:ga-server:id:file']);
 const BY_TYPE: Record<string, Group> = {
   DiagnosticReport: 'labs',
   MedicationStatement: 'medications',

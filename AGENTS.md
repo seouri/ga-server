@@ -79,7 +79,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 
 Extract health records from a local PDF or image into GA through the `ga-server` MCP tools. GA never sends data anywhere: you read the file yourself.
 
-1. Read the PDF or image locally (the path must exist on this machine).
+1. Read the PDF or image locally (the path must exist on this machine). A TIFF: make a PNG copy in your scratch directory (`sips -s format png <file> --out <copy>`) to read, and pass the original TIFF as `sourceFile`.
 2. Emit one `Observation` per result:
    - `code.coding` with a LOINC code (`system: http://loinc.org`) only when confident, otherwise `code.text` only.
    - `valueQuantity` with a UCUM unit (`system: http://unitsofmeasure.org`, `code`).

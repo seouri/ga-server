@@ -1,6 +1,6 @@
 // Fetch every patient-scoped resource a SMART FHIR R4 server offers, and map it for GA's import engine (no writes).
 import { createHash } from 'node:crypto';
-import type { Attachment, Bundle, CapabilityStatement, DocumentReference, Identifier, Resource } from '@medplum/fhirtypes';
+import type { Attachment, Bundle, CapabilityStatement, DiagnosticReport, DocumentReference, Identifier, Resource } from '@medplum/fhirtypes';
 import { GaError } from '../config.ts';
 import { rtfToText } from '../ehi/rtf.ts';
 import { COMPARTMENT } from '../engine.ts';
@@ -151,7 +151,7 @@ const entity = (m: string, e: string): string => {
 
 // Plain text of an HTML note: scripts, styles and head dropped, block ends become line breaks, entities decoded.
 // shortcut: only the common named entities are decoded; upgrade if notes show others.
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   return html
     .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
@@ -237,6 +237,12 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
     if (r.resourceType === 'DocumentReference') {
       const d = r as DocumentReference;
       d.content = d.content.map((c, i) => ({ ...c, attachment: note(c.attachment, `urn:ga-server:pending-binary:${keyOf(orig)}/${i}`) }));
+    }
+    if (r.resourceType === 'DiagnosticReport') {
+      // A report's html or rtf text becomes plain text like a note; PDFs and images stay as they are.
+      const d = r as DiagnosticReport;
+      const textual = (a: Attachment): boolean => /^(text\/html|text\/rtf|application\/rtf)$/i.test((a.contentType ?? '').split(';')[0].trim());
+      if (d.presentedForm) d.presentedForm = d.presentedForm.map((a, i) => (a.data && textual(a) ? note(a, `urn:ga-server:pending-binary:${keyOf(orig)}/presentedForm/${i}`) : a));
     }
     return r as Resource;
   });

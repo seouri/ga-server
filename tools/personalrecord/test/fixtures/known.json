@@ -1,0 +1,13 @@
+{
+  "fhir": {
+    "Observation": [
+      { "resourceType": "Observation", "id": "eKNOWNOBS0000000000001", "status": "final", "code": { "text": "Synthetic known lab" }, "effectiveDateTime": "2025-12-31", "valueString": "x" }
+    ],
+    "Condition": [
+      { "resourceType": "Condition", "id": "eCOND000000000000000001", "code": { "text": "Synthetic condition" }, "recordedDate": "2020-05-01", "note": [{ "text": "existing" }] },
+      { "resourceType": "Condition", "id": "eCOND000000000000000002", "code": { "text": "Synthetic twin" }, "recordedDate": "2021-05-01" },
+      { "resourceType": "Condition", "id": "eCOND000000000000000003", "code": { "text": "Synthetic twin" }, "recordedDate": "2022-05-01" }
+    ]
+  },
+  "attachments": []
+}

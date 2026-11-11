@@ -17,6 +17,7 @@ export type Sdk = {
 
 // Sends the document to the Claude API (opt-in: only called for `--llm api`). Never logs contents or values.
 export async function extractWithApi(filePath: string, apiKey: string, client: Sdk = new Anthropic({ apiKey })): Promise<Resource[]> {
+  if (/\.tiff?$/i.test(filePath)) throw new GaError('convert the TIFF to PNG first (the API takes PDF, PNG and JPEG)');
   const media = MEDIA[extname(filePath).toLowerCase()];
   if (!media) throw new GaError(`unsupported file type (${Object.keys(MEDIA).join(', ')})`);
   const data = readFileSync(filePath).toString('base64');

@@ -38,7 +38,7 @@ const SUBJECT_TYPES = ['Observation', 'Condition', 'MedicationStatement', 'Medic
 const NO_NOTE = new Set(['Encounter', 'DiagnosticReport']);
 // FHIR date, or dateTime with seconds and zone.
 const DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2}))?$/;
-const TYPES: Record<string, string> = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+const TYPES: Record<string, string> = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.tif': 'image/tiff', '.tiff': 'image/tiff' };
 
 // Validate, store the source file, link every resource to it, then run the dedup-safe write path.
 export async function importExtracted(
