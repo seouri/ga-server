@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { getSearchParameters } from '@medplum/core';
 import { describe, expect, it } from 'vitest';
 import { loadDefinitions, storedTypes } from '../definitions.ts';
@@ -31,6 +32,10 @@ describe('types option', () => {
       expect((await fetch(`${base}Questionnaire/_history`, { headers })).status).toBe(400);
       const cap = await (await fetch(`${base}metadata`, { headers })).json();
       expect(cap.rest[0].resource.map((r: { type: string }) => r.type)).toEqual(['Binary', 'Observation', 'Patient']);
+      // no CodeSystem or ValueSet in the set: no built-in terminology seed (and no marker)
+      const raw = new DatabaseSync(join(dir, 'x.db'));
+      expect(raw.prepare('select (select count(*) from builtin) b, (select count(*) from meta) m').get()).toEqual({ b: 0, m: 0 });
+      raw.close();
       expect(() => loadDefinitions()).toThrow(/smaller type set/);
       expect(() => new Store(join(dir, 'y.db'))).toThrow(/one type set per process/);
     } finally { s.closeAllConnections(); await new Promise((r) => s.close(r)); rmSync(dir, { recursive: true, force: true }); }

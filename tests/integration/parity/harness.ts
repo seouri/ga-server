@@ -21,7 +21,7 @@ export const PARITY_TYPES = ['Observation', 'Condition', 'Patient', 'Basic', 'Re
   'ImagingStudy', 'DiagnosticReport', 'Flag', 'PractitionerRole', 'Coverage', 'CoverageEligibilityRequest', 'Encounter', 'Communication', 'ServiceRequest',
   'Questionnaire', 'QuestionnaireResponse', 'Location', 'HealthcareService', 'AuditEvent', 'AllergyIntolerance', 'CareTeam', 'Provenance', 'Task', 'Goal',
   'MeasureReport', 'RiskAssessment', 'DeviceRequest', 'Composition', 'Bundle', 'SpecimenDefinition', 'ResearchDefinition', 'RelatedPerson', 'DocumentReference', 'Subscription',
-  'PlanDefinition', 'ActivityDefinition', 'EvidenceVariable', 'MedicinalProductManufactured'];
+  'PlanDefinition', 'ActivityDefinition', 'EvidenceVariable', 'MedicinalProductManufactured', 'CodeSystem', 'ValueSet', 'ConceptMap'];
 const PROJECT = 'ga-test-parity';
 
 export async function guardProject(me: { project: { name?: string } }): Promise<void> {
@@ -99,10 +99,11 @@ export async function paritySides(): Promise<{ sides: [Side, Side]; close(): Pro
   await guardProject(me);
   // Delete what an earlier (crashed) run left: the project is this harness's alone and Medplum sets no meta.author for this login,
   // so every record of the types goes, except GA setup's self Patient (setup keeps finding it) and the admin's own profile Practitioner.
+  // Only the project's own records: Medplum's built-in terminology (its R4 project) shows in every search and is read-only.
   for (const type of PARITY_TYPES) {
     for (;;) {
-      const rs = (await admin.searchResources(type as 'Basic', { _count: '1000' }, { cache: 'no-cache' }))
-        .filter((r) => !(type === 'Patient' && (r as { identifier?: { value?: string }[] }).identifier?.some((i) => i.value === 'self'))
+      const rs = (await admin.searchResources(type as 'Basic', { _count: '1000', _project: cfg.projectId as string }, { cache: 'no-cache' }))
+        .filter((r) => r.meta?.project === cfg.projectId && !(type === 'Patient' && (r as { identifier?: { value?: string }[] }).identifier?.some((i) => i.value === 'self'))
           && `${type}/${r.id}` !== me.membership?.profile?.reference);
       if (!rs.length) break;
       for (const r of rs) await admin.deleteResource(type as 'Basic', r.id as string);

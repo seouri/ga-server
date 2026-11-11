@@ -7,7 +7,7 @@ import { Store } from '../store.ts';
 
 describe('Store binaries', () => {
   let dir: string, store: Store;
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-bin-')); store = new Store(join(dir, 'store.db')); });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-bin-')); store = new Store(join(dir, 'store.db'), { terminology: [] }); });
   afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   const put = (contentType: string, data: Uint8Array) => store.putBinaryStream(contentType, [data]);
 
@@ -59,7 +59,7 @@ describe('Store binaries', () => {
     expect(store.openBinary('../x')).toBeUndefined();
     expect(store.openBinary('.abc.tmp')).toBeUndefined();
     store.close();
-    store = new Store(join(dir, 'store.db'));
+    store = new Store(join(dir, 'store.db'), { terminology: [] });
     expect(readdirSync(join(dir, 'binary')).some((f) => f.endsWith('.tmp'))).toBe(false);
   });
 });

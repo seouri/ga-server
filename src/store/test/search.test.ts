@@ -18,7 +18,7 @@ const PLANS = [['driver', { driveMax: 5000, walkPerRow: 50 }], ['walk', { driveM
 describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   let dir: string, store: Store, seq: number;
   const saved = { ...searchTuning };
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-search-')); store = new Store(join(dir, 'store.db')); seq = 0; Object.assign(searchTuning, tuning); });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-search-')); store = new Store(join(dir, 'store.db'), { terminology: [] }); seq = 0; Object.assign(searchTuning, tuning); });
   afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); Object.assign(searchTuning, saved); });
 
   // Fixed ids and lastUpdated (put keeps them), in insertion order.

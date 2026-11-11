@@ -78,7 +78,7 @@ function parse(text: string): any {
 }
 
 // types: the resource types the store accepts (default every R4 resource type).
-export type ServeOptions = { file: string; host?: string; port: number; tokenFile: string; maxBinaryBytes?: number; types?: readonly string[] };
+export type ServeOptions = { file: string; host?: string; port: number; tokenFile: string; maxBinaryBytes?: number; types?: readonly string[]; terminology?: readonly string[] };
 
 export async function serveStore(opts: ServeOptions): Promise<Server> {
   const binaryLimit = opts.maxBinaryBytes ?? DEFAULT_BINARY_LIMIT;
@@ -103,7 +103,7 @@ export async function serveStore(opts: ServeOptions): Promise<Server> {
   // Only the process that got the port touches the token file and the database: a second server on the same port fails above first.
   try {
     token = createHash('sha256').update(storeToken(opts.tokenFile)).digest();
-    store = new Store(opts.file, { types: opts.types });
+    store = new Store(opts.file, { types: opts.types, terminology: opts.terminology });
   } catch (e) { server.close(); throw e; }
   server.on('close', () => store?.close());
   return server;

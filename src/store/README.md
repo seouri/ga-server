@@ -39,12 +39,14 @@ From `serve.ts`: `runStore(opts)` (serve, handle signals, log one line) and `par
 
 From `store.ts`, for in-process use (one `Store` per file, in the owning process only):
 
-- `new Store(file, { types? })`; `close()`; `db` (the `DatabaseSync`).
+- `new Store(file, { types?, terminology? })` (`terminology`: the built-in bundle files to seed, default `@medplum/definitions`' `TERMINOLOGY_BUNDLE_FILES`, `[]` none; see [Terminology](#terminology)); `close()`; `db` (the `DatabaseSync`).
 - `create(resource, ifNoneExist?, id?)` (`id`: a pre-assigned id, as a transaction gives a urn entry), `update(resource, ifMatch?)`, `delete(type, id, ifMatch?)`, `read(type, id)`, `readRow(type, id)`, `version(type, id, versionId)`, `history({ type?, id?, since?, count?, offset? })`, `find(type, query)`, `validate(resource)`.
 - `search(type, query, base)` / `searchJson(...)`: a searchset Bundle (object or JSON text); `type` an array of types: a system-level search across them.
 - `put(resource, { history? })`: import keeping the given id, versionId and lastUpdated (for migrations).
 - Binaries: `putBinaryStream(contentType, data, id?, replace?)`, `openBinary(id)`, `deleteBinary(id)`.
-- `StoreError` (an `OperationOutcomeError` with an HTTP `status`), `INDEX_VERSION` (the on-disk index format) and `IndexFormatError` (thrown by the constructor for a file in another format: rebuild it from its source; the format is 4 since the search parameters were extended, so a file from an earlier version must be rebuilt).
+- `StoreError` (an `OperationOutcomeError` with an HTTP `status`), `INDEX_VERSION` (the on-disk index format) and `IndexFormatError` (thrown by the constructor for a file in another format: rebuild it from its source; the format is 5 since the concept index and built-in terminology, so a file from an earlier version must be rebuilt).
+
+From `terminology.ts`: `findTerminology(store, type, url, version?)` (the CodeSystem, ValueSet or ConceptMap an operation uses: `url|version` honoured, retired skipped, stored before built-in, then content, version, date, id; else 400 `<type> <url> not found`), `parentProperty(cs)`, `indexCodeSystem`, `importCodeSystem`, `dropCodeSystem`, `seedTerminology`, `isBuiltin`.
 
 From `definitions.ts`: `loadDefinitions(types?)` (indexes the FHIR definitions for `types`, default every R4 resource type; called by `Store`), `storedTypes()`, `PATIENT_COMPARTMENT_PARAMS`. The definitions go into `@medplum/core`'s global index, so a process holds **one type set**: loading again with the same set is a no-op, with another set it throws. Every `Store` in a process uses the same `types`.
 
@@ -65,6 +67,11 @@ Under `/fhir/R4/`:
 - `ETag`, `Last-Modified` and `Location` headers as Medplum sends them; errors are OperationOutcomes. `_pretty=true` indents; `Prefer: return=minimal` sends an empty body.
 
 Search: the common FHIR search features (all parameter types, prefixes, the modifiers `:missing`, `:exact`, `:contains`, `:text`, `:not`, `:identifier` (`subject:identifier=sys|value`), `:of-type` (an Identifier's `typeSystem|typeCode|value`), a uri's `:above` and `:below` (by path segment) and reference type modifiers (`subject:Patient`), composite parameters (`code-value-quantity=http://loinc.org|2093-3$gt200`: one repetition's components, each by its own type), chains and reverse chains (`_has`), mixed and nested up to Medplum's limit of three links, through canonical references and `_compartment` too (a link with several target types names one, `subject:Patient.name`, as Medplum), `_include`/`_revinclude` with `:iterate` (Medplum's limit: 5 rounds, 1000 entries, then 400) and canonical references (resolved by `url`), `_sort`, `_count`, `_elements`, `_summary` (`true`, `data`, `text`, `count`, `false`; on searches only: a read ignores it, as Medplum), `_total`, `_filter`), paged by cursor (`_offset` at most 10000, Medplum's default, else 400). Anything unsupported is a 400 OperationOutcome naming it, never a silently wrong answer.
+
+## Terminology
+
+- Every stored CodeSystem with `content` `complete`, `example` or `fragment` has its concepts indexed on write (tables `coding`, `coding_property`, `codesystem_property`, as Medplum's): one row per code, a synonym row per designation, a `parent` property row per nested concept; an update replaces them, a delete removes them. A concept property the CodeSystem does not declare is 400 `Unknown property: <code>` (Medplum's text).
+- Built-in terminology: a store whose types include `CodeSystem` or `ValueSet` seeds Medplum's terminology bundles (1108 CodeSystems, 1346 ValueSets; a later entry with the same url replaces an earlier one, as Medplum) once, on open, in one transaction (about 4 s and 24 MB of file). The `meta` table's `terminology` row holds the `@medplum/definitions` version seeded; another version reseeds. Built-ins have stable ids (from type, url and version), show in search and read, have no history rows, and any write to them is 403 `Forbidden`, as Medplum answers for its R4 project.
 
 ## Deliberate differences from Medplum
 

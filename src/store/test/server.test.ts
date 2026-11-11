@@ -31,7 +31,7 @@ describe('store server', () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'store-srv-'));
     const tokenFile = join(dir, 'store', 'token');
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     token = readFileSync(tokenFile, 'utf8').trim();
   });
@@ -56,7 +56,7 @@ describe('store server', () => {
     expect(statSync(join(dir, 'store')).mode & 0o777).toBe(0o700);
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token') });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token') });
     expect(readFileSync(join(dir, 'store', 'token'), 'utf8').trim()).toBe(token);
   });
 
@@ -187,7 +187,7 @@ describe('store server', () => {
     mkdirSync(d2, { mode: 0o700 });
     for (const text of ['\n', 'short']) {
       writeFileSync(tf, text, { mode: 0o644 });
-      await expect(serveStore({ file: join(d2, 'store.db'), port: 0, tokenFile: tf })).rejects.toThrow(/delete the file and restart/);
+      await expect(serveStore({ terminology: [], file: join(d2, 'store.db'), port: 0, tokenFile: tf })).rejects.toThrow(/delete the file and restart/);
     }
   });
 
@@ -195,7 +195,7 @@ describe('store server', () => {
     const d2 = join(dir, 't3'), tf = join(d2, 'token');
     mkdirSync(d2, { mode: 0o700 });
     writeFileSync(tf, '', { mode: 0o600 });
-    await expect(serveStore({ file: join(d2, 'store.db'), port: (server.address() as AddressInfo).port, tokenFile: tf })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    await expect(serveStore({ terminology: [], file: join(d2, 'store.db'), port: (server.address() as AddressInfo).port, tokenFile: tf })).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect(readFileSync(tf, 'utf8')).toBe('');
     expect(existsSync(join(d2, 'store.db'))).toBe(false);
     expect(await client().searchResources('Patient', {})).toHaveLength(0); // the first server still serves with its token
@@ -296,7 +296,7 @@ describe('store server: Medplum-compatible routes', () => {
   let dir: string, server: Server, base: string, token: string;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'store-compat-'));
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'token') });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'token') });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     token = readFileSync(join(dir, 'token'), 'utf8').trim();
   });
@@ -951,7 +951,7 @@ describe('serve.ts command line and maxBinaryBytes', () => {
 
   it('maxBinaryBytes caps a streamed Binary (413) and leaves JSON bodies at their own limit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'store-lim-'));
-    const s = await serveStore({ file: join(dir, 'x.db'), port: 0, tokenFile: join(dir, 'token'), maxBinaryBytes: 1024 });
+    const s = await serveStore({ terminology: [], file: join(dir, 'x.db'), port: 0, tokenFile: join(dir, 'token'), maxBinaryBytes: 1024 });
     try {
       const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}/fhir/R4/`;
       const headers = { authorization: `Bearer ${readFileSync(join(dir, 'token'), 'utf8').trim()}`, 'content-type': 'application/octet-stream' };
