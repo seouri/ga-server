@@ -138,9 +138,18 @@ test('ChatGPT download_url: refused unless https on a listed host, with no fetch
   expect(listed.extracted[0].sourceFile).toMatch(/\/uploads\/[A-Za-z0-9_-]{22}\/a\.pdf$/);
 });
 
-test('routes an uploaded TIFF to agent extraction', async () => {
+test('asks for a PNG or PDF instead of an uploaded TIFF (chat apps cannot read TIFF)', async () => {
   const { call, upload } = await setup();
-  const r = await call('import_file', { fileId: await upload('scan.tiff', 'II*\0') });
+  for (const name of ['scan.tiff', 'scan.TIF']) {
+    const r = await call('import_file', { fileId: await upload(name, 'II*\0') });
+    expect(r.isError).toBe(true);
+    expect(r.msg).toContain('convert it to PNG or PDF and upload that');
+  }
+});
+
+test('routes an uploaded PNG to agent extraction', async () => {
+  const { call, upload } = await setup();
+  const r = await call('import_file', { fileId: await upload('scan.png', '\x89PNG') });
   expect(r.isError).toBe(true);
   expect(r.msg).toContain('this is a PDF or image');
 });

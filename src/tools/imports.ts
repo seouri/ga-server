@@ -109,6 +109,7 @@ export function registerImportTools(server: McpServer, deps: ToolDeps, f: Partia
           }
         }
         const path = await stored(fileId, file);
+        if (/\.tiff?$/i.test(path)) throw new GaError('this is a TIFF image, which the chat cannot read: convert it to PNG or PDF and upload that');
         if (DOCUMENT_EXT.test(path)) throw new GaError('this is a PDF or image: read it in the chat and call ga_import with this fileId');
         // Chat apps cannot pass a FHIR base, and a DICOM study is not a single upload: only the CLI imports these.
         if (!/\.zip$/i.test(path) && ['fhir-export', 'dicom'].includes(detectKind(path))) throw new GaError(CLI_ONLY);

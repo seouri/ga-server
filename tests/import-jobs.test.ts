@@ -13,7 +13,7 @@ import { archiveFolder, archiveTmp } from '../src/archive.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
 import { GaError } from '../src/config.ts';
-import { inWorker, JOB_BUSY, type JobRecord, jobStatus, listJobs, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
+import { CLI_ONLY, inWorker, JOB_BUSY, type JobRecord, jobStatus, listJobs, recordJob, resumeJobs, runJob, startJob } from '../src/import-jobs.ts';
 import { IMPORT_BUSY, takeLock } from '../src/lock.ts';
 import { registerImportTools } from '../src/tools/imports.ts';
 import { writeEhiExport } from './fixtures-gen/ehi.ts';
@@ -416,4 +416,22 @@ test('a crash between the unzip and the zip delete: the next attempt deletes the
   expect(job.upload).toBe(join(a.dir, 'imports', job.id, 'upload.zip')); // a fixed name: never job.json or root
   await runJob(a.dir, job.id, { importAny: async () => ({}), client: {} as MedplumClient, cfg: { patientId: a.pid } as never });
   expect(existsSync(job.upload)).toBe(false);
+});
+
+test('a zip holding an Epic FHIR export .json (no .xml) fails as CLI only instead of importing nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-job-json-'));
+  try {
+    const src = join(dir, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'export.json'), '{"fhir":{}}');
+    expect(spawnSync('zip', ['-qr', join(dir, 'ehr.zip'), 'export.json'], { cwd: src }).status).toBe(0);
+    const gw = join(dir, 'gateway');
+    const job = recordJob(gw, upload(gw, join(dir, 'ehr.zip')), { patientId: 'p' });
+    let called = false;
+    const importAny = async () => { called = true; return {}; };
+    await expect(runJob(gw, job.id, { importAny: importAny as never, client: {} as MedplumClient, cfg: { patientId: 'p' } as never })).rejects.toThrow(CLI_ONLY);
+    expect(called).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
