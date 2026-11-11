@@ -1,0 +1,1 @@
+{"resourceType":"Observation","id":"o1","status":"final","code":{"text":"Result"},"subject":{"reference":"Patient/p1"},"effectiveDateTime":"2024-01-01","valueString":"see C:\dir x"}

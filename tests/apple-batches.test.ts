@@ -84,11 +84,11 @@ test("batched import writes the same resources as one batch, and as today's impo
     archived: 'stored', unchanged: 0,
     skips: {
       nested: 3, archiveOnly: { ActiveEnergyBurned: 15000 }, sameReadingTwoSources: 1, bpUnpaired: 0, unexpectedUnit: 0,
-      activityEmptyDays: 1, badValue: 0, clinicalTypeUnsupported: 1, clinicalUnreadable: 0, ecgUnparsed: 0,
+      activityEmptyDays: 1, badValue: 0, clinicalVersionUnsupported: 1, clinicalUnreadable: 0, ecgUnparsed: 0,
     },
   });
   expect(snap).toHaveLength(614);
-  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('b753a171f6c5c82fd8f776cf32c1323760d6cebebeaaa1f044bc40eea0f172db');
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('fa3b64e854169183155c02a1f35c43f9e73743ea78658827783c4acad36d88a6');
 }, 300_000);
 
 test('shuffled records give the same resources as sorted ones', async () => {
@@ -135,7 +135,7 @@ test('re-import of the same export writes nothing; a newer export updates only i
     const hr = '<Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Synthetic Watch" unit="count/min" startDate="2016-01-30 12:00:30 -0500" endDate="2016-01-30 12:00:30 -0500" value="190"/>\n';
     writeFileSync(join(dir, 'export.xml'), xml.replace('</HealthData>', `${hr}</HealthData>`).replace('<ExportDate value="2016-01-31', '<ExportDate value="2016-02-01'));
     const newer = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
-    expect(newer).toMatchObject({ created: 0, updated: 2 }); // that day's heart-rate mean, and the allergy (it always goes to the engine) under the newer date
+    expect(newer).toMatchObject({ created: 0, updated: 2 }); // that day's heart-rate mean, and the allergy (a clinical copy takes the export date) under the newer date
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 300_000);
 
@@ -145,7 +145,7 @@ test('skipThrough 2 writes only batches 3 onward and onBatch sees each committed
   const a = await store();
   const seen: number[] = [];
   const r = await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50, skipThrough: 2, onBatch: async (i) => { seen.push(i); } });
-  expect(seen).toEqual(all.slice(3));
+  expect(seen).toEqual([...all.slice(3), all.length]); // and the clinical call, the next index
   const full = await store();
   const whole = await importAppleHealth(full.client, full.cfg, exp, full.pid, { batchSize: 50 });
   expect(r.created).toBe(whole.created - 150);

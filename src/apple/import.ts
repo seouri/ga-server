@@ -1,12 +1,14 @@
 import type { MedplumClient } from '@medplum/core';
-import type { Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Identifier, Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
 import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
-import { addReport, importResources, type ImportReport } from '../engine.ts';
-import { sorted } from '../identity.ts';
+import { addReport, COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
+import { APPLE, sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
+import { uploadBinaries } from '../smart/sync.ts';
 import { appleBatches, type Batch } from './batches.ts';
+import type { ClinicalGroup } from './clinical.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
@@ -25,6 +27,21 @@ export const existing = (client: MedplumClient, patientId: string, resources: Re
     elements: (type) => (FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier'),
   });
 
+const SMART = 'urn:ga-server:id:smart:';
+const smartId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system?.startsWith(SMART));
+const appleId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system === APPLE);
+
+// An allergy an older import wrote is identified by its sourceURL only: give it the portal-style identifier now, so the engine
+// finds it instead of writing a second one.
+async function adoptOldAllergies(client: MedplumClient, patientId: string, resources: Resource[]): Promise<void> {
+  for (const r of resources) {
+    const s = smartId(r), a = appleId(r);
+    if (r.resourceType !== 'AllergyIntolerance' || !s || !a) continue;
+    const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
+    if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) await client.updateResource({ ...old, identifier: [...(old.identifier ?? []), s] });
+  }
+}
+
 const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
 
 // Reads the export and writes it batch by batch, each under the import lock with its own unchanged check. skipThrough:
@@ -42,12 +59,14 @@ export async function importAppleHealth(
   const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
+  let lastIndex = -1;
   const it = appleBatches(dir, { size: opts.batchSize ?? BATCH_SIZE, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
-  let n: IteratorResult<Batch, { skips: Record<string, unknown> }>;
+  let n: IteratorResult<Batch, { skips: Record<string, unknown>; clinical: { resources: Resource[]; groups: ClinicalGroup[] } }>;
   try {
     n = await it.next();
     for (; !n.done; n = await it.next()) {
       const { index, resources } = n.value;
+      lastIndex = index;
       if (index <= (opts.skipThrough ?? -1)) continue;
       const report = await withImportLock(async () => {
         const have = await existing(client, patientId, resources);
@@ -79,5 +98,29 @@ export async function importAppleHealth(
       await opts.onBatch?.(index, report);
     }
   } finally { await it.return(undefined as never); } // a failed batch: stop the read and close export.xml now (a gateway worker lives on)
+  // The hospital's records (every R4 ClinicalRecord), after the readings, one locked call per FHIR base: the engine keys references by
+  // Type/id, so two hospitals sharing an id must not share a call. Each call is a checkpoint of its own, numbered after the last reading
+  // batch (the read always completes, so a resumed import counts the same indexes and skips the committed ones). Copies only fill what
+  // another source's record lacks. A redo after a crash inside a base's call counts what the crashed attempt created as created.
+  const { resources, groups } = n.value.clinical;
+  const patient = resources.find((r) => r.resourceType === 'Patient') ?? PATIENT;
+  const first = lastIndex + 1;
+  const todo = groups.map((g, k) => ({ g, index: first + k })).filter((x) => x.index > (opts.skipThrough ?? -1));
+  if (todo.length) await withImportLock(() => adoptOldAllergies(client, patientId, groups.flatMap((g) => g.resources)));
+  for (const { g, index } of todo) {
+    const report = await withImportLock(async () => {
+      await uploadBinaries(client, g.resources, g.binaries, g.src, patientId);
+      const tracked = g.resources.filter((r) => COMPARTMENT[r.resourceType]); // the others (Medication, Practitioner...) are not patient data to look up
+      const have = await existing(client, patientId, tracked);
+      const redo = opts.redo?.index === index ? new Set(opts.redo.created) : undefined;
+      const fresh = tracked.map((r) => firstId(r as never)).filter((id) => !have.has(id));
+      if (!redo) await opts.beforeWrite?.({ index, created: fresh, updated: [] });
+      const written = await importResources(client, [patient, ...g.resources], { ...source, fillOnly: () => true }, patientId, '');
+      const was = redo ? tracked.map((r) => firstId(r as never)).filter((id) => redo.has(id) && have.has(id)).length : 0; // created by the crashed attempt
+      return { ...written, created: written.created + was, skipped: Math.max(0, written.skipped - was) };
+    });
+    addReport(total, report);
+    await opts.onBatch?.(index, report);
+  }
   return { ...total, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips: n.value.skips };
 }

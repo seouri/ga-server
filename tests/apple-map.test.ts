@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Readings } from '../src/apple/readings.ts';
 import type { AhClinical, AhRecord } from '../src/apple/read.ts';
-import { mapClinical, mapEcgs } from '../src/apple/clinical.ts';
+import { fhirBaseOf, mapClinical, mapEcgs } from '../src/apple/clinical.ts';
+import { sourceKey } from '../src/smart/auth.ts';
+import type { Condition } from '@medplum/fhirtypes';
 import { APPLE, sha256 } from '../src/identity.ts';
 
 const q = (t: string) => `HKQuantityTypeIdentifier${t}`;
@@ -150,15 +152,65 @@ describe('Apple clinical records and ECG', () => {
     ref('AllergyIntolerance', 'AllergyIntolerance-B.json', '4.0.1', 'https://fhir.example.org/R4/AllergyIntolerance/a1'),
     ref('Observation', 'Observation-C.json', '1.0.2'),
   ];
-  it('maps patient, allergy, counts unsupported', () => {
+  it('maps patient and allergy, counts the DSTU2 record', () => {
     const { resources: [p, a], skips } = mapClinical(dir, refs);
     expect(p).toEqual({ resourceType: 'Patient', id: 'apple-patient', identifier: expect.any(Array) });
     expect((p as any).identifier).toHaveLength(2);
-    expect(a.id).toBeUndefined();
     expect((a as any).patient).toEqual({ reference: 'Patient/apple-patient', display: 'Test Person' });
     expect((a as any).recorder).toEqual({ display: 'Dr. Example' });
-    expect((a as any).identifier[0]).toEqual({ system: APPLE, value: 'https://fhir.example.org/R4/AllergyIntolerance/a1' });
-    expect(skips).toEqual({ clinicalTypeUnsupported: 1, clinicalUnreadable: 0 });
+    expect((a as any).identifier[1]).toEqual({ system: APPLE, value: 'https://fhir.example.org/R4/AllergyIntolerance/a1' });
+    expect(skips).toEqual({ clinicalVersionUnsupported: 1, clinicalUnreadable: 0 });
+  });
+  describe('synthetic clinical export', () => {
+    const cdir = new URL('./fixtures/apple/clinical', import.meta.url).pathname;
+    const base = 'https://fhir.example.org/api/FHIR/R4';
+    const crefs: AhClinical[] = [
+      ['Patient', 'p1', '4.0.1'], ['AllergyIntolerance', 'a1', '4.0.1'], ['Condition', 'c1', '4.0.1'],
+      ['Observation', 'o1', '4.0.1'], ['MedicationRequest', 'm1', '1.0.2'], ['DiagnosticReport', 'd1', '4.0.1'],
+      ['Medication', 'med1', '4.0.1'], ['MedicationRequest', 'm2', '4.0.1'], ['DocumentReference', 'doc1', '4.0.1'],
+    ].map(([t, id, v], i) => ({ sourceURL: `${base}/${t}/${id}`, fhirVersion: v, resourceFilePath: `/clinical-records/${t}-${i}.json`, sourceName: 'Synthetic Hospital' }));
+    it('imports every R4 type, identified like a portal sync', () => {
+      const { resources } = mapClinical(cdir, crefs);
+      const c = resources.find((r) => r.resourceType === 'Condition') as Condition;
+      expect(c.identifier?.[0]).toEqual({ system: `urn:ga-server:id:smart:${sourceKey(base)}`, value: 'Condition/c1' });
+      expect(c.identifier?.[1]).toEqual({ system: APPLE, value: `${base}/Condition/c1` });
+      expect(c.subject).toEqual({ reference: 'Patient/apple-patient', display: 'Test Person' });
+      expect(resources.map((r) => r.resourceType).sort()).toEqual(['AllergyIntolerance', 'Condition', 'DiagnosticReport', 'DocumentReference', 'Medication', 'MedicationRequest', 'Observation', 'Patient']);
+    });
+    it('repairs a stray backslash', () => {
+      const o = mapClinical(cdir, crefs).resources.find((r) => r.resourceType === 'Observation') as any;
+      expect(o.valueString).toBe('see C:\\dir x');
+    });
+    it('counts DSTU2 records', () => expect(mapClinical(cdir, crefs).skips).toEqual({ clinicalVersionUnsupported: 1, clinicalUnreadable: 0 }));
+    it('counts a sourceURL with no FHIR base as unreadable', () => {
+      expect(mapClinical(cdir, [{ ...crefs[2], sourceURL: 'nonsense' }]).skips.clinicalUnreadable).toBe(1);
+    });
+    it('turns an html presentedForm into text', () => {
+      const d = mapClinical(cdir, crefs).resources.find((r) => r.resourceType === 'DiagnosticReport') as any;
+      expect(Buffer.from(d.presentedForm[0].data, 'base64').toString()).toBe('Impression: clear.');
+    });
+    it('keeps references between clinical records', () => {
+      const { resources } = mapClinical(cdir, crefs);
+      const d = resources.find((r) => r.resourceType === 'DiagnosticReport') as any;
+      const m = resources.find((r) => r.resourceType === 'MedicationRequest') as any;
+      expect(d.result[0].reference).toBe('Observation/o1');
+      expect(m.medicationReference.reference).toBe('Medication/med1');
+    });
+    it('keeps a base apart from another hospital with the same ids', () => {
+      const other = { ...crefs[2], sourceURL: 'https://other.example.org/R4/Condition/c1' };
+      const cs = mapClinical(cdir, [crefs[2], other]).resources as Condition[];
+      expect(cs.map((c) => c.identifier?.[0].system)).toEqual([`urn:ga-server:id:smart:${sourceKey(base)}`, 'urn:ga-server:id:smart:other-example-org']);
+    });
+    it('holds an inline pdf as a pending binary', () => {
+      const g = mapClinical(cdir, crefs).groups[0];
+      expect(g.binaries).toHaveLength(1);
+      expect((g.resources.find((r) => r.resourceType === 'DocumentReference') as any).content[0].attachment.url).toBe(g.binaries[0].ref);
+    });
+  });
+  it('finds the FHIR base of a sourceURL', () => {
+    expect(fhirBaseOf('https://h.example/R4/Observation/x.1')?.base).toBe('https://h.example/R4');
+    expect(fhirBaseOf('https://h.example/R4/Observation/x.1')?.key).toBe('h-example');
+    expect(fhirBaseOf('not a url')).toBeUndefined();
   });
   it('maps ECG without PHI', () => {
     const [d, o] = mapEcgs(dir).resources as any[];
@@ -176,8 +228,8 @@ describe('Apple clinical records and ECG', () => {
     w('p1.json', { resourceType: 'Patient', identifier: [{ system: 's', value: '1' }] });
     w('p2.json', { resourceType: 'Patient', identifier: [{ system: 's', value: '1' }, { system: 's', value: '2' }] });
     w('bad.json', '{nope');
-    w('al.json', { resourceType: 'AllergyIntolerance', recorder: { reference: 'Practitioner/x' }, patient: { reference: 'Patient/p' } });
-    const { resources, skips } = mapClinical(tmp, [ref('Patient', 'p1.json', '4.0.1'), ref('Patient', 'p2.json', '4.0.1'), ref('X', 'bad.json', '4.0.1'), ref('X', 'missing.json', '4.0.1'), ref('AllergyIntolerance', 'al.json', '4.0.1', 'u')]);
+    w('al.json', { resourceType: 'AllergyIntolerance', id: 'al', recorder: { reference: 'Practitioner/x' }, patient: { reference: 'Patient/p' } });
+    const { resources, skips } = mapClinical(tmp, [ref('Patient', 'p1.json', '4.0.1'), ref('Patient', 'p2.json', '4.0.1'), ref('X', 'bad.json', '4.0.1'), ref('X', 'missing.json', '4.0.1'), ref('AllergyIntolerance', 'al.json', '4.0.1', 'https://h.example/R4/AllergyIntolerance/al')]);
     expect(resources.filter((r) => r.resourceType === 'Patient')).toEqual([{ resourceType: 'Patient', id: 'apple-patient', identifier: [{ system: 's', value: '1' }, { system: 's', value: '2' }] }]);
     expect(skips.clinicalUnreadable).toBe(2);
     expect('recorder' in (resources[1] as any)).toBe(false);

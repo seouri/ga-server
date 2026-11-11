@@ -1,5 +1,5 @@
 import type { Identifier, Resource } from '@medplum/fhirtypes';
-import { ecgItems, mapClinical } from './clinical.ts';
+import { type ClinicalGroup, ecgItems, mapClinical } from './clinical.ts';
 import { Daily } from './daily.ts';
 import { type AhClinical, readItems } from './read.ts';
 import { Readings, short } from './readings.ts';
@@ -31,10 +31,10 @@ export function together<T>(items: T[], keys: (t: T) => string[]): T[][] {
   return [...groups.values()];
 }
 
-// The export's resources in today's order (readings as read, blood pressure, daily summaries, clinical records, ECGs), cut
+// The export's resources in today's order (readings as read, blood pressure, daily summaries, ECGs; the clinical records come back with the return value), cut
 // every `size` resources (a group is never cut, so a batch can run over). Only readings are emitted while reading; what needs
 // the whole export (blood-pressure pairs, days, nights) follows when the read ends. Same export and size: same batches.
-export async function* appleBatches(dir: string, opts: { size: number; timeZone: string }): AsyncGenerator<Batch, { exportDate: string; skips: Record<string, unknown> }> {
+export async function* appleBatches(dir: string, opts: { size: number; timeZone: string }): AsyncGenerator<Batch, { exportDate: string; skips: Record<string, unknown>; clinical: { resources: Resource[]; groups: ClinicalGroup[] } }> {
   let index = 0;
   let buf: Resource[] = [];
   const full: Resource[][] = [];
@@ -69,8 +69,7 @@ export async function* appleBatches(dir: string, opts: { size: number; timeZone:
   for (const g of together(daily.rings, firstId)) { add(...g); yield* drain(); }
   for (const o of daily.sleep()) { add(o); yield* drain(); }
   const cl = mapClinical(dir, refs), ecg = ecgItems(dir);
-  const tail = [...cl.resources.map((r) => ({ keys: firstId(r), build: () => [r] })), ...ecg.items];
-  for (const g of together(tail, (t) => t.keys)) { add(...g.flatMap((t) => t.build())); yield* drain(); }
+  for (const g of together(ecg.items, (t) => t.keys)) { add(...g.flatMap((t) => t.build())); yield* drain(); }
   if (buf.length) yield { index: index++, resources: buf };
-  return { exportDate, skips: { nested, archiveOnly, ...rd.skips, ...daily.skips, ...cl.skips, ...ecg.skips } };
+  return { exportDate, skips: { nested, archiveOnly, ...rd.skips, ...daily.skips, ...cl.skips, ...ecg.skips }, clinical: { resources: cl.resources, groups: cl.groups } };
 }
