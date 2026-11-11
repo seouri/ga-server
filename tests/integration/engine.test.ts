@@ -977,3 +977,17 @@ for (const [label, tag] of [['person-edited', 'person-edited'], ['writer-agent',
     expect(found[0].meta?.tag?.some((t) => t.code === tag)).toBe(true);
   });
 }
+
+test('an apple reading never replaces an apple clinical copy', async () => {
+  const at = '2026-04-09T07:00:00-05:00';
+  const copy = { ...weight(SMART_SYS, `Observation/${uid('o')}`, at, 80), identifier: [{ system: SMART_SYS, value: `Observation/${uid('o')}` }, { system: APPLE, value: uid('src') }] } as Observation;
+  await importResources(client, [copy], appleClinicalSrc(), pid, 'h');
+  const find = async () => (await all()).filter((r) => (r as Observation).code?.coding?.[0]?.code === '29463-7' && (r as Observation).effectiveDateTime === at);
+  const [before] = await find();
+  await importResources(client, [phone(at, 80)], apple('2026-11-05'), pid, 'a');
+  const after = await find();
+  expect(after).toHaveLength(1);
+  expect(after[0].meta?.tag).toEqual(before.meta?.tag);
+  expect(JSON.stringify({ ...after[0], meta: undefined, identifier: undefined, extension: undefined })).toBe(JSON.stringify({ ...before, meta: undefined, identifier: undefined, extension: undefined }));
+  expect(JSON.stringify((after[0] as Observation).extension)).toBe(JSON.stringify((before as Observation).extension));
+});

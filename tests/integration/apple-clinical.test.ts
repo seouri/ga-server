@@ -90,6 +90,21 @@ test('old Apple allergy gains the new identifier', async () => {
   expect(all[0].identifier?.some((i) => i.system === `urn:ga-server:id:smart:${sourceKey(BASE)}` && i.value === 'AllergyIntolerance/a1')).toBe(true);
 });
 
+test('an adopted main-era allergy takes the newer export\'s status', async () => {
+  await client.createResource({
+    resourceType: 'AllergyIntolerance', patient: { reference: `Patient/${pid}` }, code: { text: 'Penicillin' },
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'inactive' }] },
+    identifier: [{ system: APPLE, value: `${BASE}/AllergyIntolerance/a1` }],
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2025-01-01' }],
+    meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }, { system: 'urn:ga-server:tag', code: 'writer-importer' }] },
+  } as AllergyIntolerance);
+  await importAppleHealth(client, cfg, FIXTURE, pid);
+  const all = await allergies();
+  expect(all).toHaveLength(1);
+  expect(all[0].clinicalStatus?.coding?.[0]?.code).toBe('active');
+  expect(srcTags(all[0])).toEqual(['src-apple-clinical']);
+});
+
 test('re-import is a no-op', async () => {
   await importAppleHealth(client, cfg, FIXTURE, pid);
   expect((await importAppleHealth(client, cfg, FIXTURE, pid)).created).toBe(0);

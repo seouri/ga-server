@@ -39,7 +39,12 @@ async function adoptOldAllergies(client: MedplumClient, patientId: string, resou
     const s = smartId(r), a = appleId(r);
     if (r.resourceType !== 'AllergyIntolerance' || !s || !a) continue;
     const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
-    if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) await client.updateResource({ ...old, identifier: [...(old.identifier ?? []), s] });
+    if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) {
+      // Also a clinical copy now: the tag moves from src-apple-health to src-apple-clinical in the same write.
+      const tags = (old.meta?.tag ?? []).filter((t) => !(t.system === 'urn:ga-server:tag' && t.code === 'src-apple-health'));
+      if (!tags.some((t) => t.system === 'urn:ga-server:tag' && t.code === 'src-apple-clinical')) tags.push({ system: 'urn:ga-server:tag', code: 'src-apple-clinical' });
+      await client.updateResource({ ...old, identifier: [...(old.identifier ?? []), s], meta: { ...old.meta, tag: tags } });
+    }
   }
 }
 

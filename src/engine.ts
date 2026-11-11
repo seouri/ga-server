@@ -663,7 +663,8 @@ export async function importResources(
           const filled = fillFrom(same, coded, source);
           const d = decide(same, filled);
           // conflict: equal value already recorded by the agent; don't attach an importer identifier (it would conflict on every re-import).
-          const appleOntoOther = fromApple && !isApple(same);
+          // A stored Apple clinical copy (hospital identifier or another src- tag) is another source's record, though it carries the APPLE id too.
+          const appleOntoOther = fromApple && (!isApple(same) || idList(same).some((i) => i.system?.startsWith('urn:ga-server:id:smart:')) || srcTags(same).some((c) => c !== 'src-apple-health'));
           const otherOntoApple = !fromApple && isApple(same) && (!hasNonApple(same) || hospitalOntoApple(same)) && !agentOrShielded(same); // hospital body beats an Apple one
           if (d === 'conflict') report.skipped++;
           else if (fillOnly(same)) await fillOnto(same);
