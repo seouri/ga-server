@@ -74,6 +74,16 @@ test('startJob records the job and the worker imports it to done', async () => {
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }, 300_000);
 
+test('job report includes clinical records and their unmapped terms', async () => {
+  const a = await store();
+  const job = startJob(a.dir, upload(a.dir, join(FX, 'apple', 'clinical')), { patientId: a.pid, batchSize: 50 });
+  const done = await settled(a.dir, job.id);
+  expect(done.status, done.message).toBe('done');
+  const r = done.report as { created: number; unmapped: { type: string }[] };
+  expect(r.created).toBeGreaterThanOrEqual(7); // allergy, condition, observation, report, medication, request, document
+  expect(r.unmapped.some((u) => u.type === 'Condition')).toBe(true);
+}, 300_000);
+
 test('resume after a crash inside batch 3 writes each record once and reports like an uninterrupted run', async () => {
   const a = await store();
   const job = recordJob(a.dir, upload(a.dir, zip), { patientId: a.pid, batchSize: 50 }); // recorded, not run here
@@ -105,8 +115,8 @@ async function resumesExactly(kill: Parameters<typeof crash>[3], check: (mid: Jo
   expect(await snapshot(a.client, a.pid)).toEqual(await snapshot(b.client, b.pid));
 }
 
-test('a crash right after the batch writes the allergy reports like an uninterrupted run', () =>
-  resumesExactly({ type: 'AllergyIntolerance' }, (mid) => expect(mid.pending?.created.some((i) => i.startsWith('urn:ga-server:id:apple-health|'))).toBe(true)), 300_000);
+test('a crash right after the clinical call writes the allergy reports like an uninterrupted run', () =>
+  resumesExactly({ type: 'AllergyIntolerance' }, (mid) => expect(mid.pending?.created.some((i) => i.startsWith('urn:ga-server:id:smart:'))).toBe(true)), 300_000);
 
 test('a crash after batch 3 is fully written but before its checkpoint reports like an uninterrupted run', () =>
   resumesExactly({ at: 2, unlock: true }, (mid) => expect(mid).toMatchObject({ lastBatch: 2, pending: { index: 3 } })), 300_000);

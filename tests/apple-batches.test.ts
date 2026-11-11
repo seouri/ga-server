@@ -145,7 +145,7 @@ test('skipThrough 2 writes only batches 3 onward and onBatch sees each committed
   const a = await store();
   const seen: number[] = [];
   const r = await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50, skipThrough: 2, onBatch: async (i) => { seen.push(i); } });
-  expect(seen).toEqual(all.slice(3));
+  expect(seen).toEqual([...all.slice(3), all.length]); // and the clinical call, the next index
   const full = await store();
   const whole = await importAppleHealth(full.client, full.cfg, exp, full.pid, { batchSize: 50 });
   expect(r.created).toBe(whole.created - 150);

@@ -1,3 +1,5 @@
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { AllergyIntolerance, Condition, Resource } from '@medplum/fhirtypes';
@@ -90,4 +92,24 @@ test('old Apple allergy gains the new identifier', async () => {
 test('re-import is a no-op', async () => {
   await importAppleHealth(client, cfg, FIXTURE, pid);
   expect((await importAppleHealth(client, cfg, FIXTURE, pid)).created).toBe(0);
+});
+
+test('two hospitals with the same resource id stay apart', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apple-two-'));
+  try {
+    cpSync(FIXTURE, dir, { recursive: true });
+    const other = 'https://other.example.org/api/FHIR/R4';
+    const rec = (type: string, id: string, file: string) => ` <ClinicalRecord type="${type}" identifier="${id}" sourceName="Other Hospital" sourceURL="${other}/${type}/${id}" fhirVersion="4.0.1" receivedDate="2025-11-02 00:15:50 -0800" resourceFilePath="/clinical-records/${file}"/>\n`;
+    writeFileSync(join(dir, 'clinical-records', 'O2-1.json'), JSON.stringify({ resourceType: 'Observation', id: 'o1', status: 'final', code: { text: 'Other result' }, subject: { reference: 'Patient/q' }, valueString: 'other' }));
+    writeFileSync(join(dir, 'clinical-records', 'D2-1.json'), JSON.stringify({ resourceType: 'DiagnosticReport', id: 'd1', status: 'final', code: { text: 'Other report' }, subject: { reference: 'Patient/q' }, result: [{ reference: 'Observation/o1' }] }));
+    const x = readFileSync(join(dir, 'export.xml'), 'utf8').replace('</HealthData>', `${rec('Observation', 'o1', 'O2-1.json')}${rec('DiagnosticReport', 'd1', 'D2-1.json')}</HealthData>`);
+    writeFileSync(join(dir, 'export.xml'), x);
+    await importAppleHealth(client, cfg, dir, pid);
+    const reports = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+    expect(reports).toHaveLength(2);
+    for (const d of reports) {
+      const o = await client.readReference(d.result?.[0] as never) as { code?: { text?: string } };
+      expect(o.code?.text).toBe(d.code?.text === 'Other report' ? 'Other result' : 'Result');
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
