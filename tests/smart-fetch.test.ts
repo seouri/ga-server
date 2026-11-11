@@ -118,9 +118,38 @@ describe('fetchAll', () => {
     const out = mapForGa(got.resources, { key: sourceKey(m2.fhirBase), name: 'x', fhirBase: m2.fhirBase }).resources;
     expect(find<DiagnosticReport>(out, 'DiagnosticReport/dr1').presentedForm?.[0].contentType).toBe('text/plain; charset=utf-8');
   });
+
+  // A body that fails to download (5xx, bad JSON) is skipped like a 404; the rest of the sync goes on.
+  it('a failed Binary download is skipped, not fatal', async () => {
+    for (const bad of [(res: import('node:http').ServerResponse) => void res.writeHead(500).end(), (res: import('node:http').ServerResponse) => {
+      res.writeHead(200, { 'content-type': 'application/fhir+json' });
+      res.end('{not json');
+    }]) {
+      const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+      serveFixtures(m2);
+      m2.route('/fhir/metadata', (_q, res) =>
+        void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
+      );
+      const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
+      m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: dr('dr1', 'broken') }, { resource: dr('dr2', 'n1') }] })));
+      m2.route('/fhir/Binary/broken', (_q, res) => bad(res));
+      const got = await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']);
+      await m2.close();
+      expect(got.skipped.Binary).toMatch(/^1 failed/);
+      expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
+      expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr2').presentedForm?.[0].data).toBeTruthy();
+    }
+  });
 });
 
 describe('mapForGa report text', () => {
+  it('makes a url-only report attachment absolute (a body that failed to download)', () => {
+    const base = 'https://fhir.example.org/api/FHIR/R4/';
+    const dr = { resourceType: 'DiagnosticReport', id: 'r0', status: 'final', code: { text: 'X-ray' }, presentedForm: [{ contentType: 'application/pdf', url: 'Binary/e1' }] } as DiagnosticReport;
+    const out = mapForGa([dr], { key: sourceKey(base), name: 'x', fhirBase: base }).resources[0] as DiagnosticReport;
+    expect(out.presentedForm?.[0].url).toBe('https://fhir.example.org/api/FHIR/R4/Binary/e1');
+  });
+
   it('converts report html to text', () => {
     const base = 'https://fhir.example.org/api/FHIR/R4/';
     const dr = { resourceType: 'DiagnosticReport', id: 'r1', status: 'final', code: { text: 'X-ray' }, presentedForm: [{ contentType: 'text/html', data: Buffer.from('<p>Impression: normal</p>').toString('base64') }] } as DiagnosticReport;

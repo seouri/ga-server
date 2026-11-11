@@ -122,15 +122,24 @@ export async function fetchAll(
   for (const r of got.values()) {
     for (const a of attachmentsOf(r)) {
       if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !URL.canParse(a.url, `${base}/`) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
-      const res = await get(a.url, 'Binary', a.contentType ?? '*/*');
-      if (!res.ok) {
-        await fail('Binary', res);
+      // One body that fails (4xx, 5xx, timeout, bad JSON) is skipped, not the whole sync; a refused token (401) still aborts.
+      let res: Response, type: string, buf: Buffer, fhir: { resourceType?: string; data?: string; contentType?: string } | undefined;
+      try {
+        res = await get(a.url, 'Binary', a.contentType ?? '*/*');
+        if (!res.ok) {
+          await fail('Binary', res);
+          continue;
+        }
+        type = res.headers.get('content-type') ?? '';
+        buf = Buffer.from(await res.arrayBuffer());
+        // Some servers answer with a FHIR Binary resource whatever the Accept header says.
+        fhir = /json/.test(type) ? await parse<{ resourceType?: string; data?: string; contentType?: string }>(buf.toString('utf8'), 'Binary') : undefined;
+      } catch (e) {
+        if (e instanceof GaError && e.message === 'Binary: HTTP 401') throw e;
+        failures.Binary = (failures.Binary ?? 0) + 1;
+        skipped.Binary = `${failures.Binary} failed, last ${e instanceof GaError ? e.message.replace(/^Binary: /, '') : (e as Error).name === 'TimeoutError' ? 'timeout' : 'download error'}`;
         continue;
       }
-      const type = res.headers.get('content-type') ?? '';
-      const buf = Buffer.from(await res.arrayBuffer());
-      // Some servers answer with a FHIR Binary resource whatever the Accept header says.
-      const fhir = /json/.test(type) ? await parse<{ resourceType?: string; data?: string; contentType?: string }>(buf.toString('utf8'), 'Binary') : undefined;
       if (fhir?.resourceType === 'Binary') {
         a.data = fhir.data;
         a.contentType ??= fhir.contentType;
@@ -247,7 +256,8 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
       // A report's html or rtf text becomes plain text like a note; an inline PDF or image becomes a pending Binary (1 MB limit).
       const d = r as DiagnosticReport;
       const plain = (a: Attachment): boolean => /^text\/plain$/i.test((a.contentType ?? '').split(';')[0].trim());
-      if (d.presentedForm) d.presentedForm = d.presentedForm.map((a, i) => (a.data && !plain(a) ? note(a, `urn:ga-server:pending-binary:${keyOf(orig)}/presentedForm/${i}`) : a));
+      // A url-only one (its body not downloaded) goes through note() too, which makes a relative url absolute.
+      if (d.presentedForm) d.presentedForm = d.presentedForm.map((a, i) => ((a.data && !plain(a)) || (!a.data && a.url) ? note(a, `urn:ga-server:pending-binary:${keyOf(orig)}/presentedForm/${i}`) : a));
     }
     return r as Resource;
   });
