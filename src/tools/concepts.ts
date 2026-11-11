@@ -16,7 +16,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
     {
       description:
         'Source terms in GA with no standard code (status "unmapped", default) or only a suggested one ("suggested"): source, name, unit, record type, ' +
-        'how many records and up to three example dates, most frequent first (25 shown), each with ranked candidates (from the terminology search; a linked-record candidate is the code of a possible-duplicate record). No values. Map one with map_concept. type: a record type to narrow to. ' +
+        'how many records and up to three example dates, most frequent first, every term listed, the 25 most frequent each with ranked candidates (from the terminology search; a linked-record candidate is the code of a possible-duplicate record). No values. Map one with map_concept. type: a record type to narrow to. ' +
         'status "agent": the mappings agents made (source, type, term, code, display, confident, when), newest first, for the user to review; since: YYYY-MM-DD.',
       inputSchema: { status: z.enum(['unmapped', 'suggested', 'agent']).default('unmapped'), type: z.string().optional(), since: z.string().optional() },
       annotations: { readOnlyHint: true },

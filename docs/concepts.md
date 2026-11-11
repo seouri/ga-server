@@ -37,7 +37,7 @@ Some tests have more than one standard code. LDL can be calculated or measured d
 
 ## Reviewing
 
-The list is an audit trail: it shows what GA and your agent mapped, as well as what is still open. Each open term comes with ranked candidates (the 25 most frequent terms; one marked "linked record" is the code of a record GA already linked as a possible duplicate). Ask your agent ("what did you map?", "what still has no code?"), or from the repo folder:
+The list is an audit trail: it shows what GA and your agent mapped, as well as what is still open. Every open term is listed; the 25 most frequent come with ranked candidates (one marked "linked record" is the code of a record GA already linked as a possible duplicate). Ask your agent ("what did you map?", "what still has no code?"), or from the repo folder:
 
 ```sh
 node src/cli.ts concepts                     # terms with no standard code
