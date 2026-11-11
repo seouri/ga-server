@@ -1,4 +1,4 @@
-# FHIR store on SQLite
+# Gannet: a FHIR store on SQLite
 
 A FHIR R4 record store in one SQLite file (`node:sqlite`, WAL), with binaries as files beside it. Resources stay FHIR JSON; each one is indexed by evaluating its type's official SearchParameters (FHIRPath, via `@medplum/core`), and FHIR search is SQL over that index. One process owns the file and serves it over local HTTP in Medplum's REST shape, so a `MedplumClient` in another process reads and writes it. Used by GA.
 
@@ -141,7 +141,7 @@ As its own repository, with history: `git subtree split --prefix=src/store -b fh
 `package.json`
 ```json
 {
-  "name": "fhir-sqlite-store",
+  "name": "gannet",
   "private": true,
   "type": "module",
   "engines": { "node": ">=26" },

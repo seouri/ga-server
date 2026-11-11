@@ -504,7 +504,7 @@ function capability(): string {
   const versioned = ['read', 'vread', 'update', 'patch', 'delete', 'history-instance', 'history-type', 'create', 'search-type'];
   return capabilityJson ??= JSON.stringify({
     resourceType: 'CapabilityStatement', status: 'active', date: '2026-11-08', kind: 'instance', fhirVersion: '4.0.1', format: ['json'],
-    patchFormat: ['application/json-patch+json', 'application/fhir+json'], software: { name: 'fhir-sqlite-store' }, implementation: { description: 'FHIR R4 store on SQLite' },
+    patchFormat: ['application/json-patch+json', 'application/fhir+json'], software: { name: 'gannet' }, implementation: { description: 'FHIR R4 store on SQLite' },
     rest: [{
       mode: 'server',
       interaction: [{ code: 'transaction' }, { code: 'batch' }, { code: 'history-system' }, { code: 'search-system' }],
@@ -519,11 +519,11 @@ function capability(): string {
           ...(type === 'CodeSystem' && { operation: [
             ...['lookup', 'validate-code', 'subsumes'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/CodeSystem-${name}` })),
             // Medplum's own operation, which has no published OperationDefinition url: an identifier of this store's.
-            { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/CodeSystem-import' },
+            { name: 'import', definition: 'urn:gannet:OperationDefinition/CodeSystem-import' },
           ] }),
           ...(type === 'ConceptMap' && { operation: [
             { name: 'translate', definition: 'http://hl7.org/fhir/OperationDefinition/ConceptMap-translate' },
-            { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/ConceptMap-import' },
+            { name: 'import', definition: 'urn:gannet:OperationDefinition/ConceptMap-import' },
           ] }),
           ...(type === 'ValueSet' && { operation: ['expand', 'validate-code'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/ValueSet-${name}` })) }),
         }),
