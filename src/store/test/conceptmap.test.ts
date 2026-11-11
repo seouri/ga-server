@@ -1,5 +1,5 @@
 // ConceptMap: the mapping index, $translate and $import (Medplum's conceptmaptranslate.test.ts and conceptmapimport.test.ts, reduced).
-// Every store here has a GA-like type set (ConceptMap, neither CodeSystem nor ValueSet: no built-in seed, R3); the definitions are
+// Every store here has types with ConceptMap and neither CodeSystem nor ValueSet (no built-in seed); the definitions are
 // loaded once per process and vitest runs each file in its own worker.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { params } from '../terminology.ts';
 import { importConceptMap, translate } from '../conceptmap.ts';
 
 const err = (f: () => unknown): StoreError => { try { f(); } catch (e) { return e as StoreError; } throw new Error('did not throw'); };
-const TYPES = ['Patient', 'Observation', 'Basic', 'ConceptMap', 'Provenance']; // the boundary keeps GA's own list (GA_STORE_TYPES) out
+const TYPES = ['Patient', 'Observation', 'Basic', 'ConceptMap', 'Provenance'];
 const SYS = 'http://example.com/private-codes';
 const map = (o: Partial<ConceptMap> = {}): ConceptMap => ({ resourceType: 'ConceptMap', status: 'active', url: 'http://example.com/cm', sourceCanonical: 'http://example.com/labs', group: [
   { source: SYS, target: 'http://loinc.org', element: [{ code: 'FSH', target: [{ code: '15067-2', display: 'Follitropin Qn', equivalence: 'equivalent' }] }] },
@@ -122,7 +122,7 @@ describe('ConceptMap', () => {
     expect(rows()).toEqual([]);
   });
 
-  it('a store opened with GA_STORE_TYPES-like types indexes ConceptMaps without seeding terminology', () => {
+  it('a store whose types include ConceptMap but neither CodeSystem nor ValueSet indexes ConceptMaps without seeding terminology', () => {
     expect(store.db.prepare('select (select count(*) from builtin) b, (select count(*) from meta) m').get()).toEqual({ b: 0, m: 0 });
     const cm = create();
     expect(store.db.prepare('select count(*) n from concept_mapping').get()).toEqual({ n: 2 });
