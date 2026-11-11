@@ -14,6 +14,7 @@ import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { components, IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
+import { importConceptMap, translate } from './conceptmap.ts';
 import { expand, validateCodeVs } from './expand.ts';
 import { type Params, codeSystemImport, lookup, params, subsumes, validateCodeCs } from './terminology.ts';
 
@@ -281,6 +282,8 @@ const OPERATIONS: Record<string, { methods: string[]; run: (store: Store, p: Par
   'CodeSystem/$import': { methods: ['POST'], run: codeSystemImport },
   'ValueSet/$expand': { methods: ['GET', 'POST'], run: expand },
   'ValueSet/$validate-code': { methods: ['GET', 'POST'], run: validateCodeVs },
+  'ConceptMap/$translate': { methods: ['GET', 'POST'], run: translate },
+  'ConceptMap/$import': { methods: ['POST'], run: importConceptMap },
 };
 
 // An operation's input: the GET query (empty values skipped, as Medplum) or the POST body, a Parameters validated as a resource.
@@ -517,6 +520,10 @@ function capability(): string {
             ...['lookup', 'validate-code', 'subsumes'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/CodeSystem-${name}` })),
             // Medplum's own operation, which has no published OperationDefinition url: an identifier of this store's.
             { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/CodeSystem-import' },
+          ] }),
+          ...(type === 'ConceptMap' && { operation: [
+            { name: 'translate', definition: 'http://hl7.org/fhir/OperationDefinition/ConceptMap-translate' },
+            { name: 'import', definition: 'urn:fhir-sqlite-store:OperationDefinition/ConceptMap-import' },
           ] }),
           ...(type === 'ValueSet' && { operation: ['expand', 'validate-code'].map((name) => ({ name, definition: `http://hl7.org/fhir/OperationDefinition/ValueSet-${name}` })) }),
         }),

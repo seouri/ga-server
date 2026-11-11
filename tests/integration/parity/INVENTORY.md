@@ -775,23 +775,23 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Parallel Links | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Search Based Link | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Nested Search Links | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Success %s | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by URL | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Allows GET request | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by source ValueSet | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Filter on target system | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No match | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No map specified | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Code without system | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Ambiguous coding provided | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No source coding | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Not found by %s | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Unmapped code handling | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles empty CodeableConcept | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles implicit system | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No mapping groups specified | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Complex SNOMED to ICD mapping | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Renders mapping comment | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Success %s | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by URL | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Allows GET request | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Lookup by source ValueSet | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Filter on target system | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No match | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No map specified | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Code without system | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Ambiguous coding provided | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No source coding | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Not found by %s | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Unmapped code handling | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles empty CodeableConcept | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Handles implicit system | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › No mapping groups specified | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Complex SNOMED to ICD mapping | ported | terminology |  |
+| server/src/fhir/operations/conceptmaptranslate.test.ts | ConceptMap $translate › Renders mapping comment | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and properties separately | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Imports concepts and associated relationships | ported | terminology |  |
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Returns error on unknown code system | ported | terminology |  |

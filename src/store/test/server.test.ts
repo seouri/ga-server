@@ -958,6 +958,20 @@ describe('store server: Medplum-compatible routes', () => {
     expect(await text('ValueSet/$expand?url=http://example.com/missing')).toEqual([400, 'ValueSet http://example.com/missing not found']);
   });
 
+  it('ConceptMap operations: $translate GET and POST, type and instance level; $import POST only', async () => {
+    const cm = (await call('POST', 'ConceptMap', { resourceType: 'ConceptMap', status: 'active', url: 'http://example.com/cm-ops',
+      group: [{ source: 'http://example.com/a', target: 'http://example.com/b', element: [{ code: 'A', target: [{ code: 'B', equivalence: 'equivalent' }] }] }] })).json;
+    const codes = (j: any) => j.parameter.filter((p: { name: string }) => p.name === 'match').map((m: any) => m.part[1].valueCoding.code);
+    expect(codes((await call('GET', 'ConceptMap/$translate?url=http://example.com/cm-ops&system=http://example.com/a&code=A')).json)).toEqual(['B']);
+    const imported = await call('POST', `ConceptMap/${cm.id}/$import`, { resourceType: 'Parameters', parameter: [{ name: 'mapping', part: [
+      { name: 'source', valueCoding: { system: 'http://example.com/a', code: 'C' } }, { name: 'target', valueCoding: { system: 'http://example.com/b', code: 'D' } }] }] });
+    expect([imported.status, imported.json.resourceType, imported.json.id]).toEqual([200, 'ConceptMap', cm.id]);
+    expect(codes((await call('POST', `ConceptMap/${cm.id}/$translate`, { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/a', code: 'C' } }] })).json)).toEqual(['D']);
+    const cc = await call('GET', `ConceptMap/${cm.id}/$translate?codeableConcept=x`);
+    expect([cc.status, cc.json.issue[0].details.text]).toEqual([400, 'Complex parameter codeableConcept (CodeableConcept) cannot be passed via query string']);
+    expect((await call('GET', 'ConceptMap/$import')).status).toBe(404); // POST only, as Medplum
+  });
+
   it('GET metadata describes this store: types, interactions, search parameters (composites whose components R4 defines), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
     expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
@@ -969,6 +983,7 @@ describe('store server: Medplum-compatible routes', () => {
     expect(rest.resource.find((r: { type: string }) => r.type === 'ResearchStudy').searchParam.map((p: { name: string }) => p.name)).not.toContain('progress-status-state-actual');
     expect(rest.resource.find((r: { type: string }) => r.type === 'Patient').operation[0].name).toBe('everything');
     expect(rest.resource.find((r: { type: string }) => r.type === 'CodeSystem').operation.map((o: { name: string }) => o.name)).toEqual(['lookup', 'validate-code', 'subsumes', 'import']);
+    expect(rest.resource.find((r: { type: string }) => r.type === 'ConceptMap').operation.map((o: { name: string }) => o.name)).toEqual(['translate', 'import']);
     expect(rest.resource.find((r: { type: string }) => r.type === 'ValueSet').operation.map((o: { name: string }) => o.name)).toEqual(['expand', 'validate-code']);
     for (const t of ['ValueSet', 'Questionnaire', 'Subscription']) expect(rest.resource.some((r: { type: string }) => r.type === t), t).toBe(true);
     expect(rest.resource.length).toBeGreaterThan(140);

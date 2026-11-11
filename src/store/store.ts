@@ -11,9 +11,10 @@ import {
   OperationOutcomeError, convertToSearchableReferences, deepEquals, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
   stringify, toTypedValue, validateResource,
 } from '@medplum/core';
-import type { Bundle, CodeSystem, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeSystem, ConceptMap, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, loadDefinitions } from './definitions.ts';
 import { SEARCH_SCHEMA, SearchError, searchJson, writeIndex } from './search.ts';
+import { CONCEPTMAP_SCHEMA, dropConceptMap, indexConceptMap } from './conceptmap.ts';
 import { TERMINOLOGY_SCHEMA, dropCodeSystem, indexCodeSystem, seedTerminology } from './terminology.ts';
 
 export type StoreIssue = { expression?: string[]; text: string };
@@ -78,7 +79,7 @@ export class Store {
       create table if not exists history(type text not null, id text not null, versionId text not null, lastUpdated text, json text not null, unique(type, id, versionId));
       create table if not exists binaries(id text primary key, contentType text not null, size integer not null);
       create index if not exists history_i on history(type, id, lastUpdated);
-      create index if not exists history_lu on history(lastUpdated);${SEARCH_SCHEMA}${TERMINOLOGY_SCHEMA}`);
+      create index if not exists history_lu on history(lastUpdated);${SEARCH_SCHEMA}${TERMINOLOGY_SCHEMA}${CONCEPTMAP_SCHEMA}`);
     // The search index format (token rows as written since 2): a file written in another format would answer searches wrongly.
     const v = (this.db.prepare('pragma user_version').get() as { user_version: number }).user_version;
     if (v !== INDEX_VERSION) {
@@ -251,6 +252,7 @@ export class Store {
       }
       writeIndex(this.prep, row.rid, undefined);
       if (type === 'CodeSystem') dropCodeSystem(this.db, row.rid);
+      if (type === 'ConceptMap') dropConceptMap(this.db, row.rid);
       this.prep('insert into history values (?, ?, ?, ?, ?)').run(type, id, randomUUID(), now(), '');
     });
   }
@@ -304,6 +306,7 @@ export class Store {
     this.addHistory(out, json);
     writeIndex(this.prep, rid, out);
     if (out.resourceType === 'CodeSystem') indexCodeSystem(this.db, rid, out as CodeSystem);
+    if (out.resourceType === 'ConceptMap') indexConceptMap(this.db, rid, out as ConceptMap);
     return out;
   }
 
