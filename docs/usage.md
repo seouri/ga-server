@@ -106,6 +106,8 @@ An Epic EHI export brings encounters, problems, labs, medications, immunizations
 
 An Apple Health export brings per-reading vitals, daily summaries (heart rate, steps, distance, activity rings), nightly sleep, ECGs, and the Health Records inside it (allergies, patient identifiers). The folder is archived as one DocumentReference; re-importing is a no-op, and a newer export updates the changed days.
 
+Known limit (rare, not fixed): Health Records are identified by their hospital's host, like a portal sync. When two hospitals share one FHIR host (two tenants), the first FHIR base in sorted order gets the plain host key and the other a hashed key. A later export that adds or drops a tenant on that host can shift which tenant holds the plain key, and a portal sync (`ga connect`) of either tenant always uses the plain host key.
+
 `--llm api` sends the file to the Anthropic API. The default for PDFs is your own agent, so nothing leaves the machine except through the agent you already use: ask it "Import /path/to/file.pdf into GA." It reads the file and calls `ga_import` (see `.claude/skills/ga-import/extract.md`, also `/ga-import <file>` in Claude Code, and [AGENTS.md](../AGENTS.md)).
 
 ## Review flags and limits
