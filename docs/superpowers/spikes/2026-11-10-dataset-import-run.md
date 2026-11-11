@@ -18,3 +18,7 @@ Task Z of docs/superpowers/plans/2026-11-10-dataset-folder-import.md, run agains
   - 2 Epic DocumentReferences with a malformed extension.
 - **Identical copies keep the Apple label:** an Epic export record identical to an already-stored Apple copy is skipped. The stored record keeps `src-apple-clinical` and the export date as its source date, and gains no `src-fhir-export` tag. Content is the same. Labels and the currency date differ from a hospital-first import. This is a follow-up candidate: on an identical skip, add the hospital source tag.
 - **Running services still on `main`:** the MCP server started for this session, `ga-gateway` and `ga-sync` all still run main's code. Until they restart on the merged code, `health_summary` shows new hospital records with setting "unknown" and lists no FHIR export source.
+
+## Follow-up: identical hospital copies take the hospital label (commits 5a163ea, 94bf3c6)
+
+Re-import of the Epic FHIR export after the engine change: updated 1,726, skipped 1,143, created 0, invalid 10 (the same 10). Apple clinical copies now carrying the hospital label (`src-fhir-export`): every Observation, Condition, MedicationRequest, Procedure, AllergyIntolerance and Immunization. 80 kept `src-apple-clinical` (13 DiagnosticReport, 67 DocumentReference): the export copy would drop something the Apple copy has (the "loses nothing" guard), so it only filled.
