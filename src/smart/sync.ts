@@ -183,7 +183,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     if (!patient) throw new GaError('no_patient');
     stage = 'fetch_error';
     const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes);
-    const { resources, binaries } = mapForGa(fetched.resources, src);
+    const { resources, binaries } = mapForGa(fetched.resources, src, new Set(fetched.deferred));
     stage = 'import_error';
     const c = dryRun ? dryRunClient(client) : client;
     const write = async () => {

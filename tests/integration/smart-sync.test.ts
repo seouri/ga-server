@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Condition, DocumentReference, Extension, Resource } from '@medplum/fhirtypes';
+import type { Condition, DiagnosticReport, DocumentReference, Extension, Procedure, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { LAST_SEEN } from '../../src/identity.ts';
@@ -388,6 +388,55 @@ describe('a body download that fails for now', () => {
       expect(docs[0].content[0].attachment.hash).toBe(sha(body));
       const old = binId(v1.content[0].attachment.url);
       if (old && old !== binId(docs[0].content[0].attachment.url)) await client.deleteResource('Binary', old).catch(() => undefined);
+    } finally {
+      await mock.close();
+    }
+  });
+});
+
+describe('a reference to a deferred record', () => {
+  it('a new record pointing at a deferred report gets its link on the next sync', async () => {
+    const pid = await newPatient();
+    const { publicJwks } = await ensureKeys(dir);
+    const mock = await startMock({ clientId, jwks: publicJwks });
+    serveFixtures(mock);
+    const offered = (type: string) => ({ type, interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] });
+    mock.route('/fhir/metadata', (req, res) => {
+      if (!mock.authorized(req)) return void res.writeHead(401).end();
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [offered('Procedure'), offered('DiagnosticReport')] }] }));
+    });
+    const at = '2026-03-01T10:00:00Z';
+    const report = { resourceType: 'DiagnosticReport', id: 'dr-path', meta: { lastUpdated: at }, status: 'final', code: { text: 'Synthetic pathology' }, subject: { reference: `Patient/${P}` },
+      presentedForm: [{ contentType: 'application/pdf', url: `${mock.fhirBase}/Binary/path-pdf` }] };
+    const proc = { resourceType: 'Procedure', id: 'pr-biopsy', meta: { lastUpdated: at }, status: 'completed', code: { text: 'Synthetic biopsy' }, subject: { reference: `Patient/${P}` },
+      performedDateTime: '2026-02-27', report: [{ reference: `DiagnosticReport/dr-path`, display: 'Synthetic pathology' }] };
+    const bundle = (r: object) => JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: r, search: { mode: 'match' } }] });
+    for (const [type, r] of [['Procedure', proc], ['DiagnosticReport', report]] as const) {
+      mock.route(`/fhir/${type}`, (req, res) => (mock.authorized(req) ? void res.writeHead(200, { 'content-type': 'application/json' }).end(bundle(r)) : void res.writeHead(401).end()));
+    }
+    let up = false;
+    mock.route('/fhir/Binary/path-pdf', (req, res) => {
+      if (!mock.authorized(req)) return void res.writeHead(401).end();
+      if (!up) return void res.writeHead(500).end();
+      res.writeHead(200, { 'content-type': 'application/pdf' }).end(Buffer.from('%PDF-1.4\nsynthetic pathology\n'));
+    });
+    const src: SourceRec = { key: newKey('deferref'), name: 'Deferring Hospital', fhirBase: mock.fhirBase, patient: P, enabledTypes: ['Procedure', 'DiagnosticReport'] };
+    fresh(src.key, mock);
+    const get = async <T extends Resource>(type: string) => (await compartment(pid)).filter((x) => x.resourceType === type) as T[];
+    try {
+      expect((await syncSource(client, dir, src, pid, { now: new Date(Date.now() - 60_000) })).status).toBe('active');
+      const [p1] = await get<Procedure>('Procedure');
+      expect(p1.report?.[0].reference).toBeUndefined(); // display-only while the report waits
+      expect(await get('DiagnosticReport')).toEqual([]);
+      up = true;
+      expect((await syncSource(client, dir, src, pid, { now: new Date() })).status).toBe('active');
+      const [dr] = await get<DiagnosticReport>('DiagnosticReport');
+      const [p2] = await get<Procedure>('Procedure');
+      expect(p2.report?.[0].reference).toBe(`DiagnosticReport/${dr.id}`);
+      for (const a of dr.presentedForm ?? []) {
+        const id = binId(a.url);
+        if (id) await client.deleteResource('Binary', id).catch(() => undefined);
+      }
     } finally {
       await mock.close();
     }

@@ -24,6 +24,25 @@ const keys = (rs: Resource[]) => rs.map((r) => `${r.resourceType}/${r.id}`).sort
 const find = <T extends Resource>(rs: Resource[], key: string) => rs.find((r) => `${r.resourceType}/${r.id}` === key) as T;
 const text = (d: DocumentReference) => Buffer.from(d.content[0].attachment.data ?? '', 'base64').toString('utf8');
 
+// Reports whose presentedForm points at Binary ids; the broken ones answer with bad().
+const reportsMock = async (ids: [string, string][], bad: (res: ServerResponse) => void) => {
+  const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+  const { requests: reqs } = serveFixtures(m2);
+  m2.route('/fhir/metadata', (_q, res) =>
+    void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
+  );
+  const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
+  m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: ids.map(([id, bin]) => ({ resource: dr(id, bin) })) })));
+  const broken: string[] = [];
+  m2.route('/fhir/Binary/broken', (_q, res, url) => { broken.push(url.pathname); bad(res); });
+  for (const i of [1, 2, 3, 4]) m2.route(`/fhir/Binary/broken${i}`, (_q, res, url) => { broken.push(url.pathname); bad(res); });
+  try {
+    return { got: await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']), broken, reqs };
+  } finally {
+    await m2.close();
+  }
+};
+
 describe('fetchAll', () => {
   it('fetches every patient-scoped type, all pages, de-duplicated, with referenced Medications and Binaries', async () => {
     const { resources, byType, skipped } = await fetchAll(m.fhirBase, token, P);
@@ -122,27 +141,12 @@ describe('fetchAll', () => {
 
   // A body that fails for now (5xx, bad JSON) defers its record: left out of this sync (the stored copy stays), retried next time.
   // A 404 is permanent: the record comes url-only, as before. The rest of the sync goes on either way.
-  const reportsMock = async (ids: [string, string][], bad: (res: ServerResponse) => void) => {
-    const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
-    const { requests: reqs } = serveFixtures(m2);
-    m2.route('/fhir/metadata', (_q, res) =>
-      void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
-    );
-    const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
-    m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: ids.map(([id, bin]) => ({ resource: dr(id, bin) })) })));
-    const broken: string[] = [];
-    m2.route('/fhir/Binary/broken', (_q, res, url) => { broken.push(url.pathname); bad(res); });
-    for (const i of [1, 2, 3, 4]) m2.route(`/fhir/Binary/broken${i}`, (_q, res, url) => { broken.push(url.pathname); bad(res); });
-    try {
-      return { got: await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']), broken, reqs };
-    } finally {
-      await m2.close();
-    }
-  };
   it('a transient Binary failure defers its record; a 404 keeps it url-only', async () => {
     const e500 = (res: ServerResponse) => void res.writeHead(500).end();
     const badJson = (res: ServerResponse) => { res.writeHead(200, { 'content-type': 'application/fhir+json' }); res.end('{not json'); };
-    for (const bad of [e500, badJson]) {
+    const e429 = (res: ServerResponse) => void res.writeHead(429).end('slow down');
+    const e408 = (res: ServerResponse) => void res.writeHead(408).end();
+    for (const bad of [e500, badJson, e429, e408]) {
       const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], bad);
       expect(got.skipped.Binary).toMatch(/^1 deferred/);
       expect(keys(got.resources)).not.toContain('DiagnosticReport/dr1');
@@ -160,6 +164,22 @@ describe('fetchAll', () => {
     expect(reqs.filter((r) => r.startsWith('/fhir/Binary/n1'))).toEqual([]);
     expect(keys(got.resources).filter((k) => k.startsWith('DiagnosticReport'))).toEqual([]);
     expect(got.skipped.Binary).toMatch(/^5 deferred/);
+  });
+});
+
+describe('mapForGa with deferred records', () => {
+  it('dates a record 1 ms earlier only when it referenced a deferred record', () => {
+    const base = 'https://fhir.example.org/api/FHIR/R4/';
+    const proc = (id: string, report: string) => ({ resourceType: 'Procedure', id, meta: { lastUpdated: '2026-03-01T10:00:00.000Z' }, status: 'completed', code: { text: 'Biopsy' }, subject: { reference: 'Patient/p' }, report: [{ reference: report, display: 'Pathology' }] }) as Resource;
+    const out = mapForGa([proc('pr1', 'DiagnosticReport/dr-deferred'), proc('pr2', 'DiagnosticReport/dr-gone'), { resourceType: 'Patient', id: 'p', meta: { lastUpdated: '2026-03-01T10:00:00.000Z' } } as Resource], { key: sourceKey(base), name: 'x', fhirBase: base }, new Set(['DiagnosticReport/dr-deferred'])).resources;
+    expect(find(out, 'Procedure/pr1').meta?.lastUpdated).toBe('2026-03-01T09:59:59.999Z');
+    expect(find(out, 'Procedure/pr2').meta?.lastUpdated).toBe('2026-03-01T10:00:00.000Z');
+    expect(find(out, 'Patient/p').meta?.lastUpdated).toBe('2026-03-01T10:00:00.000Z');
+  });
+
+  it('fetchAll returns the deferred keys', async () => {
+    const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], (res) => void res.writeHead(500).end());
+    expect(got.deferred).toEqual(['DiagnosticReport/dr1']);
   });
 });
 

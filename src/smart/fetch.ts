@@ -42,7 +42,7 @@ export async function fetchAll(
   token: string,
   patient: string,
   types?: string[],
-): Promise<{ resources: Resource[]; byType: Record<string, number>; skipped: Record<string, string> }> {
+): Promise<{ resources: Resource[]; byType: Record<string, number>; skipped: Record<string, string>; deferred: string[] }> {
   const base = normBase(fhirBase);
   const skipped: Record<string, string> = {};
   const failures: Record<string, number> = {};
@@ -123,7 +123,8 @@ export async function fetchAll(
   // the whole record: left out of this sync, so the stored copy keeps its body and the next sync retries. After DEAD such
   // failures in a row the Binary endpoint counts as down: the remaining bodies wait too. A refused token (401) aborts.
   const DEAD = 3;
-  let streak = 0, deferred = 0, lastReason = '';
+  let streak = 0, lastReason = '';
+  const deferredKeys: string[] = [];
   const fetchable = (a: Attachment) =>
     !!a.url && !a.data && /(^|\/)Binary\/[^/]+$/.test(a.url) && URL.canParse(a.url, `${base}/`) && new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`);
   for (const [k, r] of [...got]) {
@@ -134,6 +135,11 @@ export async function fetchAll(
       let type: string, buf: Buffer, fhir: { resourceType?: string; data?: string; contentType?: string } | undefined;
       try {
         const res = await get(a.url as string, 'Binary', a.contentType ?? '*/*');
+        // A timeout or rate limit is for now: defer like a 5xx, so a throttled sync never replaces a stored body.
+        if (res.status === 408 || res.status === 429) {
+          await res.body?.cancel();
+          throw new GaError(`Binary: HTTP ${res.status}`);
+        }
         if (!res.ok) {
           streak = 0; // the server answered
           await fail('Binary', res);
@@ -161,15 +167,15 @@ export async function fetchAll(
     }
     if (defer) {
       got.delete(k);
-      deferred++;
+      deferredKeys.push(k);
     }
   }
-  if (deferred) skipped.Binary = [`${deferred} deferred to the next sync, last ${lastReason}`, skipped.Binary].filter(Boolean).join('; ');
+  if (deferredKeys.length) skipped.Binary = [`${deferredKeys.length} deferred to the next sync, last ${lastReason}`, skipped.Binary].filter(Boolean).join('; ');
 
   const resources = [...got.values()];
   const byType: Record<string, number> = {};
   for (const r of resources) byType[r.resourceType] = (byType[r.resourceType] ?? 0) + 1;
-  return { resources, byType, skipped };
+  return { resources, byType, skipped, deferred: deferredKeys };
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -218,10 +224,14 @@ function fixRefs(v: unknown, keep: (ref: string) => string | undefined): unknown
 
 // Resources from fetchAll, ready for importResources (kind 'smart'). Ids stay the server ids so batch references
 // resolve; meta keeps only lastUpdated (the per-resource source date). PDFs and images come back as `binaries`.
-export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[]; binaries: PendingBinary[] } {
+// deferred: Type/id keys fetchAll left out of this sync (body download failed for now). A record whose reference to one becomes
+// display-only is dated 1 ms before its lastUpdated: unchanged, it still skips (the stored resolved link stays); new or changed,
+// the next sync that has the target updates it with the link. Smart records carry last-seen, so currency is unaffected.
+export function mapForGa(rs: Resource[], src: SourceRec, deferred: ReadonlySet<string> = new Set()): { resources: Resource[]; binaries: PendingBinary[] } {
   const base = normBase(src.fhirBase);
   const system = `urn:ga-server:id:smart:${src.key}`;
   const inBatch = new Set(rs.map(keyOf));
+  let waits = false; // the record being mapped referenced a deferred one
   const keep = (ref: string): string | undefined => {
     if (ref.startsWith('#')) return ref;
     if (/^https?:/i.test(ref)) {
@@ -232,7 +242,9 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
       }
     }
     const local = (ref.startsWith(`${base}/`) ? ref.slice(base.length + 1) : ref).replace(/\/_history\/.*$/, '');
-    return inBatch.has(local) ? local : undefined;
+    if (inBatch.has(local)) return local;
+    if (deferred.has(local)) waits = true;
+    return undefined;
   };
   const binaries: PendingBinary[] = [];
 
@@ -257,12 +269,14 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
   };
 
   const resources = rs.map((orig) => {
+    waits = false;
     const r = fixRefs(structuredClone(orig), keep) as R;
     const ours = { system, value: keyOf(orig) };
     if (SINGULAR_ID.has(r.resourceType)) r.identifier = ours;
     else r.identifier = [ours, ...[r.identifier ?? []].flat().filter((i) => i.system !== system)];
     const lastUpdated = orig.meta?.lastUpdated;
-    if (lastUpdated) r.meta = { lastUpdated };
+    const t = lastUpdated ? Date.parse(lastUpdated) : NaN;
+    if (lastUpdated) r.meta = { lastUpdated: waits && !Number.isNaN(t) ? new Date(t - 1).toISOString() : lastUpdated };
     else delete r.meta;
     if (r.resourceType === 'DocumentReference') {
       const d = r as DocumentReference;
