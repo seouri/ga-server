@@ -171,7 +171,7 @@ const extracted = () => [{ resourceType: 'Procedure', status: 'completed', code:
 
 test('ga_import returns candidates and autoMapped', async () => {
   const { f } = fake();
-  const r = await importExtracted(client, loadConfig(), extracted(), pdf(), undefined, pid, { fetch: f }) as unknown as { autoMapped: number; unmapped: Reviewed[] };
+  const r = await importExtracted(client, { ...loadConfig(), terminologyLookup: true }, extracted(), pdf(), undefined, pid, { fetch: f }) as unknown as { autoMapped: number; unmapped: Reviewed[] };
   expect(r.autoMapped).toBe(0);
   expect(r.unmapped).toHaveLength(1);
   expect(r.unmapped[0].candidates[0]).toEqual({ system: SNOMED, code: '73761001', display: 'Colonoscopy' });

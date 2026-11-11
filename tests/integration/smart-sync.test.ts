@@ -13,7 +13,7 @@ import type { SourceRec } from '../../src/smart/store.ts';
 import { isStale, readStatus, syncAll, syncSource } from '../../src/smart/sync.ts';
 import { serveFixtures, startMock } from '../smart/mock-server.ts';
 import type { MockSmart } from '../smart/mock-server.ts';
-import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient, restoreConfig } from './helpers.ts';
+import { cleanupTestMaps, cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
 const P = 'synthetic-patient-1';
 const clientId = 'synthetic-client';
@@ -48,7 +48,7 @@ const bins = (rs: Resource[]) => rs.flatMap((x) => (x as DocumentReference).cont
 const endpoints = (key: string) =>
   client.searchResources('Endpoint', { identifier: `urn:ga-server:id:smart-source|${key}` }, { cache: 'no-cache' });
 
-// Every request the sync makes to the terminology services (there must be none: lookup is off below).
+// Every request the sync makes to the terminology services (there must be none: the run's config has lookup off).
 const termCalls: string[] = [];
 const realFetch = globalThis.fetch;
 let termAnswer: ((url: string) => Promise<Response>) | undefined; // a test's synthetic terminology service (lookup on)
@@ -56,9 +56,6 @@ let termAnswer: ((url: string) => Promise<Response>) | undefined; // a test's sy
 beforeAll(async () => {
   client = await getClient(loadConfig());
   dir = mkdtempSync(join(tmpdir(), 'ga-smart-sync-'));
-  // The sync reads GA_CONFIG for its off switch: a copy with lookup off, so no fixture name leaves the machine.
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ ...loadConfig(), terminologyLookup: false }), { mode: 0o600 });
-  process.env.GA_CONFIG = join(dir, 'config.json');
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     if (/nlm\.nih\.gov|tx\.fhir\.org/.test(url)) {
@@ -93,7 +90,6 @@ afterAll(async () => {
   await m?.close();
   rmSync(dir, { recursive: true, force: true });
   vi.mocked(globalThis.fetch).mockRestore();
-  restoreConfig();
 });
 
 describe('isStale', () => {
