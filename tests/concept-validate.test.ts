@@ -55,7 +55,13 @@ test('validates an ICD-10-CM code exactly', async () => {
   const hit = fake([1, ['E11.9'], null, [['E11.9', 'Type 2 diabetes mellitus without complications']]]);
   expect(await validate(ICD10CM, 'E11.9', { fetch: hit })).toEqual({ ok: true, display: 'Type 2 diabetes mellitus without complications' });
   expect(urls.at(-1)).toMatch(/^https:\/\/clinicaltables\.nlm\.nih\.gov\/api\/icd10cm\/v3\/search\?terms=E11\.9&/);
-  expect(await validate(ICD10CM, 'E11.9', { fetch: fake([1, ['E11.90'], null, [['E11.90', 'x']]]) })).toEqual({ ok: false, reason: 'unknown ICD-10-CM code E11.9' });
+  expect(await validate(ICD10CM, 'E11.9', { fetch: fake([1, ['E11.90'], null, [['E11.90', 'x']]]) })).toEqual({ ok: false, reason: NOT_BILLABLE });
+});
+
+// Clinical Tables lists billable codes only: a category code (E11) is refused with what to do instead.
+const NOT_BILLABLE = 'not a billable ICD-10-CM code: use a more specific code or SNOMED CT';
+test('refuses an ICD-10-CM category code as not billable', async () => {
+  expect(await validate(ICD10CM, 'E11', { fetch: fake([2, ['E11.0', 'E11.9'], null, [['E11.0', 'x'], ['E11.9', 'y']]]) })).toEqual({ ok: false, reason: NOT_BILLABLE });
 });
 
 test('an unavailable service is not an unknown code', async () => {

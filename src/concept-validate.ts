@@ -37,10 +37,10 @@ export async function validate(system: string, code: string, deps: { fetch?: typ
       }
     }
     if (system === ICD10CM) {
-      // Prefix search again: only an exact code counts.
+      // Prefix search again: only an exact code counts. The list holds billable codes only, so a category code (E11) is missing too.
       const [, codes, , rows] = (await get(f, `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?terms=${code}&sf=code&df=code,name`)) as [number, string[], unknown, string[][]];
       const i = codes?.indexOf(code) ?? -1;
-      return i < 0 ? unknown('ICD-10-CM') : { ok: true, display: rows[i].at(-1) };
+      return i < 0 ? { ok: false, reason: 'not a billable ICD-10-CM code: use a more specific code or SNOMED CT' } : { ok: true, display: rows[i].at(-1) };
     }
     if (system === LOINC) {
       // The search matches prefixes: only an exact code counts.

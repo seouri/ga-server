@@ -1,5 +1,5 @@
-// Concept-layer agent tools, both transports (spec "Agent tools"): the review list, and map_concept, which validates a code,
-// writes the source map entry (by agent: it replaces any earlier one, which is how corrections work), re-applies it and records Provenance.
+// Concept-layer agent tools, both transports (spec "Agent tools"): the review list, and map_concept, whose validation, map
+// write, re-apply and Provenance live in src/concept-map-term.ts (mapTerm), shared with GA's automatic mapping.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TARGET } from '../concept-apply.ts';
