@@ -585,8 +585,9 @@ export async function importResources(
         ? idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))
         : (source.kind === 'fhir-export' || source.kind === 'apple-clinical') &&
           (srcTags(ex).some((c) => c !== `src-${source.kind}`) || idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))));
-    // A hospital record (portal, FHIR export, EHI, C-CDA) replaces a body only Apple wrote (a clinical copy, or an Apple-only reading), whatever the dates.
-    const hospitalOntoApple = (ex: R) => ['smart', 'fhir-export', 'ehi', 'ccda'].includes(source.kind) && srcTags(ex).length === 1 && ['src-apple-clinical', 'src-apple-health'].includes(srcTags(ex)[0]);
+    // A hospital record (portal, FHIR export) replaces a body only Apple wrote (a clinical copy, or an Apple-only reading), whatever the dates.
+    // EHI and C-CDA reach Apple copies only through Epic ids and follow the dates (an older file only links).
+    const hospitalOntoApple = (ex: R) => ['smart', 'fhir-export'].includes(source.kind) && srcTags(ex).length === 1 && ['src-apple-clinical', 'src-apple-health'].includes(srcTags(ex)[0]);
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
     // Apple's clinical copies (kind apple-clinical, a hospital identifier) are hospital records here: they take part in duplicate detection.
     const fromApple = source.kind === 'apple-health';

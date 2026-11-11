@@ -1091,3 +1091,20 @@ test('an apple reading never replaces an apple clinical copy', async () => {
   expect(JSON.stringify({ ...after[0], meta: undefined, identifier: undefined, extension: undefined })).toBe(JSON.stringify({ ...before, meta: undefined, identifier: undefined, extension: undefined }));
   expect(JSON.stringify((after[0] as Observation).extension)).toBe(JSON.stringify((before as Observation).extension));
 });
+
+// EHI and C-CDA reach an Apple clinical copy only through its Epic id: they follow the dates (an older file only links).
+for (const [label, older] of [['C-CDA', () => ccda('2019-01-01')], ['EHI', () => ehiSrc('2019-01-01')]] as const) {
+  test(`an older ${label} record linked by Epic id leaves a newer Apple copy alone`, async () => {
+    const n = uid('c');
+    const pl = { system: PROBLEM_OID, value: uid('pl') };
+    const appleCopy = { ...problem([{ system: SMART_SYS, value: `Condition/${n}` }, { system: APPLE, value: `https://fhir.example.org/Condition/${n}` }, pl], 'resolved'), code: { text: 'apple wording' } } as Resource;
+    await importResources(client, [appleCopy], appleClinicalSrc(), pid, 'h');
+    const fileIds = label === 'EHI' ? [{ system: EHI_SYS, value: `PROBLEM_LIST|${pl.value}` }, pl] : [...src(uid('s')), pl];
+    expect(await importResources(client, [{ ...problem(fileIds, 'active'), code: { text: 'file wording' } } as Resource], older(), pid, 'h')).toMatchObject({ created: 0, updated: 0, merged: 1 });
+    const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+    expect(found).toHaveLength(1);
+    expect(found[0].clinicalStatus?.coding?.[0]?.code).toBe('resolved');
+    expect(found[0].code?.text).toBe('apple wording');
+    expect(tagsOf(found[0])).toContain('src-apple-clinical');
+  });
+}
