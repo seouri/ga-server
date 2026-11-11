@@ -127,6 +127,9 @@ test('does not adopt when a portal record already has the identifier', async () 
   const after = await client.readResource('AllergyIntolerance', old.id as string);
   expect(after.meta?.tag).toContainEqual(expect.objectContaining({ system: 'urn:ga-server:tag', code: 'possible-duplicate' }));
   expect(after.extension?.filter((e) => e.url === DUP_OF)).toEqual([{ url: DUP_OF, valueReference: { reference: `AllergyIntolerance/${withSmart[0].id}` } }]);
+  const portalAfter = await client.readResource('AllergyIntolerance', withSmart[0].id as string);
+  expect(portalAfter.meta?.tag?.filter((t) => t.system === 'urn:ga-server:tag' && t.code === 'possible-duplicate')).toHaveLength(1);
+  expect(portalAfter.extension?.filter((e) => e.url === DUP_OF)).toEqual([{ url: DUP_OF, valueReference: { reference: `AllergyIntolerance/${old.id}` } }]);
 });
 
 test('re-import is a no-op', async () => {

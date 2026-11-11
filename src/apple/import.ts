@@ -1,5 +1,5 @@
 import type { MedplumClient } from '@medplum/core';
-import type { AllergyIntolerance, Identifier, Resource } from '@medplum/fhirtypes';
+import type { AllergyIntolerance, Extension, Identifier, Resource } from '@medplum/fhirtypes';
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
 import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
@@ -34,7 +34,7 @@ const appleId = (r: Resource): Identifier | undefined => ((r as { identifier?: I
 
 // An allergy an older import wrote is identified by its sourceURL only: give it the portal-style identifier now, so the engine
 // finds it instead of writing a second one. Not when a record (a portal sync's) already holds that identifier: two records would
-// share it; the old one is flagged possible-duplicate instead.
+// share it; both are flagged possible-duplicate instead.
 async function adoptOldAllergies(client: MedplumClient, patientId: string, resources: Resource[]): Promise<void> {
   for (const r of resources) {
     const s = smartId(r), a = appleId(r);
@@ -42,15 +42,10 @@ async function adoptOldAllergies(client: MedplumClient, patientId: string, resou
     const held = await client.searchOne('AllergyIntolerance', { identifier: `${s.system}|${s.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' });
     const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
     if (held) {
-      // Left as it is, but flagged for review like the engine's possible duplicates, pointing at the record that holds the identifier.
-      const ref = `AllergyIntolerance/${held.id}`;
-      if (old && old.id !== held.id && !old.extension?.some((e) => e.url === DUP_OF && e.valueReference?.reference === ref)) {
-        const tagged = old.meta?.tag?.some((t) => t.system === 'urn:ga-server:tag' && t.code === 'possible-duplicate');
-        await client.updateResource({
-          ...old,
-          extension: [...(old.extension ?? []), { url: DUP_OF, valueReference: { reference: ref } }],
-          meta: { ...old.meta, tag: [...(old.meta?.tag ?? []), ...(tagged ? [] : [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }])] },
-        });
+      // Left as it is, but both flagged for review like the engine's possible duplicates, each pointing at the other.
+      if (old && old.id !== held.id) {
+        await flagDuplicate(client, old, `AllergyIntolerance/${held.id}`);
+        await flagDuplicate(client, held, `AllergyIntolerance/${old.id}`);
       }
       continue;
     }
@@ -61,6 +56,17 @@ async function adoptOldAllergies(client: MedplumClient, patientId: string, resou
       await client.updateResource({ ...old, identifier: [...(old.identifier ?? []), s], meta: { ...old.meta, tag: tags } });
     }
   }
+}
+
+// Tags r possible-duplicate and links it to ref, once (a re-import changes nothing).
+async function flagDuplicate(client: MedplumClient, r: Resource & { extension?: Extension[] }, ref: string): Promise<void> {
+  if (r.extension?.some((e) => e.url === DUP_OF && e.valueReference?.reference === ref)) return;
+  const tagged = r.meta?.tag?.some((t) => t.system === 'urn:ga-server:tag' && t.code === 'possible-duplicate');
+  await client.updateResource({
+    ...r,
+    extension: [...(r.extension ?? []), { url: DUP_OF, valueReference: { reference: ref } }],
+    meta: { ...r.meta, tag: [...(r.meta?.tag ?? []), ...(tagged ? [] : [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }])] },
+  } as Resource);
 }
 
 const PATIENT: Resource = { resourceType: 'Patient', id: 'apple-patient' }; // what Patient/apple-patient means in every batch
