@@ -223,7 +223,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
         '',
       );
     };
-    const report = dryRun ? await write() : await afterImport(client, { ...lookupConfig(), patientId }, await withImportLock(write));
+    const report = dryRun ? await write() : await withImportLock(write);
     if (!dryRun) {
       try {
         writeAtomic(join(dir, deferralsFile), JSON.stringify(fetched.deferrals));
@@ -241,14 +241,17 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       ...(dryRun && { dryRun: true }),
     };
     if (opts.dryRun) return ok; // an explicit --dry-run writes nothing at all
+    let error: string | undefined;
     try {
       // Never enabled: a status-only Endpoint, so agents see the source (off, not_enabled: stale) without any patient data.
       await writeEndpoint(client, dir, src, patientId, pending ? 'off' : 'active', at, pending ? 'not_enabled' : undefined);
     } catch {
       console.error(`smart sync ${src.key}: status_write_error`);
-      return { ...ok, error: 'status_write_error' }; // the import itself succeeded
+      error = 'status_write_error'; // the import itself succeeded
     }
-    return ok;
+    // Automatic mapping only after the Endpoint: until it has this sync's last success, every record's new last-seen reads as unconfirmed.
+    const mapped = dryRun ? ok : { ...ok, report: await afterImport(client, { ...lookupConfig(), patientId }, report).catch(() => report) };
+    return error ? { ...mapped, error } : mapped;
   } catch (e) {
     if (e instanceof GaError && e.message === IMPORT_BUSY) return busy(client, src, patientId);
     // Error codes only: messages from servers or the engine may carry content.

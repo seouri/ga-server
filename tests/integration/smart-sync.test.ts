@@ -51,6 +51,7 @@ const endpoints = (key: string) =>
 // Every request the sync makes to the terminology services (there must be none: lookup is off below).
 const termCalls: string[] = [];
 const realFetch = globalThis.fetch;
+let termAnswer: ((url: string) => Promise<Response>) | undefined; // a test's synthetic terminology service (lookup on)
 
 beforeAll(async () => {
   client = await getClient(loadConfig());
@@ -60,7 +61,10 @@ beforeAll(async () => {
   process.env.GA_CONFIG = join(dir, 'config.json');
   vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (/nlm\.nih\.gov|tx\.fhir\.org/.test(url)) termCalls.push(url);
+    if (/nlm\.nih\.gov|tx\.fhir\.org/.test(url)) {
+      if (termAnswer) return termAnswer(url);
+      termCalls.push(url);
+    }
     return realFetch(input, init);
   });
   const { publicJwks } = await ensureKeys(dir);
@@ -465,6 +469,48 @@ describe('a reference to a deferred record', () => {
         if (id) await client.deleteResource('Binary', id).catch(() => undefined);
       }
     } finally {
+      await mock.close();
+    }
+  });
+});
+
+describe('automatic mapping after a sync', () => {
+  it('runs after the Endpoint has the new last success, so portal records never read as unconfirmed meanwhile', async () => {
+    const pid = await newPatient();
+    const { publicJwks } = await ensureKeys(dir);
+    const mock = await startMock({ clientId, jwks: publicJwks });
+    serveFixtures(mock);
+    const offered = { type: 'Procedure', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] };
+    mock.route('/fhir/metadata', (req, res) => {
+      if (!mock.authorized(req)) return void res.writeHead(401).end();
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [offered] }] }));
+    });
+    const proc = { resourceType: 'Procedure', id: 'pr-uncoded', meta: { lastUpdated: '2026-03-01T10:00:00Z' }, status: 'completed', code: { text: 'Synthetic uncoded procedure' }, subject: { reference: `Patient/${P}` }, performedDateTime: '2026-02-27' };
+    mock.route('/fhir/Procedure', (req, res) => (mock.authorized(req)
+      ? void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: proc, search: { mode: 'match' } }] }))
+      : void res.writeHead(401).end()));
+    const src: SourceRec = { key: newKey('auto'), name: 'Auto Hospital', fhirBase: mock.fhirBase, patient: P, enabledTypes: ['Procedure'] };
+    fresh(src.key, mock);
+    const now = new Date();
+    const cfgPath = process.env.GA_CONFIG as string;
+    const on = join(dir, 'lookup-on.json');
+    writeFileSync(on, JSON.stringify({ ...loadConfig(), terminologyLookup: true }), { mode: 0o600 });
+    const seen: (string | undefined)[] = []; // the Endpoint's last success at each terminology request
+    termAnswer = async () => {
+      const [ep] = await endpoints(src.key);
+      seen.push(ep && ext(ep, 'urn:ga-server:ext:smart-last-success')?.valueDateTime);
+      return new Response(JSON.stringify({ expansion: { contains: [] } }));
+    };
+    try {
+      process.env.GA_CONFIG = on;
+      const r = await syncSource(client, dir, src, pid, { now });
+      expect(r.status).toBe('active');
+      expect((r.report as { unmapped?: { name: string }[] }).unmapped?.map((u) => u.name)).toEqual(['Synthetic uncoded procedure']);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen)).toEqual(new Set([now.toISOString()]));
+    } finally {
+      termAnswer = undefined;
+      process.env.GA_CONFIG = cfgPath;
       await mock.close();
     }
   });
