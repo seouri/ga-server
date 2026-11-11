@@ -79,6 +79,7 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 
 ## Deliberate differences from Medplum
 
+- A concept's synonyms and designations are unique by code, text, language and canonical row; Medplum's key leaves out the language, so a translation whose text equals another language's (French "Patient") is dropped there and kept here (62 rows of the seeded terminology).
 - Transactions are all or nothing: a failing entry fails the whole transaction with its status, as Medplum's tests expect with its `transaction-bundles` project feature (without the feature, Medplum keeps the other entries and answers 200 with the failed entry's status).
 - An unexpected error in a batch entry answers that entry 500 `Internal error` (Medplum answers it 400 with the error's text); the batch's other entries stand.
 - A batch or transaction with no entries answers 200 with an empty response Bundle (R4 `Bundle.entry` is 0..*; Medplum refuses it with 400 `Missing bundle entries`).
