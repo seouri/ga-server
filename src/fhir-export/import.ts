@@ -5,6 +5,7 @@ import type { BatchOpts } from '../batches.ts';
 import type { GaConfig } from '../config.ts';
 import { storeDocument } from '../document.ts';
 import { COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
+import { DATED } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
 import { mapForGa } from '../smart/fetch.ts';
 import { sourceKey } from '../smart/auth.ts';
@@ -43,7 +44,9 @@ export async function importFhirExport(client: MedplumClient, cfg: GaConfig, pat
   const lastUpdated = (r: { meta?: { lastUpdated?: string } }) => r.meta?.lastUpdated;
   // A record without lastUpdated (reconstructed, fill-only) takes the file's newest lastUpdated as its source date; in a file with
   // none at all it gets no source date (never invented), so it can raise neither the stored nor the scanned newest Epic import.
-  const dateOf = (r: Resource) => lastUpdated(r) ?? (read.lastUpdated ? read.date : '');
+  // Medications, problems and allergies are a whole-record list as of the file (one date per file, like C-CDA and EHI): their own
+  // older lastUpdated would read "unconfirmed" against the file's newest record.
+  const dateOf = (r: Resource) => (read.lastUpdated && DATED.has(r.resourceType) ? read.date : lastUpdated(r) ?? (read.lastUpdated ? read.date : ''));
   const report = await withImportLock(async () => {
     const { fileHash } = await storeDocument(client, path, patientId, 'application/json');
     await uploadBinaries(client, resources, binaries, src, patientId);

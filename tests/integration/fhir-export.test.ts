@@ -138,4 +138,15 @@ describe('patient-less exports', () => {
       expect(await current(pid)).toEqual(['current']);
     });
   });
+
+  it('an older active medication in a dated export reads current', () => withPatient(async (pid) => {
+    // One file: the medication was last updated months before another record in it; the file is one whole-record list.
+    const file = writeExport('dated-mixed.json', [
+      { resourceType: 'Patient', id: 'p1', meta: { lastUpdated: '2025-08-01T00:00:00Z' } },
+      { resourceType: 'MedicationRequest', id: 'm-old', meta: { lastUpdated: '2025-03-01T00:00:00Z' }, status: 'active', intent: 'order', medicationCodeableConcept: { text: 'Synthetic older drug 5 mg' }, subject: { reference: 'Patient/p1' }, authoredOn: '2025-02-01' },
+      { resourceType: 'Observation', id: 'o-new', meta: { lastUpdated: '2025-08-01T00:00:00Z' }, status: 'final', code: { text: 'Synthetic lab' }, effectiveDateTime: '2025-07-30', valueString: 'x', subject: { reference: 'Patient/p1' } },
+    ] as Resource[]);
+    await importFhirExport(client, cfg, file, pid, { fhirBase: BASE });
+    expect((await currentList(client, pid, 'medications', undefined, [])).rows.map((x) => x.currency)).toEqual(['current']);
+  }));
 });
