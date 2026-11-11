@@ -24,13 +24,25 @@ async function exp(s: Side, query: string): Promise<{ status: number; body: any 
 }
 const text = (r: { body: any }) => r.body?.issue?.[0]?.details?.text as string | undefined;
 const contains = (r: { body: any }) => r.body?.expansion?.contains as { system?: string; code?: string; display?: string }[] | undefined;
-// An expansion that walks a hierarchy has no ORDER BY in Medplum: below the third level its order follows its Postgres plan
-// (observed: grouped by the parent's code), the store's stays breadth-first in CodeSystem order. Such answers are compared
-// with `contains` sorted by system and code.
+// An expansion that walks a hierarchy without a text filter has no ORDER BY in Medplum: below the third level its order is its
+// Postgres plan's (breadth-first, a level's parents in code order); the store's is breadth-first in CodeSystem order (R4 leaves
+// expansion order open). Those tests are `differs on purpose`: the codes are compared as sets (`contains` sorted), and the
+// store's order is checked to be deterministic (storeOrder).
 const unordered = <T extends { body: any }>(r: T): T => {
   r.body?.expansion?.contains?.sort((a: any, b: any) => `${a.system}|${a.code}`.localeCompare(`${b.system}|${b.code}`));
   return r;
 };
+const codesOf = (r: { body: any }) => (contains(r) ?? []).map((c) => `${c.system}|${c.code}`);
+// The store answers `query` twice in the same order, and offset windows of one count partition the full hierarchy walk (one
+// include: Medplum's offset applies per include) with no repeat or gap.
+async function storeOrder(s: Side, query: string, extra = ''): Promise<void> {
+  expect(codesOf(await exp(s, query))).toEqual(codesOf(await exp(s, query)));
+  const url = `http://example.com/ValueSet/walk-${randomUUID()}`;
+  await s.create<ValueSet>({ resourceType: 'ValueSet', status: 'active', url, compose: { include: [{ system: ROLE_CODE, filter: [{ property: 'concept', op: 'is-a', value: '_PersonalRelationshipRoleType' }] }] } });
+  const full = codesOf(await exp(s, `url=${E(url)}&count=200${extra}`)), pages: string[] = [];
+  for (let offset = 0; offset <= full.length; offset += 25) pages.push(...codesOf(await exp(s, `url=${E(url)}&count=25&offset=${offset}${extra}`)));
+  expect([full.length > 100, pages]).toEqual([true, full]);
+}
 const created = async (s: Side, ...rs: (CodeSystem | ValueSet)[]) => { for (const r of rs) await s.create(r); };
 
 describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
@@ -190,11 +202,14 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
       });
     });
 
-    test('Expand › Subsumption [server/src/fhir/operations/expand.test.ts]', () => same(sides, async (s) => {
-      const r = await exp(s, `url=${E(RELATED)}&count=200`);
-      expect(contains(r)?.find((c) => c.system === ROLE_CODE && c.code === 'FRND')?.display).toBe('unrelated friend');
-      return unordered(r);
-    }));
+    test('differs on purpose: Expand › Subsumption [server/src/fhir/operations/expand.test.ts]', async () => {
+      await same(sides, async (s) => {
+        const r = await exp(s, `url=${E(RELATED)}&count=200`);
+        expect(contains(r)?.find((c) => c.system === ROLE_CODE && c.code === 'FRND')?.display).toBe('unrelated friend');
+        return unordered(r);
+      });
+      await storeOrder(sides[1], `url=${E(RELATED)}&count=200`);
+    });
 
     test('Expand › Returns error when CodeSystem not found [server/src/fhir/operations/expand.test.ts]', async () => {
       const url = `https://example.com/csdne${randomUUID()}`;
@@ -328,13 +343,16 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
       }));
     });
 
-    test('Expand › Recursive subsumption [server/src/fhir/operations/expand.test.ts]', () => same(sides, async (s) => {
-      const r = await exp(s, `url=${E(RELATED)}&count=200`);
-      const c = contains(r) ?? [];
-      expect([c.filter((x) => x.system === 'http://terminology.hl7.org/CodeSystem/v2-0131').length, c.filter((x) => x.system === ROLE_CODE).length]).toEqual([12, 110]);
-      expect(c.find((x) => x.code === '_PersonalRelationshipRoleType')).toBeDefined();
-      return unordered(r);
-    }));
+    test('differs on purpose: Expand › Recursive subsumption [server/src/fhir/operations/expand.test.ts]', async () => {
+      await same(sides, async (s) => {
+        const r = await exp(s, `url=${E(RELATED)}&count=200`);
+        const c = contains(r) ?? [];
+        expect([c.filter((x) => x.system === 'http://terminology.hl7.org/CodeSystem/v2-0131').length, c.filter((x) => x.system === ROLE_CODE).length]).toEqual([12, 110]);
+        expect(c.find((x) => x.code === '_PersonalRelationshipRoleType')).toBeDefined();
+        return unordered(r);
+      });
+      await storeOrder(sides[1], `url=${E(RELATED)}&count=200`);
+    });
 
     test('Expand › Recursive subsumption with filter [server/src/fhir/operations/expand.test.ts]', () => same(sides, async (s) => {
       const r = await exp(s, `url=${E(RELATED)}&filter=adopt&count=200`);
@@ -342,12 +360,15 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
       return r;
     }));
 
-    test('Expand › Filter out abstract codes [server/src/fhir/operations/expand.test.ts]', () => same(sides, async (s) => {
-      const r = await exp(s, `url=${E(RELATED)}&count=200&excludeNotForUI=true`);
-      expect(contains(r)?.filter((c) => c.system === ROLE_CODE)).toHaveLength(109);
-      expect(contains(r)?.find((c) => c.code === '_PersonalRelationshipRoleType')).toBeUndefined();
-      return unordered(r);
-    }));
+    test('differs on purpose: Expand › Filter out abstract codes [server/src/fhir/operations/expand.test.ts]', async () => {
+      await same(sides, async (s) => {
+        const r = await exp(s, `url=${E(RELATED)}&count=200&excludeNotForUI=true`);
+        expect(contains(r)?.filter((c) => c.system === ROLE_CODE)).toHaveLength(109);
+        expect(contains(r)?.find((c) => c.code === '_PersonalRelationshipRoleType')).toBeUndefined();
+        return unordered(r);
+      });
+      await storeOrder(sides[1], `url=${E(RELATED)}&count=200&excludeNotForUI=true`, '&excludeNotForUI=true');
+    });
 
     const propertyFilter = (filter: { property: string; op: '=' | 'in' | 'exists'; value: string }, n: number) => async () => {
       const url = `https://example.com/fhir/ValueSet/property-filter${randomUUID()}`;
@@ -365,7 +386,7 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
     test('Expand › Property filter with exists=true [server/src/fhir/operations/expand.test.ts]', propertyFilter({ property: 'status', op: 'exists', value: 'true' }, 1));
     test('Expand › Property filter with exists=false [server/src/fhir/operations/expand.test.ts]', propertyFilter({ property: 'status', op: 'exists', value: 'false' }, 160));
 
-    test('Expand › Reference to other ValueSet [server/src/fhir/operations/expand.test.ts]', async () => {
+    test('differs on purpose: Expand › Reference to other ValueSet [server/src/fhir/operations/expand.test.ts]', async () => {
       const url = `http://example.com/ValueSet/reference-${randomUUID()}`;
       await same(sides, async (s) => {
         await created(s, { resourceType: 'ValueSet', status: 'draft', url, compose: { include: [{ valueSet: [RELATED] },
@@ -377,6 +398,7 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
         expect([c.find((x) => x.code === 'HPOWATT')?.display, c.find((x) => x.code === 'SEE')?.display]).toEqual(['healthcare power of attorney', 'Seeing']);
         return unordered(r);
       });
+      await storeOrder(sides[1], `url=${E(url)}&count=200`);
     });
 
     test('Expand › Display text override [server/src/fhir/operations/expand.test.ts]', async () => {
@@ -687,14 +709,29 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
     });
 
     test('differs on purpose: a filter op $expand does not implement is 400 [store-plan-2]', async () => {
-      const url = `http://example.com/ValueSet/regex-${randomUUID()}`;
+      const url = `http://example.com/ValueSet/generalizes-${randomUUID()}`;
       const [medplum, store] = await both(sides, async (s) => {
-        await created(s, { resourceType: 'ValueSet', status: 'active', url, compose: { include: [{ system: ROLE_CODE, filter: [{ property: 'code', op: 'regex', value: 'MT.*' }] }] } });
+        await created(s, { resourceType: 'ValueSet', status: 'active', url, compose: { include: [{ system: ROLE_CODE, filter: [{ property: 'concept', op: 'generalizes', value: 'MT' }] }] } });
         const r = await exp(s, `url=${E(url)}`);
         return [r.status, contains(r)?.length ?? text(r)];
       });
       expect(medplum).toEqual([200, undefined]); // no codes
-      expect(store).toEqual([400, 'ValueSet filter op regex is not supported']);
+      expect(store).toEqual([400, 'ValueSet filter op generalizes is not supported']);
+    });
+
+    // Medplum 5.2.14 has no is-not-a or regex filter: an include using one expands to no codes. The store implements both (R4).
+    test('differs on purpose: the built-ins with is-not-a and regex filters expand [store-plan-2]', async () => {
+      const [medplum, store] = await both(sides, async (s) => {
+        const out = [];
+        for (const v of ['patient-contactrelationship', 'iso3166-1-3', 'iso3166-1-N']) {
+          const r = await exp(s, `url=${E(`http://hl7.org/fhir/ValueSet/${v}`)}`);
+          out.push([r.status, contains(r)?.length ?? 0, contains(r)?.some((c) => c.code === 'O') ?? false]);
+        }
+        return out;
+      });
+      expect(medplum).toEqual([[200, 0, false], [200, 0, false], [200, 0, false]]);
+      // v2-0131 without O; the 3-letter codes of urn:iso:std:iso:3166 (it holds numeric codes only as synonym properties)
+      expect(store).toEqual([[200, 11, false], [200, 248, false], [200, 0, false]]);
     });
 
     test('differs on purpose: a nested ValueSet in $validate-code; instance-level $expand [store-plan-2]', async () => {

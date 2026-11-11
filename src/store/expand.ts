@@ -4,8 +4,8 @@
 // packages/server/src/fhir/operations/expand.ts (paging, the text filter, its ranking and the order of codes),
 // valuesetvalidatecode.ts, codesystemvalidatecode.ts (validateCodings), utils/terminology.ts (addPropertyFilter) and
 // util/text.ts (foldText); the ranking's strict_word_similarity is a port of PostgreSQL's contrib/pg_trgm/trgm_op.c.
-// Beyond Medplum (R4): compose.exclude, include.valueSet in $validate-code, instance-level $expand, 400 for a filter op it
-// does not implement or a ValueSet that includes itself.
+// Beyond Medplum (R4): compose.exclude, filters is-not-a and regex, include.valueSet in $validate-code, instance-level $expand,
+// 400 for a filter op it does not implement or a ValueSet that includes itself.
 import type { DatabaseSync } from 'node:sqlite';
 import type {
   CodeSystem, Coding, Parameters, ParametersParameter, ValueSet, ValueSetComposeInclude, ValueSetComposeIncludeConcept, ValueSetComposeIncludeFilter,
@@ -109,6 +109,20 @@ function functions(db: DatabaseSync): void {
   // strict_word_similarity(medplum_unaccent(display), medplum_unaccent(filter)); null for no display
   db.function('term_rank', o, (display, f) => (display === null ? null : strictWordSimilarity(unaccent(String(display)), unaccent(String(f)))));
   db.function('term_key', o, (code) => collationKey(String(code)));
+  db.function('term_regex', o, (value, pattern) => (value === null ? 0 : +regex(String(pattern)).test(String(value))));
+}
+
+// A ValueSet `regex` filter: the whole value must match (R4 gives no anchoring; Medplum 5.2.14 has no regex filter).
+// shortcut: JavaScript's regex dialect stands in for Postgres's POSIX one (they agree on classes, ranges and {n}); upgrade if a
+// built-in or user pattern needs a POSIX-only construct.
+const patterns = new Map<string, RegExp>();
+function regex(pattern: string): RegExp {
+  let r = patterns.get(pattern);
+  if (!r) {
+    try { r = new RegExp(`^(?:${pattern})$`, 'u'); } catch { throw bad(`Invalid regex in ValueSet filter: ${pattern}`); }
+    patterns.set(pattern, r);
+  }
+  return r;
 }
 
 // ---- terminology resources
@@ -133,7 +147,8 @@ function nested(store: Store, url: string, seen: string[]): { vs: ValueSet; seen
 }
 
 // The rows (all coding columns, as `c`) of an include's filters: is-a and descendent-of walk down from the code (the first walk
-// is the source, keeping Medplum's breadth-first order), =, in and exists test a property. Undefined when no row can match (an
+// is the source, keeping a breadth-first order), is-not-a leaves that walk out, =, in and exists test a property, regex matches
+// the code or a property value whole. Undefined when no row can match (an
 // unknown property, or, as Medplum, a hierarchy filter with a text filter under 3 characters). Other ops are 400.
 function filterRows(store: Store, { rid, cs }: Target, filters: ValueSetComposeIncludeFilter[], shortText = false): { from: Sql; where: Sql[] } | undefined {
   let from: Sql | undefined;
@@ -148,6 +163,24 @@ function filterRows(store: Store, { rid, cs }: Target, filters: ValueSetComposeI
         if (!from) from = { sql: `(${walk.sql} select * from walk)`, args: walk.args };
         else where.push({ sql: `c.code in (${walk.sql} select code from walk)`, args: walk.args });
         if (f.op === 'descendent-of') where.push(S('c.code != ?', f.value));
+        break;
+      }
+      case 'is-not-a': {
+        // The CodeSystem's codes outside the is-a set of the value (the walk; a CodeSystem without an is-a hierarchy: the code).
+        if (cs.hierarchyMeaning !== 'is-a') { where.push(S('c.code != ?', f.value)); break; }
+        const prop = propertyId(store, rid, parentProperty(cs).code);
+        if (prop === undefined) { where.push(S('c.code != ?', f.value)); break; }
+        const walk = hierarchy('down', rid, prop, f.value);
+        where.push({ sql: `c.code not in (${walk.sql} select code from walk)`, args: walk.args });
+        break;
+      }
+      case 'regex': {
+        regex(f.value); // 400 for a pattern that does not compile
+        functions(store.db);
+        if (f.property === 'code') { where.push(S('term_regex(c.code, ?)', f.value)); break; }
+        const prop = propertyId(store, rid, f.property);
+        if (prop === undefined) return undefined;
+        where.push(S('exists (select 1 from coding_property cp where cp.coding = c.id and cp.property = ? and term_regex(cp.value, ?))', prop, f.value));
         break;
       }
       case '=':

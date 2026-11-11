@@ -71,7 +71,19 @@ describe('$expand (no built-ins)', () => {
   });
 
   it('an unsupported filter op is 400 naming it (Medplum returns no codes)', () => {
-    expect(err(() => expand(include({ filter: [{ property: 'concept', op: 'regex', value: '.*' }] }))).message).toBe('ValueSet filter op regex is not supported');
+    expect(err(() => expand(include({ filter: [{ property: 'concept', op: 'generalizes', value: 'A' }] }))).message).toBe('ValueSet filter op generalizes is not supported');
+  });
+
+  it('is-not-a leaves out the is-a set (a code alone without a hierarchy); regex matches the whole code or property value', () => {
+    expect(codes(expand(include({ filter: [{ property: 'concept', op: 'is-not-a', value: 'B' }] })))).toEqual(['ROOT', 'A']);
+    expect(codes(expand(include({ filter: [{ property: 'code', op: 'regex', value: 'B.?' }] })))).toEqual(['B', 'B1']);
+    expect(codes(expand(include({ filter: [{ property: 'code', op: 'regex', value: '1' }] })))).toBeUndefined(); // anchored
+    expect(codes(expand(include({ filter: [{ property: 'kind', op: 'regex', value: '[a-z]' }] })))).toEqual(['A']);
+    expect(err(() => expand(include({ filter: [{ property: 'code', op: 'regex', value: '(' }] }))).message).toBe('Invalid regex in ValueSet filter: (');
+    store.create({ resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/flat', concept: [{ code: 'x' }, { code: 'y' }] });
+    expect(codes(expand(vs({ compose: { include: [{ system: 'http://example.com/flat', filter: [{ property: 'concept', op: 'is-not-a', value: 'x' }] }] } })))).toEqual(['y']);
+    store.create(vs({ url: 'http://example.com/vs-r', compose: { include: [{ system: 'http://example.com/cs', filter: [{ property: 'code', op: 'regex', value: 'B.*' }] }] } }));
+    expect(members(store, 'http://example.com/vs-r')).toEqual(['http://example.com/cs|B', 'http://example.com/cs|B1']);
   });
 
   it('a ValueSet including itself through another is 400 (recursive definition)', () => {
@@ -138,6 +150,15 @@ describe('$expand of the built-ins', () => {
     expect(first.expansion?.total).toBe(11); // Medplum's total: the rows fetched (count + 1)
     expect(codes(first)?.filter((c) => codes(next)?.includes(c))).toEqual([]);
     expect(codes(next)).toEqual(codes(expandValueSet(store, structuredClone(v), { count: 20 }))?.slice(10)); // the next 10
+  });
+
+  it('the built-ins with is-not-a and regex filters expand', () => {
+    const exp = (url: string) => codes(expandValueSet(store, findTerminology<ValueSet>(store, 'ValueSet', url), {})) ?? [];
+    const contact = exp('http://hl7.org/fhir/ValueSet/patient-contactrelationship');
+    expect([contact.length, contact.includes('O'), contact.includes('C')]).toEqual([11, false, true]);
+    const numeric = exp('http://hl7.org/fhir/ValueSet/iso3166-1-N'), alpha3 = exp('http://hl7.org/fhir/ValueSet/iso3166-1-3');
+    // The seeded urn:iso:std:iso:3166 holds numeric codes only as synonym properties of its alpha codes, so iso3166-1-N is empty.
+    expect([numeric, alpha3.length, alpha3.every((c) => /^[A-Z]{3}$/.test(c!))]).toEqual([[], 248, true]);
   });
 
   it('Marital status: two CodeSystems, one whole and one enumerated', () => {
