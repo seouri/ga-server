@@ -167,6 +167,16 @@ describe('concept index (no built-ins)', () => {
       .toBe('$validate-code: parameter display is not supported');
   });
 
+  it('$import run twice adds a synonym (no language, or from a synonym property) once', () => {
+    const { resource } = store.create(cs({ concept: [{ code: 'A', display: 'Alpha' }], property: [{ code: 'syn', uri: 'http://hl7.org/fhir/concept-properties#synonym', type: 'string' }] }));
+    const p = P([{ name: 'designation', part: [{ name: 'code', valueCode: 'A' }, { name: 'value', valueString: 'Ay' }] }, prop('A', 'syn', 'Aleph')], resource.id);
+    codeSystemImport(store, p);
+    codeSystemImport(store, p);
+    expect(codings(store, rid(store, resource.id!)).map((c) => `${c.display}:${c.syn}`)).toEqual(['Alpha:0', 'Aleph:1', 'Ay:1']);
+    const designations = lookup(store, P([{ name: 'code', valueCode: 'A' }], resource.id)).parameter?.filter((x) => x.name === 'designation');
+    expect(designations).toHaveLength(2);
+  });
+
   it('$import adds concepts and properties to a stored CodeSystem; an unknown code rolls back; the CodeSystem is returned', () => {
     const { resource } = store.create(cs({ content: 'not-present', hierarchyMeaning: 'is-a', property: [{ code: 'parent', uri: 'http://hl7.org/fhir/concept-properties#parent', type: 'code' }] }));
     const r = rid(store, resource.id!);

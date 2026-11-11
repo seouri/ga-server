@@ -19,8 +19,9 @@ import { writeIndex } from './search.ts';
 import { type Store, StoreError } from './store.ts';
 
 export const TERMINOLOGY_SCHEMA = `
-  create table if not exists coding(id integer primary key, system integer not null, code text not null, display text, language text, synonymOf integer,
-    unique(system, code, language, display));
+  create table if not exists coding(id integer primary key, system integer not null, code text not null, display text, language text, synonymOf integer);
+  -- Medplum's key: a NULL language or synonymOf must not make a repeated synonym look new (SQLite's NULLs are all distinct).
+  create unique index if not exists coding_u on coding(system, code, display, coalesce(synonymOf, -1));
   create table if not exists coding_property(coding integer not null, property integer not null, value text, target integer);
   create unique index if not exists coding_property_c on coding_property(coding, property, value); -- (coding, property) lookups; one row per value
   create index if not exists coding_property_t on coding_property(target, property);
@@ -223,7 +224,7 @@ export function params(parameter: ParametersParameter[] = [], id?: string, fromQ
 }
 
 // Inputs R4 defines that these operations do not implement (Medplum ignores them): 400 naming the first one given.
-const refuse = (p: Params, op: string, names: string[]): void => {
+export const refuse = (p: Params, op: string, names: string[]): void => {
   const n = names.find((x) => p.all(x).length);
   if (n) throw bad(`${op}: parameter ${n} is not supported`);
 };

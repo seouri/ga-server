@@ -12,7 +12,7 @@ import type {
   ValueSetExpansionContains,
 } from '@medplum/fhirtypes';
 import { type Store, StoreError } from './store.ts';
-import { type Arg, INDEXED, type Params, findTerminology, hierarchy, parentProperty, prep } from './terminology.ts';
+import { type Arg, INDEXED, type Params, findTerminology, hierarchy, parentProperty, prep, refuse } from './terminology.ts';
 
 // Medplum's limits (expand.ts): at most 1000 codes, 10 filter words, a text filter under 3 characters matches the exact code only
 // (and no hierarchy), and a text filter without a count pages by 10.
@@ -418,11 +418,6 @@ export function expandValueSet(store: Store, vs: ValueSet, o: ExpandOptions): Va
 
 // ---- operation inputs
 
-// Inputs R4 defines that these operations do not implement (Medplum ignores them): 400 naming the first one given.
-const refuse = (p: Params, op: string, names: string[]): void => {
-  const n = names.find((x) => p.all(x).length);
-  if (n) throw bad(`${op}: parameter ${n} is not supported`);
-};
 // A typed input as Medplum's parseInputParameters reads it (a GET value is text).
 function typed(p: Params, name: string, type: 'integer' | 'boolean'): number | boolean | undefined {
   const v = p.get(name);

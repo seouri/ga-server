@@ -9,7 +9,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { type ConceptMapTranslateParameters, OperationOutcomeError, indexConceptMapCodings } from '@medplum/core';
 import type { CodeableConcept, ConceptMap, ConceptMapGroupElementTargetDependsOn, Parameters, ParametersParameter } from '@medplum/fhirtypes';
 import { type Store, StoreError } from './store.ts';
-import { type Params, findTerminology, isBuiltin, paramValue, prep } from './terminology.ts';
+import { type Params, findTerminology, isBuiltin, paramValue, prep, refuse } from './terminology.ts';
 
 // attributes: the mapping's property, dependsOn and product entries as JSON [{kind, uri, type, value}], type the value[x] suffix
 // (Code, Coding, String); nothing searches them. imported: 1 for a $import row, which an update of the ConceptMap keeps.
@@ -68,16 +68,12 @@ function typed(p?: ParametersParameter): Pick<Attribute, 'type' | 'value'> {
   return {};
 }
 
-// R4 inputs $translate does not implement (Medplum ignores them): 400 naming the first one given.
-const UNSUPPORTED = ['conceptMap', 'conceptMapVersion', 'version', 'target', 'dependency', 'reverse'];
-
 type Match = { equivalence: string; concept: { system?: string; code?: string; display?: string }; property?: Attribute[]; dependsOn?: Attribute[]; product?: Attribute[] };
 
 // ConceptMap $translate: the map by id, `url` or `source` (the newest version); the matches of each source system's codes, else the
 // group's `unmapped` (provided, fixed, other-map). result: some match that is not unmatched, disjoint or not-related-to.
 export function translate(store: Store, p: Params): Parameters {
-  const n = UNSUPPORTED.find((x) => p.all(x).length);
-  if (n) throw bad(`$translate: parameter ${n} is not supported`);
+  refuse(p, '$translate', ['conceptMap', 'conceptMapVersion', 'version', 'target', 'dependency', 'reverse']);
   const cc = p.all('codeableConcept');
   if (cc.length > 1) throw bad(`Expected 0..1 value(s) for input parameter codeableConcept, but ${cc.length} provided`);
   if (cc[0] && !cc[0].valueCodeableConcept) throw bad('Complex parameter codeableConcept (CodeableConcept) cannot be passed via query string');
