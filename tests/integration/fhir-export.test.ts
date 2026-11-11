@@ -3,14 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Bundle, DocumentReference, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getClient, loadConfig, type GaConfig } from '../../src/config.ts';
 import { importFhirExport } from '../../src/fhir-export/import.ts';
 import { NEWEST_IMPORT } from '../../src/identity.ts';
 import { currentList } from '../../src/lists.ts';
-import { attachAnnotations, type PrAnnotation } from '../../tools/personalrecord/annotations.ts';
-import { rebuild } from '../../tools/personalrecord/rebuild.ts';
 import { sourceKey } from '../../src/smart/auth.ts';
 import { cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
@@ -79,10 +77,8 @@ const withPatient = async (f: (pid: string) => Promise<void>) => {
 
 describe('patient-less exports', () => {
   it("imports the personalrecord tool's output into the patient compartment", () => withPatient(async (pid) => {
-    const fx = (f: string) => JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'tools', 'personalrecord', 'test', 'fixtures', f), 'utf8'));
-    const known = fx('known.json').fhir as Record<string, Resource[]>;
-    const { resources } = rebuild(fx('bundle.json') as Bundle, known, {});
-    const out = attachAnnotations(fx('annotations.json') as PrAnnotation[], known, resources).resources;
+    // Synthetic output of the rebuild tool (kept in the dataset folder it serves), run on its own fixtures.
+    const out = Object.values((JSON.parse(readFileSync(join(dir, 'rebuilt-sample.json'), 'utf8')) as { fhir: Record<string, Resource[]> }).fhir).flat();
     const r = await importFhirExport(client, cfg, writeExport('rebuilt.json', out), pid, { fhirBase: BASE });
     expect(r.invalid).toBe(0);
     expect(r.created).toBe(out.length);

@@ -4,7 +4,7 @@
 
 **Goal:** Import every dataset of a personal health dataset folder into GA: an Epic FHIR export file, a DICOM study, TIFF scans, and a structured rebuild of the personalrecord app's flattened bundle, alongside the Apple Health export and scanned PDFs GA already handles.
 
-**Architecture:** Task 0 (serial, small) adds two import kinds (`fhir-export`, `dicom`) to every shared switch (detectKind, SourceInfo, currency rule, engine, whats-new, CLI) and leaves stub importers. Then five code chunks run fully in parallel, each owning its own files: A fills `src/fhir-export/`, B fills `src/dicom/`, C widens `ga_import` to TIFF, D is a standalone `tools/personalrecord/` project whose output is A's input format, E makes the Apple importer import every R4 clinical record, identified like a portal sync. One data run (scanned PDFs and PNGs) needs no code and can start at once. Task Z (serial, last) runs the remaining imports in order, writes AGENTS.md and checks the totals.
+**Architecture:** Task 0 (serial, small) adds two import kinds (`fhir-export`, `dicom`) to every shared switch (detectKind, SourceInfo, currency rule, engine, whats-new, CLI) and leaves stub importers. Then five code chunks run fully in parallel, each owning its own files: A fills `src/fhir-export/`, B fills `src/dicom/`, C widens `ga_import` to TIFF, D is a standalone tool, kept in the dataset folder (`derived/ga-rebuild/<date>/tool/`, moved there after it was built), whose output is A's input format, E makes the Apple importer import every R4 clinical record, identified like a portal sync. One data run (scanned PDFs and PNGs) needs no code and can start at once. Task Z (serial, last) runs the remaining imports in order, writes AGENTS.md and checks the totals.
 
 **Tech Stack:** Node ≥26 TypeScript (run directly), Medplum client, vitest (`unit` and `integration` projects).
 
@@ -18,7 +18,7 @@
 - Identifiers from `fhir-export`: `urn:ga-server:id:smart:<sourceKey(fhirBase)>` | `<Type>/<id>` (identical to a portal sync).
 - New tags: `src-fhir-export`, `src-dicom`. New identifier systems: `urn:dicom:uid`, `urn:ga-server:id:dicom-archive`.
 - Errors that may reach a user never quote file content (GA's existing rule).
-- `tools/personalrecord/` imports only `node:*` and `@medplum/fhirtypes` (types), never `src/`.
+- The rebuild tool (in the dataset's `derived/ga-rebuild/<date>/tool/`) imports only `node:*` and `@medplum/fhirtypes` (types), never `src/`.
 - AGENTS.md is edited only by Task C (its "PDF extraction" section, which mirrors `extract.md`) and Task Z (everything else).
 
 ## Parallelism
@@ -33,7 +33,7 @@ File ownership (no file is in two tasks of phase 2):
 - A: `src/fhir-export/*`, `src/smart/fetch.ts` (export `htmlToText`, DiagnosticReport `presentedForm` conversion in `mapForGa`), `src/smart/sync.ts` (export `uploadBinaries`), `tests/smart-fetch.test.ts`, `tests/fhir-export*.test.ts`, `tests/integration/fhir-export.test.ts`, `tests/fixtures/fhir-export/*`, `docs/fhir-export.md`.
 - B: `src/dicom/*`, `src/share/scope.ts` (`NEVER_DOCS`), `tests/dicom*.test.ts`, `tests/integration/dicom.test.ts`, `tests/fixtures/dicom/*`, `docs/dicom.md`.
 - C: `src/mcp.ts` (`TYPES`), `src/tools/imports.ts`, `src/llm.ts`, `.claude/skills/ga-import/extract.md`, `.claude/skills/ga-import/SKILL.md`, AGENTS.md "PDF extraction" section, `tests/mcp-tools.test.ts`, `tests/tools-imports.test.ts`, `tests/llm.test.ts`.
-- D: `tools/personalrecord/**`.
+- D: the rebuild tool (built in `tools/personalrecord/**`, then moved into the dataset's `derived/ga-rebuild/<date>/tool/`).
 - E: `src/apple/clinical.ts`, `src/apple/read.ts`, `src/apple/import.ts`, `tests/apple-map.test.ts`, `tests/apple-read.test.ts`, `tests/integration/apple-clinical.test.ts`, `tests/fixtures/apple/clinical/*`.
 - E reads `mapForGa` and `sourceKey` but does not change them; A's `presentedForm` change reaches Apple copies after the merge with no interface change.
 
@@ -106,7 +106,7 @@ Expected: the new tests FAIL (`ccda` returned, type errors, no usage message).
 
 - [ ] **Step 3: Implement the interfaces above**
 
-`detectKind` order: `DOCUMENT_EXT` → `pdf`; `isEhiExport`; `isAppleHealthExport`; `.zip` error; `existsSync(join(path, 'DICOMDIR'))` → `dicom`; `/\.json$/i` → `fhir-export`; else `ccda`. In `cli.ts`, for kind `fhir-export` accept exactly `--fhir-base <url>` or `--fhir-base=<url>`, validate with `new URL()`, and pass `fhirBase` to `importAny`; kind `dicom` takes no extra args (`usage: ga import <dicom-folder>`). Add `'tools/**/test/*.test.ts'` to the unit project's `include` in `vitest.config.ts`.
+`detectKind` order: `DOCUMENT_EXT` → `pdf`; `isEhiExport`; `isAppleHealthExport`; `.zip` error; `existsSync(join(path, 'DICOMDIR'))` → `dicom`; `/\.json$/i` → `fhir-export`; else `ccda`. In `cli.ts`, for kind `fhir-export` accept exactly `--fhir-base <url>` or `--fhir-base=<url>`, validate with `new URL()`, and pass `fhirBase` to `importAny`; kind `dicom` takes no extra args (`usage: ga import <dicom-folder>`). (The tool's tests ran under vitest while it lived in GA; it now lives in the dataset folder and uses `node --test`.)
 
 - [ ] **Step 4: Run tests and typecheck**
 
@@ -348,6 +348,8 @@ git commit -m "feat(import): ga_import accepts TIFF scans (agent reads a PNG cop
 
 ### Task D: personalrecord rebuild (standalone project)
 
+> Moved (Task M): the tool as built below now lives in the dataset's `derived/ga-rebuild/<date>/tool/`, with `node:test` tests instead of vitest; GA keeps only a synthetic sample of its output (`tests/fixtures/fhir-export/rebuilt-sample.json`).
+
 **Files:**
 - Create: `tools/personalrecord/README.md`, `tools/personalrecord/cli.ts`, `tools/personalrecord/rebuild.ts`, `tools/personalrecord/annotations.ts`
 - Create: `tools/personalrecord/test/rebuild.test.ts`, `tools/personalrecord/test/annotations.test.ts`, `tools/personalrecord/test/boundary.test.ts`, `tools/personalrecord/test/fixtures/{bundle.json,annotations.json,known.json}` (synthetic)
@@ -357,7 +359,7 @@ git commit -m "feat(import): ga_import accepts TIFF scans (agent reads a PNG cop
 - Produces:
   - `rebuild.ts`: `export type RebuildReport = { emitted: Record<string, number>; alreadyKnown: number; beforeCutoff: number; notEpic: number; otherSource: number; cutoff: string }` and `export function rebuild(bundle: Bundle, known: Record<string, Resource[]>, opts: { includeBeforeCutoff?: boolean }): { resources: Resource[]; report: RebuildReport }`
   - `annotations.ts`: `export type PrAnnotation = { annotation_type: 'ended' | 'ongoing' | 'date_change' | 'comment'; created_at: string; code_display: string; effective_datetime_original: string | null; annotation_data: string }` and `export function attachAnnotations(anns: PrAnnotation[], known: Record<string, Resource[]>, rebuilt: Resource[]): { resources: Resource[]; unmatched: { code: string; reason: 'none' | 'several' }[] }` (returns `rebuilt` with notes added, plus verbatim copies of matched known resources with the note appended).
-  - CLI: `node tools/personalrecord/cli.ts <dir> --known <ehr-data.json> --out <file.json> [--include-before-cutoff]` reads `<dir>/bundle.json` and `<dir>/annotations.json`, writes `--out`, prints `{ ...RebuildReport, annotationsMatched, annotationsUnmatched }`.
+  - CLI: `node cli.ts <dir> --known <ehr-data.json> --out <file.json> [--include-before-cutoff]` reads `<dir>/bundle.json` and `<dir>/annotations.json`, writes `--out`, prints `{ ...RebuildReport, annotationsMatched, annotationsUnmatched }`.
 
 Rebuild mapping (id = the bundle id without its prefix; `date` = the Observation's `effectiveDateTime`; `NOTE` = `{ text: 'Reconstructed from a personalrecord export; original structure lost.' }`; never `subject`, `meta`, the app's `extension`s, or the non-FHIR fields `source`, `data_type`, `element_id`):
 
@@ -522,10 +524,10 @@ git commit -m "feat(apple): import every R4 clinical record, identified like a p
 - [ ] **Step 1: Merge** A, B, C, D, E onto main; `npx vitest run --project unit && npm run typecheck`, expected PASS.
 - [ ] **Step 1b: Apple Health:** `node src/cli.ts import <dataset>/device-data/apple-health/2025-11-10`. Expected: `clinicalVersionUnsupported` 0, `clinicalUnreadable` 0, 1,788 clinical records. Record counts in the run log `docs/superpowers/spikes/2026-11-10-dataset-import-run.md` (counts only).
 - [ ] **Step 2: Epic FHIR export:** `node src/cli.ts import <dataset>/clinical-records/mgb-epic-fhir/2025-09/ehr-data.json --fhir-base https://ws-interconnect-fhir.partners.org/Interconnect-FHIR-MU-PRD/api/FHIR/R4/`. Expected: `skippedTypes` `{}`, `attachmentsUnplaced` 0, and created + updated + merged + skipped + invalid = 2,880 (record the actual split; any `invalid` is listed in the run log by type). Map `unmapped` with `map_concept`. Run it again: expected created 0. Check no duplicates against the Apple copies: `fhir_search` `Condition` `_count=500` returns 174 (the file's count), not 174 + 15.
-- [ ] **Step 3: personalrecord rebuild:** `node --max-old-space-size=4096 tools/personalrecord/cli.ts <dataset>/derived/personalrecord/2026-06-01 --known <ehr-data.json> --out <scratch>/personalrecord-rebuilt.json`. Expected about 182 emitted (all dated after 2025-09-29). Show the owner `annotationsUnmatched`. Then `node src/cli.ts import <scratch>/personalrecord-rebuilt.json --fhir-base <same base>`.
+- [ ] **Step 3: personalrecord rebuild:** `cd <dataset>/derived/ga-rebuild/<date>/tool && node --max-old-space-size=4096 cli.ts ../../../personalrecord/2026-06-01 --known <ehr-data.json> --out ../personalrecord-rebuilt.json`. Expected about 182 emitted (all dated after 2025-09-29). Show the owner `annotationsUnmatched`. Then `node src/cli.ts import <scratch>/personalrecord-rebuilt.json --fhir-base <same base>`.
 - [ ] **Step 4: DICOM:** `node src/cli.ts import <dataset>/imaging/dental-ct-dicom/2025-12-24`. Expected: 1 study, 1 document, `unsupported` 0, archive stored.
 - [ ] **Step 5: TIFF scans:** the 3 TIFFs by Task C's extract.md step, as in R2.
-- [ ] **Step 6: AGENTS.md:** no new tool, so the intro tool list stays. In "Apple Health data", replace "Health Records inside the export are hospital copies: trust the hospital source over the Apple copy." with: "Health Records inside the export (FHIR R4) are imported, identified like a portal sync of their hospital, so a sync or Epic export links to them; the hospital version wins. DSTU2 records are counted, not imported." Add sections "Epic FHIR export file" (command, `--fhir-base`, identifiers shared with portal sync, tag `src-fhir-export`) and "DICOM imaging" (command, ImagingStudy, overview PDFs, `urn:ga-server:id:dicom-archive` never shared), and add both archives/sources to "Sharing" never-shared list where relevant. Link `docs/fhir-export.md`, `docs/dicom.md`, `tools/personalrecord/README.md`.
+- [ ] **Step 6: AGENTS.md:** no new tool, so the intro tool list stays. In "Apple Health data", replace "Health Records inside the export are hospital copies: trust the hospital source over the Apple copy." with: "Health Records inside the export (FHIR R4) are imported, identified like a portal sync of their hospital, so a sync or Epic export links to them; the hospital version wins. DSTU2 records are counted, not imported." Add sections "Epic FHIR export file" (command, `--fhir-base`, identifiers shared with portal sync, tag `src-fhir-export`) and "DICOM imaging" (command, ImagingStudy, overview PDFs, `urn:ga-server:id:dicom-archive` never shared), and add both archives/sources to "Sharing" never-shared list where relevant. Link `docs/fhir-export.md`, `docs/dicom.md`; the rebuild tool's README lives in the dataset's `derived/ga-rebuild/<date>/tool/`.
 - [ ] **Step 7: Totals:** call `health_summary` and `whats_new` (no `markSeen`), and fill the run log with per-dataset counts, the datasets not imported and why (Apple clinical copies, `export_cda.xml` incl. its differing patient name, app metadata), and any `possible-duplicate` or `source-conflict` counts.
 - [ ] **Step 8: Commit**
 
