@@ -126,9 +126,9 @@ test('a setup re-run keeps the person\'s terminologyLookup off switch', async ()
   expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).terminologyLookup).toBe(false);
 });
 
-test('lookupChoice: on for a fresh install, the first existing config decides otherwise', () => {
+test('lookupChoice: on for a fresh install, else the first config that has a choice', () => {
   expect(lookupChoice(undefined, undefined)).toBe(true);
   expect(lookupChoice(undefined, { patientId: 'p', terminologyLookup: false })).toBe(false); // ga migrate: a new out, the live config's choice
-  expect(lookupChoice({ patientId: 'p' }, { patientId: 'p', terminologyLookup: false })).toBe(true); // the written config wins, even without the key
+  expect(lookupChoice({ patientId: 'p' }, { patientId: 'p', terminologyLookup: false })).toBe(false); // a stale out file without the key (an old failed migrate) never overrides
   expect(lookupChoice({ patientId: 'p', terminologyLookup: false })).toBe(false);
 });

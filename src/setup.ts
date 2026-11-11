@@ -114,8 +114,8 @@ const selfPatient = (client: MedplumClient) => client.createResourceIfNoneExist<
   'identifier=urn:ga-server:id:patient|self',
 );
 
-// The code-lookup choice setup writes, so the person sees it: the first config's value, else on. A re-run keeps their off switch.
-export const lookupChoice = (...configs: (GaConfig | undefined)[]): boolean => configs.find(Boolean)?.terminologyLookup ?? true;
+// The code-lookup choice setup writes, so the person sees it: the first config that has one (a stale file without it never overrides), else on. A re-run keeps their off switch.
+export const lookupChoice = (...configs: (GaConfig | undefined)[]): boolean => configs.find((c) => c?.terminologyLookup !== undefined)?.terminologyLookup ?? true;
 
 function writeConfig(out: string, cfg: GaConfig): void {
   mkdirSync(dirname(out), { recursive: true });
