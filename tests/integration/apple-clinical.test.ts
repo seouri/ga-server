@@ -105,6 +105,25 @@ test('an adopted main-era allergy takes the newer export\'s status', async () =>
   expect(srcTags(all[0])).toEqual(['src-apple-clinical']);
 });
 
+test('does not adopt when a portal record already has the identifier', async () => {
+  const SMART_SYS = `urn:ga-server:id:smart:${sourceKey(BASE)}`;
+  const at = new Date().toISOString();
+  const portal = { resourceType: 'AllergyIntolerance', id: 'a1', meta: { lastUpdated: '2025-11-01T00:00:00Z' }, code: { text: 'Penicillin' }, patient: { reference: 'Patient/p1' },
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] } } as Resource;
+  const { resources } = mapForGa([{ resourceType: 'Patient', id: 'p1' }, portal], { key: sourceKey(BASE), name: 'Synthetic Hospital', fhirBase: BASE });
+  await importResources(client, resources, { kind: 'smart', file: BASE, date: at, writer: 'importer', dateOf: (r) => r.meta?.lastUpdated, seenAt: at }, pid, '');
+  const old = await client.createResource({
+    resourceType: 'AllergyIntolerance', patient: { reference: `Patient/${pid}` }, code: { text: 'Penicillin' },
+    clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] },
+    identifier: [{ system: APPLE, value: `${BASE}/AllergyIntolerance/a1` }],
+    meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] },
+  } as AllergyIntolerance);
+  await importAppleHealth(client, cfg, FIXTURE, pid);
+  const withSmart = (await allergies()).filter((a) => a.identifier?.some((i) => i.system === SMART_SYS && i.value === 'AllergyIntolerance/a1'));
+  expect(withSmart).toHaveLength(1);
+  expect(withSmart[0].id).not.toBe(old.id);
+});
+
 test('re-import is a no-op', async () => {
   await importAppleHealth(client, cfg, FIXTURE, pid);
   expect((await importAppleHealth(client, cfg, FIXTURE, pid)).created).toBe(0);

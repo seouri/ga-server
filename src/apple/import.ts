@@ -13,7 +13,7 @@ import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
 const CLINICAL = 'urn:ga-server:tag|src-apple-clinical';
-// Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id).
+// Types the unchanged filter covers (readings and ECGs; any other type in a reading batch goes to the engine).
 const FILTERED = new Set(['Observation', 'DocumentReference']);
 
 const projection = (r: Record<string, unknown>) =>
@@ -21,10 +21,10 @@ const projection = (r: Record<string, unknown>) =>
 const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
-// What GA already holds from Apple Health (readings, or with tag CLINICAL the clinical copies) for this patient among these resources: first identifier -> projection.
-export const existing = (client: MedplumClient, patientId: string, resources: Resource[], tag = TAGGED): Promise<Map<string, string>> =>
+// The Apple Health readings GA already holds for this patient among these resources: first identifier -> projection.
+export const existing = (client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> =>
   held(client, patientId, resources, {
-    tag, keys: (r) => [firstId(r as never)], value: (r) => projection(r as never),
+    tag: TAGGED, keys: (r) => [firstId(r as never)], value: (r) => projection(r as never),
     elements: (type) => (FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier'),
   });
 
@@ -33,11 +33,12 @@ const smartId = (r: Resource): Identifier | undefined => ((r as { identifier?: I
 const appleId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system === APPLE);
 
 // An allergy an older import wrote is identified by its sourceURL only: give it the portal-style identifier now, so the engine
-// finds it instead of writing a second one.
+// finds it instead of writing a second one. Not when a record (a portal sync's) already holds that identifier: two records would share it.
 async function adoptOldAllergies(client: MedplumClient, patientId: string, resources: Resource[]): Promise<void> {
   for (const r of resources) {
     const s = smartId(r), a = appleId(r);
     if (r.resourceType !== 'AllergyIntolerance' || !s || !a) continue;
+    if (await client.searchOne('AllergyIntolerance', { identifier: `${s.system}|${s.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' })) continue;
     const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
     if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) {
       // Also a clinical copy now: the tag moves from src-apple-health to src-apple-clinical in the same write.
@@ -84,7 +85,7 @@ export async function importAppleHealth(
           const id = firstId(r as never), had = have.get(id), same = had === projection(r as never);
           // A redo: what the crashed attempt wrote counts as its engine counted it (created or updated).
           // shortcut: a record that attempt's engine counted as merged, a possible duplicate or a conflict counts as created or
-          // updated here (Ruling 10); a non-filtered type (the allergy) it updated counts as the engine's skip. Records stay exact.
+          // updated here (Ruling 10); a non-filtered type it updated counts as the engine's skip. Records stay exact.
           if (redo?.created.has(id) && had !== undefined) created++;
           else if (redo?.updated.has(id) && same) updated++;
           else if (FILTERED.has(r.resourceType) && same) kept++;
@@ -121,7 +122,7 @@ export async function importAppleHealth(
     const report = await withImportLock(async () => {
       await uploadBinaries(client, g.resources, g.binaries, g.src, patientId);
       const tracked = g.resources.filter((r) => COMPARTMENT[r.resourceType]); // the others (Medication, Practitioner...) are not patient data to look up
-      const have = await existing(client, patientId, tracked, CLINICAL);
+      const have = await held(client, patientId, tracked, { tag: CLINICAL, keys: (r) => [firstId(r as never)], value: () => '', elements: () => 'identifier' }); // keys only
       const redo = opts.redo?.index === index ? new Set(opts.redo.created) : undefined;
       const fresh = tracked.map((r) => firstId(r as never)).filter((id) => !have.has(id));
       if (!redo) await opts.beforeWrite?.({ index, created: fresh, updated: [] });
