@@ -978,6 +978,70 @@ for (const [label, tag] of [['person-edited', 'person-edited'], ['writer-agent',
   });
 }
 
+// The Apple export date is newer than the hospital's lastUpdated, and the body is the same: the result equals a hospital-first import.
+const appleLate = (): SourceInfo => ({ ...appleClinicalSrc(), date: '2025-11-10', dateOf: () => '2025-11-10T00:00:00Z' });
+const appleSame = (n: string) => ({ ...hospCond(n, 'same wording'), identifier: [{ system: SMART_SYS, value: `Condition/${n}` }, { system: APPLE, value: `https://fhir.example.org/Condition/${n}` }], meta: undefined }) as Resource;
+const feDated = () => feSrc({ dateOf: (r: Resource) => r.meta?.lastUpdated });
+const srcDateOf = (r: Resource) => (r as Condition).extension?.find((e) => e.url === 'urn:ga-server:ext:source-date')?.valueDateTime;
+const tagsOf = (r: Resource) => (r.meta?.tag ?? []).map((t) => t.code);
+
+test('an identical hospital copy takes over an apple-only record', async () => {
+  const n = uid('c');
+  await importResources(client, [appleSame(n)], appleLate(), pid, 'h');
+  const [apple] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(srcDateOf(apple)?.slice(0, 10)).toBe('2025-11-10');
+  const r = await importResources(client, [hospCond(n, 'same wording')], feDated(), pid, 'h');
+  expect(r).toMatchObject({ updated: 1, created: 0 });
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(tagsOf(found[0])).toContain('src-fhir-export');
+  expect(tagsOf(found[0])).not.toContain('src-apple-clinical');
+  expect(srcDateOf(found[0])?.slice(0, 10)).toBe('2025-09-01');
+  expect(systems(found[0])).toEqual([APPLE, SMART_SYS].sort());
+  expect(await importResources(client, [hospCond(n, 'same wording')], feDated(), pid, 'h')).toMatchObject({ updated: 0, created: 0 });
+});
+
+// A real Epic export carries no meta.lastUpdated: every record is fill-only, dated by the file. An Apple-only record is still the
+// hospital's own data, so the copy takes over as a portal copy does.
+test('an identical fill-only hospital copy takes over an apple-only record', async () => {
+  const n = uid('c');
+  await importResources(client, [appleSame(n)], appleLate(), pid, 'h');
+  const fill = () => feSrc({ dateOf: () => '2025-09-01', fillOnly: (r: Resource) => !r.meta?.lastUpdated });
+  const copy = () => ({ ...hospCond(n, 'same wording'), meta: undefined }) as Resource;
+  expect(await importResources(client, [copy()], fill(), pid, 'h')).toMatchObject({ updated: 1, created: 0 });
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(tagsOf(found[0])).toContain('src-fhir-export');
+  expect(tagsOf(found[0])).not.toContain('src-apple-clinical');
+  expect(srcDateOf(found[0])?.slice(0, 10)).toBe('2025-09-01');
+  expect(systems(found[0])).toEqual([APPLE, SMART_SYS].sort());
+  expect(await importResources(client, [copy()], fill(), pid, 'h')).toMatchObject({ updated: 0, created: 0 });
+});
+
+test('a fill-only hospital copy still only fills a record another file source wrote', async () => {
+  const n = uid('c');
+  const pdfId = { system: 'urn:ga-server:id:pdf', value: uid('pdf') };
+  await importResources(client, [{ ...appleSame(n), identifier: [...(appleSame(n) as Condition).identifier!, pdfId] } as Resource], appleLate(), pid, 'h');
+  const copy = { ...hospCond(n, 'file wording'), meta: undefined } as Resource;
+  await importResources(client, [copy], feSrc({ fillOnly: () => true }), pid, 'h');
+  const [found] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found.code?.text).toBe('same wording');
+  expect(tagsOf(found)).toContain('src-apple-clinical');
+});
+
+test('an identical hospital copy leaves a protected apple copy alone', async () => {
+  const n = uid('c');
+  await importResources(client, [appleSame(n)], appleLate(), pid, 'h');
+  const [apple] = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  await client.updateResource({ ...apple, meta: { ...apple.meta, tag: [...(apple.meta?.tag ?? []), { system: 'urn:ga-server:tag', code: 'person-edited' }] } });
+  expect(await importResources(client, [hospCond(n, 'same wording')], feDated(), pid, 'h')).toMatchObject({ updated: 0, created: 0 });
+  const found = await byId('Condition', SMART_SYS, `Condition/${n}`);
+  expect(found).toHaveLength(1);
+  expect(tagsOf(found[0])).toContain('src-apple-clinical');
+  expect(tagsOf(found[0])).not.toContain('src-fhir-export');
+  expect(srcDateOf(found[0])?.slice(0, 10)).toBe('2025-11-10');
+});
+
 test('an apple reading never replaces an apple clinical copy', async () => {
   const at = '2026-04-09T07:00:00-05:00';
   const copy = { ...weight(SMART_SYS, `Observation/${uid('o')}`, at, 80), identifier: [{ system: SMART_SYS, value: `Observation/${uid('o')}` }, { system: APPLE, value: uid('src') }] } as Observation;
