@@ -3,7 +3,7 @@ import type { AllergyIntolerance, Identifier, Resource } from '@medplum/fhirtype
 import { archiveFolder } from '../archive.ts';
 import type { GaConfig } from '../config.ts';
 import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
-import { addReport, COMPARTMENT, importResources, type ImportReport } from '../engine.ts';
+import { addReport, COMPARTMENT, DUP_OF, importResources, type ImportReport } from '../engine.ts';
 import { APPLE, sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
 import { uploadBinaries } from '../smart/sync.ts';
@@ -33,13 +33,27 @@ const smartId = (r: Resource): Identifier | undefined => ((r as { identifier?: I
 const appleId = (r: Resource): Identifier | undefined => ((r as { identifier?: Identifier[] }).identifier ?? []).find((i) => i.system === APPLE);
 
 // An allergy an older import wrote is identified by its sourceURL only: give it the portal-style identifier now, so the engine
-// finds it instead of writing a second one. Not when a record (a portal sync's) already holds that identifier: two records would share it.
+// finds it instead of writing a second one. Not when a record (a portal sync's) already holds that identifier: two records would
+// share it; the old one is flagged possible-duplicate instead.
 async function adoptOldAllergies(client: MedplumClient, patientId: string, resources: Resource[]): Promise<void> {
   for (const r of resources) {
     const s = smartId(r), a = appleId(r);
     if (r.resourceType !== 'AllergyIntolerance' || !s || !a) continue;
-    if (await client.searchOne('AllergyIntolerance', { identifier: `${s.system}|${s.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' })) continue;
+    const held = await client.searchOne('AllergyIntolerance', { identifier: `${s.system}|${s.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' });
     const old = await client.searchOne('AllergyIntolerance', { identifier: `${APPLE}|${a.value}`, patient: `Patient/${patientId}` }, { cache: 'no-cache' }) as AllergyIntolerance | undefined;
+    if (held) {
+      // Left as it is, but flagged for review like the engine's possible duplicates, pointing at the record that holds the identifier.
+      const ref = `AllergyIntolerance/${held.id}`;
+      if (old && old.id !== held.id && !old.extension?.some((e) => e.url === DUP_OF && e.valueReference?.reference === ref)) {
+        const tagged = old.meta?.tag?.some((t) => t.system === 'urn:ga-server:tag' && t.code === 'possible-duplicate');
+        await client.updateResource({
+          ...old,
+          extension: [...(old.extension ?? []), { url: DUP_OF, valueReference: { reference: ref } }],
+          meta: { ...old.meta, tag: [...(old.meta?.tag ?? []), ...(tagged ? [] : [{ system: 'urn:ga-server:tag', code: 'possible-duplicate' }])] },
+        });
+      }
+      continue;
+    }
     if (old && !old.identifier?.some((i) => i.system === s.system && i.value === s.value)) {
       // Also a clinical copy now: the tag moves from src-apple-health to src-apple-clinical in the same write.
       const tags = (old.meta?.tag ?? []).filter((t) => !(t.system === 'urn:ga-server:tag' && t.code === 'src-apple-health'));

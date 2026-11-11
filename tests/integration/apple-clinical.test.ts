@@ -6,7 +6,7 @@ import type { AllergyIntolerance, Condition, Resource } from '@medplum/fhirtypes
 import { afterEach, beforeAll, beforeEach, expect, test } from 'vitest';
 import { importAppleHealth } from '../../src/apple/import.ts';
 import { type GaConfig, getClient, loadConfig } from '../../src/config.ts';
-import { importResources } from '../../src/engine.ts';
+import { DUP_OF, importResources } from '../../src/engine.ts';
 import { APPLE } from '../../src/identity.ts';
 import { sourceKey } from '../../src/smart/auth.ts';
 import { mapForGa } from '../../src/smart/fetch.ts';
@@ -122,6 +122,11 @@ test('does not adopt when a portal record already has the identifier', async () 
   const withSmart = (await allergies()).filter((a) => a.identifier?.some((i) => i.system === SMART_SYS && i.value === 'AllergyIntolerance/a1'));
   expect(withSmart).toHaveLength(1);
   expect(withSmart[0].id).not.toBe(old.id);
+  // The old copy is left as it was, but flagged for review, pointing at the portal record (once, also after a re-import).
+  await importAppleHealth(client, cfg, FIXTURE, pid);
+  const after = await client.readResource('AllergyIntolerance', old.id as string);
+  expect(after.meta?.tag).toContainEqual(expect.objectContaining({ system: 'urn:ga-server:tag', code: 'possible-duplicate' }));
+  expect(after.extension?.filter((e) => e.url === DUP_OF)).toEqual([{ url: DUP_OF, valueReference: { reference: `AllergyIntolerance/${withSmart[0].id}` } }]);
 });
 
 test('re-import is a no-op', async () => {
