@@ -93,7 +93,7 @@ export async function setup(
 
   const patient = await selfPatient(medplum);
 
-  const rotate = password === DEFAULT_PASSWORD;
+  const rotate = !noRotate && password === DEFAULT_PASSWORD; // noRotate never changes the admin password
   const cfg: GaConfig = {
     baseUrl,
     clientId: client.id as string,
