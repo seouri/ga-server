@@ -16,7 +16,7 @@ Explicit VR little endian, implicit VR little endian, and the compressed (encaps
 
 ## Other files
 
-Files that are not DICOM (the `DICOMDIR` index, preview images, `.DS_Store`) are counted as `skipped`; they never stop the import.
+Files that are not DICOM (the `DICOMDIR` index, preview images, `.DS_Store`) are counted as `notDicom` (the engine's `skipped` counts records it left unchanged); they never stop the import.
 
 ## Archive
 

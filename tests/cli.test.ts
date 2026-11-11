@@ -83,5 +83,13 @@ test('fhir-export import needs --fhir-base', () => {
 test('rejects a --fhir-base that is not a URL', () => {
   const json = join(dir, 'ehr-data.json');
   writeFileSync(json, '{}');
-  expect(cli({}, 'import', json, '--fhir-base', 'nope').stderr).toMatch('--fhir-base needs a URL');
+  expect(cli({}, 'import', json, '--fhir-base', 'nope').stderr).toMatch('--fhir-base needs an http(s) URL');
+});
+
+test('rejects a --fhir-base that is not http(s) with a host', () => {
+  const json = join(dir, 'ehr-data.json');
+  writeFileSync(json, '{}');
+  for (const bad of ['file:///etc/fhir', 'urn:example:fhir', 'ftp://fhir.example.org/R4']) {
+    expect(cli({}, 'import', json, '--fhir-base', bad).stderr, bad).toMatch('--fhir-base needs an http(s) URL');
+  }
 });

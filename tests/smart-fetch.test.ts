@@ -102,6 +102,22 @@ describe('fetchAll', () => {
     await m2.close();
     expect(got.byType.Encounter).toBe(2);
   });
+
+  it('downloads a DiagnosticReport presentedForm Binary like a note body', async () => {
+    const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
+    serveFixtures(m2);
+    m2.route('/fhir/metadata', (_q, res) =>
+      void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
+    );
+    const dr = { resourceType: 'DiagnosticReport', id: 'dr1', status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `${m2.fhirBase}/Binary/n1` }] };
+    m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: dr }] })));
+    const got = await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']);
+    await m2.close();
+    const a = find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0];
+    expect(Buffer.from(a?.data ?? '', 'base64').toString('utf8')).toContain('Synthetic follow-up note');
+    const out = mapForGa(got.resources, { key: sourceKey(m2.fhirBase), name: 'x', fhirBase: m2.fhirBase }).resources;
+    expect(find<DiagnosticReport>(out, 'DiagnosticReport/dr1').presentedForm?.[0].contentType).toBe('text/plain; charset=utf-8');
+  });
 });
 
 describe('mapForGa report text', () => {
@@ -111,6 +127,21 @@ describe('mapForGa report text', () => {
     const out = mapForGa([dr], { key: sourceKey(base), name: 'x', fhirBase: base }).resources[0] as DiagnosticReport;
     expect(out.presentedForm?.[0].contentType).toBe('text/plain; charset=utf-8');
     expect(Buffer.from(out.presentedForm?.[0].data ?? '', 'base64').toString('utf8')).toBe('Impression: normal');
+  });
+
+  it('moves an inline report PDF to a pending binary', () => {
+    const base = 'https://fhir.example.org/api/FHIR/R4/';
+    const pdf = Buffer.from('%PDF-1.4 synthetic report');
+    const dr = { resourceType: 'DiagnosticReport', id: 'r2', status: 'final', code: { text: 'CT' }, presentedForm: [{ contentType: 'application/pdf', title: 'CT report', data: pdf.toString('base64') }] } as DiagnosticReport;
+    const { resources, binaries } = mapForGa([dr], { key: sourceKey(base), name: 'x', fhirBase: base });
+    const a = (resources[0] as DiagnosticReport).presentedForm?.[0];
+    expect(a?.data).toBeUndefined();
+    expect(a?.title).toBe('CT report');
+    expect(binaries).toHaveLength(1);
+    expect(binaries[0].ref).toBe(a?.url);
+    expect(binaries[0].contentType).toBe('application/pdf');
+    expect(binaries[0].data.equals(pdf)).toBe(true);
+    expect(a?.hash).toBe(createHash('sha1').update(pdf).digest('base64'));
   });
 });
 

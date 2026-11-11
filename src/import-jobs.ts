@@ -2,7 +2,7 @@
 // thread with a capped heap (an out-of-memory import ends the worker, never the gateway). The worker saves a checkpoint after
 // each committed batch, so a retry or a gateway restart (resumeJobs) carries on from there with the same report.
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { isMainThread, type ResourceLimits, Worker, workerData } from 'node:worker_threads';
@@ -203,6 +203,11 @@ export async function runJob(dir: string, id: string, deps: { importAny?: typeof
     if (/\.zip$/i.test(j.upload)) rmSync(j.upload, { force: true }); // unzipped: the folder is enough to resume
     j = save(dir, { ...j, kind: detectKind(j.root!) });
     if (j.kind === 'fhir-export' || j.kind === 'dicom') throw new GaError(CLI_ONLY); // inside a zip: seen only after unzipping
+    // A zipped Epic FHIR export reads as C-CDA (a folder) and would finish with nothing imported.
+    if (j.kind === 'ccda' && statSync(j.root!).isDirectory()) {
+      const files = readdirSync(j.root!, { recursive: true }) as string[];
+      if (!files.some((f) => /\.xml$/i.test(f)) && files.some((f) => /\.json$/i.test(f))) throw new GaError(CLI_ONLY);
+    }
     const cfg = deps.cfg ?? loadConfig();
     const client = deps.client ?? (await getClient(cfg));
     const result = await (deps.importAny ?? importAny)(client, { ...cfg, patientId: j.patientId ?? cfg.patientId }, j.root!, {

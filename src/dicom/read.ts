@@ -7,7 +7,7 @@ export type DicomHeader = {
 };
 
 const HEAD_BYTES = 256 * 1024;
-const PDF_CLASS = '1.2.840.10008.5.1.4.1.1.104.1';
+export const PDF_CLASS = '1.2.840.10008.5.1.4.1.1.104.1';
 const IMPLICIT = '1.2.840.10008.1.2';
 const BIG_ENDIAN = '1.2.840.10008.1.2.2';
 const DEFLATED = '1.2.840.10008.1.2.1.99';

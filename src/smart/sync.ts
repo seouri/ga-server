@@ -8,7 +8,7 @@ import { GaError } from '../config.ts';
 import { binaryId, importResources, type ImportReport } from '../engine.ts';
 import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
-import { fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
+import { attachmentsOf, fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
 import { loadSecret, readApp, readSources, type SourceRec } from './store.ts';
 
 export type SyncResult = {
@@ -61,28 +61,28 @@ function dryRunClient(client: MedplumClient): MedplumClient {
   });
 }
 
-// Upload each pending Binary and point its attachment at it. A DocumentReference already stored with an attachment of the
-// same hash keeps that Binary, so a re-sync uploads nothing and changes nothing (a summary document: whatever its hash).
+// Upload each pending Binary and point its attachment at it. A DocumentReference or DiagnosticReport already stored with an
+// attachment of the same hash keeps that Binary, so a re-sync uploads nothing and changes nothing (a summary document: whatever its hash).
 export async function uploadBinaries(client: MedplumClient, resources: Resource[], binaries: PendingBinary[], src: SourceRec, patientId: string): Promise<void> {
   const byRef = new Map(binaries.map((b) => [b.ref, b]));
   for (const r of resources) {
-    if (r.resourceType !== 'DocumentReference') continue;
-    const d = r as DocumentReference;
-    if (!d.content.some((c) => c.attachment.url?.startsWith(PENDING))) continue;
+    const atts = attachmentsOf(r);
+    if (!atts.some((a) => a.url?.startsWith(PENDING))) continue;
+    const type = r.resourceType as 'DocumentReference' | 'DiagnosticReport';
     const existing = await client.searchOne(
-      'DocumentReference',
-      { identifier: `urn:ga-server:id:smart:${src.key}|DocumentReference/${d.id}`, subject: `Patient/${patientId}` },
+      type,
+      { identifier: `urn:ga-server:id:smart:${src.key}|${type}/${r.id}`, subject: `Patient/${patientId}` },
       { cache: 'no-cache' },
     );
     // Epic generates the summary document (C-CDA) anew on every request (new id, time, version): keep the stored copy, or each
     // sync would store another. shortcut: a newer summary never replaces it; its data arrives as FHIR records anyway.
-    const summary = d.category?.some((c) => c.coding?.some((x) => x.code === 'summary-document'));
-    for (const c of d.content) {
-      const a = c.attachment;
+    const summary = type === 'DocumentReference' && (r as DocumentReference).category?.some((c) => c.coding?.some((x) => x.code === 'summary-document'));
+    const stored = existing ? attachmentsOf(existing) : [];
+    for (const a of atts) {
       const b = a.url && byRef.get(a.url);
       if (!b) continue;
       // Medplum may answer with a presigned storage URL: store the Binary/<id> form either way.
-      const old = existing?.content.find((x) => x.attachment.url && (x.attachment.hash === a.hash || summary))?.attachment;
+      const old = stored.find((x) => x.url && (x.hash === a.hash || summary));
       const id = old?.url && binaryId(old.url);
       if (id && summary) Object.assign(a, { hash: old.hash, size: old.size });
       a.url = `Binary/${id ?? (await client.createBinary({ data: b.data, contentType: b.contentType })).id}`;

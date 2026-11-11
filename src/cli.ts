@@ -48,11 +48,8 @@ try {
         if (args.length === 1 && args[0].startsWith('--fhir-base=')) fhirBase = args[0].slice(12);
         else if (args.length === 2 && args[0] === '--fhir-base') fhirBase = args[1];
         else throw new GaError(usage);
-        try {
-          new URL(fhirBase);
-        } catch {
-          throw new GaError('--fhir-base needs a URL, e.g. https://fhir.example.org/api/FHIR/R4/');
-        }
+        const u = URL.canParse(fhirBase) ? new URL(fhirBase) : undefined;
+        if (!u || !['http:', 'https:'].includes(u.protocol) || !u.hostname) throw new GaError('--fhir-base needs an http(s) URL, e.g. https://fhir.example.org/api/FHIR/R4/');
       } else if (kind === 'dicom' && process.argv.length > 4) throw new GaError('usage: ga import <dicom-folder>');
       else if (kind === 'apple' && process.argv.length > 4) throw new GaError('usage: ga import <apple-health-folder>');
       const cfg = loadConfig();

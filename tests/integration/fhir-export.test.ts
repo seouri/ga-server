@@ -149,4 +149,21 @@ describe('patient-less exports', () => {
     await importFhirExport(client, cfg, file, pid, { fhirBase: BASE });
     expect((await currentList(client, pid, 'medications', undefined, [])).rows.map((x) => x.currency)).toEqual(['current']);
   }));
+
+  // Medplum refuses a record over 1 MB: an inline report PDF goes to a Binary, the report keeps only its url.
+  it('imports a report with a large inline PDF', () => withPatient(async (pid) => {
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(1_200_000, 0x41)]);
+    const file = writeExport('report-pdf.json', [
+      { resourceType: 'Patient', id: 'p1', meta: { lastUpdated: '2025-09-01T00:00:00Z' } },
+      { resourceType: 'DiagnosticReport', id: 'dr-pdf', meta: { lastUpdated: '2025-09-01T00:00:00Z' }, status: 'final', code: { text: 'Synthetic CT report' }, subject: { reference: 'Patient/p1' }, effectiveDateTime: '2025-08-30', presentedForm: [{ contentType: 'application/pdf', data: pdf.toString('base64') }] },
+    ] as Resource[]);
+    const r = await importFhirExport(client, cfg, file, pid, { fhirBase: BASE });
+    expect(r).toMatchObject({ created: 1, invalid: 0 }); // the report; the Patient links to the test patient
+    const dr = await client.searchOne('DiagnosticReport', { identifier: `${ID}|DiagnosticReport/dr-pdf`, subject: `Patient/${pid}` }, { cache: 'no-cache' });
+    const a = dr?.presentedForm?.[0];
+    expect(a?.data).toBeUndefined();
+    const bin = /(?:Binary|storage)\/([0-9a-f-]{36})/.exec(a?.url ?? '')?.[1];
+    expect(bin).toBeDefined();
+    if (bin) await client.deleteResource('Binary', bin).catch(() => undefined);
+  }));
 });

@@ -14,8 +14,14 @@ const CATEGORIES: Record<string, string[]> = {
   CarePlan: ['38717003', '734163000'], // Epic requires one: longitudinal, encounter (the only ones a patient app may read)
 };
 
-// A PDF or image a DocumentReference points at; uploadBinaries (sync.ts) stores it. Never inlined: Medplum's max JSON size is 1 MB.
+// A PDF or image a DocumentReference or DiagnosticReport holds; uploadBinaries (sync.ts) stores it. Never inlined: Medplum's max JSON size is 1 MB.
 export type PendingBinary = { ref: string; contentType: string; data: Buffer };
+
+// The attachments that may carry a document body: DocumentReference content, DiagnosticReport presentedForm.
+export const attachmentsOf = (r: Resource): Attachment[] =>
+  r.resourceType === 'DocumentReference' ? ((r as DocumentReference).content ?? []).map((c) => c.attachment)
+  : r.resourceType === 'DiagnosticReport' ? ((r as DiagnosticReport).presentedForm ?? [])
+  : [];
 
 type R = Resource & { identifier?: Identifier[] | Identifier };
 const keyOf = (r: Resource): string => `${r.resourceType}/${r.id}`;
@@ -112,10 +118,9 @@ export async function fetchAll(
     else await fail('Medication', res);
   }
 
-  // Note bodies: Binary/<id> attachments are fetched into attachment.data (base64); mapForGa decides what they become.
+  // Note and report bodies: Binary/<id> attachments are fetched into attachment.data (base64); mapForGa decides what they become.
   for (const r of got.values()) {
-    if (r.resourceType !== 'DocumentReference') continue;
-    for (const { attachment: a } of (r as DocumentReference).content ?? []) {
+    for (const a of attachmentsOf(r)) {
       if (!a.url || a.data || !/(^|\/)Binary\/[^/]+$/.test(a.url) || !URL.canParse(a.url, `${base}/`) || !new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`)) continue;
       const res = await get(a.url, 'Binary', a.contentType ?? '*/*');
       if (!res.ok) {
@@ -151,7 +156,7 @@ const entity = (m: string, e: string): string => {
 
 // Plain text of an HTML note: scripts, styles and head dropped, block ends become line breaks, entities decoded.
 // shortcut: only the common named entities are decoded; upgrade if notes show others.
-export function htmlToText(html: string): string {
+function htmlToText(html: string): string {
   return html
     .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
@@ -239,10 +244,10 @@ export function mapForGa(rs: Resource[], src: SourceRec): { resources: Resource[
       d.content = d.content.map((c, i) => ({ ...c, attachment: note(c.attachment, `urn:ga-server:pending-binary:${keyOf(orig)}/${i}`) }));
     }
     if (r.resourceType === 'DiagnosticReport') {
-      // A report's html or rtf text becomes plain text like a note; PDFs and images stay as they are.
+      // A report's html or rtf text becomes plain text like a note; an inline PDF or image becomes a pending Binary (1 MB limit).
       const d = r as DiagnosticReport;
-      const textual = (a: Attachment): boolean => /^(text\/html|text\/rtf|application\/rtf)$/i.test((a.contentType ?? '').split(';')[0].trim());
-      if (d.presentedForm) d.presentedForm = d.presentedForm.map((a, i) => (a.data && textual(a) ? note(a, `urn:ga-server:pending-binary:${keyOf(orig)}/presentedForm/${i}`) : a));
+      const plain = (a: Attachment): boolean => /^text\/plain$/i.test((a.contentType ?? '').split(';')[0].trim());
+      if (d.presentedForm) d.presentedForm = d.presentedForm.map((a, i) => (a.data && !plain(a) ? note(a, `urn:ga-server:pending-binary:${keyOf(orig)}/presentedForm/${i}`) : a));
     }
     return r as Resource;
   });

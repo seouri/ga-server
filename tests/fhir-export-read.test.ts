@@ -54,6 +54,10 @@ describe('readFhirExport', () => {
     const r = readFhirExport(exportWith([att('content.length'), att('content.0.attachment')]));
     expect(r.attachmentsUnplaced).toBe(1);
   });
+  it('counts an attachment without a string contentType as unplaced', () => {
+    const r = readFhirExport(exportWith([{ ...att('content.0.attachment'), contentType: 5 }, { resourceType: 'DocumentReference', resourceId: 'd1', path: 'content.0.attachment', contentBase64: 'eA==' }] as never));
+    expect(r.attachmentsUnplaced).toBe(2);
+  });
   it('counts resources without an id or of another type', () => {
     const r = readFhirExport(exportWith([], { Condition: [{ resourceType: 'Condition' }, { resourceType: 'Observation', id: 'x' }] }));
     expect(r.skippedTypes).toEqual({ 'Condition (invalid)': 2 });
