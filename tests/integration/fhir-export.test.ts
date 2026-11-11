@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { DocumentReference, Resource } from '@medplum/fhirtypes';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getClient, loadConfig, type GaConfig } from '../../src/config.ts';
 import { importResources } from '../../src/engine.ts';
 import { importFhirExport } from '../../src/fhir-export/import.ts';
@@ -165,5 +165,25 @@ describe('patient-less exports', () => {
     const bin = /(?:Binary|storage)\/([0-9a-f-]{36})/.exec(a?.url ?? '')?.[1];
     expect(bin).toBeDefined();
     if (bin) await client.deleteResource('Binary', bin).catch(() => undefined);
+  }));
+
+  // Medplum reads a stored Binary/<id> back as a presigned storage URL: the same report again must not count as a change.
+  it('a report with a Binary-backed PDF re-imported unchanged is not updated', () => withPatient(async (pid) => {
+    const pdf = Buffer.from('%PDF-1.4\nsynthetic report\n');
+    const file = writeExport('report-pdf-again.json', [
+      { resourceType: 'Patient', id: 'p1' },
+      { resourceType: 'DiagnosticReport', id: 'dr-again', status: 'final', code: { text: 'Synthetic MRI report' }, subject: { reference: 'Patient/p1' }, effectiveDateTime: '2025-08-30', presentedForm: [{ contentType: 'application/pdf', data: pdf.toString('base64') }] },
+    ] as Resource[]);
+    expect(await importFhirExport(client, cfg, file, pid, { fhirBase: BASE })).toMatchObject({ created: 1 });
+    const created = vi.spyOn(client, 'createBinary');
+    try {
+      expect(await importFhirExport(client, cfg, file, pid, { fhirBase: BASE })).toMatchObject({ created: 0, updated: 0 });
+      expect(created).not.toHaveBeenCalled();
+    } finally {
+      created.mockRestore();
+      const dr = await client.searchOne('DiagnosticReport', { identifier: `${ID}|DiagnosticReport/dr-again`, subject: `Patient/${pid}` }, { cache: 'no-cache' });
+      const bin = /(?:Binary|storage)\/([0-9a-f-]{36})/.exec(dr?.presentedForm?.[0]?.url ?? '')?.[1];
+      if (bin) await client.deleteResource('Binary', bin).catch(() => undefined);
+    }
   }));
 });

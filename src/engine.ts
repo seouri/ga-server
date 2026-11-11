@@ -1,5 +1,5 @@
 import { getStatus, type MedplumClient, OperationOutcomeError } from '@medplum/core';
-import type { DocumentReference, Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import type { Attachment, DiagnosticReport, DocumentReference, Extension, Identifier, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { addUnmapped, carryConcept, codeRecord, countUnmapped, gaCodings, learnable, onSource, sameConcept, stripConcept, type Unmapped } from './concept-apply.ts';
 import { loadMaps, type MapEntry, type Maps, upsertEntries } from './conceptmap.ts';
 import { GaError } from './config.ts';
@@ -80,10 +80,9 @@ function body(r: R): unknown {
   // issued alone is no change: Epic stamps some Observations with the time of each request.
   const { id: _i, meta: _m, identifier: _id, issued: _is, extension, ...rest } = stripConcept(r) as R & { issued?: string };
   const ext = (extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== DUP_OF && e.url !== LAST_SEEN && e.url !== ARRIVED);
-  if (r.resourceType === 'DocumentReference') {
-    const content = (r as DocumentReference).content?.map((c) => (c.attachment.url ? { ...c, attachment: { ...c.attachment, url: binaryId(c.attachment.url) ?? c.attachment.url } } : c));
-    Object.assign(rest, { content });
-  }
+  const byBinary = (a: Attachment): Attachment => (a.url ? { ...a, url: binaryId(a.url) ?? a.url } : a);
+  if (r.resourceType === 'DocumentReference') Object.assign(rest, { content: (r as DocumentReference).content?.map((c) => ({ ...c, attachment: byBinary(c.attachment) })) });
+  if (r.resourceType === 'DiagnosticReport' && (r as DiagnosticReport).presentedForm) Object.assign(rest, { presentedForm: (r as DiagnosticReport).presentedForm?.map(byBinary) });
   return ext.length ? { ...rest, extension: ext } : rest;
 }
 
