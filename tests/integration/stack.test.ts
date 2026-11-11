@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AuditEvent, DocumentReference, Resource, ResourceType } from '@medplum/fhirtypes';
 import { expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
@@ -6,7 +7,7 @@ import { cleanupTestPatient, createTestPatient, emptyTestProject, restoreConfig,
 
 // Runs ga setup against the long-lived ga-test project (temp GA_CONFIG), never the user's own; emptied before and after.
 test('setup is idempotent, and the GA client reads clinical records but no Medplum admin records', { timeout: 240_000 }, async () => {
-  const realPatient = SQLITE ? '' : (process.env.GA_INT_LIVE_PATIENT_ID ?? ''); // the live project's, read from its config by global-setup.ts
+  const realPatient = SQLITE ? '' : (process.env.GA_INT_LIVE_PATIENT_ID || randomUUID()); // the live project's, read from its config by global-setup.ts
   const { baseUrl, cfg: a } = await testProject();
   const empty = async () => emptyTestProject(await getClient(a));
   try {

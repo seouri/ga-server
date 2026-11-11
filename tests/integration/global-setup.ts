@@ -5,10 +5,10 @@
 // GA_STORE=sqlite: nothing to do here; store-setup.ts gives each file its own temp store.
 // The GA work runs in a child node (Node runs the sources directly): vitest's global-setup runner lacks import.meta.resolve.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { defaultConfigPath, type GaConfig, storeKind } from '../../src/config.ts';
 
 const url = (f: string) => JSON.stringify(new URL(f, import.meta.url).href);
 const child = (code: string, env: NodeJS.ProcessEnv): void => {
@@ -29,10 +29,16 @@ const EMPTY = `const { getClient, loadConfig } = await import(${url('../../src/c
   await emptyTestProject(await getClient(loadConfig()));`;
 
 export default function globalSetup(): (() => void) | undefined {
-  if (process.env.GA_STORE === 'sqlite') return undefined;
-  const livePath = process.env.GA_CONFIG || join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.ga', 'config.json');
-  const live = JSON.parse(readFileSync(livePath, 'utf8')) as { baseUrl?: string; adminPassword?: string; patientId?: string; store?: string };
-  if (live.store === 'sqlite') return undefined;
+  if (storeKind() === 'sqlite') return undefined;
+  const livePath = defaultConfigPath();
+  const live = JSON.parse(readFileSync(livePath, 'utf8')) as GaConfig;
+  if (storeKind(live) === 'sqlite') return undefined; // GA_STORE=medplum overrides a config's "store": "sqlite"
+  // A killed run leaves its temp config (it holds the admin password): remove this user's leftovers. Runs are one at a time.
+  for (const d of readdirSync(tmpdir())) {
+    if (!d.startsWith('ga-int-run-')) continue;
+    const p = join(tmpdir(), d);
+    try { if (lstatSync(p).isDirectory() && lstatSync(p).uid === process.getuid?.()) rmSync(p, { recursive: true, force: true }); } catch { /* gone or not ours */ }
+  }
   // Without the stored password ga setup would try the seeded default and rotate the admin password away from the live config.
   if (!live.baseUrl || !live.adminPassword) throw new Error(`integration tests need baseUrl and adminPassword in ${livePath} to make the ga-test project`);
   const dir = mkdtempSync(join(tmpdir(), 'ga-int-run-'));
