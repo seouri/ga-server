@@ -71,9 +71,17 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - Sleep is one Observation per night (stage components).
 - "Activity rings, daily (Apple Health)" is Apple's own per-day ring totals: components Active energy burned (kcal), Exercise minutes, Stand hours.
 - A home reading and a clinic reading on the same day are both real; don't merge or flag them.
-- Health Records inside the export are hospital copies (tag `src-apple-clinical`, the hospital's portal-style identifier first): trust the hospital source over the Apple copy.
+- Health Records inside the export (FHIR R4) are imported as hospital records: tag `src-apple-clinical`, identified like a portal sync of their hospital (`urn:ga-server:id:smart:<host key>`, from the record's `sourceURL`), dated by the export, one import call per hospital. A later portal sync or Epic FHIR export links to them; a hospital record with different content replaces the Apple copy, an identical one leaves it as is. DSTU2 records (older iPhones) are counted, not imported. An export may be a person's only data, so treat these as clinic records, not home readings.
 - The ECG is a text `DocumentReference` (CSV) plus an Observation with its classification.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:apple-health-archive`).
+
+## Epic FHIR export file
+
+`ga import <file.json> --fhir-base <FHIR base URL>` (CLI only) loads a portal FHIR export shaped `{fhir: {<Type>: Resource[]}, attachments: [...]}` (docs/fhir-export.md). Records are identified exactly like a portal sync of that server (`urn:ga-server:id:smart:<host key>` | `<Type>/<id>`), so `ga connect` to the same portal later links instead of duplicating; tag `src-fhir-export`; it counts as a whole-record Epic import for the currency rule. A record without `meta.lastUpdated` only fills fields other sources lack. A copy that adds only a `note` adds that note (owner annotations); a newer copy of that record from the hospital can later replace it. Re-import is a no-op.
+
+## DICOM imaging
+
+`ga import <folder with DICOMDIR>` (CLI only) reads DICOM headers (no pixel data) into one `ImagingStudy` per study (identifier `urn:dicom:uid`, tag `src-dicom`), stores each encapsulated PDF (an overview sheet, not a report: never shared, identifier `urn:ga-server:id:file`), and archives the whole folder as a `DocumentReference` (`urn:ga-server:id:dicom-archive`, never shared). docs/dicom.md.
 
 ## PDF extraction (mirrors .claude/skills/ga-import/extract.md)
 
@@ -99,7 +107,7 @@ Extract health records from a local PDF or image into GA through the `ga-server`
 ## Sharing
 
 - `ga share` / `ga shares` / `ga revoke` / `ga share log` / `ga share export` are CLI only; the stdio MCP has no share tool (remote chat sessions do: see "Remote chat apps"). The `/ga` skill (step 10) builds the command and runs it only after the user confirms.
-- Never shared: `Endpoint`, `Provenance`, `AuditEvent`, the EHI and Apple Health archive DocumentReferences, imported source files (DocumentReferences identified `urn:ga-server:id:file`: original PDFs, C-CDA, EHI files; their extracted records are shared), the C-CDA `Composition` (its narrative includes insurance), billing and contact records, anything outside the share's patient compartment. The Patient goes out trimmed to name, birth date and gender.
+- Never shared: `Endpoint`, `Provenance`, `AuditEvent`, the EHI, Apple Health and DICOM archive DocumentReferences, imported source files (DocumentReferences identified `urn:ga-server:id:file`: original PDFs, C-CDA, EHI files; their extracted records are shared), the C-CDA `Composition` (its narrative includes insurance), billing and contact records, anything outside the share's patient compartment. The Patient goes out trimmed to name, birth date and gender.
 - The access log is local `AuditEvent`s tagged `urn:ga-server:share|<share id>` (views, downloads, questions); `ga share log` reads it. Share settings: `.ga/share/shares.json`.
 - The `ga-gateway` compose service runs `ga gateway serve` on `127.0.0.1:8110` (share pages, `/callback` and, with `GA_PUBLIC_URL`, chat-app access); Tailscale Funnel exposes it. Never run `tailscale funnel` for the user.
 
