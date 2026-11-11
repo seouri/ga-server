@@ -12,17 +12,18 @@ Store parity plan 2, Task 2, R11. Question: does seeding Medplum's five terminol
 
 | Run | Peak RSS | Time to healthy |
 | --- | --- | --- |
-| Fresh file, seeds | 406 MiB | 3.99 s |
-| Seeded file reopened, no seed | 292 MiB | 0.40 s |
+| Fresh file, seeds | 354-361 MiB (4 runs alone); 400-406 MiB in the first runs (alongside other work) | 3.9-4.5 s |
+| Seeded file reopened, no seed | 292 MiB (every run) | 0.39-0.40 s |
+| **Increment (seed minus reopen)** | **62-69 MiB alone; 108-114 MiB worst seen** | |
 
-- Seed: about 3.5-3.6 s in process, measured as Store open time with seed minus without.
-- File: 23.7 MiB after the seed, against 0.13 MB for an empty store. It holds 29,875 `coding` rows and 11,789 `coding_property` rows.
+- Seed time in process: about 3.5-3.6 s (Store open with the seed minus without).
+- File: 23.7 MiB after the seed, against 0.13 MB for an empty store.
+- Rows: 1108 CodeSystems and 1346 ValueSets as resources (2,454 `builtin` rows), 29,875 `coding` rows, 11,789 `coding_property` rows.
 - Lowering SQLite's page cache to 8 MiB during the seed changed the peak by about 6 MiB, so it was not kept.
+- Not measured on Linux (no docker for this task).
 
-## Verdict: R11 not met
+## Ruling (controller, 2026-11-11)
 
-- The floor alone is 292 MiB, which is already over the 220 MiB budget before any seeding. That floor is an all-types store: full R4 definitions, measured on macOS, where freed pages stay counted in RSS. The 2026-11-08 store-memory spike measured the full definitions at about +193 MB peak over a ~94 MB baseline on Linux, so roughly 287 MB, also over 220.
-- The seed adds about 114 MiB on top of that floor, from parsing one bundle (up to 9 MB of JSON) plus the write transaction.
-- Not measured on Linux: docker is out of scope for this task.
-- GA's own store (`GA_STORE_TYPES`) has neither CodeSystem nor ValueSet, so it never seeds (R3), and this cost does not apply to GA today.
-- The test asserts the 220 MiB budget and fails on this machine. The controller or owner rules on the budget for an all-types store.
+- The absolute 220 MiB budget (R11) applies to ga-store with GA's type set. That set has neither CodeSystem nor ValueSet, so it never seeds (R3).
+- An all-types store is not held to 220 MiB. Its floor without any seed is already 292 MiB on macOS, and about 287 MB on Linux by the 2026-11-08 store-memory spike.
+- The test therefore asserts the seed's increment, with the same child setup: peak RSS when seeding minus peak RSS when reopening the seeded file must be at most 128 MiB. It logs both absolute numbers.

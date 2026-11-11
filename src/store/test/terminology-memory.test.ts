@@ -1,6 +1,7 @@
-// The built-in terminology seed must fit ga-store's memory budget: serve.ts with every type, in a child process as it runs in
-// production, seeds a fresh file; the child prints its own peak RSS (process.resourceUsage().maxRSS, KiB on Linux and macOS)
-// on exit. A second start on the seeded file (no reseed) gives the floor without the seed.
+// The built-in terminology seed's memory: serve.ts with every type, in a child process as it runs in production, seeds a fresh
+// file; the child prints its own peak RSS (process.resourceUsage().maxRSS, KiB on Linux and macOS) on exit. A second start on
+// the seeded file (no reseed) gives the floor without the seed. The seed's increment over that floor is bounded; ga-store's
+// absolute 220 MiB budget applies to GA's type set, which never seeds (controller ruling, 2026-11-11).
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -10,7 +11,7 @@ import { expect, test } from 'vitest';
 
 const SERVE = new URL('../serve.ts', import.meta.url).pathname;
 const HOOK = `data:text/javascript,process.on('exit',()=>console.log('maxRSS '+process.resourceUsage().maxRSS))`;
-const BUDGET_MIB = 220; // ga-store's share of the measured 512 MB configuration
+const SEED_INCREMENT_MIB = 128;
 
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as { port: number }; s.close(() => resolve(port)); });
@@ -36,14 +37,14 @@ async function run(file: string): Promise<{ peakMiB: number; healthyMs: number }
   return { peakMiB: Math.round(kib / 1024), healthyMs };
 }
 
-test('seeding the built-in terminology stays under ga-store\'s memory budget', async () => {
+test('seeding the built-in terminology adds at most 128 MiB of peak RSS', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'store-term-mem-'));
   try {
     const file = join(dir, 'store.db');
     const seeded = await run(file);
     const reopened = await run(file);
-    console.log(`terminology seed: peak RSS ${seeded.peakMiB} MiB (reopen without seed ${reopened.peakMiB} MiB), healthy after ${seeded.healthyMs} ms`
+    console.log(`terminology seed: peak RSS ${seeded.peakMiB} MiB (reopen without seed ${reopened.peakMiB} MiB, increment ${seeded.peakMiB - reopened.peakMiB} MiB), healthy after ${seeded.healthyMs} ms`
       + ` (reopen ${reopened.healthyMs} ms), file ${(statSync(file).size / 2 ** 20).toFixed(1)} MiB, ${process.platform}`);
-    expect(seeded.peakMiB).toBeLessThan(BUDGET_MIB);
+    expect(seeded.peakMiB - reopened.peakMiB).toBeLessThanOrEqual(SEED_INCREMENT_MIB);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 300_000);
