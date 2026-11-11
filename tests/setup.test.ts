@@ -2,7 +2,7 @@
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { setup } from '../src/setup.ts';
+import { lookupChoice, setup } from '../src/setup.ts';
 import { tempStore, type TempStore } from './temp-store.ts';
 
 let store: TempStore, dir: string, base: string;
@@ -124,4 +124,11 @@ test('a setup re-run keeps the person\'s terminologyLookup off switch', async ()
   writeFileSync(join(dir, 'config.json'), JSON.stringify({ patientId: 'old', store: 'sqlite', terminologyLookup: false }));
   await setup('http://127.0.0.1:9/');
   expect(JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).terminologyLookup).toBe(false);
+});
+
+test('lookupChoice: on for a fresh install, the first existing config decides otherwise', () => {
+  expect(lookupChoice(undefined, undefined)).toBe(true);
+  expect(lookupChoice(undefined, { patientId: 'p', terminologyLookup: false })).toBe(false); // ga migrate: a new out, the live config's choice
+  expect(lookupChoice({ patientId: 'p' }, { patientId: 'p', terminologyLookup: false })).toBe(true); // the written config wins, even without the key
+  expect(lookupChoice({ patientId: 'p', terminologyLookup: false })).toBe(false);
 });

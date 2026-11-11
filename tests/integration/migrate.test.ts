@@ -37,7 +37,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     const m = (await admin.searchOne('ProjectMembership', { profile: `ClientApplication/${made.clientId}` }, { cache: 'no-cache' })) as ProjectMembership;
     await admin.updateResource<ProjectMembership>({ ...m, admin: true, accessPolicy: undefined });
     const { projectId: _p, ...legacy } = made; // an install from before GA had its own project
-    writeFileSync(join(dir, 'config.json'), JSON.stringify(legacy), { mode: 0o600 });
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ ...legacy, terminologyLookup: false }), { mode: 0o600 }); // the person chose lookup off
     await expect(retryLimited(() => setup(baseUrl))).rejects.toThrow('run ga migrate'); // a plain setup must not repoint an old install
 
     const src = join(dir, 'sources');
@@ -78,6 +78,7 @@ test.skipIf(SQLITE)('ga migrate re-imports into a new project, verifies and swit
     const now = loadConfig();
     clients.push(now);
     expect(now.projectId).not.toBe(made.projectId);
+    expect(now.terminologyLookup).toBe(false); // the old config's off switch survives the switch
     expect(statSync(join(dir, 'config.super-admin.json')).mode & 0o777).toBe(0o600);
     expect(existsSync(join(dir, 'config.next.json'))).toBe(false);
     expect(listShares(join(dir, 'share')).map((s) => s.patientId)).toEqual([now.patientId, 'someone-else']);

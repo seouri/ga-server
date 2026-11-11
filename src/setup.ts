@@ -101,7 +101,7 @@ export async function setup(
     patientId: patient.id as string,
     projectId,
     adminPassword: rotate ? randomBytes(24).toString('base64url') : password,
-    terminologyLookup: written?.terminologyLookup ?? true, // written so the person sees it; their off switch survives a re-run
+    terminologyLookup: lookupChoice(written, stored), // ga migrate's out is a new file: the live config's value counts
   };
   // Saved before the change: if the change fails, the next run falls back to the default and rotates again.
   writeConfig(out, cfg);
@@ -114,6 +114,9 @@ const selfPatient = (client: MedplumClient) => client.createResourceIfNoneExist<
   'identifier=urn:ga-server:id:patient|self',
 );
 
+// The code-lookup choice setup writes, so the person sees it: the first config's value, else on. A re-run keeps their off switch.
+export const lookupChoice = (...configs: (GaConfig | undefined)[]): boolean => configs.find(Boolean)?.terminologyLookup ?? true;
+
 function writeConfig(out: string, cfg: GaConfig): void {
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(cfg, null, 2), { mode: 0o600 });
@@ -124,7 +127,7 @@ function writeConfig(out: string, cfg: GaConfig): void {
 // the config (Medplum's, for a rollback; storeUrl) are kept.
 async function setupStore(out: string, stored: GaConfig | undefined): Promise<GaConfig> {
   const patient = await selfPatient(await getClient({ ...(stored ?? ({} as GaConfig)), store: 'sqlite' }));
-  const cfg: GaConfig = { ...stored, patientId: patient.id as string, store: 'sqlite', terminologyLookup: stored?.terminologyLookup ?? true };
+  const cfg: GaConfig = { ...stored, patientId: patient.id as string, store: 'sqlite', terminologyLookup: lookupChoice(stored) };
   writeConfig(out, cfg);
   return cfg;
 }
