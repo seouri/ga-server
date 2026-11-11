@@ -571,19 +571,19 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code against an include with multiple filters | skipped | terminology | not yet ported (Task 4) |
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates system-less coding matched by a later include | skipped | terminology | not yet ported (Task 4) |
 | server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Success | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Coding parameter | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Not found | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › No full coding specified | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Success | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Coding parameter | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Not found | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › No full coding specified | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Checks project | skipped | terminology | project scoping: another project cannot see the CodeSystem |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Falls back to validating system URL | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Lookup using specific CodeSystem version | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET endpoint | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance system URL mismatch | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Instance endpoint with coding | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance coding system mismatch | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Returns specified displayLanguage | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Falls back to validating system URL | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Lookup using specific CodeSystem version | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET endpoint | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › GET instance endpoint | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance system URL mismatch | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Instance endpoint with coding | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance coding system mismatch | ported | terminology |  |
+| server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Returns specified displayLanguage | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › validateCodings | skipped | terminology | in-process function, no HTTP request (validateCodings) |
 | server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumes | skipped | terminology | not yet ported (Task 3) |
 | server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumed by | skipped | terminology | not yet ported (Task 3) |

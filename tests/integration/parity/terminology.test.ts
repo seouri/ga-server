@@ -224,4 +224,122 @@ describe.skipIf(SQLITE)('built-in terminology (parity)', () => {
       return r;
     }));
   });
+
+  // codesystemvalidatecode.test.ts (Medplum's beforeAll uses a Super Admin; a project admin makes the same calls)
+  describe('CodeSystem validate-code', () => {
+    const testCodeSystem: CodeSystem = { resourceType: 'CodeSystem', url: `http://example.com/test-code-system-${randomUUID()}`, name: 'testCodeSystem',
+      title: 'Test Code System', status: 'active', hierarchyMeaning: 'is-a', content: 'not-present' };
+    const url = testCodeSystem.url!;
+    const cs: Record<string, CodeSystem & { id: string }> = {};
+    beforeAll(async () => {
+      await both(sides, async (s) => {
+        cs[s.name] = await s.create(testCodeSystem);
+        const r = await call(s, 'POST', 'CodeSystem/$import', P({ name: 'system', valueUri: url }, { name: 'concept', valueCoding: { code: '1', display: 'Biopsy of brain' } },
+          { name: 'designation', part: [{ name: 'code', valueCode: '1' }, { name: 'language', valueCode: 'fr' }, { name: 'value', valueString: 'biopsie du tissu encéphalique' }] },
+          { name: 'concept', valueCoding: { code: '2', display: 'Biopsy of head' } }));
+        expect(r.status, s.name).toBe(200);
+      });
+    });
+    const yes = (display: string) => ({ status: 200, body: { resourceType: 'Parameters', parameter: [{ name: 'result', valueBoolean: true }, { name: 'display', valueString: display }] } });
+    const no = { status: 200, body: { resourceType: 'Parameters', parameter: [{ name: 'result', valueBoolean: false }] } };
+    const post = (s: Side, ...parameter: ParametersParameter[]) => call(s, 'POST', 'CodeSystem/$validate-code', P(...parameter));
+
+    test('CodeSystem validate-code › Success [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await post(s, { name: 'url', valueUri: url }, { name: 'code', valueCode: '1' });
+      expect(r).toEqual(yes('Biopsy of brain'));
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Coding parameter [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await post(s, { name: 'coding', valueCoding: { system: url, code: '1' } });
+      expect(r).toEqual(yes('Biopsy of brain'));
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Not found [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await post(s, { name: 'url', valueUri: url }, { name: 'code', valueCode: 'wrong code' });
+      expect(r).toEqual(no);
+      return r;
+    }));
+
+    test('CodeSystem validate-code › No full coding specified [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await post(s, { name: 'code', valueCode: 'wrong code' });
+      expect(r).toMatchObject({ status: 400, body: { issue: [{ severity: 'error', code: 'invalid', details: { text: 'No code system specified' } }] } });
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Falls back to validating system URL [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const system = `https://example.com/${randomUUID()}`;
+      const y = await post(s, { name: 'coding', valueCoding: { system, code: '1' } });
+      expect(y).toEqual({ status: 200, body: { resourceType: 'Parameters', parameter: [{ name: 'result', valueBoolean: true }] } });
+      const n = await post(s, { name: 'url', valueUri: 'http://example.com/other-system' }, { name: 'coding', valueCoding: { system, code: '1' } });
+      expect(n).toEqual(no);
+      return [y, n];
+    }));
+
+    test('CodeSystem validate-code › Lookup using specific CodeSystem version [server/src/fhir/operations/codesystemvalidatecode.test.ts]', async () => {
+      const versionedUrl = `http://example.com/versioned-code-system-${randomUUID()}`;
+      await same(sides, async (s) => {
+        for (const [version, display] of [['2.7.1', 'Archaism'], ['3.1.4', 'Neologism']]) {
+          await s.create<CodeSystem>({ ...testCodeSystem, url: versionedUrl, content: 'complete', version, concept: [{ code: '5', display }] });
+        }
+        const r = await post(s, { name: 'coding', valueCoding: { system: versionedUrl, code: '5' } }, { name: 'version', valueString: '2.7.1' });
+        expect(r).toEqual(yes('Archaism'));
+        return r;
+      });
+    });
+
+    test('CodeSystem validate-code › GET endpoint [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'GET', q('CodeSystem/$validate-code', ['url', url], ['code', '1']));
+      expect(r).toEqual(yes('Biopsy of brain'));
+      return r;
+    }));
+
+    test('CodeSystem validate-code › GET instance endpoint [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'GET', `CodeSystem/${cs[s.name].id}/$validate-code?code=1`);
+      expect(r).toEqual(yes('Biopsy of brain'));
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Fail on instance system URL mismatch [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'GET', `CodeSystem/${cs[s.name].id}/$validate-code?url=incorrect&code=1`);
+      expect(r).toEqual(no);
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Instance endpoint with coding [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'POST', `CodeSystem/${cs[s.name].id}/$validate-code`, P({ name: 'coding', valueCoding: { code: '1' } }));
+      expect(r).toEqual(yes('Biopsy of brain'));
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Fail on instance coding system mismatch [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'POST', `CodeSystem/${cs[s.name].id}/$validate-code`, P({ name: 'coding', valueCoding: { system: 'incorrect', code: '1' } }));
+      expect(r).toEqual(no);
+      return r;
+    }));
+
+    test('CodeSystem validate-code › Returns specified displayLanguage [server/src/fhir/operations/codesystemvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'POST', `CodeSystem/${cs[s.name].id}/$validate-code`, P({ name: 'coding', valueCoding: { system: url, code: '1' } }, { name: 'displayLanguage', valueCode: 'fr' }));
+      expect(r).toEqual(yes('biopsie du tissu encéphalique'));
+      return r;
+    }));
+
+    // R4 defines these inputs; Medplum ignores them, the store refuses them (unsupported is loud).
+    test('differs on purpose: unsupported $validate-code inputs are 400 [store-plan-2]', async () => {
+      const extras: ParametersParameter[] = [{ name: 'codeSystem', resource: { resourceType: 'CodeSystem', status: 'active', content: 'not-present' } },
+        { name: 'codeableConcept', valueCodeableConcept: { text: 'x' } }, { name: 'date', valueDateTime: '2020-01-01' }, { name: 'abstract', valueBoolean: true },
+        { name: 'display', valueString: 'Biopsy of brain' }];
+      const [medplum, store] = await both(sides, async (s) => {
+        const out = [];
+        for (const extra of extras) {
+          const r = await post(s, { name: 'url', valueUri: url }, { name: 'code', valueCode: '1' }, extra);
+          out.push([r.status, r.body.issue?.[0]?.details?.text]);
+        }
+        return out;
+      });
+      expect(medplum.map((x) => x[0])).toEqual([200, 200, 200, 200, 200]);
+      expect(store).toEqual(extras.map((x) => [400, `$validate-code: parameter ${x.name} is not supported`]));
+    });
+  });
 });
