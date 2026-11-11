@@ -435,3 +435,23 @@ test('a zip holding an Epic FHIR export .json (no .xml) fails as CLI only instea
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('macOS AppleDouble entries (__MACOSX/, ._*) do not make a JSON-only zip read as C-CDA', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-job-json-mac-'));
+  try {
+    const src = join(dir, 'src');
+    mkdirSync(join(src, '__MACOSX'), { recursive: true });
+    writeFileSync(join(src, 'export.json'), '{"fhir":{}}');
+    writeFileSync(join(src, '__MACOSX', '._x.xml'), 'apple double');
+    writeFileSync(join(src, '._y.xml'), 'apple double');
+    expect(spawnSync('zip', ['-qr', join(dir, 'ehr.zip'), 'export.json', '__MACOSX', '._y.xml'], { cwd: src }).status).toBe(0);
+    const gw = join(dir, 'gateway');
+    const job = recordJob(gw, upload(gw, join(dir, 'ehr.zip')), { patientId: 'p' });
+    let called = false;
+    const importAny = async () => { called = true; return {}; };
+    await expect(runJob(gw, job.id, { importAny: importAny as never, client: {} as MedplumClient, cfg: { patientId: 'p' } as never })).rejects.toThrow(CLI_ONLY);
+    expect(called).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
