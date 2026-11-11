@@ -1,10 +1,16 @@
 // Epic FHIR export import against the local Medplum, on a throwaway test patient.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { DocumentReference } from '@medplum/fhirtypes';
+import type { Bundle, DocumentReference, Resource } from '@medplum/fhirtypes';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getClient, loadConfig, type GaConfig } from '../../src/config.ts';
 import { importFhirExport } from '../../src/fhir-export/import.ts';
+import { NEWEST_IMPORT } from '../../src/identity.ts';
+import { currentList } from '../../src/lists.ts';
+import { attachAnnotations, type PrAnnotation } from '../../tools/personalrecord/annotations.ts';
+import { rebuild } from '../../tools/personalrecord/rebuild.ts';
 import { sourceKey } from '../../src/smart/auth.ts';
 import { cleanupTestPatient, compartmentOf, createTestPatient } from './helpers.ts';
 
@@ -52,5 +58,63 @@ describe('importFhirExport', () => {
   it('an added note updates the record', async () => {
     await importFhirExport(client, cfg, MINI_NOTE, patientId, { fhirBase: BASE });
     expect((await cond())?.note?.map((n) => n.text)).toContain('patient note');
+  });
+});
+
+// A FHIR export file written to a temp folder (the importer reads a path); each test its own content.
+const tmp = mkdtempSync(join(tmpdir(), 'fhir-export-'));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+const writeExport = (name: string, rs: Resource[]): string => {
+  const fhir: Record<string, Resource[]> = {};
+  for (const r of rs) (fhir[r.resourceType] ??= []).push(r);
+  const path = join(tmp, name);
+  writeFileSync(path, JSON.stringify({ fhir, attachments: [] }));
+  return path;
+};
+// A fresh patient per test: these tests read the whole compartment.
+const withPatient = async (f: (pid: string) => Promise<void>) => {
+  const pid = await createTestPatient(client);
+  try { await f(pid); } finally { await cleanupTestPatient(client, pid); }
+};
+
+describe('patient-less exports', () => {
+  it("imports the personalrecord tool's output into the patient compartment", () => withPatient(async (pid) => {
+    const fx = (f: string) => JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'tools', 'personalrecord', 'test', 'fixtures', f), 'utf8'));
+    const known = fx('known.json').fhir as Record<string, Resource[]>;
+    const { resources } = rebuild(fx('bundle.json') as Bundle, known, {});
+    const out = attachAnnotations(fx('annotations.json') as PrAnnotation[], known, resources).resources;
+    const r = await importFhirExport(client, cfg, writeExport('rebuilt.json', out), pid, { fhirBase: BASE });
+    expect(r.invalid).toBe(0);
+    expect(r.created).toBe(out.length);
+    const mine = (await compartmentOf(client, pid)).filter((x) => x.meta?.tag?.some((t) => t.code === 'src-fhir-export'));
+    expect(mine).toHaveLength(out.length);
+  }));
+
+  it('a rebuilt-only file does not make portal medications unconfirmed', async () => {
+    const at = '2025-09-01T00:00:00Z';
+    const knownFile = (name: string) => writeExport(name, [
+      { resourceType: 'Patient', id: 'p1', meta: { lastUpdated: at } },
+      { resourceType: 'MedicationRequest', id: 'm1', meta: { lastUpdated: at }, status: 'active', intent: 'order', medicationCodeableConcept: { text: 'Synthetic drug 5 mg' }, subject: { reference: 'Patient/p1' }, authoredOn: '2025-08-01' },
+    ] as Resource[]);
+    // Reconstructed records: no meta.lastUpdated, no patient, dated after the known export.
+    const rebuiltFile = (name: string) => writeExport(name, [
+      { resourceType: 'Observation', id: 'eREBUILT0000000000001', status: 'final', code: { text: 'Synthetic later lab' }, effectiveDateTime: '2026-05-01', valueString: 'x' },
+      { resourceType: 'Condition', id: 'eREBUILT0000000000002', code: { text: 'Synthetic later problem' }, recordedDate: '2026-06-01' },
+    ] as Resource[]);
+    const current = async (pid: string) => (await currentList(client, pid, 'medications', undefined, [])).rows.map((x) => x.currency);
+    const stored = async (pid: string) => (await client.readResource('Patient', pid, { cache: 'no-cache' })).extension?.find((e) => e.url === NEWEST_IMPORT)?.valueDateTime;
+    await withPatient(async (pid) => { // known export, then the rebuilt file
+      await importFhirExport(client, cfg, knownFile('known-1.json'), pid, { fhirBase: BASE });
+      await importFhirExport(client, cfg, rebuiltFile('rebuilt-1.json'), pid, { fhirBase: BASE });
+      expect(await stored(pid)).toBe(at.replace('Z', '.000Z'));
+      expect(await current(pid)).toEqual(['current']);
+    });
+    await withPatient(async (pid) => { // the rebuilt file first: it stores nothing, and a later scan does not count it
+      await importFhirExport(client, cfg, rebuiltFile('rebuilt-2.json'), pid, { fhirBase: BASE });
+      expect(await stored(pid)).toBeUndefined();
+      await importFhirExport(client, cfg, knownFile('known-2.json'), pid, { fhirBase: BASE });
+      expect(await stored(pid)).toBe(at.replace('Z', '.000Z'));
+      expect(await current(pid)).toEqual(['current']);
+    });
   });
 });

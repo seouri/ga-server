@@ -88,7 +88,9 @@ test("batched import writes the same resources as one batch, and as today's impo
     },
   });
   expect(snap).toHaveLength(614);
-  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('fa3b64e854169183155c02a1f35c43f9e73743ea78658827783c4acad36d88a6');
+  // The one R4 clinical record (an allergy) carries src-apple-clinical since Apple's hospital copies got their own kind; with that tag
+  // read back as src-apple-health the digest is today's importer's (fa3b64e8...).
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('46006bf5e4c50ce75c364bf21a754ac0361a6fd403061265c293ad8dddc42f32');
 }, 300_000);
 
 test('shuffled records give the same resources as sorted ones', async () => {

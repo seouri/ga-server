@@ -147,7 +147,7 @@ test('routes an uploaded TIFF to agent extraction', async () => {
 
 test('refuses a FHIR export or DICOM upload', async () => {
   const { call, upload } = await setup();
-  const msg = 'this is an Epic FHIR export or a DICOM study: import it with ga import on the computer running GA';
+  const msg = 'this looks like an Epic FHIR export (.json) or a DICOM study: import it with ga import on the computer running GA';
   const json = await call('import_file', { fileId: await upload('export.json', '{}') });
   expect(json.isError).toBe(true);
   expect(json.msg).toContain(msg);

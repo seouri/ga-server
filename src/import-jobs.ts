@@ -43,7 +43,7 @@ export type JobRecord = {
 export type Run = (dir: string, id: string) => Promise<void>;
 
 const MAX_ATTEMPTS = 3;
-export const CLI_ONLY = 'this is an Epic FHIR export or a DICOM study: import it with ga import on the computer running GA';
+export const CLI_ONLY = 'this looks like an Epic FHIR export (.json) or a DICOM study: import it with ga import on the computer running GA';
 export const JOB_BUSY = 'this import job is already running (in ga-gateway or another `ga import-job`): try again later';
 const ID = /^[A-Za-z0-9_-]{12}$/;
 const jobDir = (dir: string, id: string): string => join(dir, 'imports', id);

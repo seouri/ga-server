@@ -34,7 +34,7 @@ describe('labResults', () => {
   });
   it('builds the query, follows next by path, drops non-lab categories and uncategorised vitals, flags truncation', async () => {
     const seen: string[] = [];
-    pages = [[obs(0, { effectiveDateTime: undefined }), obs(1), obs(2, { category: [{ coding: [{ code: 'vital-signs' }] }] }), obs(5, { code: { text: 'Weight' } })], [obs(3), obs(4)]];
+    pages = [[obs(0, { effectiveDateTime: undefined }), obs(1), obs(2, { category: [{ coding: [{ code: 'vital-signs' }] }] }), obs(5, { code: { text: 'Weight' } })], [obs(3, { meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-clinical' }] } }), obs(4)]]; // id3: Apple's copy of a hospital lab, a lab result
     const r = await labResults(fake(seen), 'p', { name: 'crp', since: '2024-01-01', until: '2024-12-31', limit: 2 });
     expect(r).toMatchObject({ total: 2, truncated: true });
     expect((r.rows as LabRow[]).map((x) => x.id)).toEqual(['id1', 'id3']);

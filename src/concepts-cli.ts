@@ -11,7 +11,9 @@ import { COMPARTMENT } from './engine.ts';
 import { effective, type SourceInfo, TAG } from './identity.ts';
 
 const TYPES = ['Observation', 'Immunization', 'Procedure', 'MedicationStatement', 'MedicationRequest', 'Condition'];
-const KINDS = ['ccda', 'ehi', 'apple-health', 'pdf', 'smart'] as const;
+const KINDS = ['ccda', 'ehi', 'apple-health', 'apple-clinical', 'pdf', 'smart'] as const;
+// The kinds whose records a map key's source prefix covers: Apple's clinical copies share the apple-health map (conceptmap.ts sourceKey).
+const kindsOf = (prefix: string): string[] => (prefix === 'apple-health' ? ['apple-health', 'apple-clinical'] : [prefix]);
 const PAGE = 500;
 
 const keyOf = (r: Resource, info: SourceInfo): string | undefined => {
@@ -46,11 +48,11 @@ function sourceResolver(client: MedplumClient, patientId: string, maps: () => Ma
     if (!orgs.has(file)) orgs.set(file, find().catch(() => undefined));
     return orgs.get(file);
   };
-  // only: the one source kind wanted (map_concept): other kinds are never resolved, so no C-CDA file is read for them.
-  return async (r: Resource, only?: string): Promise<SourceInfo | undefined> => {
+  // only: the source kinds wanted (map_concept): other kinds are never resolved, so no C-CDA file is read for them.
+  return async (r: Resource, only?: string[]): Promise<SourceInfo | undefined> => {
     const infos: SourceInfo[] = [];
     for (const k of KINDS) {
-      if ((only && k !== only) || !r.meta?.tag?.some((t) => t.system === TAG && t.code === `src-${k}`)) continue;
+      if ((only && !only.includes(k)) || !r.meta?.tag?.some((t) => t.system === TAG && t.code === `src-${k}`)) continue;
       const info: SourceInfo = { kind: k, file: r.meta?.source ?? '', date: '', writer: 'importer' };
       if (k === 'ccda') {
         const o = await orgOf(info.file);
@@ -112,14 +114,14 @@ export async function applyAll(client: MedplumClient, patientId: string, opts: {
       return recode(fresh, info, false);
     }
   };
-  const kind = opts.source?.split(':')[0];
+  const kinds = opts.source ? kindsOf(opts.source.split(':')[0]) : undefined;
   const n = { scanned: 0, matched: 0, coded: 0, suggested: 0, unmapped: 0, changed: 0 };
-  const only: Record<string, string> = opts.review ? { _tag: `${TAG}|concept-unmapped,${TAG}|concept-suggested` } : kind ? { _tag: `${TAG}|src-${kind}` } : {}; // infoOf still checks the source
+  const only: Record<string, string> = opts.review ? { _tag: `${TAG}|concept-unmapped,${TAG}|concept-suggested` } : kinds ? { _tag: kinds.map((k) => `${TAG}|src-${k}`).join(',') } : {}; // infoOf still checks the source
   for await (const page of scan(client, patientId, opts.type ? [opts.type] : TYPES, only)) {
     for (const r of page) {
       n.scanned++;
       if (opts.source && termKey(r) !== opts.key) continue; // before infoOf: no source file is read for other terms
-      const info = await infoOf(r, kind);
+      const info = await infoOf(r, kinds);
       if (!info) continue;
       if (opts.source && keyOf(r, info) !== opts.source) continue;
       n.matched++;

@@ -31,7 +31,8 @@ function place(r: Resource, a: Attach): boolean {
   return true;
 }
 
-export function readFhirExport(path: string): { resources: Resource[]; skippedTypes: Record<string, number>; attachmentsUnplaced: number; date: string } {
+// date: the newest meta.lastUpdated (lastUpdated: true), else the newest clinical date.
+export function readFhirExport(path: string): { resources: Resource[]; skippedTypes: Record<string, number>; attachmentsUnplaced: number; date: string; lastUpdated: boolean } {
   let doc: unknown;
   try {
     doc = JSON.parse(readFileSync(path, 'utf8'));
@@ -58,6 +59,7 @@ export function readFhirExport(path: string): { resources: Resource[]; skippedTy
   }
   const times = (vals: unknown[]): number[] => vals.filter((v): v is string => typeof v === 'string').map((v) => Date.parse(v)).filter((t) => !Number.isNaN(t));
   let newest = Math.max(...times(resources.map((r) => r.meta?.lastUpdated)), 0);
+  const lastUpdated = !!newest;
   if (!newest) newest = Math.max(...times(resources.flatMap((r) => DATES.map((k) => (r as unknown as Record<string, unknown>)[k]))), 0);
-  return { resources, skippedTypes, attachmentsUnplaced, date: new Date(newest || Date.now()).toISOString() };
+  return { resources, skippedTypes, attachmentsUnplaced, date: new Date(newest || Date.now()).toISOString(), lastUpdated };
 }

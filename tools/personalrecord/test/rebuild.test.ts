@@ -23,6 +23,13 @@ describe('rebuild', () => {
     const d = rebuild(BUNDLE, KNOWN, {}).resources.find((r) => r.resourceType === 'DocumentReference') as DocumentReference;
     expect(Buffer.from(d.content[0].attachment.data!, 'base64').toString()).toBe('synthetic note text');
   });
+  it('omits an unparseable note date instead of failing', () => {
+    const entry = (BUNDLE.entry ?? []).find((e) => e.resource?.id?.startsWith('docref-'))!;
+    const bad = { ...BUNDLE, entry: [{ resource: { ...entry.resource, effectiveDateTime: 'not a date' } as Resource }] };
+    const d = rebuild(bad, KNOWN, { includeBeforeCutoff: true }).resources[0] as DocumentReference;
+    expect(d.resourceType).toBe('DocumentReference');
+    expect(d.date).toBeUndefined();
+  });
   it('maps each prefix to its type and drops app fields', () => {
     const { resources, report } = rebuild(BUNDLE, KNOWN, {});
     expect(report.emitted).toEqual({ Observation: 1, MedicationRequest: 1, DocumentReference: 1, Condition: 1, DiagnosticReport: 1, Immunization: 1, Procedure: 1 });

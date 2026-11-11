@@ -47,6 +47,7 @@ test('inScope follows the spec boundary', () => {
 test('sourceKey per kind', () => {
   expect(sourceKey(src('pdf'), lab('a', 'b'))).toBe('pdf');
   expect(sourceKey(src('apple-health'), lab('a', 'b'))).toBe('apple-health');
+  expect(sourceKey(src('apple-clinical'), { ...lab('a', 'b'), identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Observation/1' }] })).toBe('apple-health'); // the map Apple clinical copies always used
   const ehi = { ...lab('a', 'b'), identifier: [{ system: 'urn:ga-server:id:ehi:acme', value: 'X|1' }] };
   expect(sourceKey(src('ehi'), ehi)).toBe('ehi:acme');
   const smart = { ...lab('a', 'b'), identifier: [{ system: 'urn:ga-server:id:smart:hosp1', value: 'Observation/1' }] };

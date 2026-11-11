@@ -7,7 +7,7 @@
 Each file's header, the first 256 KB only, never the pixels: SOP class and instance, transfer syntax, study and series UIDs and descriptions, study date and time, modality, body part, series and instance numbers.
 
 - One `ImagingStudy` per study UID, with its series and instances (identifier system `urn:dicom:uid`, value `urn:oid:<study UID>`; tag `src-dicom`). `started` is the study date only (DICOM has no time zone); the study time is kept in `description` ("... (study time hh:mm)").
-- An Encapsulated PDF object (SOP class `1.2.840.10008.5.1.4.1.1.104.1`, such as a study overview report) is stored as a document (`DocumentReference`, PDF, identified by its SOP instance UID) and linked to its study with `context.related`.
+- An Encapsulated PDF object (SOP class `1.2.840.10008.5.1.4.1.1.104.1`, such as a study overview report) is stored as a document (`DocumentReference`, PDF, identified by its SOP instance UID) and linked to its study with `context.related`. It is kept like any imported source file (identifier `urn:ga-server:id:file`): never shared, no `src-dicom` tag, and not listed by `whats_new`.
 - No pixel data is stored as a record; the images stay in the archive.
 
 ## Transfer syntaxes

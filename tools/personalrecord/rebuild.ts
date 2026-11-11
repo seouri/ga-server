@@ -12,6 +12,11 @@ const DATE_FIELDS = ['effectiveDateTime', 'recordedDate', 'authoredOn', 'date', 
 type Obs = Record<string, unknown> & { id?: string; code?: CodeableConcept; valueString?: string; effectiveDateTime?: string; extension?: { url?: string; valueString?: string }[] };
 
 const day = (s: unknown): string => (typeof s === 'string' ? s.slice(0, 10) : '');
+// An instant for a date string; undefined when it does not parse (the date is left out, never invented).
+const instant = (s: string | undefined): string | undefined => {
+  const t = s ? Date.parse(s) : NaN;
+  return Number.isNaN(t) ? undefined : new Date(t).toISOString();
+};
 
 // The newest clinical date (YYYY-MM-DD) among the known resources; '' when none has one.
 function newestDate(known: Record<string, Resource[]>): string {
@@ -48,7 +53,7 @@ function build(prefix: string, id: string, o: Obs): Resource | undefined {
       return { resourceType: 'MedicationRequest', id, status: 'unknown', intent: 'order', medicationCodeableConcept: hasCode(code) ? code : { text: v }, authoredOn: date, note: [NOTE] } as Resource;
     case 'docref-':
       return {
-        resourceType: 'DocumentReference', id, status: 'current', type: code, date: date ? new Date(date).toISOString() : undefined,
+        resourceType: 'DocumentReference', id, status: 'current', type: code, date: instant(date),
         content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(v ?? '').toString('base64'), title: code?.text } }],
       } as Resource;
     case 'dr-':

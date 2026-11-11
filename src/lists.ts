@@ -67,9 +67,10 @@ function listItems(rs: Resource[], meds: ReturnType<typeof medMap>, ctx: Ctx, ki
       currency: e?.currency ?? (unstated ? undefined : isPlanned(res) ? 'planned' : 'inactive'),
       reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : isPlanned(res) ? 'planned or proposed in a plan of treatment; not taken yet' : undefined),
       since: (r.effectiveDateTime ?? r.effectivePeriod?.start ?? r.authoredOn ?? r.onsetDateTime ?? r.onsetPeriod?.start ?? r.recordedDate ?? r.dateAsserted)?.slice(0, 10),
-      source: keys.length
-        ? `hospital portal ${keys.join(', ')}`
-        : tags.has('src-apple-health') ? 'Apple Health copy of a hospital record (prefer the hospital source)' : r.meta?.source ? basename(r.meta.source) : undefined,
+      // An Apple clinical copy carries the hospital's portal-style identifier too: it is still Apple's copy.
+      source: tags.has('src-apple-clinical') || (tags.has('src-apple-health') && !keys.length)
+        ? 'Apple Health copy of a hospital record (prefer the hospital source)'
+        : keys.length ? `hospital portal ${keys.join(', ')}` : r.meta?.source ? basename(r.meta.source) : undefined,
       flags: flagsOf(r.meta),
       type: kind === 'medications' ? r.resourceType : undefined,
       id: r.id,

@@ -21,6 +21,7 @@ const cond = (clinical: string, date: string) =>
 test.each<[Resource, Group | undefined]>([
   [obs('laboratory', { meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] } }), 'apple'],
   [obs('laboratory'), 'labs'],
+  [obs('laboratory', { meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-clinical' }] } }), 'labs'], // Apple's copy of a hospital lab
   [r({ resourceType: 'DiagnosticReport' }), 'labs'],
   [obs('vital-signs'), 'vitals'],
   [r({ resourceType: 'MedicationStatement' }), 'medications'],

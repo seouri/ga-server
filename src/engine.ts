@@ -122,7 +122,7 @@ function merge(ex: unknown, inc: unknown): unknown {
   return isObj(ex) && isObj(inc) && coded(ex) && !ex.text && inc.text ? { ...ex, text: inc.text } : ex;
 }
 export function fillFrom<T extends Resource>(existing: T, incomingRes: T, s: SourceInfo): T {
-  if (s.kind !== 'ehi' && s.kind !== 'smart' && s.kind !== 'fhir-export' && s.kind !== 'apple-health') return incomingRes;
+  if (s.kind !== 'ehi' && s.kind !== 'smart' && s.kind !== 'fhir-export' && s.kind !== 'apple-clinical') return incomingRes;
   return onSource(existing, incomingRes, fillSource);
 }
 function fillSource<T extends Resource>(existing: T, incomingRes: T): T {
@@ -573,19 +573,21 @@ export async function importResources(
       !!source.fillOnly?.(incoming) &&
       (source.kind === 'smart'
         ? idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))
-        : (source.kind === 'fhir-export' || source.kind === 'apple-health') &&
+        : (source.kind === 'fhir-export' || source.kind === 'apple-clinical') &&
           (srcTags(ex).some((c) => c !== `src-${source.kind}`) || idList(ex).some((i) => OTHER_SOURCE(i.system ?? ''))));
-    // A hospital record (portal, FHIR export, EHI, C-CDA) replaces a body only an Apple clinical copy wrote, whatever the dates.
-    const hospitalOntoApple = (ex: R) => ['smart', 'fhir-export', 'ehi', 'ccda'].includes(source.kind) && srcTags(ex).length === 1 && srcTags(ex)[0] === 'src-apple-health';
+    // A hospital record (portal, FHIR export, EHI, C-CDA) replaces a body only Apple wrote (a clinical copy, or an Apple-only reading), whatever the dates.
+    const hospitalOntoApple = (ex: R) => ['smart', 'fhir-export', 'ehi', 'ccda'].includes(source.kind) && srcTags(ex).length === 1 && ['src-apple-clinical', 'src-apple-health'].includes(srcTags(ex)[0]);
     // Apple readings are many per day and never day-level duplicates of (or by) hospital records; only an exact match merges.
+    // Apple's clinical copies (kind apple-clinical, a hospital identifier) are hospital records here: they take part in duplicate detection.
     const fromApple = source.kind === 'apple-health';
+    const appleReading = (m: R) => isApple(m) && !idList(m).some((i) => i.system?.startsWith('urn:ga-server:id:smart:'));
     // A same-day content match at another time of day is a possible duplicate only with the same value (one lab, collected vs resulted
     // time in two sources); different values at different times are separate readings (a retaken BP, a home log).
     const timed = (v?: string) => !!v && /T\d/.test(v);
     const sameMoment = (m: R) => !timed(when) || !timed(effective(m as Observation)) || Date.parse(when) === Date.parse(effective(m as Observation)!)
       || sameNumbers(m as Observation, incoming as Observation);
     const dayMatches = [...link.dups, ...contentMatches.filter((m) => !link.dups.some((d) => d.id === m.id) && sameMoment(m as R))] as R[];
-    const matches = fromApple ? [] : dayMatches.filter((m) => !isApple(m));
+    const matches = fromApple ? [] : dayMatches.filter((m) => !appleReading(m));
     try {
       let target: Resource;
       const idless = ![(src as { identifier?: Identifier | Identifier[] }).identifier ?? []].flat()[0]?.value;
@@ -704,8 +706,10 @@ export async function importResources(
       t.seen += (report.seen ?? 0) - (before.seen ?? 0);
     }
   }
-  if (source.kind === 'ccda' || source.kind === 'ehi' || source.kind === 'fhir-export') {
-    const newest = Math.max(...ordered.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
+  // Fill-only records (a FHIR export's reconstructed ones) never count: a batch of only those stores nothing.
+  const counted = ordered.filter((r) => !source.fillOnly?.(r));
+  if ((source.kind === 'ccda' || source.kind === 'ehi' || source.kind === 'fhir-export') && counted.length) {
+    const newest = Math.max(...counted.map((r) => Date.parse(source.dateOf?.(r) ?? source.date)).filter((t) => !Number.isNaN(t)));
     // newestEpicImport seeds the stored date from a scan when there is none, so an older import never hides a newer one.
     await storeNewestImport(client, patientId, Math.max(newest, await newestEpicImport(client, patientId)));
   }

@@ -24,8 +24,8 @@ import { vaccineGaps } from './vaccines.ts';
 
 const SHARED = ['Medication', 'Practitioner', 'PractitionerRole', 'Organization', 'Location', 'Device'] as ResourceType[];
 const COMPARTMENT = PATIENT_COMPARTMENT.filter((t) => t !== 'Patient');
-const SRC_TAGS = ['src-ccda', 'src-ehi', 'src-apple-health', 'src-pdf', 'src-smart'].map((c) => `${TAG}|${c}`).join(',');
-const TAG_ROWS = ['possible-duplicate', 'source-conflict', 'person-edited', 'extracted-by-llm', 'writer-agent', 'src-ccda', 'src-ehi', 'src-apple-health', 'src-pdf'];
+const SRC_TAGS = ['src-ccda', 'src-ehi', 'src-apple-health', 'src-apple-clinical', 'src-pdf', 'src-smart'].map((c) => `${TAG}|${c}`).join(',');
+const TAG_ROWS = ['possible-duplicate', 'source-conflict', 'person-edited', 'extracted-by-llm', 'writer-agent', 'src-ccda', 'src-ehi', 'src-apple-health', 'src-apple-clinical', 'src-pdf'];
 const GA_LOG = 'urn:ga-server:share|,urn:ga-server:remote|'; // share and chat-app access logs (AuditEvent)
 const FILE = 'urn:ga-server:id:file';
 const ARCHIVE = { ehi: 'urn:ga-server:id:ehi-archive', apple: 'urn:ga-server:id:apple-health-archive' };

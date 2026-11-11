@@ -71,7 +71,7 @@ GA codes records from every source to standard codes (LOINC, CVX, RxNorm, SNOMED
 - Sleep is one Observation per night (stage components).
 - "Activity rings, daily (Apple Health)" is Apple's own per-day ring totals: components Active energy burned (kcal), Exercise minutes, Stand hours.
 - A home reading and a clinic reading on the same day are both real; don't merge or flag them.
-- Health Records inside the export are hospital copies: trust the hospital source over the Apple copy.
+- Health Records inside the export are hospital copies (tag `src-apple-clinical`, the hospital's portal-style identifier first): trust the hospital source over the Apple copy.
 - The ECG is a text `DocumentReference` (CSV) plus an Observation with its classification.
 - The whole export is archived as a `DocumentReference` (identifier system `urn:ga-server:id:apple-health-archive`).
 

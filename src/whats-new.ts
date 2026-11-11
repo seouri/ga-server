@@ -15,7 +15,7 @@ import { messageText, noteText, snippet } from './notes.ts';
 import { hasCategory } from './share/scope.ts';
 import { addDays } from './vaccines.ts';
 
-export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-fhir-export', 'Epic FHIR export'], ['src-dicom', 'DICOM imaging'], ['src-apple-health', 'Apple Health'], ['src-pdf', 'PDF or photo']];
+export const SOURCES: [string, string][] = [['src-ccda', 'C-CDA'], ['src-ehi', 'Epic EHI export'], ['src-fhir-export', 'Epic FHIR export'], ['src-dicom', 'DICOM imaging'], ['src-apple-health', 'Apple Health'], ['src-apple-clinical', 'Apple Health (hospital records)'], ['src-pdf', 'PDF or photo']];
 
 export type Kind = 'lab results' | 'vital signs' | 'Apple Health readings' | 'medications' | 'problems' | 'allergies' | 'vaccines' | 'procedures' | 'visits' | 'notes and messages' | 'other';
 

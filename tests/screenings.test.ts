@@ -65,6 +65,8 @@ test('Apple Health readings never satisfy blood pressure', () => {
   expect(item([{ ...bp, ...tag('src-pdf') }], 'blood-pressure-40').status).toBe('due');
   expect(item([{ ...bp, meta: undefined }], 'blood-pressure-40').status).toBe('due');
   expect(item([{ ...bp, meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] } }], 'blood-pressure-40').status).toBe('due');
+  // Apple's copy of a hospital record is the hospital's measurement.
+  expect(item([{ ...bp, ...tag('src-apple-clinical') }], 'blood-pressure-40').status).toBe('done');
 });
 
 test('out of age range is not for you', () => {

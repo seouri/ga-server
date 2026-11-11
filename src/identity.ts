@@ -3,13 +3,13 @@ import type { Extension, Identifier, Observation, Resource } from '@medplum/fhir
 import { GaError } from './config.ts';
 
 export type SourceInfo = {
-  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'smart' | 'fhir-export' | 'dicom';
+  kind: 'ccda' | 'pdf' | 'ehi' | 'apple-health' | 'apple-clinical' | 'smart' | 'fhir-export' | 'dicom'; // apple-clinical: Apple's copies of hospital records
   file: string;
   org?: string; // C-CDA custodian organisation name; keys the source's ConceptMap (src/conceptmap.ts)
   date: string;
   writer: 'importer' | 'agent';
   llm?: boolean;
-  dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`
+  dateOf?: (r: Resource) => string | undefined; // per-resource source date; falls back to `date`; '' = none (no SRC_DATE)
   fillOnly?: (r: Resource) => boolean; // true: may only add fields an existing other-source record lacks
   seenAt?: string; // stamp/refresh LAST_SEEN on every DATED record this import touches or skips
   prelearned?: boolean; // concepts already learned from the whole import (a batched EHI import): importResources only applies the maps
@@ -28,8 +28,8 @@ export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
 export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
-// From a hospital source (EHI export, C-CDA, portal sync). A PDF or photo does not say where a reading was taken.
-export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart', 'src-fhir-export', 'src-dicom'].some((c) => hasTag(r, c));
+// From a hospital source (EHI export, C-CDA, portal sync, or Apple's copy of a hospital record). A PDF or photo does not say where a reading was taken.
+export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart', 'src-fhir-export', 'src-dicom', 'src-apple-clinical'].some((c) => hasTag(r, c));
 
 // R4 types whose identifier is 0..1: the stable identifier replaces the source one (the source file keeps it).
 export const SINGULAR_ID = new Set(['Composition', 'Bundle', 'QuestionnaireResponse']);
@@ -100,7 +100,8 @@ export const EPIC_OID = 'urn:oid:1.2.840.114350.';
 
 const OWN_ID: Partial<Record<SourceInfo['kind'], { name: string; ok: (system: string) => boolean }>> = {
   ehi: { name: 'EHI', ok: (x) => x.startsWith('urn:ga-server:id:ehi:') },
-  'apple-health': { name: 'Apple Health', ok: (x) => x === APPLE || x.startsWith('urn:ga-server:id:smart:') },
+  'apple-health': { name: 'Apple Health', ok: (x) => x === APPLE },
+  'apple-clinical': { name: 'Apple Health clinical', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
   smart: { name: 'SMART', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
   'fhir-export': { name: 'FHIR export', ok: (x) => x.startsWith('urn:ga-server:id:smart:') },
   dicom: { name: 'DICOM', ok: (x) => x === 'urn:dicom:uid' },
@@ -137,9 +138,10 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
   const tags = (meta.tag ??= []);
   for (const code of codes) if (!tags.some((t) => t.system === TAG && t.code === code)) tags.push({ system: TAG, code });
   meta.source = s.file;
+  const date = s.dateOf?.(r) ?? s.date;
   out.extension = [
     ...(out.extension ?? []).filter((e) => e.url !== SRC_DATE && e.url !== LAST_SEEN),
-    { url: SRC_DATE, valueDateTime: s.dateOf?.(r) ?? s.date },
+    ...(date ? [{ url: SRC_DATE, valueDateTime: date }] : []),
     ...(s.seenAt && DATED.has(r.resourceType) ? [{ url: LAST_SEEN, valueDateTime: s.seenAt }] : []),
   ];
   return out;

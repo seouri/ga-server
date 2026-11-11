@@ -571,6 +571,35 @@ test('one Apple identifier for two patients makes two records; the first is neve
   }
 });
 
+test('a person-edited apple reading is not replaced on the same-content path', async () => {
+  const at = '2026-03-08T09:00:00-05:00';
+  await importResources(client, [phone(at, 80)], apple('2026-11-05'), pid, 'a');
+  const [mine] = await rowAt(at);
+  await client.updateResource({ ...mine, meta: { ...mine.meta, tag: [...(mine.meta?.tag ?? []), { system: TAG, code: 'person-edited' }] } });
+  // An older hospital export with the same time and value: decide says skip, so only the guard keeps the person's record.
+  await importResources(client, [{ ...hospital(at, 80), note: [{ text: 'clinic' }] }], ehiSrc('2026-01-01'), pid, 'h');
+  const rows = await rowAt(at);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].note).toBeUndefined();
+  expect(tagged(rows[0], 'person-edited')).toBe(true);
+  expect(tagged(rows[0], 'src-apple-health')).toBe(true);
+});
+
+test('an apple clinical lab and a C-CDA copy of the same lab are flagged possible-duplicate', async () => {
+  const clinical = (day: string): Observation => ({
+    ...chol(uid('o'), 190, `${day}T08:00:00Z`), identifier: [{ system: SMART_SYS, value: `Observation/${uid('o')}` }, { system: APPLE, value: `https://fhir.example.org/Observation/${uid('o')}` }],
+  });
+  const dups = async (day: string) => (await all()).filter((r) => r.resourceType === 'Observation' && (r as Observation).effectiveDateTime?.startsWith(day) && tagged(r, 'possible-duplicate'));
+  // C-CDA first (a date-only result), then Apple's copy of the hospital's own record that day.
+  expect(await importResources(client, [chol(uid('c'), 190, '2011-07-14')], ccda('2026-01-01'), pid, 'c')).toMatchObject({ created: 1 });
+  expect(await importResources(client, [clinical('2011-07-14')], appleClinicalSrc(), pid, 'a')).toMatchObject({ possibleDuplicates: 1, created: 0 });
+  expect(await dups('2011-07-14')).toHaveLength(2);
+  // Apple's copy first, then the C-CDA.
+  await importResources(client, [clinical('2011-07-15')], appleClinicalSrc(), pid, 'a');
+  expect(await importResources(client, [chol(uid('c'), 190, '2011-07-15')], ccda('2026-01-01'), pid, 'c')).toMatchObject({ possibleDuplicates: 1, created: 0 });
+  expect(await dups('2011-07-15')).toHaveLength(2);
+});
+
 test('a newer Apple copy of an allergy carrying its hospital identifiers updates it', async () => {
   const allergy = (criticality: 'low' | 'high'): Resource =>
     ({ resourceType: 'AllergyIntolerance', identifier: [{ system: APPLE, value: uid('allergy') }, { system: 'urn:test:hospital', value: 'a1' }], patient: me(), code: { text: 'synthetic allergen' }, criticality, clinicalStatus: { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'active' }] } }) as Resource;
@@ -860,7 +889,7 @@ test('arrival survives a last-seen bump and a fill-only merge', async () => {
 
 // Apple clinical copies and FHIR export copies against hospital records (spec: Apple Health clinical records).
 const feSrc = (extra: Partial<SourceInfo> = {}): SourceInfo => ({ kind: 'fhir-export', file: '/synthetic/ehr.json', date: '2025-09-01', writer: 'importer', ...extra });
-const appleClinicalSrc = (): SourceInfo => ({ kind: 'apple-health', file: '/synthetic/export.xml', date: '2025-11-02', writer: 'importer', fillOnly: () => true, dateOf: () => '2025-11-02T00:00:00Z' });
+const appleClinicalSrc = (): SourceInfo => ({ kind: 'apple-clinical', file: '/synthetic/export.xml', date: '2025-11-02', writer: 'importer', fillOnly: () => true, dateOf: () => '2025-11-02T00:00:00Z' });
 const hospCond = (n: string, text: string, extra: object = {}) =>
   ({ ...problem([{ system: SMART_SYS, value: `Condition/${n}` }], 'active'), code: { text }, meta: { lastUpdated: '2025-09-01T00:00:00Z' }, ...extra }) as Resource;
 const appleCond = (n: string) =>

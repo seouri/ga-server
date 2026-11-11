@@ -55,6 +55,7 @@ export function termKey(r: Resource): string | undefined {
 // custodian name (SourceInfo.org, set by the C-CDA importer), else the export folder name.
 export function sourceKey(src: SourceInfo, r: Resource): string {
   if (src.kind === 'pdf' || src.kind === 'apple-health') return src.kind;
+  if (src.kind === 'apple-clinical') return 'apple-health'; // the map Apple's clinical copies used before they had a kind of their own
   if (src.kind === 'ccda') {
     const org = norm(src.org) || (src.file && norm(basename(dirname(resolve(src.file))))); // resolve: './doc.xml' gets its real folder
     if (!org) throw new Error('no organisation for a C-CDA source'); // never one catch-all map

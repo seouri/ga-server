@@ -12,6 +12,7 @@ import type { ClinicalGroup } from './clinical.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
+const CLINICAL = 'urn:ga-server:tag|src-apple-clinical';
 // Types the unchanged filter covers (AllergyIntolerance always goes to the engine: its status/reaction can change under one id).
 const FILTERED = new Set(['Observation', 'DocumentReference']);
 
@@ -20,10 +21,10 @@ const projection = (r: Record<string, unknown>) =>
 const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
-// What GA already holds from Apple Health for this patient among these resources: first identifier -> projection.
-export const existing = (client: MedplumClient, patientId: string, resources: Resource[]): Promise<Map<string, string>> =>
+// What GA already holds from Apple Health (readings, or with tag CLINICAL the clinical copies) for this patient among these resources: first identifier -> projection.
+export const existing = (client: MedplumClient, patientId: string, resources: Resource[], tag = TAGGED): Promise<Map<string, string>> =>
   held(client, patientId, resources, {
-    tag: TAGGED, keys: (r) => [firstId(r as never)], value: (r) => projection(r as never),
+    tag, keys: (r) => [firstId(r as never)], value: (r) => projection(r as never),
     elements: (type) => (FILTERED.has(type) ? 'identifier,status,code,valueQuantity,valueString,component,effectiveDateTime,effectivePeriod' : 'identifier'),
   });
 
@@ -104,18 +105,22 @@ export async function importAppleHealth(
   // another source's record lacks. A redo after a crash inside a base's call counts what the crashed attempt created as created.
   const { resources, groups } = n.value.clinical;
   const patient = resources.find((r) => r.resourceType === 'Patient') ?? PATIENT;
+  const clinical = { ...source, kind: 'apple-clinical', fillOnly: () => true } as const; // hospital records: their own kind and tag
   const first = lastIndex + 1;
   const todo = groups.map((g, k) => ({ g, index: first + k })).filter((x) => x.index > (opts.skipThrough ?? -1));
   if (todo.length) await withImportLock(() => adoptOldAllergies(client, patientId, groups.flatMap((g) => g.resources)));
+  // Patient files alone (no other readable clinical record): their identifiers still go onto GA's patient. Not a checkpoint: it writes
+  // only the identifiers GA's patient lacks, so a resumed import may run it again.
+  if (!groups.length && patient !== PATIENT) await withImportLock(() => importResources(client, [patient], clinical, patientId, ''));
   for (const { g, index } of todo) {
     const report = await withImportLock(async () => {
       await uploadBinaries(client, g.resources, g.binaries, g.src, patientId);
       const tracked = g.resources.filter((r) => COMPARTMENT[r.resourceType]); // the others (Medication, Practitioner...) are not patient data to look up
-      const have = await existing(client, patientId, tracked);
+      const have = await existing(client, patientId, tracked, CLINICAL);
       const redo = opts.redo?.index === index ? new Set(opts.redo.created) : undefined;
       const fresh = tracked.map((r) => firstId(r as never)).filter((id) => !have.has(id));
       if (!redo) await opts.beforeWrite?.({ index, created: fresh, updated: [] });
-      const written = await importResources(client, [patient, ...g.resources], { ...source, fillOnly: () => true }, patientId, '');
+      const written = await importResources(client, [patient, ...g.resources], clinical, patientId, '');
       const was = redo ? tracked.map((r) => firstId(r as never)).filter((id) => redo.has(id) && have.has(id)).length : 0; // created by the crashed attempt
       return { ...written, created: written.created + was, skipped: Math.max(0, written.skipped - was) };
     });

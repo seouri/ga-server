@@ -13,6 +13,7 @@ import { mapForGa } from '../../src/smart/fetch.ts';
 import { cleanupTestPatient, createTestPatient } from './helpers.ts';
 
 const FIXTURE = join(import.meta.dirname, '..', 'fixtures', 'apple', 'clinical');
+const READINGS = join(import.meta.dirname, '..', 'fixtures', 'apple'); // readings plus one R4 allergy
 const BASE = 'https://fhir.example.org/api/FHIR/R4';
 let cfg: GaConfig;
 let client: MedplumClient;
@@ -111,5 +112,28 @@ test('two hospitals with the same resource id stay apart', async () => {
       const o = await client.readReference(d.result?.[0] as never) as { code?: { text?: string } };
       expect(o.code?.text).toBe(d.code?.text === 'Other report' ? 'Other result' : 'Result');
     }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const srcTags = (r: Resource) => (r.meta?.tag ?? []).filter((t) => t.system === 'urn:ga-server:tag' && t.code?.startsWith('src-')).map((t) => t.code);
+
+test('clinical copies carry src-apple-clinical, readings still src-apple-health', async () => {
+  await importAppleHealth(client, cfg, READINGS, pid);
+  const [a] = await allergies();
+  expect(srcTags(a)).toEqual(['src-apple-clinical']);
+  const readings = await client.searchResources('Observation', { subject: `Patient/${pid}`, identifier: `${APPLE}|`, _count: '1000' }, { cache: 'no-cache' });
+  expect(readings.length).toBeGreaterThan(0);
+  for (const o of readings) expect(srcTags(o)).toEqual(['src-apple-health']);
+});
+
+test('an export whose only readable clinical records are Patient files still merges their identifiers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'apple-patient-'));
+  try {
+    cpSync(FIXTURE, dir, { recursive: true });
+    const x = readFileSync(join(dir, 'export.xml'), 'utf8').split('\n').filter((l) => !l.includes('<ClinicalRecord ') || l.includes('type="Patient"')).join('\n');
+    writeFileSync(join(dir, 'export.xml'), x);
+    await importAppleHealth(client, cfg, dir, pid);
+    const p = await client.readResource('Patient', pid, { cache: 'no-cache' });
+    expect(p.identifier?.some((i) => i.system === 'urn:example:mrn' && i.value === '123')).toBe(true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

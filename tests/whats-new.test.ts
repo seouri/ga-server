@@ -15,6 +15,7 @@ const obs = (extra: object = {}) => ({ resourceType: 'Observation', status: 'fin
 
 test('kindOf covers each branch', () => {
   expect(kindOf(obs({ meta: tag('src-apple-health'), category: [{ coding: [{ code: 'vital-signs' }] }] }))).toBe('Apple Health readings');
+  expect(kindOf(obs({ meta: tag('src-apple-clinical'), category: [{ coding: [{ code: 'laboratory' }] }] }))).toBe('lab results'); // Apple's copy of a hospital lab
   expect(kindOf(obs({ category: [{ coding: [{ code: 'vital-signs' }] }] }))).toBe('vital signs');
   expect(kindOf(obs({ category: [{ coding: [{ code: 'laboratory' }] }] }))).toBe('lab results');
   expect(kindOf(obs({ meta: tag('extracted-by-llm') }))).toBe('lab results');

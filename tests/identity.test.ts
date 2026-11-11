@@ -144,8 +144,15 @@ test('an id-less C-CDA entry keys alike in two documents that number its narrati
 
 test('fhir-export takes the smart identifier as its own', () =>
   expect(stableIdentifier({ resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }] } as Condition, { kind: 'fhir-export', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toEqual({ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }));
-test('apple-health accepts a leading smart identifier', () =>
-  expect(stableIdentifier({ resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }] } as Condition, { kind: 'apple-health', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toEqual({ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }));
+test('apple-clinical takes the smart identifier as its own; apple-health readings only Apple\'s', () => {
+  const c = { resourceType: 'Condition', identifier: [{ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' }] } as Condition;
+  expect(stableIdentifier(c, { kind: 'apple-clinical', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toEqual({ system: 'urn:ga-server:id:smart:h', value: 'Condition/1' });
+  expect(() => stableIdentifier(c, { kind: 'apple-health', file: 'f', date: '2025-01-01', writer: 'importer' }, '')).toThrow(/no Apple Health identifier/);
+});
+test('an Apple clinical copy is a clinic record; an Apple reading is not', () => {
+  expect(isClinic({ resourceType: 'Observation', meta: { tag: [{ system: TAG, code: 'src-apple-clinical' }] } } as Resource)).toBe(true);
+  expect(isClinic({ resourceType: 'Observation', meta: { tag: [{ system: TAG, code: 'src-apple-health' }] } } as Resource)).toBe(false);
+});
 test('fhir-export and dicom records are clinic records', () => {
   expect(isClinic({ resourceType: 'Observation', meta: { tag: [{ system: TAG, code: 'src-fhir-export' }] } } as Resource)).toBe(true);
   expect(isClinic({ resourceType: 'ImagingStudy', meta: { tag: [{ system: TAG, code: 'src-dicom' }] } } as Resource)).toBe(true);
