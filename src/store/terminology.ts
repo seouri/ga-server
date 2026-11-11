@@ -20,8 +20,9 @@ import { type Store, StoreError } from './store.ts';
 
 export const TERMINOLOGY_SCHEMA = `
   create table if not exists coding(id integer primary key, system integer not null, code text not null, display text, language text, synonymOf integer);
-  -- Medplum's key: a NULL language or synonymOf must not make a repeated synonym look new (SQLite's NULLs are all distinct).
-  create unique index if not exists coding_u on coding(system, code, display, coalesce(synonymOf, -1));
+  -- Medplum's key plus the language (so a translation equal to another language's text is kept); coalesce, because SQLite's
+  -- NULLs are all distinct and a repeated $import would add the same synonym again.
+  create unique index if not exists coding_u on coding(system, code, display, coalesce(language, ''), coalesce(synonymOf, -1));
   create table if not exists coding_property(coding integer not null, property integer not null, value text, target integer);
   create unique index if not exists coding_property_c on coding_property(coding, property, value); -- (coding, property) lookups; one row per value
   create index if not exists coding_property_t on coding_property(target, property);

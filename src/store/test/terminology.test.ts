@@ -175,6 +175,11 @@ describe('concept index (no built-ins)', () => {
     expect(codings(store, rid(store, resource.id!)).map((c) => `${c.display}:${c.syn}`)).toEqual(['Alpha:0', 'Aleph:1', 'Ay:1']);
     const designations = lookup(store, P([{ name: 'code', valueCode: 'A' }], resource.id)).parameter?.filter((x) => x.name === 'designation');
     expect(designations).toHaveLength(2);
+    // the same text in two languages is two translations, kept (Medplum's key, without the language, keeps one)
+    const fr = (lang: string) => P([{ name: 'designation', part: [{ name: 'code', valueCode: 'A' }, { name: 'language', valueCode: lang }, { name: 'value', valueString: 'Ay' }] }], resource.id);
+    codeSystemImport(store, fr('fr'));
+    codeSystemImport(store, fr('de'));
+    expect(codings(store, rid(store, resource.id!)).filter((c) => c.display === 'Ay').map((c) => c.language).sort()).toEqual(['de', 'fr', null]);
   });
 
   it('$import adds concepts and properties to a stored CodeSystem; an unknown code rolls back; the CodeSystem is returned', () => {
