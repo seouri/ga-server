@@ -14,6 +14,7 @@ import {
 import type { Bundle, CodeSystem, ConceptMap, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, loadDefinitions } from './definitions.ts';
 import { SEARCH_SCHEMA, SearchError, searchJson, writeIndex } from './search.ts';
+import { inValueSet, subsumedCodes } from './expand.ts';
 import { CONCEPTMAP_SCHEMA, dropConceptMap, indexConceptMap } from './conceptmap.ts';
 import { TERMINOLOGY_SCHEMA, dropCodeSystem, indexCodeSystem, seedTerminology } from './terminology.ts';
 
@@ -119,11 +120,11 @@ export class Store {
   // The same search as JSON text, each resource spliced in as stored (no parse and re-stringify), for the HTTP server.
   searchJson(type: string | string[], query: [string, string][], base: string): string {
     try {
-      return searchJson(this.prep, type, query, base);
+      return searchJson(this.prep, type, query, base, { inValueSet: (url) => inValueSet(this, url), subsumed: (system, code, dir) => subsumedCodes(this, system, code, dir) });
     } catch (e) {
       if (e instanceof SearchError) throw new StoreError(400, [{ text: e.text }]);
       // SQLite's limits on one statement (expression depth, parser recursion): a value list too long, not a server fault.
-      if ((e as { code?: string }).code === 'ERR_SQLITE_ERROR' && /Expression tree is too large|Recursion limit/.test((e as Error).message)) throw new StoreError(400, [{ text: 'Search has too many values' }]);
+      if ((e as { code?: string }).code === 'ERR_SQLITE_ERROR' && /Expression tree is too large|Recursion limit|too many SQL variables/.test((e as Error).message)) throw new StoreError(400, [{ text: 'Search has too many values' }]);
       throw e;
     }
   }

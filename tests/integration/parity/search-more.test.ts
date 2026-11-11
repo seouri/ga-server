@@ -1036,8 +1036,8 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     return [bundle1.total, bundle2.total, names(bundle2, { task1, task2 })];
   }));
 
-  // Medplum's test.each, checked as it does: a 400 whose text contains the expected words. The _deleted cases are a
-  // deliberate difference, tested below.
+  // Medplum's test.each, checked as it does: a 400 whose text contains the expected words. The _deleted cases and :in/:not-in
+  // on token parameters (_project, active, identifier) are deliberate differences, tested below.
   const invalid: [string, string][] = [
     ['Patient?_id:in=123', 'Invalid modifier'], ['Patient?_id:not-in=123', 'Invalid modifier'], ['Patient?_id:text=123', 'Invalid modifier'],
     ['Patient?_id:above=123', 'Invalid modifier'], ['Patient?_id:below=123', 'Invalid modifier'], ['Patient?_id:of-type=123', 'Invalid modifier'],
@@ -1053,9 +1053,10 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     ['Patient?identifier:in=123', 'Invalid modifier'], ['Patient?identifier:not-in=123', 'Invalid modifier'],
     ['Patient?name:in=123', 'Invalid modifier'], ['Patient?name:not-in=123', 'Invalid modifier'],
   ];
+  const terminology = (p: string) => /^Patient\?(_project|active|identifier):(in|not-in)=/.test(p);
   test('systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', () => same(sides, async (s) => {
     const out = [];
-    for (const [path, expected] of invalid.filter(([p]) => !p.includes('_deleted'))) {
+    for (const [path, expected] of invalid.filter(([p]) => !p.includes('_deleted') && !terminology(p))) {
       const e = await error(s, path);
       expect([path, e.status, e.text?.includes(expected)], e.text).toEqual([path, 400, true]);
       out.push([path, e.status]);
@@ -1109,6 +1110,16 @@ describe.skipIf(SQLITE)('Medplum search.test.ts (parity, part 2)', () => {
     });
     expect(medplum).toEqual(paths.map(() => 200));
     expect(store).toEqual(paths.map(() => 400));
+  });
+
+  // README: token :in/:not-in work over the ValueSets the store holds (R4); Medplum 5.2.14 refuses them. A value naming no
+  // ValueSet the store holds is still 400, naming it.
+  test('differs on purpose: systemRepo › invalid operators and modifiers › Reject invalid operator or modifier for %s [server/src/fhir/search.test.ts]', async () => {
+    const paths = invalid.filter(([p]) => terminology(p)).map(([p]) => p);
+    const [medplum, store] = await both(sides, async (s) => Promise.all(paths.map(async (p) => { const e = await error(s, p); return `${e.status} ${e.text}`; })));
+    expect(medplum).toEqual(['400 Invalid modifier :in for _project', '400 Invalid modifier :not-in for _project', '400 Invalid modifier :in for active', '400 Invalid modifier :not-in for active',
+      '400 Invalid modifier :in for Patient-identifier', '400 Invalid modifier :not-in for Patient-identifier']);
+    expect(store).toEqual(['400 ValueSet 123 not found', '400 ValueSet 123 not found', '400 ValueSet true not found', '400 ValueSet true not found', '400 ValueSet 123 not found', '400 ValueSet 123 not found']);
   });
 
   // README: no _deleted parameter (the store keeps no deleted records, Medplum's soft delete): an unknown parameter.

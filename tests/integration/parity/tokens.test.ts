@@ -212,19 +212,25 @@ describe.skipIf(SQLITE)('Medplum tokens.test.ts (parity)', () => {
     return out;
   }));
 
-  // :in and :not-in need a ValueSet expansion: Medplum refuses them on Condition.code (Invalid modifier), as the store does.
-  test('Token-based searches › With systemRepo › Condition.code :%s search [server/src/fhir/tokens.test.ts]', () => same(sides, async (s) => {
-    const p = await s.create({ resourceType: 'Patient', name: [{ family: crypto.randomUUID() }] });
-    await s.create({ resourceType: 'Condition', subject: ref(p), code: { coding: [{ system: SNOMED, code: '165002' }] } });
-    await s.create({ resourceType: 'Condition', subject: ref(p), code: { coding: [{ system: 'https://example.com', code: 'test' }] } });
-    const out = [];
-    for (const op of ['in', 'not-in']) {
-      const g = await s.call('GET', q('Condition', ['subject', `Patient/${p.id}`], [`code:${op}`, 'http://hl7.org/fhir/ValueSet/condition-code']));
-      expect(g.status).toBe(400);
-      out.push(g.status);
-    }
-    return out;
-  }));
+  // README: token :in and :not-in work as R4 defines them, over the ValueSets the store holds; Medplum 5.2.14 refuses both
+  // (Invalid modifier). Each side gets its own ValueSet of the example code; condition-code needs SNOMED, which neither holds.
+  test('differs on purpose: Token-based searches › With systemRepo › Condition.code :%s search [server/src/fhir/tokens.test.ts]', async () => {
+    const [medplum, store] = await both(sides, async (s) => {
+      const p = await s.create({ resourceType: 'Patient', name: [{ family: crypto.randomUUID() }] });
+      const snomed = await s.create({ resourceType: 'Condition', subject: ref(p), code: { coding: [{ system: SNOMED, code: '165002' }] } });
+      const example = await s.create({ resourceType: 'Condition', subject: ref(p), code: { coding: [{ system: 'https://example.com', code: 'test' }] } });
+      const url = `https://example.com/ValueSet/${crypto.randomUUID()}`;
+      await s.create({ resourceType: 'ValueSet', status: 'active', url, compose: { include: [{ system: 'https://example.com', concept: [{ code: 'test' }] }] } });
+      const out = [];
+      for (const op of ['in', 'not-in']) {
+        const g = await s.call('GET', q('Condition', ['subject', `Patient/${p.id}`], [`code:${op}`, url]));
+        out.push(g.status === 200 ? (g.json as Bundle).entry?.map((e) => (e.resource?.id === snomed.id ? 'snomed' : e.resource?.id === example.id ? 'example' : '?')) : `${g.status} ${g.json?.issue?.[0]?.details?.text}`);
+      }
+      return out;
+    });
+    expect(medplum).toEqual(['400 Invalid modifier :in for clinical-code', '400 Invalid modifier :not-in for clinical-code']);
+    expect(store).toEqual([['example'], ['snomed']]);
+  });
 
   // describe 'Condition.code token queries': one fixture per side, its Conditions named by identifier.
   const sys1 = 'http://sys.one', sys2 = 'http://sys.two', val1 = 'ABCDEFGHIJ', val2 = '0123456789', disp1 = 'The Quick Brown Fox';
