@@ -1,5 +1,5 @@
 // Sync one or all SMART sources into GA: token -> fetch -> map -> Binaries -> importResources -> Endpoint status.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
@@ -81,6 +81,13 @@ export async function uploadBinaries(client: MedplumClient, resources: Resource[
     for (const a of atts) {
       const b = a.url && byRef.get(a.url);
       if (!b) continue;
+      // Stored inline by an older import (before pending Binaries): the same bytes keep that inline form, no new Binary.
+      const inline = stored.find((x) => x.data && createHash('sha1').update(Buffer.from(x.data, 'base64')).digest('base64') === a.hash);
+      if (inline) {
+        for (const k of Object.keys(a)) delete (a as Record<string, unknown>)[k];
+        Object.assign(a, inline);
+        continue;
+      }
       // Medplum may answer with a presigned storage URL: store the Binary/<id> form either way.
       const old = stored.find((x) => x.url && (x.hash === a.hash || summary));
       const id = old?.url && binaryId(old.url);
