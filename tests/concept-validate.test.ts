@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { CPT, CVX, ICD10CM, LOINC, RXNORM, SNOMED } from '../src/concepts.ts';
+import { CPT, CVX, HCPCS, ICD10CM, LOINC, RXNORM, SNOMED } from '../src/concepts.ts';
 import { validate, wellFormed } from '../src/concept-validate.ts';
 
 const urls: string[] = [];
@@ -20,11 +20,11 @@ test('RxNorm: properties found passes; {} fails', async () => {
   expect((await validate(RXNORM, '99999999', { fetch: fake({}) })).ok).toBe(false);
 });
 
-test('CVX from the shipped table; SNOMED, ICD-10 and CPT not validated', async () => {
+test('CVX from the shipped table; CPT and HCPCS not validated', async () => {
   const none = (async () => { throw new Error('no network for these'); }) as unknown as typeof fetch;
   expect((await validate(CVX, '208', { fetch: none })).ok).toBe(true);
   expect((await validate(CVX, '99999', { fetch: none })).ok).toBe(false);
-  for (const [s, c] of [[SNOMED, '44054006'], [ICD10CM, 'E11.9'], [CPT, '80061']]) expect(await validate(s, c, { fetch: none })).toEqual({ ok: true, reason: 'not validated' });
+  for (const [s, c] of [[CPT, '80061'], [HCPCS, 'G0105']]) expect(await validate(s, c, { fetch: none })).toEqual({ ok: true, reason: 'not validated' });
 });
 
 test('a fetch that throws, or a server error, gives validation unavailable; a malformed code is refused without a request', async () => {
@@ -42,4 +42,22 @@ test('wellFormed: per-system code shapes; unknown systems pass', () => {
     expect(wellFormed(s, bad)).toBe(false);
   }
   expect(wellFormed('http://example.org/x', 'anything')).toBe(true);
+});
+
+test('validates a SNOMED CT code on tx.fhir.org', async () => {
+  const ok = fake({ resourceType: 'Parameters', parameter: [{ name: 'display', valueString: 'Colonoscopy' }] });
+  expect(await validate(SNOMED, '73761001', { fetch: ok })).toEqual({ ok: true, display: 'Colonoscopy' });
+  expect(urls.at(-1)).toBe('https://tx.fhir.org/r4/CodeSystem/$lookup?system=http://snomed.info/sct&code=73761001');
+  expect(await validate(SNOMED, '99999999', { fetch: fake({}, 404) })).toEqual({ ok: false, reason: 'unknown SNOMED CT code 99999999' });
+});
+
+test('validates an ICD-10-CM code exactly', async () => {
+  const hit = fake([1, ['E11.9'], null, [['E11.9', 'Type 2 diabetes mellitus without complications']]]);
+  expect(await validate(ICD10CM, 'E11.9', { fetch: hit })).toEqual({ ok: true, display: 'Type 2 diabetes mellitus without complications' });
+  expect(urls.at(-1)).toMatch(/^https:\/\/clinicaltables\.nlm\.nih\.gov\/api\/icd10cm\/v3\/search\?terms=E11\.9&/);
+  expect(await validate(ICD10CM, 'E11.9', { fetch: fake([1, ['E11.90'], null, [['E11.90', 'x']]]) })).toEqual({ ok: false, reason: 'unknown ICD-10-CM code E11.9' });
+});
+
+test('an unavailable service is not an unknown code', async () => {
+  for (const [s, c] of [[SNOMED, '73761001'], [ICD10CM, 'E11.9']]) expect(await validate(s, c, { fetch: fake({}, 503) })).toEqual({ ok: false, reason: 'validation unavailable' });
 });

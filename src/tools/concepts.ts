@@ -3,6 +3,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Provenance, Resource } from '@medplum/fhirtypes';
 import { z } from 'zod';
+import { CPT } from '../concepts.ts';
 import { field, TARGET } from '../concept-apply.ts';
 import { validate, wellFormed } from '../concept-validate.ts';
 import { agentMappings, applyAll, reviewList } from '../concepts-cli.ts';
@@ -47,7 +48,8 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
       description:
         "Map one source term (source, name, unit, type and key exactly as concepts_to_review or ga_import's unmapped list gives them; key carries the specimen when there is one) to a standard code: " +
         'LOINC for labs and vitals, CVX for vaccines, RxNorm for medications (clinical drug when strength and form are given, else ingredient), SNOMED CT or ICD-10-CM for conditions, ' +
-        'SNOMED CT, CPT or HCPCS for procedures. GA checks LOINC, RxNorm and CVX codes exist (a code that does not exist is refused, nothing written), then codes every record of that term from that source. ' +
+        'SNOMED CT (or HCPCS) for procedures, never CPT (licensed: refused). GA checks LOINC, RxNorm, CVX, SNOMED CT and ICD-10-CM codes exist (a code that does not exist is refused, nothing written), then codes every record of that term from that source. ' +
+        'When the source lacks a detail the exact code needs, map to the closest broader concept with equivalence "wider". ' +
         'confident: true only when name, unit and specimen all agree with the code (for LOINC, its long name); otherwise false, and the code is applied as suggested. ' +
         'equivalence: "equivalent" when the code means exactly the term; wider/narrower/inexact are applied as suggested; "unmatched" when no standard code exists ' +
         '(adds none and clears the term from review). A second call for the same term replaces the mapping (corrections). ' +
@@ -70,6 +72,7 @@ export function registerConceptTools(server: McpServer, deps: ToolDeps): void {
       const who = remote?.clientName ?? server.server.getClientVersion()?.name ?? 'Claude Code'; // the client is known only after initialize
       try {
         // Refusals first: nothing is sent or written for them.
+        if (system === CPT) throw new GaError('CPT is licensed and cannot be checked: map procedures to SNOMED CT');
         const term = termOf(type, name, unit);
         const derived = termKey(term);
         if (!derived || !inScope(term)) throw new GaError(`${type} "${name}" is not in the concept layer's scope (GA's own Apple Health summaries, health maintenance and the ECG are never mapped)`);
