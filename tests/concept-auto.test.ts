@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CVX, SNOMED } from '../src/concepts.ts';
+import { CVX, ICD10CM, SNOMED } from '../src/concepts.ts';
 import type { MedplumClient } from '@medplum/core';
 import { autoMap, pickAuto } from '../src/concept-auto.ts';
 
@@ -42,6 +42,15 @@ describe('autoMap', () => {
     expect(r).toEqual({ autoMapped: 0, terms: [{ ...colo, candidates: [c('73761001', 'Colonoscopy')] }] });
     expect(client.createResourceIfNoneExist).not.toHaveBeenCalled(); // no map entry
     expect(client.createResource).not.toHaveBeenCalled();
+  });
+  it('a problem is never auto-mapped to an exact ICD-10-CM name, only offered', async () => {
+    const client = empty();
+    const row = [1, ['Z00.0'], null, [['Z00.0', 'Synthetic disease']]];
+    const f = (async (input: string | URL) => new Response(JSON.stringify(String(input).includes('icd10cm') ? row : { expansion: { contains: [] } }))) as typeof fetch;
+    const term = { source: 'pdf', type: 'Condition', key: 'Condition|synthetic disease', name: 'Synthetic disease', count: 1 };
+    const r = await autoMap(client as unknown as MedplumClient, 'p', [term], { fetch: f });
+    expect(r).toEqual({ autoMapped: 0, terms: [{ ...term, candidates: [{ system: ICD10CM, code: 'Z00.0', display: 'Synthetic disease' }] }] });
+    expect(client.createResourceIfNoneExist).not.toHaveBeenCalled(); // no map entry
   });
   it('gives up at the deadline: unsearched terms come back without candidates', async () => {
     const hang = (() => new Promise(() => {})) as typeof fetch;

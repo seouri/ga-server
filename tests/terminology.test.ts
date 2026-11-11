@@ -32,6 +32,14 @@ describe('searchCodes', () => {
     expect(r).toEqual([{ system: RXNORM, code: '308297', display: 'Drug A' }, { system: RXNORM, code: '197361', display: 'Drug B' }]);
   });
 
+  it('keeps the RxNorm candidates whose name arrived when one name lookup fails', async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(json({ approximateGroup: { candidate: [{ rxcui: '308297' }, { rxcui: '197361' }] } }))
+      .mockResolvedValueOnce(json({}, 429))
+      .mockResolvedValueOnce(json({ properties: { name: 'Drug B' } }));
+    expect(await searchCodes(RXNORM, 'drug b', { fetch: f })).toEqual([{ system: RXNORM, code: '197361', display: 'Drug B' }]);
+  });
+
   it('searches SNOMED CT on tx.fhir.org', async () => {
     const f = stub({ expansion: { contains: [{ code: '73761001', display: 'Colonoscopy' }] } });
     const r = await searchCodes(SNOMED, 'colonoscopy', { fetch: f });

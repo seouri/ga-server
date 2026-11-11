@@ -36,10 +36,12 @@ export async function searchCodes(system: string, term: string, deps: { fetch?: 
     if (system === RXNORM) {
       const { approximateGroup } = (await get(f, `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${q}&maxEntries=${limit}`)) as { approximateGroup?: { candidate?: { rxcui: string }[] } };
       const ids = [...new Set((approximateGroup?.candidate ?? []).map((c) => c.rxcui))].slice(0, limit);
-      return Promise.all(ids.map(async (code) => {
+      // One failed name lookup (a 429, say) drops only that candidate.
+      const named = await Promise.allSettled(ids.map(async (code) => {
         const { properties } = (await get(f, `https://rxnav.nlm.nih.gov/REST/rxcui/${code}/properties.json`)) as { properties?: { name?: string } };
         return { system, code, display: properties?.name ?? '' };
       }));
+      return named.flatMap((n) => (n.status === 'fulfilled' ? [n.value] : []));
     }
     if (system === CVX) return cvxLike(term, limit) as Candidate[]; // the shipped table: nothing is sent
     if (system === SNOMED) {
