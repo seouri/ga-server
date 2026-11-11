@@ -6,8 +6,9 @@ import { type BatchOpts, BATCH_SIZE, held, type Pending } from '../batches.ts';
 import { addReport, importResources, type ImportReport } from '../engine.ts';
 import { APPLE, sorted } from '../identity.ts';
 import { withImportLock } from '../lock.ts';
+import { uploadBinaries } from '../smart/sync.ts';
 import { appleBatches, type Batch } from './batches.ts';
-import { receivedBy } from './clinical.ts';
+import type { ClinicalGroup } from './clinical.ts';
 import { exportDateOf } from './read.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
@@ -55,14 +56,11 @@ export async function importAppleHealth(
   const t0 = Date.now();
   const archived = await archiveFolder(client, dir, patientId, 'urn:ga-server:id:apple-health-archive');
   await opts.onArchived?.(archived);
-  // A clinical copy (the hospital's identifier plus Apple's) carries Epic's receivedDate and never replaces another source's record.
-  const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer',
-    dateOf: (r: Resource) => receivedBy.get(appleId(r)?.value ?? ''),
-    fillOnly: (r: Resource) => !!smartId(r) } as const;
+    const source = { kind: 'apple-health', file: dir, date: await exportDateOf(dir), writer: 'importer' } as const;
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
   const it = appleBatches(dir, { size: opts.batchSize ?? BATCH_SIZE, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
-  let n: IteratorResult<Batch, { skips: Record<string, unknown> }>;
+  let n: IteratorResult<Batch, { skips: Record<string, unknown>; clinical: { resources: Resource[]; groups: ClinicalGroup[] } }>;
   try {
     n = await it.next();
     for (; !n.done; n = await it.next()) {
@@ -90,7 +88,6 @@ export async function importAppleHealth(
           return false;
         });
         if (!redo) await opts.beforeWrite?.(p); // a redo keeps the first attempt's lists
-        await adoptOldAllergies(client, patientId, rest);
         const written = rest.length ? await importResources(client, [PATIENT, ...rest], source, patientId, '') : { ...EMPTY, unmapped: [] };
         return { ...written, created: written.created + created, updated: written.updated + updated, unchanged: kept };
       });
@@ -99,5 +96,17 @@ export async function importAppleHealth(
       await opts.onBatch?.(index, report);
     }
   } finally { await it.return(undefined as never); } // a failed batch: stop the read and close export.xml now (a gateway worker lives on)
+  // The hospital's records (every R4 ClinicalRecord) in one call, after the readings: references between them resolve within it, and a
+  // resumed import (readings up to skipThrough skipped) still writes them. Copies only fill what another source's record lacks.
+  const { resources, groups } = n.value.clinical;
+  if (resources.length) {
+    const rest = resources.some((r) => r.resourceType === 'Patient') ? resources : [PATIENT, ...resources];
+    const report = await withImportLock(async () => {
+      for (const g of groups) await uploadBinaries(client, g.resources, g.binaries, g.src, patientId);
+      await adoptOldAllergies(client, patientId, rest);
+      return importResources(client, rest, { ...source, fillOnly: () => true }, patientId, '');
+    });
+    addReport(total, report);
+  }
   return { ...total, archived, unchanged, seconds: (Date.now() - t0) / 1000, skips: n.value.skips };
 }

@@ -42,6 +42,22 @@ test('Apple only: every R4 record lands', async () => {
   for (const t of ['Observation', 'DiagnosticReport']) expect(await count(t)).toBe(1);
 });
 
+test('keeps references between clinical records', async () => {
+  await importAppleHealth(client, cfg, FIXTURE, pid);
+  const [d] = await client.searchResources('DiagnosticReport', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+  const [o] = await client.searchResources('Observation', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+  expect(d.result?.[0].reference).toBe(`Observation/${o.id}`);
+  const [m] = await client.searchResources('MedicationRequest', { subject: `Patient/${pid}` }, { cache: 'no-cache' });
+  const med = await client.readReference(m.medicationReference as never) as { code?: { coding?: { code?: string }[] } };
+  expect(med.code?.coding?.[0].code).toBe('197361');
+});
+
+test('an inline pdf is stored as a Binary', async () => {
+  await importAppleHealth(client, cfg, FIXTURE, pid);
+  const [doc] = await client.searchResources('DocumentReference', { subject: `Patient/${pid}`, identifier: `urn:ga-server:id:smart:${sourceKey(BASE)}|` }, { cache: 'no-cache' });
+  expect(doc.content[0].attachment.url).toMatch(/^Binary\/|\/storage\//); // Medplum answers a Binary with its presigned storage URL
+});
+
 test('Apple then hospital', async () => {
   await importAppleHealth(client, cfg, FIXTURE, pid);
   await importHospital();

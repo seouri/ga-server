@@ -167,6 +167,7 @@ describe('Apple clinical records and ECG', () => {
     const crefs: AhClinical[] = [
       ['Patient', 'p1', '4.0.1'], ['AllergyIntolerance', 'a1', '4.0.1'], ['Condition', 'c1', '4.0.1'],
       ['Observation', 'o1', '4.0.1'], ['MedicationRequest', 'm1', '1.0.2'], ['DiagnosticReport', 'd1', '4.0.1'],
+      ['Medication', 'med1', '4.0.1'], ['MedicationRequest', 'm2', '4.0.1'], ['DocumentReference', 'doc1', '4.0.1'],
     ].map(([t, id, v], i) => ({ sourceURL: `${base}/${t}/${id}`, fhirVersion: v, resourceFilePath: `/clinical-records/${t}-${i}.json`, sourceName: 'Synthetic Hospital' }));
     it('imports every R4 type, identified like a portal sync', () => {
       const { resources } = mapClinical(cdir, crefs);
@@ -174,7 +175,7 @@ describe('Apple clinical records and ECG', () => {
       expect(c.identifier?.[0]).toEqual({ system: `urn:ga-server:id:smart:${sourceKey(base)}`, value: 'Condition/c1' });
       expect(c.identifier?.[1]).toEqual({ system: APPLE, value: `${base}/Condition/c1` });
       expect(c.subject).toEqual({ reference: 'Patient/apple-patient', display: 'Test Person' });
-      expect(resources.map((r) => r.resourceType).sort()).toEqual(['AllergyIntolerance', 'Condition', 'DiagnosticReport', 'Observation', 'Patient']);
+      expect(resources.map((r) => r.resourceType).sort()).toEqual(['AllergyIntolerance', 'Condition', 'DiagnosticReport', 'DocumentReference', 'Medication', 'MedicationRequest', 'Observation', 'Patient']);
     });
     it('repairs a stray backslash', () => {
       const o = mapClinical(cdir, crefs).resources.find((r) => r.resourceType === 'Observation') as any;
@@ -186,7 +187,24 @@ describe('Apple clinical records and ECG', () => {
     });
     it('turns an html presentedForm into text', () => {
       const d = mapClinical(cdir, crefs).resources.find((r) => r.resourceType === 'DiagnosticReport') as any;
-      expect(d.presentedForm?.[0]?.contentType ?? 'text/plain').toMatch(/^text\/(plain|html)/);
+      expect(Buffer.from(d.presentedForm[0].data, 'base64').toString()).toBe('Impression: clear.');
+    });
+    it('keeps references between clinical records', () => {
+      const { resources } = mapClinical(cdir, crefs);
+      const d = resources.find((r) => r.resourceType === 'DiagnosticReport') as any;
+      const m = resources.find((r) => r.resourceType === 'MedicationRequest') as any;
+      expect(d.result[0].reference).toBe('Observation/o1');
+      expect(m.medicationReference.reference).toBe('Medication/med1');
+    });
+    it('keeps a base apart from another hospital with the same ids', () => {
+      const other = { ...crefs[2], sourceURL: 'https://other.example.org/R4/Condition/c1' };
+      const cs = mapClinical(cdir, [crefs[2], other]).resources as Condition[];
+      expect(cs.map((c) => c.identifier?.[0].system)).toEqual([`urn:ga-server:id:smart:${sourceKey(base)}`, 'urn:ga-server:id:smart:other-example-org']);
+    });
+    it('holds an inline pdf as a pending binary', () => {
+      const g = mapClinical(cdir, crefs).groups[0];
+      expect(g.binaries).toHaveLength(1);
+      expect((g.resources.find((r) => r.resourceType === 'DocumentReference') as any).content[0].attachment.url).toBe(g.binaries[0].ref);
     });
   });
   it('finds the FHIR base of a sourceURL', () => {

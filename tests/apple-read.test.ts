@@ -17,9 +17,9 @@ describe('apple read', () => {
     expect(appleDate('2017-11-03 10:13:05 +0900')).toBe('2017-11-03T10:13:05+09:00');
   });
 
-  it('reads receivedDate and sourceName', async () => {
-    expect((await collect(fixture)).clinical[0]).toMatchObject({ receivedDate: '2026-02-25T11:00:30-05:00', sourceName: 'Example Hospital' });
-    expect((await collect('tests/fixtures/apple/clinical')).clinical[0]).toMatchObject({ receivedDate: '2025-11-02T00:15:40-08:00', sourceName: 'Synthetic Hospital' });
+  it('reads sourceName', async () => {
+    expect((await collect(fixture)).clinical[0]).toMatchObject({ sourceName: 'Example Hospital' });
+    expect((await collect('tests/fixtures/apple/clinical')).clinical[0]).toMatchObject({ sourceName: 'Synthetic Hospital' });
   });
 
   it('detects an Apple export', () => {

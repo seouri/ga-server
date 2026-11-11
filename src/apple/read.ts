@@ -5,7 +5,7 @@ import { GaError } from '../config.ts';
 
 export type AhRecord = { type: string; unit?: string; value?: string; sourceName: string; startDate: string; endDate: string };
 export type AhSummary = { date: string; activeEnergyBurned?: number; activeEnergyBurnedUnit?: string; appleExerciseTime?: number; appleStandHours?: number; activeEnergyBurnedGoal?: number };
-export type AhClinical = { sourceURL: string; fhirVersion: string; resourceFilePath: string; receivedDate?: string; sourceName?: string };
+export type AhClinical = { sourceURL: string; fhirVersion: string; resourceFilePath: string; sourceName?: string };
 
 export function isAppleHealthExport(dir: string): boolean {
   const file = join(dir, 'export.xml');
@@ -71,7 +71,7 @@ export async function* readItems(dir: string): AsyncGenerator<AhItem, { exportDa
         } };
       } else if (name === 'ClinicalRecord') {
         const a = attrs(line);
-        yield { clinical: { sourceURL: a.sourceURL, fhirVersion: a.fhirVersion, resourceFilePath: a.resourceFilePath, ...(a.receivedDate && { receivedDate: appleDate(a.receivedDate) }), ...(a.sourceName && { sourceName: a.sourceName }) } };
+        yield { clinical: { sourceURL: a.sourceURL, fhirVersion: a.fhirVersion, resourceFilePath: a.resourceFilePath, ...(a.sourceName && { sourceName: a.sourceName }) } };
       }
     }
   } finally { input.destroy(); } // a caller that stops early (exportDateOf) or a throw: close the file

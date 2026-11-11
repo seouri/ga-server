@@ -4,7 +4,8 @@ import type { Identifier, Resource } from '@medplum/fhirtypes';
 import { COMPARTMENT } from '../engine.ts';
 import { APPLE, sha256 as sha } from '../identity.ts';
 import { sourceKey } from '../smart/auth.ts';
-import { mapForGa } from '../smart/fetch.ts';
+import { mapForGa, type PendingBinary } from '../smart/fetch.ts';
+import type { SourceRec } from '../smart/store.ts';
 import { appleDate, type AhClinical } from './read.ts';
 import { SUBJECT } from './readings.ts';
 
@@ -19,21 +20,22 @@ export function fhirBaseOf(sourceURL: string): { base: string; key: string } | u
   } catch { return undefined; }
 }
 
-// Epic's receivedDate per sourceURL (the APPLE identifier value): the source date of an Apple clinical copy. Keyed by value because
-// the engine stamps a clone of each resource.
-export const receivedBy = new Map<string, string>();
-
 // Hospital JSON now and then holds an invalid escape (a stray "\d" in a string): double that backslash and parse again.
 function parseJson(text: string): any {
   try { return JSON.parse(text); } catch { return JSON.parse(text.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, ok) => (ok ? m : '\\\\'))); }
 }
 
-export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; skips: { clinicalVersionUnsupported: number; clinicalUnreadable: number } } {
-  const resources: Resource[] = [];
-  const ids = new Map<string, Identifier>(); // one Patient with the union of identifiers
+export type ClinicalGroup = { src: SourceRec; resources: Resource[]; binaries: PendingBinary[] };
+
+// Every R4 clinical record of the export: one Patient with the union of the Patient files' identifiers, then the other records
+// mapped once per FHIR base (references between a base's records resolve within one import call). Each record carries the
+// hospital's portal-style identifier first and Apple's sourceURL second.
+export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resource[]; groups: ClinicalGroup[]; skips: { clinicalVersionUnsupported: number; clinicalUnreadable: number } } {
+  const ids = new Map<string, Identifier>();
   let clinicalVersionUnsupported = 0;
   let clinicalUnreadable = 0;
   let patients = 0;
+  const bases = new Map<string, { src: SourceRec; rs: any[]; url: Map<string, string> }>();
   for (const ref of refs) {
     if (!ref.fhirVersion?.startsWith('4.')) { clinicalVersionUnsupported++; continue; }
     let r: any;
@@ -45,18 +47,27 @@ export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resou
     }
     const at = fhirBaseOf(ref.sourceURL);
     if (!at || typeof r?.resourceType !== 'string' || !r.id) { clinicalUnreadable++; continue; }
-    // One record at a time: a reference to another record would dangle when the batches cut between them, so mapForGa keeps displays only.
-    const { resources: [m] } = mapForGa([r], { key: at.key, name: ref.sourceName ?? new URL(at.base).hostname, fhirBase: at.base });
-    const out = m as Record<string, any>;
-    const field = COMPARTMENT[out.resourceType];
-    if (field) out[field] = { ...SUBJECT, ...(r[field]?.display && { display: r[field].display }) };
-    for (const c of out.content ?? []) if (String(c.attachment?.url).startsWith('urn:ga-server:pending-binary:')) delete c.attachment.url; // no Binary upload for an Apple copy
-    out.identifier = [out.identifier, { system: APPLE, value: ref.sourceURL }].flat();
-    if (ref.receivedDate) receivedBy.set(ref.sourceURL, ref.receivedDate);
-    resources.push(m);
+    let g = bases.get(at.base);
+    if (!g) bases.set(at.base, g = { src: { key: at.key, name: ref.sourceName ?? new URL(at.base).hostname, fhirBase: at.base }, rs: [], url: new Map() });
+    g.rs.push(r);
+    g.url.set(`${r.resourceType}/${r.id}`, ref.sourceURL);
   }
+  const groups: ClinicalGroup[] = [];
+  for (const g of bases.values()) {
+    const mapped = mapForGa(g.rs, g.src);
+    const out = mapped.resources.map((m, i) => {
+      const o = m as Record<string, any>;
+      const orig = g.rs[i];
+      const field = COMPARTMENT[o.resourceType];
+      if (field) o[field] = { ...SUBJECT, ...(orig[field]?.display && { display: orig[field].display }) };
+      o.identifier = [o.identifier, { system: APPLE, value: g.url.get(`${orig.resourceType}/${orig.id}`) }].flat();
+      return m;
+    });
+    groups.push({ src: g.src, resources: out, binaries: mapped.binaries });
+  }
+  const resources = groups.flatMap((g) => g.resources);
   if (patients) resources.unshift({ resourceType: 'Patient', id: 'apple-patient', identifier: [...ids.values()] });
-  return { resources, skips: { clinicalVersionUnsupported, clinicalUnreadable } };
+  return { resources, groups, skips: { clinicalVersionUnsupported, clinicalUnreadable } };
 }
 
 const KEYS = new Set(['Recorded Date', 'Classification', 'Symptoms']);

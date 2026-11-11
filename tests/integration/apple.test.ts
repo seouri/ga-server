@@ -87,7 +87,7 @@ test('newer export updates a changed allergy', async () => {
   const a = JSON.parse(readFileSync(f, 'utf8'));
   a.clinicalStatus = { coding: [{ system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical', code: 'resolved' }] };
   writeFileSync(f, JSON.stringify(a));
-  put(xml().replace('2026-11-06 13:39:52', '2026-11-07 13:39:52').replace('2026-02-25 11:00:31 -0500', '2026-11-06 09:00:00 -0500')); // the hospital sent the changed allergy again: a newer receivedDate
+  put(xml().replace('2026-11-06 13:39:52', '2026-11-07 13:39:52'));
   await importAppleHealth(client, cfg, dir, pid);
   const [stored] = (await client.searchResources('AllergyIntolerance', { patient: `Patient/${pid}` }, { cache: 'no-cache' })) as AllergyIntolerance[];
   expect(stored.clinicalStatus?.coding?.[0].code).toBe('resolved');

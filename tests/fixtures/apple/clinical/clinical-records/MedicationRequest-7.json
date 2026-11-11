@@ -1,0 +1,1 @@
+{"resourceType": "MedicationRequest", "id": "m2", "status": "active", "intent": "order", "medicationReference": {"reference": "Medication/med1", "display": "Amlodipine"}, "subject": {"reference": "Patient/p1"}, "authoredOn": "2024-04-01"}
