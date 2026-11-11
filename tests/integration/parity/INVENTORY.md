@@ -585,13 +585,13 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Fail on instance coding system mismatch | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Returns specified displayLanguage | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › validateCodings | skipped | terminology | in-process function, no HTTP request (validateCodings) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumes | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumed by | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Equivalent | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Not subsumed | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Returns error on incomplete input | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET endpoint | skipped | terminology | not yet ported (Task 3) |
-| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET instance endpoint | skipped | terminology | not yet ported (Task 3) |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumes | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Subsumed by | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Equivalent | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Not subsumed | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › Returns error on incomplete input | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET endpoint | ported | terminology |  |
+| server/src/fhir/operations/subsumes.test.ts | CodeSystem subsumes › GET instance endpoint | ported | terminology |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch success | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Batch invalid bundle | ported | existing |  |
 | fhir-router/src/fhirrouter.test.ts | FHIR Router › Read resource by ID | ported | existing |  |

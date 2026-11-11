@@ -342,4 +342,52 @@ describe.skipIf(SQLITE)('built-in terminology (parity)', () => {
       expect(store).toEqual(extras.map((x) => [400, `$validate-code: parameter ${x.name} is not supported`]));
     });
   });
+
+  // subsumes.test.ts: over the built-in v3-RoleCode (Medplum's test uses a Super Admin to read it; every project sees it)
+  describe('CodeSystem subsumes', () => {
+    const run = async (s: Side, codeA: string, codeB: string) => {
+      const r = await call(s, 'POST', 'CodeSystem/$subsumes', P({ name: 'system', valueUri: ROLE_CODE }, { name: 'codeA', valueCode: codeA }, { name: 'codeB', valueCode: codeB }));
+      expect(r.status).toBe(200);
+      return r.body.parameter?.find((p: ParametersParameter) => p.name === 'outcome')?.valueCode;
+    };
+    const outcome = (a: string, b: string, expected: string) => () => same(sides, async (s) => {
+      const o = await run(s, a, b);
+      expect(o).toBe(expected);
+      return o;
+    });
+    test('CodeSystem subsumes › Subsumes [server/src/fhir/operations/subsumes.test.ts]', outcome('SIB', 'ITWINBRO', 'subsumes'));
+    test('CodeSystem subsumes › Subsumed by [server/src/fhir/operations/subsumes.test.ts]', outcome('WIFE', 'SIGOTHR', 'subsumed-by'));
+    test('CodeSystem subsumes › Equivalent [server/src/fhir/operations/subsumes.test.ts]', outcome('INLAW', 'INLAW', 'equivalent'));
+    test('CodeSystem subsumes › Not subsumed [server/src/fhir/operations/subsumes.test.ts]', outcome('BRO', 'VET', 'not-subsumed'));
+
+    test('CodeSystem subsumes › Returns error on incomplete input [server/src/fhir/operations/subsumes.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'POST', 'CodeSystem/$subsumes', P({ name: 'system', valueUri: ROLE_CODE }, { name: 'codeA', valueCode: 'SIB' }));
+      expect([r.status, r.body.resourceType]).toEqual([400, 'OperationOutcome']);
+      return r;
+    }));
+
+    test('CodeSystem subsumes › GET endpoint [server/src/fhir/operations/subsumes.test.ts]', () => same(sides, async (s) => {
+      const r = await call(s, 'GET', q('CodeSystem/$subsumes', ['system', ROLE_CODE], ['codeA', 'SIB'], ['codeB', 'ITWINBRO']));
+      expect(r).toEqual({ status: 200, body: { resourceType: 'Parameters', parameter: [{ name: 'outcome', valueCode: 'subsumes' }] } });
+      return r;
+    }));
+
+    test('CodeSystem subsumes › GET instance endpoint [server/src/fhir/operations/subsumes.test.ts]', () => same(sides, async (s) => {
+      const codeSystem = (await search(s, q('CodeSystem', ['url', ROLE_CODE]))).entry?.[0]?.resource;
+      const r = await call(s, 'GET', `CodeSystem/${codeSystem?.id}/$subsumes?codeA=SIB&codeB=ITWINBRO`);
+      expect(r).toEqual({ status: 200, body: { resourceType: 'Parameters', parameter: [{ name: 'outcome', valueCode: 'subsumes' }] } });
+      return r;
+    }));
+
+    // R4 defines codingA and codingB; Medplum ignores them (and then asks for codeA and codeB), the store refuses them.
+    test('differs on purpose: unsupported $subsumes inputs are 400 [store-plan-2]', async () => {
+      const [medplum, store] = await both(sides, async (s) => {
+        const r = await call(s, 'POST', 'CodeSystem/$subsumes', P({ name: 'system', valueUri: ROLE_CODE }, { name: 'codingA', valueCoding: { system: ROLE_CODE, code: 'SIB' } },
+          { name: 'codingB', valueCoding: { system: ROLE_CODE, code: 'ITWINBRO' } }));
+        return [r.status, r.body.issue?.[0]?.details?.text];
+      });
+      expect(medplum).toEqual([400, 'Must specify codeA and codeB parameters']);
+      expect(store).toEqual([400, '$subsumes: parameter codingA is not supported']);
+    });
+  });
 });
