@@ -18,7 +18,7 @@ const PLANS = [['driver', { driveMax: 5000, walkPerRow: 50 }], ['walk', { driveM
 describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   let dir: string, store: Store, seq: number;
   const saved = { ...searchTuning };
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-search-')); store = new Store(join(dir, 'store.db')); seq = 0; Object.assign(searchTuning, tuning); });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-search-')); store = new Store(join(dir, 'store.db'), { terminology: [] }); seq = 0; Object.assign(searchTuning, tuning); });
   afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); Object.assign(searchTuning, saved); });
 
   // Fixed ids and lastUpdated (put keeps them), in insertion order.
@@ -334,7 +334,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   it('unsupported features are 400 naming the feature; unknown params and types are errors', () => {
     obs('x1');
     expect(fail('Observation', 'code:in=http://vs').status).toBe(400);
-    expect(fail('Observation', 'code:in=http://vs').message).toMatch(/:in/);
+    expect(fail('Observation', 'code:in=http://vs').message).toBe('ValueSet http://vs not found');
     expect(fail('Observation', 'code:below=x').message).toMatch(/:below/);
     for (const q of ['_summary=nonsense', 'code:of-type=a|b|c', 'code:not-in=http://vs', 'code:above=x', '_contained=true', '_text=x', '_content=x']) expect(fail('Observation', q).status, q).toBe(400);
     expect(run('Observation', '_summary=false').entry).toHaveLength(1); // a no-op, as Medplum
@@ -698,7 +698,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Questionnaire', 'url:below=http://ex.org/fhir/')).toEqual(['q1', 'q2', 'q3', 'q4']);
     expect(ids('Questionnaire', 'url:above=http://ex.org/fhir/Questionnaire/a/b/_history/1')).toEqual(['q1', 'q2', 'q4']);
     expect(ids('Questionnaire', 'url:above=http://ex.org/fhir/Questionnaire/a')).toEqual(['q1', 'q4']);
-    expect(fail('Observation', 'code:below=x').message).toBe('Invalid modifier :below for code'); // token: terminology (plan 2)
+    expect(fail('Patient', 'name:below=x').message).toBe('Invalid modifier :below for name'); // a string's: none
   });
 
   it('Observation?code-value-quantity=http://loinc.org|2093-3$gt200 (composite)', () => {
@@ -757,7 +757,7 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
   it('error texts as Medplum for modifiers: Invalid modifier, :missing must be true or false; _id takes eq, ne, :not, :exact', () => {
     expect(fail('Patient', '_id:text=123').message).toBe('Invalid modifier :text for _id');
     expect(fail('Patient', '_id:above=123').message).toBe('Invalid modifier :above for _id');
-    expect(fail('Patient', 'identifier:in=123').message).toBe('Invalid modifier :in for identifier');
+    expect(fail('Patient', 'name:in=123').message).toBe('Invalid modifier :in for name');
     expect(fail('Patient', 'name:identifier=x').message).toBe('Invalid modifier :identifier for name');
     for (const code of ['_id', '_compartment', 'identifier', 'code-value-quantity']) {
       expect(fail(code === 'code-value-quantity' ? 'Observation' : 'Patient', `${code}:missing=maybe`).message).toBe("Search filter ':missing' must have a value of 'true' or 'false'");
@@ -868,9 +868,9 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
     expect(ids('Observation', '_filter=value-quantity ap 51')).toEqual(['q2']);
     expect(ids('Observation', '_filter=value-quantity pr false')).toEqual(['q3']);
     expect(fail('Observation', '_filter=code ew x').message).toBe('Invalid operator: ew');
-    expect(fail('Observation', '_filter=code ss x').message).toBe('Invalid operator: ss');
+    expect(fail('Observation', '_filter=code xx x').message).toBe('Invalid operator: xx');
     expect(fail('Observation', '_filter=nope eq x').message).toBe('Unknown search parameter: nope');
-    expect(fail('Observation', '_filter=code in http://example.com/vs').message).toBe('Invalid modifier :in for code'); // terminology: plan 2
+    expect(fail('Observation', '_filter=code eq x y').message).toBe('Unexpected token in _filter expression: y');
   });
 
   it('a value list too long for one SQL statement is 400, not a server error', () => {
@@ -881,5 +881,89 @@ describe.each(PLANS)('Store search (%s plan)', (_plan, tuning) => {
       const e = fail('Observation', q);
       expect([e.status, e.message]).toEqual([400, 'Search has too many values']);
     }
+  });
+});
+
+// Token :in, :not-in, :above, :below and _filter in, ni, ss, sb over the store's terminology (expand.ts), on every plan.
+describe.each(PLANS)('Store terminology search (%s plan)', (_plan, tuning) => {
+  const CS = 'http://example.com/cs', VS = 'http://example.com/vs', FEATURE = 'https://medplum.com/fhir/CodeSystem/project-feature';
+  let dir: string, store: Store;
+  const saved = { ...searchTuning };
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'store-term-search-'));
+    store = new Store(join(dir, 'store.db'), { terminology: ['fhir/r4/valuesets-medplum.json'] });
+    Object.assign(searchTuning, tuning);
+    // A > B > C by the parent property, and A's parent C: a cycle.
+    store.create({ resourceType: 'CodeSystem', status: 'active', content: 'complete', url: CS, hierarchyMeaning: 'is-a',
+      property: [{ code: 'parent', uri: 'http://hl7.org/fhir/concept-properties#parent', type: 'code' }],
+      concept: [{ code: 'A', property: [{ code: 'parent', valueCode: 'C' }] }, { code: 'B', property: [{ code: 'parent', valueCode: 'A' }] },
+        { code: 'C', property: [{ code: 'parent', valueCode: 'B' }] }, { code: 'D' }] } as Resource);
+    store.create({ resourceType: 'ValueSet', status: 'active', url: VS, compose: { include: [{ system: CS, concept: [{ code: 'B' }, { code: 'D' }] }] } } as Resource);
+    for (const [id, system, code] of [['a', CS, 'A'], ['b', CS, 'B'], ['d', CS, 'D'], ['x', 'http://other', 'B'], ['f', FEATURE, 'bots'], ['g', FEATURE, 'email']]) {
+      store.put({ resourceType: 'Condition', id, meta, subject: { reference: 'Patient/p' }, code: { coding: [{ system, code }] } } as Resource);
+    }
+    store.put({ resourceType: 'Condition', id: 'n', meta, subject: { reference: 'Patient/p' } } as Resource);
+  });
+  afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); Object.assign(searchTuning, saved); });
+  const ids = (q: string): string[] => (store.search('Condition', [...new URLSearchParams(q)], BASE).entry ?? []).map((e) => e.resource!.id!).sort();
+  const fail = (q: string): StoreError => { try { store.search('Condition', [...new URLSearchParams(q)], BASE); } catch (e) { return e as StoreError; } throw new Error('did not throw'); };
+  const builtinVs = 'https://medplum.com/fhir/ValueSet/project-feature';
+  const meta = { versionId: 'v1', lastUpdated: '2024-01-01T00:00:00.000Z' };
+
+  it('code:in matches codes of a ValueSet (built-in and stored) and :not-in the rest', () => {
+    expect(ids(`code:in=${VS}`)).toEqual(['b', 'd']);
+    expect(ids(`code:in=${builtinVs}`)).toEqual(['f', 'g']);
+    expect(ids(`code:in=${VS},${builtinVs}`)).toEqual(['b', 'd', 'f', 'g']);
+    expect(ids(`code:not-in=${VS}`)).toEqual(['a', 'f', 'g', 'n', 'x']);
+    expect(ids(`code:in=${VS}&subject=Patient/p`)).toEqual(['b', 'd']);
+    expect(ids(`code:not-in=${VS}&code:not-in=${builtinVs}`)).toEqual(['a', 'n', 'x']);
+  });
+
+  it('code:below and :above follow is-a, cycles end', () => {
+    expect(ids(`code:below=${CS}|A`)).toEqual(['a', 'b']); // A, B, C; no Condition is coded C
+    expect(ids(`code:above=${CS}|C`)).toEqual(['a', 'b']);
+    expect(ids(`code:below=${CS}|D`)).toEqual(['d']);
+    expect(fail(`code:below=${FEATURE}|bots`).message).toBe(`Invalid filter: CodeSystem ${FEATURE} does not have an is-a hierarchy`);
+    expect(fail('code:below=A').message).toBe('Invalid :below value A: want system|code');
+    expect(fail('code:above=|A').message).toBe('Invalid :above value |A: want system|code');
+  });
+
+  it('unknown system or ValueSet is 400 for every terminology modifier', () => {
+    const u = 'http://unknown.example.com';
+    for (const q of [`code:in=${u}`, `code:not-in=${u}`, `code:above=${u}|x`, `code:below=${u}|x`, `_filter=code in ${u}`, `_filter=code ni ${u}`,
+      `_filter=code ss ${u}|x`, `_filter=code sb ${u}|x`]) {
+      const e = fail(q);
+      expect([q, e.status, e.message.includes(u)], e.message).toEqual([q, 400, true]);
+    }
+  });
+
+  it('a CodeSystem held only as a stub (content not-present, no concepts) is 400 naming it, never an empty match', () => {
+    const stub = 'http://example.com/stub', stubVs = 'http://example.com/vs-stub';
+    store.create({ resourceType: 'CodeSystem', status: 'active', content: 'not-present', url: stub, hierarchyMeaning: 'is-a' } as Resource);
+    store.create({ resourceType: 'ValueSet', status: 'active', url: stubVs, compose: { include: [{ valueSet: [VS] }, { system: stub, filter: [{ property: 'concept', op: 'is-a', value: 's' }] }] } } as Resource);
+    store.put({ resourceType: 'Condition', id: 's', meta, subject: { reference: 'Patient/p' }, code: { coding: [{ system: stub, code: 's' }] } } as Resource);
+    for (const q of [`code:below=${stub}|s`, `code:above=${stub}|s`, `code:in=${stubVs}`, `code:not-in=${stubVs}`, `_filter=code ss ${stub}|s`,
+      `_filter=code sb ${stub}|s`, `_filter=code in ${stubVs}`, `_filter=code ni ${stubVs}`]) {
+      const e = fail(q);
+      expect([q, e.status, e.message]).toEqual([q, 400, `CodeSystem ${stub} has no concepts in the store (content not-present)`]);
+    }
+    // Conditional create: 400, nothing written.
+    const before = ids('');
+    let e: StoreError | undefined;
+    try { store.create({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { coding: [{ system: stub, code: 's' }] } } as Resource, `code:below=${stub}|s`); } catch (x) { e = x as StoreError; }
+    expect([e?.status, e?.message]).toEqual([400, `CodeSystem ${stub} has no concepts in the store (content not-present)`]);
+    expect(ids('')).toEqual(before);
+    // Enumerated concepts of the stub need none of its rows.
+    store.create({ resourceType: 'ValueSet', status: 'active', url: 'http://example.com/vs-enum', compose: { include: [{ system: stub, concept: [{ code: 's' }] }] } } as Resource);
+    expect(ids('code:in=http://example.com/vs-enum')).toEqual(['s']);
+  });
+
+  it('_filter code in, ni, ss, sb', () => {
+    expect(ids(`_filter=code in ${VS}`)).toEqual(['b', 'd']);
+    expect(ids(`_filter=code ni ${VS}`)).toEqual(['a', 'f', 'g', 'n', 'x']);
+    expect(ids(`_filter=code ss ${CS}|D`)).toEqual(['d']); // the value subsumes the record's code: :below
+    expect(ids(`_filter=code sb ${CS}|B`)).toEqual(['a', 'b']); // the value is subsumed by the record's code: :above
+    expect(ids(`_filter=${encodeURIComponent(`code in ${VS} and not (code ss ${CS}|D)`)}`)).toEqual(['b']);
+    expect(fail('_filter=onset-date ss 2024-01-01').message).toBe('Invalid operator: ss'); // tokens only, as Medplum's text elsewhere
   });
 });

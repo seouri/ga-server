@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
+// SPDX-License-Identifier: Apache-2.0
 // FHIR search for the SQLite store. Each resource is indexed by evaluating its type's official SearchParameters (FHIRPath,
 // as Medplum's server indexes them) into rows; a search is SQL over those rows.
 //
@@ -21,7 +23,7 @@ import {
   FhirFilterComparison, FhirFilterConnective, FhirFilterNegation, OperationOutcomeError, Operator, convertToSearchableDates,
   convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
   convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameterDetails, getSearchParameters,
-  parseFhirPath, parseFilterParameter, parseSearchRequest, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
+  initFhirPathParserBuilder, parseFhirPath, parseSearchRequest, Tokenizer, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
   type Filter, type FhirFilterExpression, type FhirPathAtom, type SearchRequest, type TypedValue,
 } from '@medplum/core';
 import type { Bundle, Resource, SearchParameter } from '@medplum/fhirtypes';
@@ -68,6 +70,12 @@ export class SearchError extends OperationOutcomeError {
   }
 }
 const badRequest = (text: string): Error => new SearchError(text);
+
+// The store's terminology, for the token modifiers :in, :not-in, :above and :below: SQL subqueries of a ValueSet's (system, code)
+// pairs, and of the codes at or under (below) or over (above) a code. Each throws 400 naming a url the store does not hold.
+type Sub = { sql: string; args: Arg[] };
+export type Terminology = { inValueSet(url: string): Sub; subsumed(system: string, code: string, dir: 'below' | 'above'): Sub };
+let terminology: Terminology | undefined; // set for the length of one (synchronous) searchJson
 
 const utc = (s?: string): string | null => {
   if (!s) return null;
@@ -254,7 +262,7 @@ const MODIFIERS: readonly string[] = ['contains', 'exact', 'above', 'below', 'te
 const refuse = (op: string, code: string): Error => badRequest(MODIFIERS.includes(op) ? `Invalid modifier :${op} for ${code}` : `Invalid operator ${op} for ${code}`);
 const PREFIXES: readonly string[] = ['eq', 'ne', 'gt', 'lt', 'ge', 'le', 'sa', 'eb', 'ap'];
 const ALLOWED: Record<string, readonly string[]> = {
-  token: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.TEXT, Operator.OF_TYPE],
+  token: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.TEXT, Operator.OF_TYPE, Operator.IN, Operator.NOT_IN, Operator.ABOVE, Operator.BELOW],
   string: [Operator.EQUALS, Operator.EXACT, Operator.CONTAINS, Operator.NOT, Operator.NOT_EQUALS],
   uri: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.ABOVE, Operator.BELOW],
   reference: [Operator.EQUALS, Operator.NOT, Operator.NOT_EQUALS, Operator.IDENTIFIER],
@@ -265,7 +273,7 @@ const ALLOWED: Record<string, readonly string[]> = {
 function cond(type: string, f: Filter, a: string): Cond {
   if (f.code === '_filter') {
     let e: FhirFilterExpression;
-    try { e = parseFilterParameter(f.value); } catch (err) { throw badRequest(err instanceof Error ? err.message : String(err)); } // Medplum's text
+    try { e = parseFilter(f.value); } catch (err) { throw badRequest(err instanceof Error ? err.message : String(err)); } // Medplum's text
     return filterExpr(type, e, a);
   }
   if (f.code.startsWith('_has:') || f.code.includes('.')) return chainCond(type, f, a);
@@ -288,7 +296,7 @@ function cond(type: string, f: Filter, a: string): Cond {
   if (p.type === 'composite') return compositeCond(type, p, f.value, a);
   const vals = splitSearchOnComma(f.value);
   // :not on tokens, strings, uris and references means "no matching value" (FHIR); ne on ranges is a prefix.
-  const neg = op === Operator.NOT || (op === Operator.NOT_EQUALS && p.type !== 'date' && p.type !== 'number' && p.type !== 'quantity');
+  const neg = op === Operator.NOT || op === Operator.NOT_IN || (op === Operator.NOT_EQUALS && p.type !== 'date' && p.type !== 'number' && p.type !== 'quantity');
 
   if (code === '_id') {
     const set = { sql: `select x.rid from resources x where x.type = ? and x.id in (${qs(vals.length)})`, args: [type, ...vals] };
@@ -309,7 +317,7 @@ function cond(type: string, f: Filter, a: string): Cond {
   const probe = `exists (select 1 from idx i where i.rid = ${a}.rid and ${where})`;
   if (neg) return { sql: `not ${probe}`, args: [ic, ...va] };
   return { sql: probe, args: [ic, ...va], set: { sql: `select i.rid from idx i where i.type = ? and ${where}`, args: [type, ic, ...va] },
-    ref: p.type === 'reference' && op !== Operator.IDENTIFIER, multi: vals.length > 1 || op === Operator.TEXT || op === Operator.ABOVE || op === Operator.BELOW };
+    ref: p.type === 'reference' && op !== Operator.IDENTIFIER, multi: vals.length > 1 || op === Operator.TEXT || op === Operator.IN || op === Operator.ABOVE || op === Operator.BELOW };
 }
 
 // One search value of a parameter as SQL over the index row `i` (idx or comp: the same columns).
@@ -328,7 +336,16 @@ function valueSql(type: string, p: SearchParameter, op: string, v: string, i: st
         if (!rest.length) throw badRequest(`Invalid :of-type value ${v}: want typeSystem|typeCode|value`);
         return [`${i}.val = ? and ${i}.sys = ?`, [rest.join('|'), `${s}|${c}`]];
       }
+      if (op === Operator.IN || op === Operator.NOT_IN) {
+        const m = term().inValueSet(v); // the url as written: a |version selects that version
+        return [`(${i}.sys, ${i}.val) in (select system, code from (${m.sql}))`, m.args];
+      }
       const bar = v.indexOf('|');
+      if (op === Operator.ABOVE || op === Operator.BELOW) {
+        if (bar < 1) throw badRequest(`Invalid :${op} value ${v}: want system|code`);
+        const m = term().subsumed(v.slice(0, bar), v.slice(bar + 1), op);
+        return [`${i}.sys = ? and ${i}.val in (${m.sql})`, [v.slice(0, bar), ...m.args]];
+      }
       const ci = (x: string) => (caseless(type, p) ? x.toLowerCase() : x);
       if (bar < 0) return [`${i}.val = ? and (${i}.sys is null or ${i}.sys <> ?)`, [ci(v), TEXT]];
       const s = v.slice(0, bar), val = ci(v.slice(bar + 1));
@@ -388,6 +405,8 @@ function compositeCond(type: string, p: SearchParameter, value: string, a: strin
   return { sql: `exists (select 1 from ${from} where c0.rid = ${a}.rid and ${where})`, args: [p.code, ...va],
     set: { sql: `select c0.rid from ${from} where c0.type = ? and ${where}`, args: [type, p.code, ...va] }, multi: true };
 }
+
+const term = (): Terminology => terminology ?? (() => { throw badRequest('Terminology search is not available'); })();
 
 const likeEscape = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -538,9 +557,52 @@ function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
   }
   if (e instanceof FhirFilterNegation) { const c = filterExpr(type, e.child, a); return { sql: `not (${c.sql})`, args: c.args }; }
   const c = e as FhirFilterComparison;
+  // ss and sb are concepts' subsumption (a uri's :above and :below are by path): elsewhere Medplum's parser text.
+  if ((c.operator === Operator.ABOVE || c.operator === Operator.BELOW) && param(type, c.path)?.type !== 'token') throw badRequest(`Invalid operator: ${c.operator === Operator.BELOW ? 'ss' : 'sb'}`);
   // A chain maps the operator on its last parameter (chainCond), as Medplum.
   const chain = c.path.startsWith('_has:') || c.path.includes('.');
   return cond(type, { code: c.path, operator: chain ? c.operator : filterOp(param(type, c.path), c.operator), value: c.value }, a);
+}
+
+// Medplum 5.2.14 packages/core/src/filter/parse.ts and tokenize.ts (FilterParameterParser, its operator map), plus ss (the value
+// subsumes the record's code: :below) and sb (the value is subsumed by it: :above), which Medplum refuses (Invalid operator).
+const FILTER_OPS: Record<string, Operator> = {
+  eq: Operator.EXACT, ne: Operator.NOT_EQUALS, co: Operator.CONTAINS, sw: Operator.STARTS_WITH, gt: Operator.GREATER_THAN, lt: Operator.LESS_THAN,
+  ge: Operator.GREATER_THAN_OR_EQUALS, le: Operator.LESS_THAN_OR_EQUALS, ap: Operator.APPROXIMATELY, sa: Operator.STARTS_AFTER, eb: Operator.ENDS_BEFORE,
+  pr: Operator.PRESENT, ss: Operator.BELOW, sb: Operator.ABOVE, in: Operator.IN, ni: Operator.NOT_IN, re: Operator.EQUALS, identifier: Operator.IDENTIFIER,
+};
+const filterParser = initFhirPathParserBuilder();
+function parseFilter(input: string): FhirFilterExpression {
+  const tokens = new Tokenizer(input, ['true', 'false'], ['!=', '!~', '<=', '>=', '{}', '->', 'eq', 'ne', 'co'], { dateTimeLiterals: true, symbolRegex: /[^\s\])]/ }).tokenize();
+  const parser = filterParser.construct(tokens);
+  parser.removeComments();
+  const parse = (): FhirFilterExpression => {
+    let result: FhirFilterExpression;
+    if (parser.peek()?.value === '(') {
+      parser.consume('(');
+      result = parse();
+      parser.consume(')');
+    } else if (parser.peek()?.value === 'not') {
+      parser.consume('Symbol', 'not');
+      parser.consume('(');
+      result = new FhirFilterNegation(parse());
+      parser.consume(')');
+    } else {
+      const path = parser.consume('Symbol').value, op = parser.consume('Symbol').value;
+      if (!Object.hasOwn(FILTER_OPS, op)) throw badRequest(`Invalid operator: ${op}`);
+      result = new FhirFilterComparison(path, FILTER_OPS[op], parser.consume().value);
+    }
+    const next = parser.peek()?.value;
+    if (next === 'and' || next === 'or') {
+      parser.consume('Symbol', next);
+      return new FhirFilterConnective(next, result, parse());
+    }
+    return result;
+  };
+  const result = parse();
+  const extra = parser.peek();
+  if (extra) throw badRequest(`Unexpected token in _filter expression: ${extra.value}`);
+  return result;
 }
 
 // _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
@@ -629,8 +691,10 @@ type RawEntry = { fullUrl: string; mode: 'match' | 'include'; json: string };
 type RawBundle = { total?: number; entry?: RawEntry[]; link?: Bundle['link'] };
 
 // `type` an array: a system-level search across those types (_type), its filters applied per type as Medplum does.
-export function searchJson(prep: Prep, type: string | string[], query: [string, string][], base: string): string {
-  const raw = searchRaw(prep, type, query, base);
+export function searchJson(prep: Prep, type: string | string[], query: [string, string][], base: string, terms?: Terminology): string {
+  terminology = terms;
+  let raw: RawBundle;
+  try { raw = searchRaw(prep, type, query, base); } finally { terminology = undefined; }
   const entry = raw.entry?.map((e) => `{"fullUrl":${JSON.stringify(e.fullUrl)},"search":{"mode":"${e.mode}"},"resource":${e.json}}`).join(',');
   return `{"resourceType":"Bundle","type":"searchset"${raw.total !== undefined ? `,"total":${raw.total}` : ''}${entry ? `,"entry":[${entry}]` : ''}${raw.link ? `,"link":${JSON.stringify(raw.link)}` : ''}}`;
 }

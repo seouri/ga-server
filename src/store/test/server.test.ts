@@ -31,7 +31,7 @@ describe('store server', () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'store-srv-'));
     const tokenFile = join(dir, 'store', 'token');
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     token = readFileSync(tokenFile, 'utf8').trim();
   });
@@ -56,7 +56,7 @@ describe('store server', () => {
     expect(statSync(join(dir, 'store')).mode & 0o777).toBe(0o700);
     server.closeAllConnections();
     await new Promise((r) => server.close(r));
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token') });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token') });
     expect(readFileSync(join(dir, 'store', 'token'), 'utf8').trim()).toBe(token);
   });
 
@@ -187,7 +187,7 @@ describe('store server', () => {
     mkdirSync(d2, { mode: 0o700 });
     for (const text of ['\n', 'short']) {
       writeFileSync(tf, text, { mode: 0o644 });
-      await expect(serveStore({ file: join(d2, 'store.db'), port: 0, tokenFile: tf })).rejects.toThrow(/delete the file and restart/);
+      await expect(serveStore({ terminology: [], file: join(d2, 'store.db'), port: 0, tokenFile: tf })).rejects.toThrow(/delete the file and restart/);
     }
   });
 
@@ -195,7 +195,7 @@ describe('store server', () => {
     const d2 = join(dir, 't3'), tf = join(d2, 'token');
     mkdirSync(d2, { mode: 0o700 });
     writeFileSync(tf, '', { mode: 0o600 });
-    await expect(serveStore({ file: join(d2, 'store.db'), port: (server.address() as AddressInfo).port, tokenFile: tf })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    await expect(serveStore({ terminology: [], file: join(d2, 'store.db'), port: (server.address() as AddressInfo).port, tokenFile: tf })).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect(readFileSync(tf, 'utf8')).toBe('');
     expect(existsSync(join(d2, 'store.db'))).toBe(false);
     expect(await client().searchResources('Patient', {})).toHaveLength(0); // the first server still serves with its token
@@ -296,7 +296,7 @@ describe('store server: Medplum-compatible routes', () => {
   let dir: string, server: Server, base: string, token: string;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'store-compat-'));
-    server = await serveStore({ file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'token') });
+    server = await serveStore({ terminology: [], file: join(dir, 'store.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'token') });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     token = readFileSync(join(dir, 'token'), 'utf8').trim();
   });
@@ -925,6 +925,53 @@ describe('store server: Medplum-compatible routes', () => {
     expect([again.status, again.headers.get('location')]).toEqual([200, null]);
   });
 
+  it('CodeSystem operations: type and instance level, GET query and POST Parameters, in a batch; complex or repeated query values are 400', async () => {
+    const cs = (await call('POST', 'CodeSystem', { resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/ops', concept: [{ code: 'A', display: 'Alpha' }] })).json;
+    const display = (j: any) => j.parameter.find((p: { name: string }) => p.name === 'display')?.valueString;
+    expect(display((await call('GET', 'CodeSystem/$lookup?system=http://example.com/ops&code=A')).json)).toBe('Alpha');
+    expect(display((await call('GET', `CodeSystem/${cs.id}/$lookup?code=A`)).json)).toBe('Alpha');
+    expect(display((await call('POST', 'CodeSystem/$validate-code', { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/ops', code: 'A' } }] })).json)).toBe('Alpha');
+    const imported = await call('POST', `CodeSystem/${cs.id}/$import`, { resourceType: 'Parameters', parameter: [{ name: 'concept', valueCoding: { code: 'B', display: 'Beta' } }] });
+    expect([imported.status, imported.json.resourceType, imported.json.id]).toEqual([200, 'CodeSystem', cs.id]);
+    const b = await tx('batch', [{ request: { method: 'GET', url: `CodeSystem/${cs.id}/$lookup?code=B` } }]);
+    expect(display(b.json.entry[0].resource)).toBe('Beta');
+    const text = async (method: string, path: string, body?: unknown) => { const g = await call(method, path, body); return [g.status, g.json?.issue?.[0]?.details?.text]; };
+    expect(await text('GET', 'CodeSystem/$lookup?coding=x')).toEqual([400, 'Complex parameter coding (Coding) cannot be passed via query string']);
+    expect(await text('GET', 'CodeSystem/$lookup?system=http://example.com/ops&code=A&code=B')).toEqual([400, 'Expected 0..1 value(s) for input parameter code, but 2 provided']);
+    expect(await text('POST', 'CodeSystem/$lookup', { resourceType: 'Patient' })).toEqual([400, 'Expected a Parameters']);
+    expect((await call('GET', 'CodeSystem/$import')).status).toBe(404); // POST only, as Medplum
+  });
+
+  it('ValueSet operations: $expand by url, id or inline valueSet; $validate-code type and instance level; typed query values', async () => {
+    await call('POST', 'CodeSystem', { resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/vs-ops', concept: [{ code: 'A', display: 'Alpha' }, { code: 'B', display: 'Beta' }] });
+    const vs = (await call('POST', 'ValueSet', { resourceType: 'ValueSet', status: 'active', url: 'http://example.com/vs', compose: { include: [{ system: 'http://example.com/vs-ops' }] } })).json;
+    const codes = (j: any) => j.expansion.contains.map((c: { code: string }) => c.code);
+    expect(codes((await call('GET', 'ValueSet/$expand?url=http://example.com/vs&offset=1')).json)).toEqual(['B']);
+    expect(codes((await call('GET', `ValueSet/${vs.id}/$expand?filter=alp`)).json)).toEqual(['A']);
+    expect(codes((await call('POST', 'ValueSet/$expand', { resourceType: 'Parameters', parameter: [{ name: 'valueSet', resource: { ...vs, id: undefined } }, { name: 'count', valueInteger: 1 }] })).json)).toEqual(['A']);
+    const result = (j: any) => j.parameter.find((p: { name: string }) => p.name === 'result').valueBoolean;
+    expect(result((await call('GET', 'ValueSet/$validate-code?url=http://example.com/vs&system=http://example.com/vs-ops&code=B')).json)).toBe(true);
+    expect(result((await call('POST', `ValueSet/${vs.id}/$validate-code`, { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/vs-ops', code: 'C' } }] })).json)).toBe(false);
+    const text = async (path: string) => { const g = await call('GET', path); return [g.status, g.json?.issue?.[0]?.details?.text]; };
+    expect(await text('ValueSet/$expand?url=http://example.com/vs&count=x')).toEqual([400, "Invalid value 'x' provided for integer parameter 'count'"]);
+    expect(await text('ValueSet/$expand?valueSet=x')).toEqual([400, 'Complex parameter valueSet (ValueSet) cannot be passed via query string']);
+    expect(await text('ValueSet/$expand?url=http://example.com/missing')).toEqual([400, 'ValueSet http://example.com/missing not found']);
+  });
+
+  it('ConceptMap operations: $translate GET and POST, type and instance level; $import POST only', async () => {
+    const cm = (await call('POST', 'ConceptMap', { resourceType: 'ConceptMap', status: 'active', url: 'http://example.com/cm-ops',
+      group: [{ source: 'http://example.com/a', target: 'http://example.com/b', element: [{ code: 'A', target: [{ code: 'B', equivalence: 'equivalent' }] }] }] })).json;
+    const codes = (j: any) => j.parameter.filter((p: { name: string }) => p.name === 'match').map((m: any) => m.part[1].valueCoding.code);
+    expect(codes((await call('GET', 'ConceptMap/$translate?url=http://example.com/cm-ops&system=http://example.com/a&code=A')).json)).toEqual(['B']);
+    const imported = await call('POST', `ConceptMap/${cm.id}/$import`, { resourceType: 'Parameters', parameter: [{ name: 'mapping', part: [
+      { name: 'source', valueCoding: { system: 'http://example.com/a', code: 'C' } }, { name: 'target', valueCoding: { system: 'http://example.com/b', code: 'D' } }] }] });
+    expect([imported.status, imported.json.resourceType, imported.json.id]).toEqual([200, 'ConceptMap', cm.id]);
+    expect(codes((await call('POST', `ConceptMap/${cm.id}/$translate`, { resourceType: 'Parameters', parameter: [{ name: 'coding', valueCoding: { system: 'http://example.com/a', code: 'C' } }] })).json)).toEqual(['D']);
+    const cc = await call('GET', `ConceptMap/${cm.id}/$translate?codeableConcept=x`);
+    expect([cc.status, cc.json.issue[0].details.text]).toEqual([400, 'Complex parameter codeableConcept (CodeableConcept) cannot be passed via query string']);
+    expect((await call('GET', 'ConceptMap/$import')).status).toBe(404); // POST only, as Medplum
+  });
+
   it('GET metadata describes this store: types, interactions, search parameters (composites whose components R4 defines), operations', async () => {
     const m = (await call('GET', 'metadata')).json;
     expect(m).toMatchObject({ resourceType: 'CapabilityStatement', fhirVersion: '4.0.1', kind: 'instance', patchFormat: ['application/json-patch+json', 'application/fhir+json'] });
@@ -935,6 +982,9 @@ describe('store server: Medplum-compatible routes', () => {
     expect(obsCap.searchParam).toContainEqual({ name: 'code-value-quantity', type: 'composite' });
     expect(rest.resource.find((r: { type: string }) => r.type === 'ResearchStudy').searchParam.map((p: { name: string }) => p.name)).not.toContain('progress-status-state-actual');
     expect(rest.resource.find((r: { type: string }) => r.type === 'Patient').operation[0].name).toBe('everything');
+    expect(rest.resource.find((r: { type: string }) => r.type === 'CodeSystem').operation.map((o: { name: string }) => o.name)).toEqual(['lookup', 'validate-code', 'subsumes', 'import']);
+    expect(rest.resource.find((r: { type: string }) => r.type === 'ConceptMap').operation.map((o: { name: string }) => o.name)).toEqual(['translate', 'import']);
+    expect(rest.resource.find((r: { type: string }) => r.type === 'ValueSet').operation.map((o: { name: string }) => o.name)).toEqual(['expand', 'validate-code']);
     for (const t of ['ValueSet', 'Questionnaire', 'Subscription']) expect(rest.resource.some((r: { type: string }) => r.type === t), t).toBe(true);
     expect(rest.resource.length).toBeGreaterThan(140);
   });
@@ -951,7 +1001,7 @@ describe('serve.ts command line and maxBinaryBytes', () => {
 
   it('maxBinaryBytes caps a streamed Binary (413) and leaves JSON bodies at their own limit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'store-lim-'));
-    const s = await serveStore({ file: join(dir, 'x.db'), port: 0, tokenFile: join(dir, 'token'), maxBinaryBytes: 1024 });
+    const s = await serveStore({ terminology: [], file: join(dir, 'x.db'), port: 0, tokenFile: join(dir, 'token'), maxBinaryBytes: 1024 });
     try {
       const base = `http://127.0.0.1:${(s.address() as AddressInfo).port}/fhir/R4/`;
       const headers = { authorization: `Bearer ${readFileSync(join(dir, 'token'), 'utf8').trim()}`, 'content-type': 'application/octet-stream' };

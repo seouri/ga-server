@@ -11,18 +11,21 @@ import {
   OperationOutcomeError, convertToSearchableReferences, deepEquals, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
   stringify, toTypedValue, validateResource,
 } from '@medplum/core';
-import type { Bundle, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
+import type { Bundle, CodeSystem, ConceptMap, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, loadDefinitions } from './definitions.ts';
 import { SEARCH_SCHEMA, SearchError, searchJson, writeIndex } from './search.ts';
+import { inValueSet, subsumedCodes } from './expand.ts';
+import { CONCEPTMAP_SCHEMA, dropConceptMap, indexConceptMap } from './conceptmap.ts';
+import { TERMINOLOGY_SCHEMA, dropCodeSystem, indexCodeSystem, seedTerminology } from './terminology.ts';
 
 export type StoreIssue = { expression?: string[]; text: string };
 
 // An OperationOutcomeError (so clients read it as they read Medplum's) with an HTTP status.
 export class StoreError extends OperationOutcomeError {
-  readonly status: 400 | 404 | 409 | 410 | 412;
-  constructor(status: 400 | 404 | 409 | 410 | 412, issues: StoreIssue[], outcome?: OperationOutcome) {
-    const id = { 400: undefined, 404: 'not-found', 409: 'conflict', 410: 'gone', 412: 'precondition-failed' }[status];
-    const code = { 400: 'invalid', 404: 'not-found', 409: 'conflict', 410: 'deleted', 412: 'processing' }[status] as OperationOutcomeIssue['code'];
+  readonly status: 400 | 403 | 404 | 409 | 410 | 412;
+  constructor(status: 400 | 403 | 404 | 409 | 410 | 412, issues: StoreIssue[], outcome?: OperationOutcome) {
+    const id = { 400: undefined, 403: 'forbidden', 404: 'not-found', 409: 'conflict', 410: 'gone', 412: 'precondition-failed' }[status];
+    const code = { 400: 'invalid', 403: 'forbidden', 404: 'not-found', 409: 'conflict', 410: 'deleted', 412: 'processing' }[status] as OperationOutcomeIssue['code'];
     super(outcome ?? { resourceType: 'OperationOutcome', id, issue: issues.map((i) => ({ severity: 'error', code, details: { text: i.text }, expression: i.expression })) });
     this.status = status;
   }
@@ -32,7 +35,7 @@ export class StoreError extends OperationOutcomeError {
 export const multipleMatches = () => new StoreError(412, [], { resourceType: 'OperationOutcome', id: 'multiple-matches',
   issue: [{ severity: 'error', code: 'multiple-matches', details: { text: 'Multiple resources found matching condition' } }] });
 
-export const INDEX_VERSION = 4;
+export const INDEX_VERSION = 5;
 // The file was written in another search index format: it must be rebuilt (re-imported) before this version can open it.
 export class IndexFormatError extends Error {}
 export type Row = { type: string; id: string; versionId: string; lastUpdated: string; json: string }; // json '': a delete
@@ -64,7 +67,8 @@ export class Store {
   private readonly binDir: string;
 
   // types: the resource types this store accepts (default every R4 resource type); one set per process (definitions.ts).
-  constructor(file: string, opts: { types?: readonly string[] } = {}) {
+  // terminology: the built-in terminology bundles to seed (terminology.ts; default Medplum's five, [] none).
+  constructor(file: string, opts: { types?: readonly string[]; terminology?: readonly string[] } = {}) {
     loadDefinitions(opts.types);
     this.db = new DatabaseSync(file);
     this.binDir = join(dirname(file), 'binary');
@@ -76,7 +80,7 @@ export class Store {
       create table if not exists history(type text not null, id text not null, versionId text not null, lastUpdated text, json text not null, unique(type, id, versionId));
       create table if not exists binaries(id text primary key, contentType text not null, size integer not null);
       create index if not exists history_i on history(type, id, lastUpdated);
-      create index if not exists history_lu on history(lastUpdated);${SEARCH_SCHEMA}`);
+      create index if not exists history_lu on history(lastUpdated);${SEARCH_SCHEMA}${TERMINOLOGY_SCHEMA}${CONCEPTMAP_SCHEMA}`);
     // The search index format (token rows as written since 2): a file written in another format would answer searches wrongly.
     const v = (this.db.prepare('pragma user_version').get() as { user_version: number }).user_version;
     if (v !== INDEX_VERSION) {
@@ -86,6 +90,14 @@ export class Store {
         throw new IndexFormatError(`FHIR store ${file} has search index format ${v}, this version needs ${INDEX_VERSION}: rebuild the file from its source`);
       }
       this.db.exec(`pragma user_version = ${INDEX_VERSION}`);
+    }
+    try { seedTerminology(this, opts.terminology); } catch (e) { this.db.close(); throw e; }
+  }
+
+  // A built-in (seeded terminology) is read-only: 403 Forbidden, as Medplum answers a write to its R4 project's resources.
+  private guard(type: string, id?: string): void {
+    if (id && this.prep('select 1 from resources r join builtin b on b.rid = r.rid where r.type = ? and r.id = ?').get(type, id)) {
+      throw new StoreError(403, [{ text: 'Forbidden' }]);
     }
   }
 
@@ -108,11 +120,11 @@ export class Store {
   // The same search as JSON text, each resource spliced in as stored (no parse and re-stringify), for the HTTP server.
   searchJson(type: string | string[], query: [string, string][], base: string): string {
     try {
-      return searchJson(this.prep, type, query, base);
+      return searchJson(this.prep, type, query, base, { inValueSet: (url) => inValueSet(this, url), subsumed: (system, code, dir) => subsumedCodes(this, system, code, dir) });
     } catch (e) {
       if (e instanceof SearchError) throw new StoreError(400, [{ text: e.text }]);
       // SQLite's limits on one statement (expression depth, parser recursion): a value list too long, not a server fault.
-      if ((e as { code?: string }).code === 'ERR_SQLITE_ERROR' && /Expression tree is too large|Recursion limit/.test((e as Error).message)) throw new StoreError(400, [{ text: 'Search has too many values' }]);
+      if ((e as { code?: string }).code === 'ERR_SQLITE_ERROR' && /Expression tree is too large|Recursion limit|too many SQL variables/.test((e as Error).message)) throw new StoreError(400, [{ text: 'Search has too many values' }]);
       throw e;
     }
   }
@@ -215,6 +227,7 @@ export class Store {
   update(r: Resource, ifMatch?: string): Resource {
     r = prune(r);
     return this.transaction(() => {
+      this.guard(r.resourceType, r.id);
       const old = r.id ? this.readRow(r.resourceType, r.id, true) : undefined;
       if (!old) throw new StoreError(404, [{ text: `Not found: ${r.resourceType}/${r.id}` }]);
       if (ifMatch && etag(ifMatch) !== old.versionId) throw new StoreError(412, [{ text: 'Precondition Failed' }]);
@@ -229,6 +242,7 @@ export class Store {
   // current versionId, else 412 (a deleted resource has none, as Medplum).
   delete(type: string, id: string, ifMatch?: string): void {
     this.transaction(() => {
+      this.guard(type, id);
       if (ifMatch && this.readRow(type, id)?.versionId !== etag(ifMatch) && this.prep('select 1 from history where type = ? and id = ? limit 1').get(type, id)) {
         throw new StoreError(412, [{ text: 'Precondition Failed' }]);
       }
@@ -238,6 +252,8 @@ export class Store {
         throw new StoreError(404, [{ text: `Not found: ${type}/${id}` }]);
       }
       writeIndex(this.prep, row.rid, undefined);
+      if (type === 'CodeSystem') dropCodeSystem(this.db, row.rid);
+      if (type === 'ConceptMap') dropConceptMap(this.db, row.rid);
       this.prep('insert into history values (?, ?, ?, ?, ?)').run(type, id, randomUUID(), now(), '');
     });
   }
@@ -259,6 +275,7 @@ export class Store {
   put(r: Resource, opts: { history?: Resource[] } = {}): Resource {
     if (!r.id || !r.meta?.versionId || !r.meta.lastUpdated) throw new StoreError(400, [{ text: 'put needs id, meta.versionId and meta.lastUpdated' }]);
     return this.transaction(() => {
+      this.guard(r.resourceType, r.id);
       const out = this.write(r, { versionId: r.meta!.versionId!, lastUpdated: r.meta!.lastUpdated! });
       for (const h of opts.history ?? []) this.addHistory(h); // after write: the current version's row is the stored one
       return out;
@@ -289,6 +306,8 @@ export class Store {
       .get(out.resourceType, out.id!, stamp.versionId!, stamp.lastUpdated!, json) as { rid: number };
     this.addHistory(out, json);
     writeIndex(this.prep, rid, out);
+    if (out.resourceType === 'CodeSystem') indexCodeSystem(this.db, rid, out as CodeSystem);
+    if (out.resourceType === 'ConceptMap') indexConceptMap(this.db, rid, out as ConceptMap);
     return out;
   }
 

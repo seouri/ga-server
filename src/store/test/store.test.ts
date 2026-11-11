@@ -12,7 +12,7 @@ const err = (f: () => unknown): StoreError => { try { f(); } catch (e) { return 
 
 describe('Store core', () => {
   let dir: string, store: Store;
-  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-store-')); store = new Store(join(dir, 'store.db')); });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-store-')); store = new Store(join(dir, 'store.db'), { terminology: [] }); });
   afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
   it('opens in WAL mode with a 64 MB cache, no mmap and full sync', () => {
@@ -171,21 +171,21 @@ describe('Store index format', () => {
     const dir = mkdtempSync(join(tmpdir(), 'store-ver-'));
     const file = join(dir, 'store.db');
     try {
-      const s = new Store(file);
+      const s = new Store(file, { terminology: [] });
       s.create({ resourceType: 'Patient' });
       expect((s.db.prepare('pragma user_version').get() as { user_version: number }).user_version).toBe(INDEX_VERSION);
       s.close();
-      new Store(file).close(); // same version: opens
-      for (const old of [1, 2, 3]) { // 2: before word rows and caseless ContactPoints; 3: before composite, :identifier and :of-type rows
+      new Store(file, { terminology: [] }).close(); // same version: opens
+      for (const old of [1, 2, 3, 4]) { // 2: before word rows and caseless ContactPoints; 3: before composite, :identifier and :of-type rows; 4: before the concept index and built-in terminology
         const raw = new DatabaseSync(file);
         raw.exec(`pragma user_version = ${old}`);
         raw.close();
-        expect(() => new Store(file)).toThrow(new RegExp(`search index format ${old}, this version needs ${INDEX_VERSION}: rebuild`));
+        expect(() => new Store(file, { terminology: [] })).toThrow(new RegExp(`search index format ${old}, this version needs ${INDEX_VERSION}: rebuild`));
       }
       const raw0 = new DatabaseSync(file);
       raw0.exec('pragma user_version = 0'); // a file from before versions, with records
       raw0.close();
-      expect(() => new Store(file)).toThrow(IndexFormatError);
+      expect(() => new Store(file, { terminology: [] })).toThrow(IndexFormatError);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

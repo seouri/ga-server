@@ -47,6 +47,11 @@ test('no row appears twice', () => {
   expect(keys.filter((k, i) => keys.indexOf(k) !== i)).toEqual([]);
 });
 
+test('no row is deferred to plan 2', () => {
+  expect(rows.filter((r) => r.status === 'plan-2').map((r) => `${r.title} [${r.file}]`)).toEqual([]);
+});
+
+// Final gate: no row is left `not yet ported`.
 test('no row is left "not yet ported"', () => {
   expect(rows.filter((r) => /not yet ported/i.test(r.note)).map((r) => `${r.title} [${r.file}]`)).toEqual([]);
 });

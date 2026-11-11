@@ -179,6 +179,17 @@ describe('store boundary', () => {
     expect(bad).toEqual([]);
   });
 
+  // The store says nothing about the application that uses it (README.md may name it as a user). The word is built from
+  // pieces so this file passes its own scan.
+  it('no file in the store directory names the application', () => {
+    const word = new RegExp(`\\b(${'G'}A(_\\w*)?|${'Guard'}ian)\\b`);
+    const all = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.name === 'node_modules' || e.name.startsWith('.') ? []
+      : e.isDirectory() ? all(join(dir, e.name)) : join(dir, e.name) === join(ROOT, 'README.md') ? [] : [join(dir, e.name)]);
+    const named = all(ROOT).filter((f) => word.test(readFileSync(f, 'utf8'))).map((f) => relative(ROOT, f));
+    expect(named).toEqual([]);
+    expect(word.test(`a ${'G'}A-like set`) && word.test(`${'G'}A_STORE_TYPES`) && !word.test('GAMMA') && !word.test('SAGA')).toBe(true);
+  });
+
   it('flags every way out of the directory', () => {
     const f = join(ROOT, 'server.ts');
     const specs = specifiers(readFileSync(join(ROOT, 'test', 'boundary-fixture.txt'), 'utf8')); // not .ts: the scan above skips it
