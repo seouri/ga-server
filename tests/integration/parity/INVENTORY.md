@@ -812,17 +812,17 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/codesystemimport.test.ts | CodeSystem $import › Accepts batch of max size | ported | terminology |  |
 | server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports basic mappings from resource | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
 | server/src/fhir/operations/conceptmapimport.test.ts | importConceptMap() › Imports mapping metadata | skipped | terminology | in-process function, no HTTP request (importConceptMap) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports concept mappings and attributes | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports by ID without extended mode | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports concept mappings and attributes | ported | terminology |  |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Imports by ID without extended mode | ported | terminology |  |
 | server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires admin privileges | skipped | terminology | needs a non-admin project member |
 | server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Prevents writes by Project admin to linked Project ConceptMap | skipped | terminology | linked projects or project scoping |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Allows selecting ConceptMap by URL | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires ConceptMap to be specified | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Cannot overspecify ConceptMap | skipped | terminology | not yet ported (Task 5) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires source code to be specified | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Allows selecting ConceptMap by URL | ported | terminology |  |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires ConceptMap to be specified | ported | terminology |  |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Cannot overspecify ConceptMap | ported | terminology |  |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Requires source code to be specified | ported | terminology |  |
 | server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Ignores unspecified source code in ConceptMap resource | skipped | terminology | in-process function, no HTTP request (reads Medplum mapping tables) |
 | server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Handles ConceptMap with no valid mappings | skipped | terminology | in-process function, no HTTP request (reads Medplum mapping tables) |
-| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Import does not clobber or duplicate inline mappings | skipped | terminology | not yet ported (Task 5) |
+| server/src/fhir/operations/conceptmapimport.test.ts | ConceptMap/$import › Import does not clobber or duplicate inline mappings | ported | terminology |  |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Forbidden | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Expunge single resource | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |
 | server/src/fhir/operations/expunge.test.ts | Expunge › Expunge $project project as $name $outcome | skipped | platform | not in plan 1: operation $expunge, decide in plan 4 |

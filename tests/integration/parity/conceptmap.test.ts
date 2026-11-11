@@ -199,4 +199,94 @@ describe.skipIf(SQLITE)('ConceptMap operations (parity)', () => {
       expect(store).toEqual(['conceptMapVersion', 'version', 'target', 'reverse'].map((n) => [n, 400, `$translate: parameter ${n} is not supported`]));
     });
   });
+
+  // conceptmapimport.test.ts
+  describe('ConceptMap/$import', () => {
+    const blank = (s: Side, o: Partial<ConceptMap> = {}) => s.create<ConceptMap>({ resourceType: 'ConceptMap', status: 'draft', url: `http://example.com/ConceptMap/${suffix}`, ...o });
+    const imp = (s: Side, path: string, ...parameter: ParametersParameter[]) => call(s, 'POST', path, P(...parameter), { 'x-medplum': 'extended' });
+    const translated = (s: Side, cm: ConceptMap, code: string) => call(s, 'GET', `ConceptMap/${cm.id}/$translate?system=${E(SNOMED)}&code=${code}`);
+    const one = mapping(src('10347006'), tgt('T50.905'));
+
+    test('ConceptMap/$import › Imports concept mappings and attributes [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s, { name: 'Test Imported ConceptMap' });
+      const res = await imp(s, `ConceptMap/${cm.id}/$import`, mapping(
+        { name: 'source', valueCoding: { system: SNOMED, code: '10347006', display: 'Solar uticaria' } },
+        { name: 'target', valueCoding: { system: ICD10CM, code: 'T50.905', display: 'Adverse effect of unspecified drugs, medicaments and biological substances, episode of care unspecified' } },
+        { name: 'comment', valueString: 'CONSIDER ADDITIONAL CODE TO IDENTIFY SPECIFIC CONDITION OR DISEASE | EPISODE OF CARE INFORMATION NEEDED | MAP OF SOURCE CONCEPT IS CONTEXT DEPENDENT' },
+        { name: 'dependsOn', part: [{ name: 'code', valueCode: 'context' }, { name: 'value', valueCoding: { system: SNOMED, code: '403625006' } }] },
+      ));
+      expect([res.status, res.body.resourceType]).toEqual([200, 'ConceptMap']);
+      const r = await translated(s, cm, '10347006');
+      expect(matches(r)).toHaveLength(1);
+      expect(matches(r)[0].part).toEqual(expect.arrayContaining([
+        { name: 'dependsOn', part: [{ name: 'attribute', valueUri: 'context' }, { name: 'value', valueCoding: { system: SNOMED, code: '403625006' } }] }]));
+      return [res, r];
+    }));
+
+    test('ConceptMap/$import › Imports by ID without extended mode [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s, { name: 'Test Imported ConceptMap' });
+      const res = await call(s, 'POST', `ConceptMap/${cm.id}/$import`, P(one));
+      expect(res.status).toBe(200);
+      return res;
+    }));
+
+    test('ConceptMap/$import › Allows selecting ConceptMap by URL [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s);
+      const res = await imp(s, 'ConceptMap/$import', { name: 'url', valueUri: cm.url }, one);
+      expect(res.status).toBe(200);
+      const r = await translated(s, cm, '10347006');
+      expect(matches(r)).toHaveLength(1);
+      return [res, r];
+    }));
+
+    test('ConceptMap/$import › Requires ConceptMap to be specified [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const res = await call(s, 'POST', 'ConceptMap/$import', P(one));
+      expect([res.status, text(res)]).toEqual([400, 'ConceptMap to import into must be specified']);
+      return res;
+    }));
+
+    test('ConceptMap/$import › Cannot overspecify ConceptMap [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s);
+      const res = await imp(s, `ConceptMap/${cm.id}/$import`, { name: 'url', valueUri: cm.url }, one);
+      expect(res.status).toBe(400);
+      expect(text(res)).toContain('not permitted for instance operation');
+      return res;
+    }));
+
+    test('ConceptMap/$import › Requires source code to be specified [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s);
+      const res = await imp(s, `ConceptMap/${cm.id}/$import`, mapping(src(undefined), tgt('T50.905')));
+      expect([res.status, text(res)]).toEqual([400, 'Source code for mapping is required']);
+      return res;
+    }));
+
+    const inline = (): Partial<ConceptMap> => ({ version: '4.0.1', group: [{ source: SNOMED, target: 'http://hl7.org/fhir/sid/icd-10-us', element: [
+      { code: '263204007', target: [{ code: 'S52.209A', equivalence: 'equivalent' }, { code: 'S52.209D', equivalence: 'equivalent' }] }] }] });
+
+    test('ConceptMap/$import › Import does not clobber or duplicate inline mappings [server/src/fhir/operations/conceptmapimport.test.ts]', run(async (s) => {
+      const cm = await blank(s, inline());
+      const before = await translated(s, cm, '263204007');
+      expect(matches(before)).toHaveLength(2);
+      const res = await imp(s, `ConceptMap/${cm.id}/$import`, one);
+      expect(res.status).toBe(200);
+      const [inl, imported] = [await translated(s, cm, '263204007'), await translated(s, cm, '10347006')];
+      expect([matches(inl).length, matches(imported).length]).toEqual([2, 1]); // 3 rows
+      return [before, res, inl, imported];
+    }));
+
+    // Medplum's update of a ConceptMap with groups purges every mapping row and re-indexes the inline ones, losing what $import
+    // wrote; the store replaces only the inline rows, so an import survives an edit of the map (as CodeSystem $import's concepts do).
+    test('differs on purpose: $import mappings survive an update of the ConceptMap [store-plan-2]', async () => {
+      suffix = randomUUID();
+      const [medplum, store] = await both(sides, async (s) => {
+        const cm = await blank(s, inline());
+        expect((await imp(s, `ConceptMap/${cm.id}/$import`, one)).status).toBe(200);
+        const put = await s.call('PUT', `ConceptMap/${cm.id}`, { ...cm, group: [{ ...cm.group![0], element: [{ code: '263204007', target: [{ code: 'S52.209A', equivalence: 'equivalent' }] }] }] });
+        expect(put.status).toBe(200);
+        return [matches(await translated(s, cm, '263204007')).length, matches(await translated(s, cm, '10347006')).length];
+      });
+      expect(medplum).toEqual([1, 0]);
+      expect(store).toEqual([1, 1]);
+    });
+  });
 });
