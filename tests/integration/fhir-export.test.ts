@@ -190,7 +190,7 @@ describe('patient-less exports', () => {
   // An import from before pending Binaries stored a small report PDF inline: importing it again keeps it inline, no new Binary.
   it('a report stored with an inline PDF is re-imported without a new Binary', () => withPatient(async (pid) => {
     const pdf = Buffer.from('%PDF-1.4\nsynthetic inline report\n').toString('base64');
-    const report = { resourceType: 'DiagnosticReport', status: 'final', code: { text: 'Synthetic echo report' }, effectiveDateTime: '2025-08-30', presentedForm: [{ contentType: 'application/pdf', data: pdf }] } as const;
+    const report = { resourceType: 'DiagnosticReport', status: 'final', code: { text: 'Synthetic echo report' }, effectiveDateTime: '2025-08-30', presentedForm: [{ contentType: 'application/pdf', data: pdf }] };
     await client.createResource({ ...report, subject: { reference: `Patient/${pid}` }, identifier: [{ system: ID, value: 'DiagnosticReport/dr-inline' }], meta: { tag: [{ system: 'urn:ga-server:tag', code: 'src-fhir-export' }] } } as Resource);
     const file = writeExport('report-inline.json', [{ resourceType: 'Patient', id: 'p1' }, { ...report, id: 'dr-inline', subject: { reference: 'Patient/p1' } }] as Resource[]);
     const created = vi.spyOn(client, 'createBinary');
