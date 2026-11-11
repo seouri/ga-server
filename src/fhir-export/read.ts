@@ -54,7 +54,7 @@ export function readFhirExport(path: string): { resources: Resource[]; skippedTy
   let attachmentsUnplaced = 0;
   const attachments = Array.isArray(doc.attachments) ? (doc.attachments as Attach[]) : [];
   for (const a of attachments) {
-    const r = isObj(a) && typeof a.path === 'string' && typeof a.contentBase64 === 'string' ? byKey.get(`${a.resourceType}/${a.resourceId}`) : undefined;
+    const r = isObj(a) && typeof a.path === 'string' && typeof a.contentType === 'string' && typeof a.contentBase64 === 'string' ? byKey.get(`${a.resourceType}/${a.resourceId}`) : undefined;
     if (!r || !place(r, a)) attachmentsUnplaced++;
   }
   const times = (vals: unknown[]): number[] => vals.filter((v): v is string => typeof v === 'string').map((v) => Date.parse(v)).filter((t) => !Number.isNaN(t));
