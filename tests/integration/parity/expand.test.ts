@@ -566,6 +566,104 @@ describe.skipIf(SQLITE)('ValueSet $expand and $validate-code (parity)', () => {
     });
   });
 
+  // valuesetvalidatecode.test.ts. Medplum's Super Admin is the parity project's admin (R7).
+  describe('ValueSet validate-code', () => {
+    const system = ROLE_CODE, url = `http://example.com/test-valueset-${randomUUID()}`;
+    const ids: Record<string, string> = {};
+    beforeAll(() => both(sides, async (s) => {
+      ids[s.name] = (await s.create<ValueSet>({ resourceType: 'ValueSet', url, name: 'testValueSet', title: 'Test Value Set', status: 'active', compose: { include: [
+        { system, concept: [{ code: 'WARD' }] },
+        { system, filter: [{ property: 'concept', op: 'descendent-of', value: '_PersonalRelationshipRoleType' }] },
+        { system, filter: [{ property: 'status', op: '=', value: 'deprecated' }] },
+        { system, filter: [{ property: 'child', op: 'in', value: 'PEDICU,PEDE' }] },
+      ] } })).id;
+    }));
+    const call = async (s: Side, method: string, path: string, body?: unknown) => { const g = await s.call(method, path, body); return { status: g.status, body: g.json }; };
+    const post = (s: Side, ...parameter: ParametersParameter[]) => call(s, 'POST', 'ValueSet/$validate-code', P(...parameter));
+    const out = (r: { body: any }, name: string) => r.body?.parameter?.find((p: ParametersParameter) => p.name === name);
+    const ok = (r: { status: number; body: any }, result: boolean, display?: string) => {
+      expect([r.status, r.body.resourceType, out(r, 'result')?.valueBoolean, out(r, 'display')?.valueString]).toEqual([200, 'Parameters', result, display]);
+      return r;
+    };
+
+    test('ValueSet validate-code › Explicitly included code succeeds [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system, code: 'WARD' } }), true, 'ward')));
+
+    test('ValueSet validate-code › Filter included code succeeds: %j [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const rs = [];
+      for (const params of [
+        [{ name: 'system', valueUri: system }, { name: 'code', valueCode: 'ITWINBRO' }],
+        [{ name: 'coding', valueCoding: { system, code: 'ITWINBRO' } }],
+        [{ name: 'codeableConcept', valueCodeableConcept: { coding: [{ system, code: 'VET' }, { system, code: 'ITWINBRO' }] } }],
+      ] as ParametersParameter[][]) rs.push(ok(await post(s, { name: 'url', valueUri: url }, ...params), true, 'identical twin brother'));
+      return rs;
+    }));
+
+    test('ValueSet validate-code › Filter excluded code fails [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system, code: 'RETIREE' } }), false)));
+
+    test('ValueSet validate-code › Returns negative result on display mismatch [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system, code: 'AUNT' } }, { name: 'display', valueString: 'ant' }), false, 'aunt')));
+
+    test('ValueSet validate-code › Returns negative result when no coding matches [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system: 'http://example.com/other', code: 'foo' } }), false)));
+
+    test('ValueSet validate-code › Returns error when no coding specified [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => {
+      const r = await post(s, { name: 'url', valueUri: url }, { name: 'code', valueCode: 'RETIREE' });
+      expect([r.status, r.body.resourceType]).toEqual([400, 'OperationOutcome']);
+      return r;
+    }));
+
+    test('ValueSet validate-code › Validates coding via property filter [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system, code: 'NOK' } }), true, 'next of kin')));
+
+    test('ValueSet validate-code › Validates coding via property filter with multiple values [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await post(s, { name: 'url', valueUri: url }, { name: 'coding', valueCoding: { system, code: 'PEDC' } }), true, 'Pediatrics clinic')));
+
+    test('ValueSet validate-code › Validates code when only example CodeSystem is present [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await post(s, { name: 'url', valueUri: OBS }, { name: 'coding', valueCoding: { system: LOINC, code: '10727-6' } }), true)));
+
+    test('ValueSet validate-code › Does not validate display without authoritative CodeSystem [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await post(s, { name: 'url', valueUri: OBS }, { name: 'coding', valueCoding: { system: LOINC, code: '10727-6' } }, { name: 'display', valueString: 'Cat parasites' }), false)));
+
+    test('ValueSet validate-code › GET endpoint [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => ok(await call(s, 'GET', `ValueSet/$validate-code?url=${url}&system=${system}&code=WARD`), true, 'ward')));
+
+    test('ValueSet validate-code › GET instance endpoint [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) => ok(await call(s, 'GET', `ValueSet/${ids[s.name]}/$validate-code?system=${system}&code=WARD`), true, 'ward')));
+
+    test('ValueSet validate-code › Instance endpoint with coding [server/src/fhir/operations/valuesetvalidatecode.test.ts]', () => same(sides, async (s) =>
+      ok(await call(s, 'POST', `ValueSet/${ids[s.name]}/$validate-code`, P({ name: 'coding', valueCoding: { system, code: 'WARD' } })), true, 'ward')));
+
+    test('ValueSet validate-code › Validates code against an include with multiple filters [server/src/fhir/operations/valuesetvalidatecode.test.ts]', async () => {
+      const multi = `http://example.com/multi-filter-${randomUUID()}`, vsUrl = `http://example.com/multi-filter-vs-${randomUUID()}`;
+      await same(sides, async (s) => {
+        await created(s, { resourceType: 'CodeSystem', url: multi, status: 'active', content: 'complete', hierarchyMeaning: 'is-a', property: [{ code: 'kind', type: 'code' }],
+          concept: [{ code: 'ROOT', display: 'Root', concept: [{ code: 'CHILD1', display: 'Child One', property: [{ code: 'kind', valueCode: 'primary' }] },
+            { code: 'CHILD2', display: 'Child Two', property: [{ code: 'kind', valueCode: 'secondary' }] }] }] },
+        { resourceType: 'ValueSet', url: vsUrl, status: 'active', compose: { include: [{ system: multi, filter: [{ property: 'concept', op: 'descendent-of', value: 'ROOT' }, { property: 'kind', op: '=', value: 'primary' }] }] } });
+        const r = await post(s, { name: 'url', valueUri: vsUrl }, { name: 'codeableConcept', valueCodeableConcept: { coding: [{ system: multi, code: 'ROOT' }, { system: multi, code: 'CHILD2' }, { system: multi, code: 'CHILD1' }] } });
+        expect(r.body.parameter).toEqual([{ name: 'result', valueBoolean: true }, { name: 'display', valueString: 'Child One' }]);
+        return r;
+      });
+    });
+
+    test('ValueSet validate-code › Validates system-less coding matched by a later include [server/src/fhir/operations/valuesetvalidatecode.test.ts]', async () => {
+      const a = `http://example.com/system-a-${randomUUID()}`, b = `http://example.com/system-b-${randomUUID()}`, vsUrl = `http://example.com/two-system-vs-${randomUUID()}`;
+      await same(sides, async (s) => {
+        await created(s, { resourceType: 'CodeSystem', url: a, status: 'active', content: 'complete', concept: [{ code: 'ALPHA', display: 'Alpha from A' }] },
+          { resourceType: 'CodeSystem', url: b, status: 'active', content: 'complete', concept: [{ code: 'TARGET', display: 'Target from B' }] },
+          { resourceType: 'ValueSet', url: vsUrl, status: 'active', compose: { include: [{ system: a, concept: [{ code: 'ALPHA' }] }, { system: b, concept: [{ code: 'TARGET' }] }] } });
+        const r = await post(s, { name: 'url', valueUri: vsUrl }, { name: 'coding', valueCoding: { code: 'TARGET' } });
+        expect(r.body.parameter).toEqual([{ name: 'result', valueBoolean: true }, { name: 'display', valueString: 'Target from B' }]);
+        return r;
+      });
+    });
+
+    test('ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable [server/src/fhir/operations/valuesetvalidatecode.test.ts]', async () => {
+      const other = `http://example.com/other-codes-${randomUUID()}`, vsUrl = `http://example.com/test-valueset-${randomUUID()}`, code = randomUUID();
+      await same(sides, async (s) => {
+        await created(s, { resourceType: 'ValueSet', url: vsUrl, status: 'active', compose: { include: [{ system: other }] } });
+        return ok(await post(s, { name: 'url', valueUri: vsUrl }, { name: 'coding', valueCoding: { system: other, code } }), true);
+      });
+    });
+  });
+
   // Where the store follows R4 and Medplum does not (README "Deliberate differences from Medplum").
   describe('differs on purpose', () => {
     test('differs on purpose: compose.exclude removes codes from $expand and $validate-code [store-plan-2]', async () => {

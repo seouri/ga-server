@@ -555,22 +555,22 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Error on instance coding system mismatch | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Correctly renders imported properties of different types | ported | terminology |  |
 | server/src/fhir/operations/codesystemlookup.test.ts | CodeSystem lookup › Outputs translated designations | ported | terminology |  |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Explicitly included code succeeds | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter included code succeeds: %j | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter excluded code fails | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result on display mismatch | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result when no coding matches | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns error when no coding specified | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter with multiple values | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code when only example CodeSystem is present | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Does not validate display without authoritative CodeSystem | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET endpoint | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET instance endpoint | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Instance endpoint with coding | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code against an include with multiple filters | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates system-less coding matched by a later include | skipped | terminology | not yet ported (Task 4) |
-| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable | skipped | terminology | not yet ported (Task 4) |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Explicitly included code succeeds | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter included code succeeds: %j | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Filter excluded code fails | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result on display mismatch | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns negative result when no coding matches | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Returns error when no coding specified | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates coding via property filter with multiple values | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code when only example CodeSystem is present | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Does not validate display without authoritative CodeSystem | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET endpoint | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › GET instance endpoint | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Instance endpoint with coding | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates code against an include with multiple filters | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Validates system-less coding matched by a later include | ported | terminology |  |
+| server/src/fhir/operations/valuesetvalidatecode.test.ts | ValueSet validate-code › Falls back to validating system URL when CodeSystem unavailable | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Success | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Coding parameter | ported | terminology |  |
 | server/src/fhir/operations/codesystemvalidatecode.test.ts | CodeSystem validate-code › Not found | ported | terminology |  |
