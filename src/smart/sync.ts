@@ -8,7 +8,7 @@ import { GaError } from '../config.ts';
 import { binaryId, importResources, type ImportReport } from '../engine.ts';
 import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
-import { attachmentsOf, fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
+import { attachmentsOf, type Deferral, fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
 import { loadSecret, readApp, readJson, readSources, type SourceRec, writeAtomic } from './store.ts';
 
 export type SyncResult = {
@@ -170,6 +170,16 @@ async function busy(client: MedplumClient, src: SourceRec, patientId: string): P
   return { source: src.key, status: (ep?.status as SyncResult['status'] | undefined) ?? 'pending', error: 'busy' };
 }
 
+// Entries of a deferrals file that fetchAll can use: a count (older format) or {n, since}; anything else is dropped.
+function validDeferrals(v: unknown): Record<string, Deferral | number> {
+  const out: Record<string, Deferral | number> = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const [k, d] of Object.entries(v)) {
+    if (typeof d === 'number' ? d >= 0 : !!d && typeof d === 'object' && typeof d.n === 'number' && typeof d.since === 'string' && !Number.isNaN(Date.parse(d.since))) out[k] = d as Deferral | number;
+  }
+  return out;
+}
+
 async function runSync(client: MedplumClient, dir: string, src: SourceRec, patientId: string, opts: { dryRun?: boolean; now?: Date }): Promise<SyncResult> {
   const at = (opts.now ?? new Date()).toISOString(); // one timestamp: source date, last-seen and last-success
   const pending = !src.enabledTypes; // no enabled types yet: counts only, nothing in GA, until the user enables them
@@ -184,13 +194,13 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     stage = 'fetch_error';
     // Per record, the syncs in a row its body download failed for now (fetchAll's deferral cap); a dry run never writes it.
     const deferralsFile = `${src.key}.deferrals.json`;
-    let deferrals: Record<string, number> = {};
+    let deferrals: Record<string, Deferral | number> = {};
     try {
-      deferrals = readJson(dir, deferralsFile, {});
+      deferrals = validDeferrals(readJson<unknown>(dir, deferralsFile, {}));
     } catch {
       // unreadable: start counting again
     }
-    const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes, { deferrals });
+    const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes, { deferrals, now: new Date(at) });
     const { resources, binaries } = mapForGa(fetched.resources, src, new Set(fetched.deferred));
     stage = 'import_error';
     const c = dryRun ? dryRunClient(client) : client;
@@ -205,7 +215,13 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       );
     };
     const report = dryRun ? await write() : await withImportLock(write);
-    if (!dryRun) writeAtomic(join(dir, deferralsFile), JSON.stringify(fetched.deferrals));
+    if (!dryRun) {
+      try {
+        writeAtomic(join(dir, deferralsFile), JSON.stringify(fetched.deferrals));
+      } catch {
+        // best effort: the import is done; losing the counts only restarts them
+      }
+    }
     const ok: SyncResult = {
       source: src.key,
       status: pending ? 'pending' : 'active',

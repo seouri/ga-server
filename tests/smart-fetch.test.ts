@@ -25,7 +25,7 @@ const find = <T extends Resource>(rs: Resource[], key: string) => rs.find((r) =>
 const text = (d: DocumentReference) => Buffer.from(d.content[0].attachment.data ?? '', 'base64').toString('utf8');
 
 // Reports whose presentedForm points at Binary ids; the broken ones answer with bad().
-const reportsMock = async (ids: [string, string, string?][], bad: (res: ServerResponse) => void, opts: { deferrals?: Record<string, number> } = {}) => {
+const reportsMock = async (ids: [string, string, string?][], bad: (res: ServerResponse) => void, opts: Parameters<typeof fetchAll>[4] = {}) => {
   const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
   const { requests: reqs } = serveFixtures(m2);
   m2.route('/fhir/metadata', (_q, res) =>
@@ -176,16 +176,60 @@ describe('fetchAll', () => {
     expect(broken).toEqual(['/fhir/Binary/broken3', '/fhir/Binary/broken1', '/fhir/Binary/broken2']);
   });
 
-  it('a record deferred in 3 syncs in a row comes url-only on the 4th failure; a success clears its count', async () => {
+  it('a record deferred in 3 syncs over at least a day comes url-only on the next failure; a success clears its count', async () => {
     const e500 = (res: ServerResponse) => void res.writeHead(500).end();
-    const third = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { deferrals: { 'DiagnosticReport/dr1': 2, 'DiagnosticReport/dr2': 2 } });
+    const now = new Date('2026-06-02T12:00:00Z');
+    const since = '2026-06-01T11:00:00.000Z'; // 25 h before now
+    const third = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { now, deferrals: { 'DiagnosticReport/dr1': { n: 2, since }, 'DiagnosticReport/dr2': { n: 2, since } } });
     expect(third.got.deferred).toEqual(['DiagnosticReport/dr1']);
-    expect(third.got.deferrals).toEqual({ 'DiagnosticReport/dr1': 3 }); // dr2's body arrived: its count is gone
-    const fourth = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { deferrals: third.got.deferrals });
+    expect(third.got.deferrals).toEqual({ 'DiagnosticReport/dr1': { n: 3, since } }); // dr2's body arrived: its count is gone
+    const fourth = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { now, deferrals: third.got.deferrals });
     expect(fourth.got.deferred).toEqual([]);
     expect(fourth.got.deferrals).toEqual({});
     expect(find<DiagnosticReport>(fourth.got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
     expect(fourth.got.skipped.Binary).toMatch(/1 url-only after 3 deferrals/);
+  });
+
+  it('the cap needs a day: 5 deferrals within an hour still defer; an old-format count starts its day now', async () => {
+    const e500 = (res: ServerResponse) => void res.writeHead(500).end();
+    const now = new Date('2026-06-02T12:00:00Z');
+    const since = '2026-06-02T11:00:00.000Z';
+    const { got } = await reportsMock([['dr1', 'broken']], e500, { now, deferrals: { 'DiagnosticReport/dr1': { n: 5, since } } });
+    expect(got.deferred).toEqual(['DiagnosticReport/dr1']);
+    expect(got.deferrals).toEqual({ 'DiagnosticReport/dr1': { n: 6, since } });
+    const old = await reportsMock([['dr1', 'broken']], e500, { now, deferrals: { 'DiagnosticReport/dr1': 3 } });
+    expect(old.got.deferred).toEqual(['DiagnosticReport/dr1']);
+    expect(old.got.deferrals).toEqual({ 'DiagnosticReport/dr1': { n: 4, since: now.toISOString() } });
+  });
+
+  it('retries records already deferred before newer ones', async () => {
+    const ids: [string, string, string?][] = [['dr-new', 'broken1', '2026-06-01T00:00:00Z'], ['dr-old', 'broken2', '2025-01-01T00:00:00Z']];
+    const { broken } = await reportsMock(ids, (res) => void res.writeHead(404).end(), { deferrals: { 'DiagnosticReport/dr-old': { n: 1, since: '2026-06-01T00:00:00.000Z' } } });
+    expect(broken).toEqual(['/fhir/Binary/broken2', '/fhir/Binary/broken1']);
+  });
+
+  it('a record behind the 3-failure stop is deferred without a request, its entry unchanged, never url-only', async () => {
+    const now = new Date('2026-06-02T12:00:00Z');
+    const old = { n: 3, since: '2026-05-01T00:00:00.000Z' };
+    const d = { n: 1, since: '2026-06-02T00:00:00.000Z' };
+    const ids: [string, string, string?][] = [['dr1', 'broken1', '2026-06-01T00:00:00Z'], ['dr2', 'broken2', '2026-06-01T00:00:00Z'], ['dr3', 'broken3', '2026-06-01T00:00:00Z'], ['dr-x', 'n1', '2025-01-01T00:00:00Z']];
+    const deferrals = { 'DiagnosticReport/dr1': d, 'DiagnosticReport/dr2': d, 'DiagnosticReport/dr3': d, 'DiagnosticReport/dr-x': old };
+    const { got, reqs } = await reportsMock(ids, (res) => void res.writeHead(503).end(), { now, deferrals });
+    expect(reqs.filter((r) => r.startsWith('/fhir/Binary/n1'))).toEqual([]);
+    expect(got.deferred).toContain('DiagnosticReport/dr-x');
+    expect(got.deferrals['DiagnosticReport/dr-x']).toEqual(old);
+    expect(got.skipped.Binary).not.toMatch(/url-only/);
+  });
+
+  it('a JSON attachment that is not a FHIR resource is stored as bytes; unparseable fhir+json still defers', async () => {
+    const asJson = (body: string, type = 'application/json') => (res: ServerResponse) => void res.writeHead(200, { 'content-type': type }).end(body);
+    for (const body of ['{"note":"synthetic"}', 'not json at all']) {
+      const { got } = await reportsMock([['dr1', 'broken']], asJson(body));
+      expect(got.deferred).toEqual([]);
+      expect(Buffer.from(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data ?? '', 'base64').toString('utf8')).toBe(body);
+    }
+    const { got } = await reportsMock([['dr1', 'broken']], asJson('not json at all', 'application/fhir+json; charset=utf-8'));
+    expect(got.deferred).toEqual(['DiagnosticReport/dr1']);
   });
 
   it('after 3 transient failures in a row, the rest of the bodies wait for the next sync', async () => {

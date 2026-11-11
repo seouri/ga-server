@@ -1,6 +1,6 @@
 // SMART sync against the synthetic mock server and the local Medplum, always on throwaway test patients.
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
@@ -380,9 +380,22 @@ describe('a body download that fails for now', () => {
       expect(binId(v2.content[0].attachment.url)).toBe(binId(v1.content[0].attachment.url));
       expect(v2.content[0].attachment.hash).toBe(v1.content[0].attachment.hash);
       expect(v2.meta?.versionId).toBe(v1.meta?.versionId);
-      // The download works again: the new body is stored.
+      // The deferral is counted in <key>.deferrals.json; an explicit dry run writes no file; a corrupt file never fails a sync.
+      const file = join(dir, `${src.key}.deferrals.json`);
+      const counts = () => JSON.parse(readFileSync(file, 'utf8')) as Record<string, { n: number; since: string }>;
+      expect(counts()['DocumentReference/doc-flaky']).toMatchObject({ n: 1 });
+      rmSync(file);
+      expect((await syncSource(client, dir, src, pid, { dryRun: true })).status).toBe('active');
+      expect(existsSync(file)).toBe(false);
+      for (const corrupt of ['[1]', '"x"', '{"DocumentReference/doc-flaky": "x"}']) {
+        writeFileSync(file, corrupt);
+        expect((await syncSource(client, dir, src, pid, { now: new Date(Date.now() - 30_000) })).status).toBe('active');
+        expect(counts()['DocumentReference/doc-flaky']).toMatchObject({ n: 1 });
+      }
+      // The download works again: the new body is stored and the entry is gone.
       body = Buffer.from('%PDF-1.4\nsynthetic note v2\n');
       expect((await syncSource(client, dir, src, pid, { now: new Date() })).status).toBe('active');
+      expect(counts()).toEqual({});
       const docs = await stored();
       expect(docs).toHaveLength(1);
       expect(docs[0].content[0].attachment.hash).toBe(sha(body));
