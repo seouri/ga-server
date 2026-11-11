@@ -210,7 +210,8 @@ async function plan(old: MedplumClient, project: string, oldCfg: GaConfig, newCl
         writeFileSync(file, Buffer.from(await (await old.download(att.url as string)).arrayBuffer()), { mode: 0o600 });
         const [c, cfg] = await newClient();
         try {
-          return await importExtracted(c, cfg, rs.map(stripExtracted), file, srcDate(own));
+          // A copy, not an import: no term searches and no new mappings (the old project's maps are copied as they are).
+          return await importExtracted(c, { ...cfg, terminologyLookup: false }, rs.map(stripExtracted), file, srcDate(own));
         } catch (e) {
           const docId = e instanceof GaError && e.message.startsWith('already imported') ? /DocumentReference\/([^\s)]+)/.exec(e.message)?.[1] : undefined;
           if (!docId) throw e;
