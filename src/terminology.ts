@@ -1,5 +1,5 @@
 // Finds standard codes by term name. Only the name goes out, to NLM Clinical Tables (LOINC, ICD-10-CM), RxNav (RxNorm) and tx.fhir.org (SNOMED CT): never values, dates, units, ids or source names.
-import { ICD10CM, LOINC, RXNORM, SNOMED } from './concepts.ts';
+import { CVX, cvxLike, ICD10CM, LOINC, RXNORM, SNOMED } from './concepts.ts';
 
 export type Candidate = { system: string; code: string; display: string; from?: 'linked record' };
 
@@ -41,6 +41,7 @@ export async function searchCodes(system: string, term: string, deps: { fetch?: 
         return { system, code, display: properties?.name ?? '' };
       }));
     }
+    if (system === CVX) return cvxLike(term, limit) as Candidate[]; // the shipped table: nothing is sent
     if (system === SNOMED) {
       const found = await snomed(f, term, limit);
       const retry = simpler(term);

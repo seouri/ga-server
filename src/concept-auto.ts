@@ -5,7 +5,8 @@ import type { CodeableConcept, Extension, Resource } from '@medplum/fhirtypes';
 import { field, TARGET, trusted, type Unmapped } from './concept-apply.ts';
 import type { GaConfig } from './config.ts';
 import { mapTerm } from './concept-map-term.ts';
-import { CPT, ICD10CM } from './concepts.ts';
+import { CPT, CVX, ICD10CM } from './concepts.ts';
+import { validate } from './concept-validate.ts';
 import { loadMaps, lookup, termKey } from './conceptmap.ts';
 import { COMPARTMENT, DUP_OF } from './engine.ts';
 import { hasTag } from './identity.ts';
@@ -15,6 +16,7 @@ export type Reviewed = Unmapped & { candidates: Candidate[] };
 
 const MAX_TERMS = 50;
 const IN_FLIGHT = 4;
+const DEADLINE = 20_000; // for the whole run: a hanging service never holds an import, sync or tool call longer
 
 export function pickAuto(name: string, candidates: Candidate[]): Candidate | undefined {
   const hits = candidates.filter((c) => !c.from && sameName(c.display, name));
@@ -49,7 +51,7 @@ async function linked(client: MedplumClient, dups: Resource[], t: Unmapped): Pro
 }
 
 export async function autoMap(
-  client: MedplumClient, patientId: string, terms: Unmapped[], deps: { fetch?: typeof fetch; lookup?: boolean; map?: boolean } = {},
+  client: MedplumClient, patientId: string, terms: Unmapped[], deps: { fetch?: typeof fetch; lookup?: boolean; map?: boolean; deadline?: number } = {},
 ): Promise<{ autoMapped: number; terms: Reviewed[] }> {
   const out: Reviewed[] = terms.map((t) => ({ ...t, candidates: [] }));
   if (deps.lookup === false) return { autoMapped: 0, terms: out };
@@ -65,24 +67,35 @@ export async function autoMap(
     if (!dups.has(type)) dups.set(type, client.searchResources(type as 'Procedure', { [COMPARTMENT[type]]: `Patient/${patientId}`, _tag: 'urn:ga-server:tag|possible-duplicate', _count: '1000' }, { cache: 'no-cache' }).catch(() => []));
     return dups.get(type) as Promise<Resource[]>;
   };
+  let expired = false; // past the deadline: no more candidates or writes, so the returned terms stay as they are
   const one = async (t: Reviewed) => {
     const searched = await searchCodes(TARGET[t.type][0], t.name, { fetch: deps.fetch });
-    const pick = pickAuto(t.name, searched); // only the first vocabulary may be auto-mapped
+    const pick = TARGET[t.type][0] === CVX ? undefined : pickAuto(t.name, searched); // only the first vocabulary, never the CVX table, may be auto-mapped
     const more = t.type === 'Condition' ? await searchCodes(ICD10CM, t.name, { fetch: deps.fetch }) : [];
     const link = await linked(client, await dupsOf(t.type), t);
+    if (expired) return;
     t.candidates = [...(link ? [link] : []), ...[...searched, ...more].filter((c) => !(link && c.system === link.system && c.code === link.code))];
     if (deps.map === false || !pick || (link && (link.system !== pick.system || link.code !== pick.code))) return; // a differing linked code: the agent judges
+    // GA maps only a code the service confirmed: unavailable validation leaves the term for the agent.
+    const checked = await validate(pick.system, pick.code, { fetch: deps.fetch });
+    if (!checked.ok || checked.reason || expired) return;
     try {
-      const r = await mapTerm(client, patientId, { source: t.source, name: t.name, unit: t.unit, key: t.key, type: t.type, system: pick.system, code: pick.code, display: pick.display, equivalence: 'equivalent', confident: true }, 'GA (automatic)', { fetch: deps.fetch });
+      const r = await mapTerm(client, patientId, { source: t.source, name: t.name, unit: t.unit, key: t.key, type: t.type, system: pick.system, code: pick.code, display: pick.display, equivalence: 'equivalent', confident: true }, 'GA (automatic)', { fetch: deps.fetch, checked });
       if (r.status === 'mapped' || r.status === 'no records') mapped.add(t);
     } catch {
       // a refusal (out of scope, unknown code) leaves the term for the agent, with its candidates
     }
   };
   const queue = [...todo];
-  await Promise.all(Array.from({ length: IN_FLIGHT }, async () => {
-    for (let t = queue.shift(); t; t = queue.shift()) await one(t).catch(() => undefined); // that term stays for the agent
-  }));
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.all(Array.from({ length: IN_FLIGHT }, async () => {
+      for (let t = queue.shift(); t && !expired; t = queue.shift()) await one(t).catch(() => undefined); // that term stays for the agent
+    })),
+    new Promise<void>((resolve) => { timer = setTimeout(() => { expired = true; resolve(); }, deps.deadline ?? DEADLINE); }),
+  ]);
+  clearTimeout(timer);
+  expired = true;
   return left();
 }
 

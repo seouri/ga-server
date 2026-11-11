@@ -19,7 +19,7 @@ const termOf = (type: string, name: string, unit?: string): Resource => {
 };
 
 export async function mapTerm(
-  client: MedplumClient, patientId: string, input: MapInput, who: string, deps: { fetch?: typeof fetch } = {},
+  client: MedplumClient, patientId: string, input: MapInput, who: string, deps: { fetch?: typeof fetch; checked?: Awaited<ReturnType<typeof validate>> } = {},
 ): Promise<{ changed: number; status: 'mapped' | 'suggested' | 'unmatched' | 'no records'; reason?: string }> {
   const { source, name, unit, key: given, type, system, code, display, equivalence, confident } = input;
   // Refusals first: nothing is sent or written for them.
@@ -33,7 +33,7 @@ export async function mapTerm(
   const unmatched = equivalence === 'unmatched';
   if (!unmatched && !TARGET[type].includes(system)) throw new GaError(`${type} takes ${TARGET[type].join(', ')}, not ${system}`);
   if (!unmatched && !wellFormed(system, code)) throw new GaError(`"${code}" is not a ${system} code`);
-  const v = unmatched ? { ok: true } : await validate(system, code, { fetch: deps.fetch });
+  const v = unmatched ? { ok: true } : deps.checked ?? await validate(system, code, { fetch: deps.fetch }); // checked: validated by the caller
   if (!v.ok && v.reason !== 'validation unavailable') throw new GaError(`${v.reason}: not mapped`); // the code does not exist
   const sure = confident && v.ok && !v.reason; // an unavailable or skipped validation is applied as suggested
   const correction = !!lookup(await loadMaps(client, true), source, key); // a term mapped before may be coded on any record
