@@ -31,7 +31,7 @@ export const TERMINOLOGY_SCHEMA = `
 
 export const PARENT = 'http://hl7.org/fhir/concept-properties#parent';
 const SYNONYM = 'http://hl7.org/fhir/concept-properties#synonym';
-const INDEXED = new Set(['complete', 'example', 'fragment']); // Medplum's CodingTable: the content modes whose concepts are rows
+export const INDEXED = new Set(['complete', 'example', 'fragment']); // Medplum's CodingTable: the content modes whose concepts are rows
 
 // Not @medplum/definitions' readJson (see definitions.ts); its file names start at dist/ (fhir/r4/...).
 const DIST = new URL('../', import.meta.resolve('@medplum/definitions'));

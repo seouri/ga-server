@@ -12,7 +12,7 @@ import type {
   ValueSetExpansionContains,
 } from '@medplum/fhirtypes';
 import { type Store, StoreError } from './store.ts';
-import { type Arg, type Params, findTerminology, hierarchy, parentProperty, prep } from './terminology.ts';
+import { type Arg, INDEXED, type Params, findTerminology, hierarchy, parentProperty, prep } from './terminology.ts';
 
 // Medplum's limits (expand.ts): at most 1000 codes, 10 filter words, a text filter under 3 characters matches the exact code only
 // (and no hierarchy), and a text filter without a count pages by 10.
@@ -112,14 +112,24 @@ function functions(db: DatabaseSync): void {
   db.function('term_regex', o, (value, pattern) => (value === null ? 0 : +regex(String(pattern)).test(String(value))));
 }
 
-// A ValueSet `regex` filter: the whole value must match (R4 gives no anchoring; Medplum 5.2.14 has no regex filter).
+// A ValueSet `regex` filter: the whole value must match (R4 gives no anchoring; Medplum 5.2.14 has no regex filter). The bare
+// pattern compiles first, so an unbalanced one (`x)|(.*`) cannot escape the anchors.
 // shortcut: JavaScript's regex dialect stands in for Postgres's POSIX one (they agree on classes, ranges and {n}); upgrade if a
 // built-in or user pattern needs a POSIX-only construct.
+// shortcut: against catastrophic backtracking on the synchronous server, a pattern over 256 characters or with a quantified
+// group that holds a quantifier (`(a+)+`) is 400; overlapping alternation (`(a|aa)+`) and nested groups (`((a+))+`) still pass.
+// Upgrade to a linear-time engine if user patterns need those shapes.
+const MAX_PATTERN = 256;
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d)(?:[^()\\]|\\.)*\)(?:[+*]|\{\d)/;
 const patterns = new Map<string, RegExp>();
 function regex(pattern: string): RegExp {
   let r = patterns.get(pattern);
   if (!r) {
-    try { r = new RegExp(`^(?:${pattern})$`, 'u'); } catch { throw bad(`Invalid regex in ValueSet filter: ${pattern}`); }
+    try {
+      if (pattern.length > MAX_PATTERN || NESTED_QUANTIFIER.test(pattern)) throw new Error();
+      new RegExp(pattern, 'u');
+      r = new RegExp(`^(?:${pattern})$`, 'u');
+    } catch { throw bad(`Invalid regex in ValueSet filter: ${pattern}`); }
     patterns.set(pattern, r);
   }
   return r;
@@ -213,40 +223,49 @@ function preExpanded(vs: ValueSet): boolean {
   return !!e?.contains?.length && !e.parameter && (!e.total || e.total === e.contains.length);
 }
 
-function includeMembers(store: Store, inc: ValueSetComposeInclude, seen: string[], cache: Map<string, Target>): Sql {
-  if (inc.valueSet) return union(inc.valueSet.map((url) => { const n = nested(store, url, seen); return members(store, n.vs, n.seen, cache); }));
+// A CodeSystem whose concepts the store holds, for search (strict): one held only as a stub (content not-present, as the seeded
+// SNOMED CT and LOINC, and no rows $import wrote) is 400, never an empty match. $expand keeps Medplum's empty expansion.
+function concepts(store: Store, t: Target, strict: boolean): Target {
+  if (strict && !INDEXED.has(t.cs.content) && !prep(store.db)('select 1 from coding where system = ? limit 1').get(t.rid)) {
+    throw bad(`CodeSystem ${t.cs.url} has no concepts in the store (content ${t.cs.content})`);
+  }
+  return t;
+}
+
+function includeMembers(store: Store, inc: ValueSetComposeInclude, seen: string[], cache: Map<string, Target>, strict = false): Sql {
+  if (inc.valueSet) return union(inc.valueSet.map((url) => { const n = nested(store, url, seen); return members(store, n.vs, n.seen, cache, strict); }));
   if (!inc.system) throw bad('Missing system URL for ValueSet include');
   if (inc.concept) return values(inc.concept.map((c) => [inc.system!, c.code]));
-  const rows = filterRows(store, target(store, inc.system, cache), inc.filter ?? []);
+  const rows = filterRows(store, concepts(store, target(store, inc.system, cache), strict), inc.filter ?? []);
   if (!rows) return NONE;
   const w = all(rows.where, ' and ');
   return { sql: `select ? system, c.code code from ${rows.from.sql} c where ${w.sql} and c.synonymOf is null`, args: [inc.system, ...rows.from.args, ...w.args] };
 }
 
-function members(store: Store, vs: ValueSet, seen: string[], cache: Map<string, Target>): Sql {
+function members(store: Store, vs: ValueSet, seen: string[], cache: Map<string, Target>, strict = false): Sql {
   if (preExpanded(vs)) return values(flatten(vs.expansion!.contains!).map((c) => [c.system!, c.code!]));
   if (!vs.compose?.include?.length) throw bad('Missing ValueSet definition');
-  const inc = union(vs.compose.include.map((i) => includeMembers(store, i, seen, cache)));
-  const ex = excluded(store, vs, seen, cache);
+  const inc = union(vs.compose.include.map((i) => includeMembers(store, i, seen, cache, strict)));
+  const ex = excluded(store, vs, seen, cache, strict);
   return ex ? { sql: `select * from (${inc.sql}) except select * from (${ex.sql})`, args: [...inc.args, ...ex.args] } : inc;
 }
 
-const excluded = (store: Store, vs: ValueSet, seen: string[], cache: Map<string, Target>): Sql | undefined =>
-  vs.compose?.exclude?.length ? union(vs.compose.exclude.map((i) => includeMembers(store, i, seen, cache))) : undefined;
+const excluded = (store: Store, vs: ValueSet, seen: string[], cache: Map<string, Target>, strict = false): Sql | undefined =>
+  vs.compose?.exclude?.length ? union(vs.compose.exclude.map((i) => includeMembers(store, i, seen, cache, strict))) : undefined;
 const isExcluded = (store: Store, ex: Sql | undefined, system: string, code: string): boolean =>
   !!ex && !!prep(store.db)(`select 1 from (${ex.sql}) where system = ? and code = ? limit 1`).get(...ex.args, system, code);
 
 // An SQL subquery of the (system, code) pairs in ValueSet `url`, for the token modifiers :in and :not-in. 400 when the store
-// does not hold the ValueSet, or a CodeSystem it draws a whole or filtered include from.
+// does not hold the ValueSet, or the concepts of a CodeSystem it draws a whole or filtered include from.
 export function inValueSet(store: Store, url: string): Sql {
   const vs = findTerminology<ValueSet>(store, 'ValueSet', url);
-  return members(store, vs, [vs.url!], new Map());
+  return members(store, vs, [vs.url!], new Map(), true);
 }
 
 // An SQL subquery (column `code`) of the codes at or under (below) or at or over (above) `code` in CodeSystem `system`, for
-// :below and :above. 400 when the store does not hold the CodeSystem or it has no is-a hierarchy.
+// :below and :above. 400 when the store does not hold the CodeSystem or its concepts, or it has no is-a hierarchy.
 export function subsumedCodes(store: Store, system: string, code: string, dir: 'below' | 'above'): Sql {
-  const { rid, cs } = target(store, system, new Map());
+  const { rid, cs } = concepts(store, target(store, system, new Map()), true);
   const walk = hierarchy(dir === 'below' ? 'down' : 'up', rid, propertyId(store, rid, parentProperty(cs).code) ?? -1, code);
   return { sql: `${walk.sql} select code from walk where synonymOf is null`, args: walk.args };
 }
@@ -349,7 +368,7 @@ function includeQuery(store: Store, t: Target, inc: ValueSetComposeInclude, o: E
   return {
     sql: `select * from (select c.id, c.code, ${display.sql} display, ${language.sql} language, c.synonymOf from ${rows.from.sql} c where ${w.sql}) x
       ${dl ? 'where x.display is not null' : ''} ${order.sql} limit ? offset ?`,
-    args: [...display.args, ...language.args, ...rows.from.args, ...w.args, ...order.args, (o.count ?? MAX_EXPANSION_SIZE) + 1, o.offset ?? 0],
+    args: [...display.args, ...language.args, ...rows.from.args, ...w.args, ...order.args, Math.min(o.count ?? MAX_EXPANSION_SIZE, MAX_EXPANSION_SIZE) + 1, o.offset ?? 0],
   };
 }
 

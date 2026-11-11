@@ -937,6 +937,27 @@ describe.each(PLANS)('Store terminology search (%s plan)', (_plan, tuning) => {
     }
   });
 
+  it('a CodeSystem held only as a stub (content not-present, no concepts) is 400 naming it, never an empty match', () => {
+    const stub = 'http://example.com/stub', stubVs = 'http://example.com/vs-stub';
+    store.create({ resourceType: 'CodeSystem', status: 'active', content: 'not-present', url: stub, hierarchyMeaning: 'is-a' } as Resource);
+    store.create({ resourceType: 'ValueSet', status: 'active', url: stubVs, compose: { include: [{ valueSet: [VS] }, { system: stub, filter: [{ property: 'concept', op: 'is-a', value: 's' }] }] } } as Resource);
+    store.put({ resourceType: 'Condition', id: 's', meta, subject: { reference: 'Patient/p' }, code: { coding: [{ system: stub, code: 's' }] } } as Resource);
+    for (const q of [`code:below=${stub}|s`, `code:above=${stub}|s`, `code:in=${stubVs}`, `code:not-in=${stubVs}`, `_filter=code ss ${stub}|s`,
+      `_filter=code sb ${stub}|s`, `_filter=code in ${stubVs}`, `_filter=code ni ${stubVs}`]) {
+      const e = fail(q);
+      expect([q, e.status, e.message]).toEqual([q, 400, `CodeSystem ${stub} has no concepts in the store (content not-present)`]);
+    }
+    // Conditional create: 400, nothing written.
+    const before = ids('');
+    let e: StoreError | undefined;
+    try { store.create({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { coding: [{ system: stub, code: 's' }] } } as Resource, `code:below=${stub}|s`); } catch (x) { e = x as StoreError; }
+    expect([e?.status, e?.message]).toEqual([400, `CodeSystem ${stub} has no concepts in the store (content not-present)`]);
+    expect(ids('')).toEqual(before);
+    // Enumerated concepts of the stub need none of its rows.
+    store.create({ resourceType: 'ValueSet', status: 'active', url: 'http://example.com/vs-enum', compose: { include: [{ system: stub, concept: [{ code: 's' }] }] } } as Resource);
+    expect(ids('code:in=http://example.com/vs-enum')).toEqual(['s']);
+  });
+
   it('_filter code in, ni, ss, sb', () => {
     expect(ids(`_filter=code in ${VS}`)).toEqual(['b', 'd']);
     expect(ids(`_filter=code ni ${VS}`)).toEqual(['a', 'f', 'g', 'n', 'x']);

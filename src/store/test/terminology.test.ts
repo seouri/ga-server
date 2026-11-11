@@ -224,6 +224,16 @@ describe('built-in terminology', () => {
     expect(findTerminology<CodeSystem>(store, 'CodeSystem', 'http://terminology.hl7.org/CodeSystem/v2-0360').version).toBe('2.7');
   });
 
+  it('search over a seeded stub (SNOMED CT, content not-present) is 400 naming it; conditional create writes nothing', () => {
+    const sct = 'http://snomed.info/sct', text = `CodeSystem ${sct} has no concepts in the store (content not-present)`;
+    for (const q of [`code:below=${sct}|44054006`, 'code:in=http://hl7.org/fhir/ValueSet/condition-code', 'code:not-in=http://hl7.org/fhir/ValueSet/condition-code']) {
+      const e = err(() => store.search('Condition', [...new URLSearchParams(q)], ''));
+      expect([q, e.status, e.message]).toEqual([q, 400, text]);
+    }
+    const e = err(() => store.create({ resourceType: 'Condition', subject: { reference: 'Patient/p' }, code: { coding: [{ system: sct, code: '44054006' }] } }, `code:below=${sct}|44054006`));
+    expect([e.status, e.message, count(store, 'Condition')]).toEqual([400, text, 0]);
+  });
+
   it('a stored CodeSystem with a built-in url is found first', () => {
     const url = 'http://terminology.hl7.org/CodeSystem/v3-ActCode';
     const mine = store.create(cs({ url, content: 'example', concept: [{ code: 'X' }] })).resource;

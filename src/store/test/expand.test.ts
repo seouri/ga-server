@@ -86,6 +86,38 @@ describe('$expand (no built-ins)', () => {
     expect(members(store, 'http://example.com/vs-r')).toEqual(['http://example.com/cs|B', 'http://example.com/cs|B1']);
   });
 
+  it('a regex filter cannot escape its anchors; an unbalanced pattern is 400', () => {
+    expect(err(() => expand(include({ filter: [{ property: 'code', op: 'regex', value: 'ZZZ)|(.*' }] }))).message).toBe('Invalid regex in ValueSet filter: ZZZ)|(.*');
+    store.create(vs({ url: 'http://example.com/vs-x', compose: { include: [{ system: 'http://example.com/cs', filter: [{ property: 'code', op: 'regex', value: 'ZZZ)|(.*' }] }] } }));
+    expect(err(() => members(store, 'http://example.com/vs-x')).status).toBe(400);
+  });
+
+  it('a regex filter with a nested quantifier or over 256 characters is 400 (catastrophic backtracking)', () => {
+    for (const value of ['(a+)+b', '(x*)*', 'a'.repeat(257)]) {
+      const e = err(() => expand(include({ filter: [{ property: 'kind', op: 'regex', value }] })));
+      expect([e.status, e.message]).toEqual([400, `Invalid regex in ValueSet filter: ${value}`]);
+    }
+    expect(codes(expand(include({ filter: [{ property: 'code', op: 'regex', value: '(B1?)+' }] })))).toEqual(['B', 'B1']);
+  });
+
+  it('a count over 1000 fetches at most 1001 rows and expands as count 1000', () => {
+    store.create({ resourceType: 'CodeSystem', status: 'active', content: 'complete', url: 'http://example.com/big', concept: Array.from({ length: 1500 }, (_, i) => ({ code: `c${i}` })) });
+    const big = vs({ compose: { include: [{ system: 'http://example.com/big' }] } });
+    const limits: unknown[] = [];
+    const prepare = store.db.prepare.bind(store.db);
+    store.db.prepare = ((sql: string) => {
+      const st = prepare(sql);
+      if (/limit \? offset \?/.test(sql)) { const run = st.all.bind(st); st.all = ((...a: never[]) => { limits.push(a.at(-2)); return run(...a); }) as typeof st.all; }
+      return st;
+    }) as typeof store.db.prepare;
+    let wide: ValueSet;
+    try { wide = expand(big, { count: 20000 }); } finally { store.db.prepare = prepare; }
+    expect(limits).toEqual([1001]);
+    const narrow = expand(big, { count: 1000 });
+    expect({ ...wide.expansion, timestamp: 0 }).toEqual({ ...narrow.expansion, timestamp: 0 });
+    expect([wide.expansion?.total, wide.expansion?.contains?.length]).toEqual([1001, 1000]);
+  });
+
   it('a ValueSet including itself through another is 400 (recursive definition)', () => {
     store.create(vs({ url: 'http://example.com/vs-a', compose: { include: [{ valueSet: ['http://example.com/vs-b'] }] } }));
     store.create(vs({ url: 'http://example.com/vs-b', compose: { include: [{ valueSet: ['http://example.com/vs-a'] }] } }));
