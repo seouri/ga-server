@@ -9,7 +9,7 @@ import { binaryId, importResources, type ImportReport } from '../engine.ts';
 import { IMPORT_BUSY, takeLock, withImportLock } from '../lock.ts';
 import { accessToken, type Tokens } from './auth.ts';
 import { attachmentsOf, fetchAll, mapForGa, type PendingBinary } from './fetch.ts';
-import { loadSecret, readApp, readSources, type SourceRec } from './store.ts';
+import { loadSecret, readApp, readJson, readSources, type SourceRec, writeAtomic } from './store.ts';
 
 export type SyncResult = {
   source: string;
@@ -182,7 +182,15 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     const patient = src.patient ?? loadSecret<Tokens>(dir, src.key)?.patient;
     if (!patient) throw new GaError('no_patient');
     stage = 'fetch_error';
-    const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes);
+    // Per record, the syncs in a row its body download failed for now (fetchAll's deferral cap); a dry run never writes it.
+    const deferralsFile = `${src.key}.deferrals.json`;
+    let deferrals: Record<string, number> = {};
+    try {
+      deferrals = readJson(dir, deferralsFile, {});
+    } catch {
+      // unreadable: start counting again
+    }
+    const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes, { deferrals });
     const { resources, binaries } = mapForGa(fetched.resources, src, new Set(fetched.deferred));
     stage = 'import_error';
     const c = dryRun ? dryRunClient(client) : client;
@@ -197,6 +205,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       );
     };
     const report = dryRun ? await write() : await withImportLock(write);
+    if (!dryRun) writeAtomic(join(dir, deferralsFile), JSON.stringify(fetched.deferrals));
     const ok: SyncResult = {
       source: src.key,
       status: pending ? 'pending' : 'active',

@@ -42,7 +42,8 @@ export async function fetchAll(
   token: string,
   patient: string,
   types?: string[],
-): Promise<{ resources: Resource[]; byType: Record<string, number>; skipped: Record<string, string>; deferred: string[] }> {
+  { deferrals = {} }: { deferrals?: Record<string, number> } = {},
+): Promise<{ resources: Resource[]; byType: Record<string, number>; skipped: Record<string, string>; deferred: string[]; deferrals: Record<string, number> }> {
   const base = normBase(fhirBase);
   const skipped: Record<string, string> = {};
   const failures: Record<string, number> = {};
@@ -61,7 +62,10 @@ export async function fetchAll(
     const u = new URL(url, `${base}/`).href;
     if (!inside(u)) throw new GaError(`${what}: URL outside the FHIR base`);
     const r = await fetch(u, { headers: { authorization: `Bearer ${token}`, accept }, signal: AbortSignal.timeout(60_000) });
-    if (r.status === 401 || r.status >= 500) throw new GaError(`${what}: HTTP ${r.status}`);
+    if (r.status === 401 || r.status >= 500) {
+      await r.body?.cancel(); // release the socket
+      throw new GaError(`${what}: HTTP ${r.status}`);
+    }
     return r;
   };
   const search = async (first: string, what: string): Promise<Resource[] | string> => {
@@ -119,15 +123,20 @@ export async function fetchAll(
   }
 
   // Note and report bodies: Binary/<id> attachments are fetched into attachment.data (base64); mapForGa decides what they become.
-  // A permanent refusal (403, 404...) leaves the attachment url-only. A failure for now (5xx, timeout, network, bad JSON) defers
-  // the whole record: left out of this sync, so the stored copy keeps its body and the next sync retries. After DEAD such
-  // failures in a row the Binary endpoint counts as down: the remaining bodies wait too. A refused token (401) aborts.
-  const DEAD = 3;
-  let streak = 0, lastReason = '';
+  // A permanent refusal (403, 404...) leaves the attachment url-only. A failure for now (5xx, 408, 429, timeout, network, bad
+  // JSON, an empty body or not a Binary) defers the whole record: left out of this sync, so the stored copy keeps its body and the
+  // next sync retries. After DEAD such failures in a row the Binary endpoint counts as down: the remaining bodies wait too.
+  // Newest lastUpdated first, so new and changed records use a rate-limited quota before unchanged ones (which skip anyway).
+  // deferrals: per record, the syncs in a row it was deferred (the caller keeps it); after MAX_DEFER it comes url-only instead,
+  // so a body that always fails never hides a record for good. A refused token (401) aborts.
+  const DEAD = 3, MAX_DEFER = 3;
+  let streak = 0, lastReason = '', urlOnly = 0;
   const deferredKeys: string[] = [];
+  const nextDeferrals: Record<string, number> = {};
   const fetchable = (a: Attachment) =>
     !!a.url && !a.data && /(^|\/)Binary\/[^/]+$/.test(a.url) && URL.canParse(a.url, `${base}/`) && new URL(a.url, `${base}/`).href.startsWith(`${base}/Binary/`);
-  for (const [k, r] of [...got]) {
+  const when = (r: Resource) => Date.parse(r.meta?.lastUpdated ?? '') || -Infinity;
+  for (const [k, r] of [...got].sort(([, a], [, b]) => when(b) - when(a))) {
     const atts = attachmentsOf(r).filter(fetchable);
     let defer = atts.length > 0 && streak >= DEAD;
     for (const a of atts) {
@@ -149,6 +158,8 @@ export async function fetchAll(
         buf = Buffer.from(await res.arrayBuffer());
         // Some servers answer with a FHIR Binary resource whatever the Accept header says.
         fhir = /json/.test(type) ? await parse<{ resourceType?: string; data?: string; contentType?: string }>(buf.toString('utf8'), 'Binary') : undefined;
+        if (fhir && fhir.resourceType !== 'Binary') throw new GaError('Binary: not a Binary');
+        if (fhir ? !fhir.data : !buf.length) throw new GaError('Binary: empty');
       } catch (e) {
         if (e instanceof GaError && e.message === 'Binary: HTTP 401') throw e;
         streak++;
@@ -157,7 +168,7 @@ export async function fetchAll(
         break;
       }
       streak = 0;
-      if (fhir?.resourceType === 'Binary') {
+      if (fhir) {
         a.data = fhir.data;
         a.contentType ??= fhir.contentType;
       } else {
@@ -165,17 +176,26 @@ export async function fetchAll(
         a.contentType ??= type || undefined;
       }
     }
-    if (defer) {
-      got.delete(k);
-      deferredKeys.push(k);
+    if (!defer) continue;
+    if ((deferrals[k] ?? 0) >= MAX_DEFER) {
+      urlOnly++; // its failed attachments stay url-only, like a permanent refusal
+      continue;
     }
+    got.delete(k);
+    deferredKeys.push(k);
+    nextDeferrals[k] = (deferrals[k] ?? 0) + 1;
   }
-  if (deferredKeys.length) skipped.Binary = [`${deferredKeys.length} deferred to the next sync, last ${lastReason}`, skipped.Binary].filter(Boolean).join('; ');
+  skipped.Binary = [
+    deferredKeys.length && `${deferredKeys.length} deferred to the next sync, last ${lastReason}`,
+    urlOnly && `${urlOnly} url-only after ${MAX_DEFER} deferrals`,
+    skipped.Binary,
+  ].filter(Boolean).join('; ');
+  if (!skipped.Binary) delete skipped.Binary;
 
   const resources = [...got.values()];
   const byType: Record<string, number> = {};
   for (const r of resources) byType[r.resourceType] = (byType[r.resourceType] ?? 0) + 1;
-  return { resources, byType, skipped, deferred: deferredKeys };
+  return { resources, byType, skipped, deferred: deferredKeys, deferrals: nextDeferrals };
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };

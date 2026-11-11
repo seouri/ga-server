@@ -25,19 +25,19 @@ const find = <T extends Resource>(rs: Resource[], key: string) => rs.find((r) =>
 const text = (d: DocumentReference) => Buffer.from(d.content[0].attachment.data ?? '', 'base64').toString('utf8');
 
 // Reports whose presentedForm points at Binary ids; the broken ones answer with bad().
-const reportsMock = async (ids: [string, string][], bad: (res: ServerResponse) => void) => {
+const reportsMock = async (ids: [string, string, string?][], bad: (res: ServerResponse) => void, opts: { deferrals?: Record<string, number> } = {}) => {
   const m2 = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
   const { requests: reqs } = serveFixtures(m2);
   m2.route('/fhir/metadata', (_q, res) =>
     void res.end(JSON.stringify({ resourceType: 'CapabilityStatement', rest: [{ resource: [{ type: 'DiagnosticReport', interaction: [{ code: 'search-type' }], searchParam: [{ name: 'patient' }] }] }] })),
   );
-  const dr = (id: string, bin: string) => ({ resourceType: 'DiagnosticReport', id, status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
-  m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: ids.map(([id, bin]) => ({ resource: dr(id, bin) })) })));
+  const dr = (id: string, bin: string, lastUpdated?: string) => ({ resourceType: 'DiagnosticReport', id, ...(lastUpdated && { meta: { lastUpdated } }), status: 'final', code: { text: 'X-ray' }, subject: { reference: `Patient/${P}` }, presentedForm: [{ contentType: 'text/html', url: `Binary/${bin}` }] });
+  m2.route('/fhir/DiagnosticReport', (_q, res) => void res.end(JSON.stringify({ resourceType: 'Bundle', type: 'searchset', entry: ids.map(([id, bin, lu]) => ({ resource: dr(id, bin, lu) })) })));
   const broken: string[] = [];
   m2.route('/fhir/Binary/broken', (_q, res, url) => { broken.push(url.pathname); bad(res); });
   for (const i of [1, 2, 3, 4]) m2.route(`/fhir/Binary/broken${i}`, (_q, res, url) => { broken.push(url.pathname); bad(res); });
   try {
-    return { got: await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport']), broken, reqs };
+    return { got: await fetchAll(m2.fhirBase, m2.grant(), P, ['DiagnosticReport'], opts), broken, reqs };
   } finally {
     await m2.close();
   }
@@ -155,6 +155,37 @@ describe('fetchAll', () => {
     const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], (res) => void res.writeHead(404).end());
     expect(got.skipped.Binary).toBe('1 failed, last HTTP 404');
     expect(find<DiagnosticReport>(got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
+  });
+
+  it('an empty body, a Binary without data or a JSON that is not a Binary defers its record', async () => {
+    const answers = [
+      (res: ServerResponse) => void res.writeHead(200, { 'content-type': 'application/pdf' }).end(),
+      (res: ServerResponse) => void res.writeHead(200, { 'content-type': 'application/fhir+json' }).end(JSON.stringify({ resourceType: 'Binary', contentType: 'application/pdf' })),
+      (res: ServerResponse) => void res.writeHead(200, { 'content-type': 'application/fhir+json' }).end(JSON.stringify({ resourceType: 'OperationOutcome', issue: [{ severity: 'error', code: 'exception' }] })),
+    ];
+    for (const bad of answers) {
+      const { got } = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], bad);
+      expect(got.deferred).toEqual(['DiagnosticReport/dr1']);
+      expect(keys(got.resources)).toContain('DiagnosticReport/dr2');
+    }
+  });
+
+  it('downloads the newest bodies first (records without lastUpdated last)', async () => {
+    const ids: [string, string, string?][] = [['dr-old', 'broken1', '2025-01-01T00:00:00Z'], ['dr-none', 'broken2'], ['dr-new', 'broken3', '2026-06-01T00:00:00Z']];
+    const { broken } = await reportsMock(ids, (res) => void res.writeHead(404).end());
+    expect(broken).toEqual(['/fhir/Binary/broken3', '/fhir/Binary/broken1', '/fhir/Binary/broken2']);
+  });
+
+  it('a record deferred in 3 syncs in a row comes url-only on the 4th failure; a success clears its count', async () => {
+    const e500 = (res: ServerResponse) => void res.writeHead(500).end();
+    const third = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { deferrals: { 'DiagnosticReport/dr1': 2, 'DiagnosticReport/dr2': 2 } });
+    expect(third.got.deferred).toEqual(['DiagnosticReport/dr1']);
+    expect(third.got.deferrals).toEqual({ 'DiagnosticReport/dr1': 3 }); // dr2's body arrived: its count is gone
+    const fourth = await reportsMock([['dr1', 'broken'], ['dr2', 'n1']], e500, { deferrals: third.got.deferrals });
+    expect(fourth.got.deferred).toEqual([]);
+    expect(fourth.got.deferrals).toEqual({});
+    expect(find<DiagnosticReport>(fourth.got.resources, 'DiagnosticReport/dr1').presentedForm?.[0].data).toBeUndefined();
+    expect(fourth.got.skipped.Binary).toMatch(/1 url-only after 3 deferrals/);
   });
 
   it('after 3 transient failures in a row, the rest of the bodies wait for the next sync', async () => {
