@@ -14,7 +14,8 @@ import { importAppleHealth } from '../../src/apple/import.ts';
 import { collapsePatients } from '../../src/patient.ts';
 import { createTestPatient } from './helpers.ts';
 
-// Writes to the REAL patient. Prints counts only: never values, names, dates or resource bodies.
+// Imports the owner's REAL files (into the run's ga-test project, never the live one). Prints counts only: never values, names,
+// dates or resource bodies.
 const root = process.env.GA_REAL_DATA;
 
 // Server/converter messages can echo field values; keep only issue codes and element paths.

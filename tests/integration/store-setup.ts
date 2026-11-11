@@ -1,5 +1,6 @@
 // GA_STORE=sqlite: every integration file runs against its own temp SQLite store (a child `serveStore`, so tests that
 // block on spawnSync can't deadlock it) with a temp config and self Patient. Never the live install's config or token.
+// Medplum (the default): the run's ga-test project (global-setup.ts), checked before each file.
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,4 +36,11 @@ if (process.env.GA_STORE === 'sqlite') {
     child?.kill();
     rmSync(dir, { recursive: true, force: true });
   });
+} else {
+  // Medplum: global-setup.ts pointed GA_CONFIG at the ga-test project; each file checks it still does before any test writes.
+  beforeAll(async () => {
+    const { getClient, loadConfig } = await import('../../src/config.ts');
+    const { assertTestProject } = await import('./helpers.ts');
+    await assertTestProject(await getClient(loadConfig()));
+  }, 60_000);
 }

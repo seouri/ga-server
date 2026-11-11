@@ -7,6 +7,7 @@ import { defaultConfigPath, type GaConfig, getClient, loadConfig, storeKind } fr
 import { convertCcdaLocal } from '../../src/ccda.ts';
 import { COMPARTMENT } from '../../src/engine.ts';
 import { searchAll } from '../../src/labs.ts';
+import { binaryIds } from '../../src/migrate.ts';
 import { setup } from '../../src/setup.ts';
 import type { Bundle, DocumentReference, Patient, Resource } from '@medplum/fhirtypes';
 
@@ -45,8 +46,32 @@ export async function retryLimited<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+// Medplum mode: every helper that writes first checks, once per client, that the client is in a ga-test* project
+// (global-setup.ts points the run at one). The store (GA_STORE=sqlite) is a per-file temp store already.
+const checked = new WeakMap<MedplumClient, Promise<void>>();
+export function assertTestProject(client: MedplumClient): Promise<void> {
+  if (SQLITE) return Promise.resolve();
+  let p = checked.get(client);
+  if (!p) {
+    p = (async () => {
+      const me = (await client.get('auth/me', { cache: 'no-cache' })) as { project?: { name?: string; display?: string } };
+      if (!/^ga-test/.test(me.project?.name ?? me.project?.display ?? '')) throw new Error('refusing to run integration tests against a non-test project');
+    })();
+    p.catch(() => checked.delete(client));
+    checked.set(client, p);
+  }
+  return p;
+}
+
+// Each Binary a record's attachments point at (Binary/<id> as written, or Medplum's presigned storage/<id>/... read back),
+// deleted before the record: Medplum cannot search Binary, so once the record is gone the file is unreachable.
+async function deleteFiles(client: MedplumClient, r: Resource): Promise<void> {
+  for (const id of binaryIds([r])) await client.deleteResource('Binary', id).catch(() => undefined); // shared by another record, or gone
+}
+
 // Tests must never write onto the real Patient (identifier ...|self).
 export async function createTestPatient(client: MedplumClient): Promise<string> {
+  await assertTestProject(client);
   const p = await client.createResource<Patient>({
     resourceType: 'Patient',
     identifier: [{ system: 'urn:ga-server:id:patient', value: `test-${randomUUID()}` }],
@@ -56,19 +81,23 @@ export async function createTestPatient(client: MedplumClient): Promise<string> 
 }
 
 export async function cleanupTestPatient(client: MedplumClient, patientId: string): Promise<void> {
+  await assertTestProject(client);
   // Only compartment matches: $everything also includes referenced shared records (Organization, Practitioner...), which may be real.
   // Repeat until nothing matches, so a compartment larger than one page is fully deleted.
   for (;;) {
     const mine = await compartmentOf(client, patientId);
     if (!mine.length) break;
-    for (const r of mine) await client.deleteResource(r.resourceType, r.id as string);
+    for (const r of mine) {
+      await deleteFiles(client, r);
+      await client.deleteResource(r.resourceType, r.id as string);
+    }
   }
   await client.deleteResource('Patient', patientId);
 }
 
-// Tests that pointed GA_CONFIG at a test project put back the one the run started with (deleting it would fall back to
-// the checkout's own .ga/config.json, absent in a worktree). On the store: the file's temp store config, never the shell's.
-const STARTING_CONFIG = process.env.GA_CONFIG;
+// Tests that pointed GA_CONFIG at another test project put back the run's ga-test config (global-setup.ts), never the live
+// one. On the store: the file's temp store config, never the shell's.
+const STARTING_CONFIG = process.env.GA_INT_RUN_CONFIG ?? process.env.GA_CONFIG;
 export function restoreConfig(): void {
   if (SQLITE) { if (process.env.GA_INT_STORE_CONFIG) process.env.GA_CONFIG = process.env.GA_INT_STORE_CONFIG; }
   else if (STARTING_CONFIG === undefined) delete process.env.GA_CONFIG;
@@ -121,19 +150,24 @@ export async function emptyTestProject(client: MedplumClient): Promise<void> {
     }
     return;
   }
-  const me = (await client.get('auth/me', { cache: 'no-cache' })) as { project: { name?: string; display?: string } };
-  if (!/^ga-test/.test(me.project.name ?? me.project.display ?? '')) throw new Error('not a ga-test project');
+  await assertTestProject(client);
   for (const t of DOOMED) {
     for (;;) {
       const rs = (await client.searchResources(t as 'Patient', { _count: '1000' }, { cache: 'no-cache' }))
         .filter((r) => r.meta?.author?.reference?.startsWith('ClientApplication/') && !(t === 'Patient' && (r as Patient).identifier?.some((i) => i.value === 'self')));
       if (!rs.length) break;
       for (const r of rs) {
-        const files = t === 'DocumentReference' ? (r as unknown as DocumentReference).content.flatMap((c) => /^Binary\/([\w-]+)$/.exec(c.attachment.url ?? '')?.[1] ?? []) : [];
-        for (const id of files) await client.deleteResource('Binary', id).catch(() => undefined); // shared by another record, or gone
+        await deleteFiles(client, r);
         await client.deleteResource(t as 'Patient', r.id as string);
       }
     }
+  }
+  // The self Patient stays, but back to what ga setup made: imports onto it merge in fixture identifiers and demographics
+  // (a C-CDA's fake MRN), which a later file's identifier search would find.
+  for (const p of await client.searchResources('Patient', { identifier: 'urn:ga-server:id:patient|self' }, { cache: 'no-cache' })) {
+    const { resourceType, id, meta: _m, identifier, ...rest } = p;
+    if (identifier?.length === 1 && !Object.keys(rest).length) continue;
+    await client.updateResource<Patient>({ resourceType, id, identifier: [{ system: 'urn:ga-server:id:patient', value: 'self' }] });
   }
 }
 
@@ -141,6 +175,7 @@ export async function emptyTestProject(client: MedplumClient): Promise<void> {
 // fixture's path (identifier search is global; the owner's records never carry a test fixture's path), so shared records
 // (Practitioner, Organization...) that cleanupTestPatient does not reach go too.
 export async function cleanupCcda(client: MedplumClient, file: string): Promise<void> {
+  await assertTestProject(client);
   const types = new Set(convertCcdaLocal(readFileSync(file, 'utf8')).resources.map((r) => r.resourceType).filter((t) => t !== 'Patient'));
   for (const t of types) {
     for (const r of await searchAll(client, t, { identifier: 'urn:ga-server:id:ccda|' })) if (r.meta?.source === file) await client.deleteResource(t, r.id as string);
@@ -156,6 +191,7 @@ const TEST_MAP = new RegExp(
     `|smart:(cut|firstfail|good|link|lock|norefresh|revoked|sync)-${UUID}|smart:fhir-example-org|test-${UUID})$`,
 );
 export async function cleanupTestMaps(client: MedplumClient): Promise<void> {
+  await assertTestProject(client);
   for (const m of await client.searchResources('ConceptMap', { _count: '1000' }, { cache: 'no-cache' })) {
     if (TEST_MAP.test(decodeURI(m.url ?? ''))) await client.deleteResource('ConceptMap', m.id as string);
   }
