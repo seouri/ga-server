@@ -101,6 +101,7 @@ export async function setup(
     patientId: patient.id as string,
     projectId,
     adminPassword: rotate ? randomBytes(24).toString('base64url') : password,
+    ...(written?.terminologyLookup === false && { terminologyLookup: false }), // the person's off switch survives a re-run
   };
   // Saved before the change: if the change fails, the next run falls back to the default and rotates again.
   writeConfig(out, cfg);

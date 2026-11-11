@@ -15,6 +15,7 @@ test('setup is idempotent, and the GA client reads clinical records but no Medpl
     const b = await retryLimited(() => setup(baseUrl, { projectName: 'ga-test' }));
     expect([b.projectId, b.patientId, b.clientId]).toEqual([a.projectId, a.patientId, a.clientId]);
     expect(loadConfig().projectId).toBe(a.projectId);
+    expect(loadConfig().terminologyLookup).toBe(false); // a re-run keeps the person's off switch (testProject set it)
     const client = await getClient(loadConfig());
     expect((await client.readResource('Patient', a.patientId)).id).toBe(a.patientId);
     // Medplum only (the store has no login, project or admin records): the client is an ordinary project member.
