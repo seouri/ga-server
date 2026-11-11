@@ -56,6 +56,8 @@ describe('ConceptMap', () => {
     expect(text([{ name: 'source', valueUri: `${cm.url}BAD` }, coding(SYS, 'FSH')])).toEqual([400, `ConceptMap for source ${cm.url}BAD not found`]);
     expect(text([coding(SYS, 'FSH'), { name: 'reverse', valueBoolean: true }], cm.id)).toEqual([400, '$translate: parameter reverse is not supported']);
     expect(text([coding(SYS, 'FSH')], '00000000-0000-4000-8000-000000000000')).toEqual([404, 'Not found']);
+    expect(text([])).toEqual([400, 'No ConceptMap specified']); // the map is found before the codings are read, as Medplum
+    expect(text([], '00000000-0000-4000-8000-000000000000')).toEqual([404, 'Not found']);
   });
 
   it('$translate: unmapped provided and fixed; implicit system; no groups; an other-map loop is 400', () => {
@@ -73,6 +75,11 @@ describe('ConceptMap', () => {
     expect(translate(store, P([coding(SYS, 'FSH')], empty.id)).parameter).toEqual([{ name: 'result', valueBoolean: false }]);
     const loop = create({ url: 'http://example.com/loop', group: [{ source: SYS, element: [{ code: 'X', target: [{ code: 'Y', equivalence: 'equivalent' }] }], unmapped: { mode: 'other-map', url: 'http://example.com/loop' } }] });
     expect(err(() => translate(store, P([coding(SYS, 'FSH')], loop.id))).status).toBe(400);
+    // A diamond is no loop: two source systems that both fall back to the same map.
+    const n = create({ url: 'http://example.com/n', group: [{ source: 'http://example.com/s2', target: 'http://example.com/t', element: [{ code: 'Q', target: [{ code: 'R', equivalence: 'equivalent' }] }] }] });
+    const m = create({ url: 'http://example.com/m', group: ['http://example.com/s1', 'http://example.com/s2'].map((source) => ({ source, element: [{ code: 'X', target: [{ code: 'Y', equivalence: 'equivalent' }] }],
+      unmapped: { mode: 'other-map' as const, url: n.url } })) });
+    expect(codes(translate(store, P([{ name: 'codeableConcept', valueCodeableConcept: { coding: [{ system: 'http://example.com/s1', code: 'Q' }, { system: 'http://example.com/s2', code: 'Q' }] } }], m.id)))).toEqual(['R', 'R']); // each fallback translates every coding again, as Medplum
   });
 
   it('$import adds mappings with comment and dependsOn; $translate sorts by dependsOn, then system|code', () => {

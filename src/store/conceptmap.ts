@@ -82,12 +82,12 @@ export function translate(store: Store, p: Params): Parameters {
   if (cc.length > 1) throw bad(`Expected 0..1 value(s) for input parameter codeableConcept, but ${cc.length} provided`);
   if (cc[0] && !cc[0].valueCodeableConcept) throw bad('Complex parameter codeableConcept (CodeableConcept) cannot be passed via query string');
   const input: ConceptMapTranslateParameters = { system: p.get('system'), code: p.get('code'), coding: p.coding('coding'), codeableConcept: cc[0]?.valueCodeableConcept as CodeableConcept | undefined };
+  const cm = conceptMap(store, p); // before the codings, as Medplum's handler
   let sourceCodes: Record<string, string[]>;
   try { sourceCodes = indexConceptMapCodings(input); } catch (e) {
     if (e instanceof OperationOutcomeError) throw new StoreError(400, [], e.outcome);
     throw e;
   }
-  const cm = conceptMap(store, p);
   const matches = translateCodes(store, cm, sourceCodes, p.get('targetsystem'), new Set());
   return { resourceType: 'Parameters', parameter: [
     { name: 'result', valueBoolean: matches.some((m) => !NON_MATCHING.includes(m.equivalence)) },
@@ -114,7 +114,7 @@ function conceptMap(store: Store, p: Params): ConceptMap & { id: string } {
 const ridOf = (store: Store, id: string) => (prep(store.db)("select rid from resources where type = 'ConceptMap' and id = ?").get(id) as { rid: number }).rid;
 
 function translateCodes(store: Store, cm: ConceptMap & { id: string }, sourceCodes: Record<string, string[]>, targetSystem: string | undefined, seen: Set<string>): Match[] {
-  seen.add(cm.id);
+  seen = new Set(seen).add(cm.id); // the maps on this chain only: two branches may reach the same map
   const matches: Match[] = [];
   for (const [system, codes] of Object.entries(sourceCodes)) {
     const rows = prep(store.db)(`select targetSystem, targetCode, targetDisplay, relationship, comment, attributes from concept_mapping
