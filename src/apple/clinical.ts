@@ -48,14 +48,17 @@ export function mapClinical(dir: string, refs: AhClinical[]): { resources: Resou
     const at = fhirBaseOf(ref.sourceURL);
     if (!at || typeof r?.resourceType !== 'string' || !r.id) { clinicalUnreadable++; continue; }
     let g = bases.get(at.base);
-    if (!g) {
-      // The key is the host: a second base on that host (another tenant) gets its own, so its ids never collide with the first's.
-      // The first keeps the plain key, matching a portal sync of it.
-      const key = [...bases.values()].some((b) => b.src.key === at.key) ? `${at.key}-${sha(at.base).slice(0, 8)}` : at.key;
-      bases.set(at.base, g = { src: { key, name: ref.sourceName ?? new URL(at.base).hostname, fhirBase: at.base }, rs: [], url: new Map() });
-    }
+    if (!g) bases.set(at.base, g = { src: { key: at.key, name: ref.sourceName ?? new URL(at.base).hostname, fhirBase: at.base }, rs: [], url: new Map() });
     g.rs.push(r);
     g.url.set(`${r.resourceType}/${r.id}`, ref.sourceURL);
+  }
+  // The key is the host: a second base on that host (another tenant) gets its own, so its ids never collide with the first's.
+  // The first in sorted order keeps the plain key (matching a portal sync of it), whatever order the export lists them in.
+  const taken = new Set<string>();
+  for (const base of [...bases.keys()].sort()) {
+    const src = bases.get(base)!.src;
+    if (taken.has(src.key)) src.key = `${src.key}-${sha(base).slice(0, 8)}`;
+    else taken.add(src.key);
   }
   const groups: ClinicalGroup[] = [];
   for (const g of bases.values()) {

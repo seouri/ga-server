@@ -207,6 +207,11 @@ describe('Apple clinical records and ECG', () => {
       const plain = `urn:ga-server:id:smart:${sourceKey(base)}`; // the first base still matches a portal sync of it
       expect(cs.map((c) => c.identifier?.[0].system)).toEqual([plain, `${plain}-${sha256('https://fhir.example.org/api/FHIR/R4-tenant2').slice(0, 8)}`]);
     });
+    it('the plain key goes to the same base whatever the export order', () => {
+      const tenant = { ...crefs[2], sourceURL: 'https://fhir.example.org/api/FHIR/R4-tenant2/Condition/c1' };
+      const sys = (rs: AhClinical[]) => Object.fromEntries((mapClinical(cdir, rs).resources as Condition[]).map((c) => [c.identifier?.[1].value, c.identifier?.[0].system]));
+      expect(sys([tenant, crefs[2]])).toEqual(sys([crefs[2], tenant]));
+    });
     it('holds an inline pdf as a pending binary', () => {
       const g = mapClinical(cdir, crefs).groups[0];
       expect(g.binaries).toHaveLength(1);
