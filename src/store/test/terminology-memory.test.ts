@@ -1,7 +1,7 @@
 // The built-in terminology seed's memory: serve.ts with every type, in a child process as it runs in production, seeds a fresh
 // file; the child prints its own peak RSS (process.resourceUsage().maxRSS, KiB on Linux and macOS) on exit. A second start on
-// the seeded file (no reseed) gives the floor without the seed. The seed's increment over that floor is bounded; ga-store's
-// absolute 220 MiB budget applies to GA's type set, which never seeds (controller ruling, 2026-11-11).
+// the seeded file (no reseed) gives the floor without the seed. The seed's increment over that floor is bounded (an all-types
+// store's absolute floor is set by the full R4 definitions, not by the seed).
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
