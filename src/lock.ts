@@ -68,8 +68,10 @@ export async function withImportLock<T>(fn: () => Promise<T>, opts: { dir?: stri
   // other listener is re-raised after the release, so the process still ends by it. Main thread only: a worker gets no signals,
   // and one that dies keeps its lock for freeThreadLock.
   const release = () => rmSync(lock, { force: true });
+  // Counted now too: a process.once handler registered earlier is removed before it runs, so it no longer shows when we run.
+  const before = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') };
   const onSignal = (sig: NodeJS.Signals) => {
-    if (process.listenerCount(sig)) return; // another handler owns the shutdown (and may drain): 'exit' releases
+    if (before[sig as 'SIGINT'] || process.listenerCount(sig)) return; // another handler owns the shutdown (and may drain): 'exit' releases
     release();
     process.kill(process.pid, sig);
   };

@@ -575,6 +575,30 @@ describe('store server: Medplum-compatible routes', () => {
     } finally { boom.mockRestore(); err.mockRestore(); }
   });
 
+  it('a bundle whose entries committed and then failed (its response too big to serialize) keeps the Binary its records reference', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const stringify = JSON.stringify;
+    let fail = false;
+    const big = vi.spyOn(JSON, 'stringify').mockImplementation((v: unknown, ...a: unknown[]) => {
+      if (fail && /^(batch|transaction)-response$/.test((v as Bundle)?.type ?? '')) throw new RangeError('Invalid string length');
+      return stringify(v, ...(a as []));
+    });
+    try {
+      for (const type of ['batch', 'transaction'] as const) {
+        const urn = `urn:uuid:2222222${type === 'batch' ? '1' : '2'}-2222-4222-8222-222222222222`;
+        fail = true;
+        const r = await tx(type, [
+          { fullUrl: urn, request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'aGVsbG8=' } },
+          { request: { method: 'POST', url: 'DocumentReference' }, resource: { resourceType: 'DocumentReference', status: 'current', description: type, content: [{ attachment: { url: urn } }] } as Resource },
+        ]);
+        fail = false;
+        expect(r.status).toBe(500);
+        const d = (await call('GET', `DocumentReference?description=${type}`)).json.entry[0].resource;
+        expect(await (await fetch(`${base}fhir/R4/${d.content[0].attachment.url}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text()).toBe('hello');
+      }
+    } finally { big.mockRestore(); err.mockRestore(); }
+  });
+
   it('as Medplum: unknown types 400, DELETE If-Match, FHIRPath Patch, _pretty, Prefer return=minimal, empty values dropped, $validate of a Parameters body', async () => {
     for (const [m, p] of [['GET', 'Patientx/1'], ['GET', 'xyz/1/_history'], ['GET', 'xyz/1/_history/2'], ['DELETE', 'xyz/1'], ['PATCH', 'Foo/1'], ['GET', 'Patientx']]) {
       const r = await call(m, p, m === 'PATCH' ? { resourceType: 'Parameters' } : undefined);

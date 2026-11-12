@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { UploadTooLarge, acceptUpload, cleanUploads, newUpload, unzipSafe, uploadPath } from '../src/gateway/uploads.ts';
-import { recordJob } from '../src/import-jobs.ts';
+import { listJobs, recordJob } from '../src/import-jobs.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const ZIPS = join(import.meta.dirname, 'fixtures', 'zips');
@@ -76,6 +76,12 @@ test('the upload sweep never removes a recorded import job\'s export', async () 
   cleanUploads(dir, Date.now() + 48 * 3600_000);
   expect(readFileSync(job.upload, 'utf8')).toBe('PK synthetic');
   expect(job.upload.startsWith(join(dir, 'imports', job.id))).toBe(true);
+});
+
+// recordJob moves the upload before writing job.json: a record never points at an export that is not in its folder.
+test('recordJob of an upload that cannot be moved leaves no job record', () => {
+  expect(() => recordJob(dir, join(dir, 'uploads', 'missing.zip'))).toThrow();
+  expect(listJobs(dir)).toEqual([]);
 });
 
 test('unzipSafe: a normal zip with one top folder returns that folder', async () => {

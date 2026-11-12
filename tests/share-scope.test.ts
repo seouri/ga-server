@@ -226,21 +226,27 @@ test("selectScoped: another record's link to a never-shared archive's Binary is 
   expect(out.resources).toEqual([report, note]);
   expect(out.refs).toEqual([]);
 });
-test('loadScoped: an Apple-tagged archive still loads for a share without Apple, so its Binary stays blocked', async () => {
+test('loadScoped: a share without Apple fetches no Apple record (an ECG CSV is ~330 KB); the untagged archive still loads and blocks its Binary', async () => {
   const bin = '00000000-0000-0000-0000-000000000004';
-  const arch = r({ resourceType: 'DocumentReference', id: 'arch', ...inP, meta: { ...inP.meta, tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] },
-    identifier: [{ system: 'urn:ga-server:id:apple-health-archive', value: 'a' }], content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const tag = { system: 'urn:ga-server:tag', code: 'src-apple-health' };
+  // archiveFolder -> storeDocument writes the archive untagged.
+  const arch = r({ resourceType: 'DocumentReference', id: 'arch', ...inP, identifier: [{ system: 'urn:ga-server:id:apple-health-archive', value: 'a' }], content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const ecg = r({ resourceType: 'DocumentReference', id: 'ecg', ...inP, meta: { ...inP.meta, tag: [tag] }, date: '2024-02-01', content: [{ attachment: { contentType: 'text/csv', data: 'eA==' } }] });
   const report = r({ resourceType: 'DiagnosticReport', id: 'dr', ...inP, status: 'final', code: { text: 'CBC' }, effectiveDateTime: '2026-01-01', presentedForm: [{ url: `Binary/${bin}` }] });
+  let ecgLoaded = false;
   const client = {
     readResource: async () => ({ resourceType: 'Patient', id: 'p' }),
     searchResourcePages: async function* (t: string, q: Record<string, string>) {
-      if (t === 'DocumentReference' && !q['_tag:not']) yield [arch];
-      else if (t === 'DiagnosticReport') yield [report];
+      if (t === 'DocumentReference') {
+        if (q['_tag:not'] !== tag.system + '|' + tag.code) ecgLoaded = true;
+        yield q['_tag:not'] ? [arch] : [arch, ecg];
+      } else if (t === 'DiagnosticReport') yield [report];
       else yield [];
     },
     searchResources: async () => [],
   } as unknown as MedplumClient;
   const s = await loadScoped(client, share({ groups: ['labs'] }));
+  expect(ecgLoaded).toBe(false);
   expect(s.resources.map((x) => x.id)).toEqual(['dr']);
   expect(s.binaries).toEqual([]);
 });
@@ -266,9 +272,10 @@ test('loadScoped fetches no Apple reading for any share; an Apple share streams 
     await loadScoped(client, share({ groups }));
     return qs;
   };
-  for (const g of [['labs', 'vitals'], 'all', ['labs', 'apple']] as Share['groups'][]) {
+  for (const g of ['all', ['labs', 'apple']] as Share['groups'][]) {
     for (const q of await queries(g)) expect(q['_tag:not']).toBe(q.t === 'Observation' && !q._tag ? 'urn:ga-server:tag|src-apple-health' : undefined);
   }
+  for (const q of await queries(['labs', 'vitals'])) expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health'); // no Apple record at all
 });
 
 test('loadScoped keeps no Apple reading and reads no Binary: the Apple summary is aggregated page by page, readings stream for downloads', async () => {

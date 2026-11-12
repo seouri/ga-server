@@ -167,8 +167,9 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   const staged = !type && method === 'POST' ? await stageBinaries(store, json) : [];
   let a: Answer;
   try { a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base }); } catch (e) {
-    // A refused bundle keeps none of its Binaries: a transaction rolled back, and a batch throws only before its first entry runs.
-    for (const id of staged) store.deleteBinary(id);
+    // A refused bundle (StoreError, HttpError: a transaction rolled back, a batch's checks before its first entry) keeps none of
+    // its Binaries. Any other error may come after entries committed (a response too big to serialize): their records keep theirs.
+    if (e instanceof StoreError || e instanceof HttpError) for (const id of staged) store.deleteBinary(id);
     throw e;
   }
   const h: Record<string, string> = {};
@@ -563,7 +564,7 @@ function capability(): string {
 }
 
 // A batch's or transaction's top-level POST Binary entries (base64 data, as Medplum's clients send them) are written before it
-// runs (binaries are files, written outside SQLite transactions); the caller deletes them when a transaction fails. Returns their ids.
+// runs (binaries are files, written outside SQLite transactions); the caller deletes them when the bundle is refused. Returns their ids.
 const staged = new WeakMap<object, { id: string; contentType: string }>();
 async function stageBinaries(store: Store, b: unknown): Promise<string[]> {
   const bundle = b as Bundle, ids: string[] = [];

@@ -98,7 +98,18 @@ export class Store {
       try {
         this.transaction(() => {
           this.db.exec('delete from idx; delete from comp; delete from sortkeys; delete from idx_text');
-          for (const { rid, json } of this.prep('select rid, json from resources').iterate() as Iterable<{ rid: number; json: string }>) writeIndex(this.prep, rid, JSON.parse(json));
+          // meta.compartment comes from the definitions too: recomputed, and rewritten (current version and its history row) when it moved.
+          for (const { rid, json } of this.prep('select rid, json from resources').iterate() as Iterable<{ rid: number; json: string }>) {
+            const r = JSON.parse(json) as Resource;
+            const comp = this.compartment(r);
+            if (comp.join() !== (r.meta?.compartment ?? []).map((c) => c.reference).join()) {
+              r.meta = { ...r.meta, compartment: comp.length ? comp.map((reference) => ({ reference })) : undefined };
+              const out = JSON.stringify(r);
+              this.prep('update resources set json = ? where rid = ?').run(out, rid);
+              this.prep('update history set json = ? where type = ? and id = ? and versionId = ?').run(out, r.resourceType, r.id!, r.meta.versionId ?? null);
+            }
+            writeIndex(this.prep, rid, r);
+          }
           this.prep("insert or replace into meta values ('index', ?)").run(deps);
         });
       } catch (e) { this.db.close(); throw e; }

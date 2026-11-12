@@ -212,11 +212,11 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
   const p = await client.readResource('Patient', share.patientId, opts);
   // Per type, not $everything: Medplum caps _offset at 10000. _sort=_lastUpdated with _count >= 20 makes it page by _cursor.
   const compartment: Resource[] = [];
-  // Apple readings (Observations) are never loaded here (below: summarized page by page). Apple's few other records load and
-  // inScope drops them from a share without Apple: a never-shared archive DocumentReference always loads and blocks its Binary.
+  // Apple readings (Observations) are never loaded here (below: summarized page by page); a share without Apple fetches no
+  // Apple record at all (an ECG CSV is ~330 KB inline). Never-shared archives are written untagged, so they still load and block their Binary.
   const apple = withApple(share);
   for (const type of COMPARTMENT_TYPES) {
-    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...(type === 'Observation' && { '_tag:not': APPLE_TAG }) };
+    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...((!apple || type === 'Observation') && { '_tag:not': APPLE_TAG }) };
     for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
   const { resources, refs, newestImport } = selectScoped(compartment, share);
