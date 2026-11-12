@@ -4,10 +4,11 @@ import { mkdtempSync, type ReadStream, readFileSync, rmSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
-import type { Resource } from '@medplum/fhirtypes';
+import type { Observation, Resource } from '@medplum/fhirtypes';
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { appleBatches } from '../src/apple/batches.ts';
 import { importAppleHealth } from '../src/apple/import.ts';
+import { LEGACY } from '../src/apple/readings.ts';
 import type { GaConfig } from '../src/config.ts';
 import { ARRIVED, sorted } from '../src/identity.ts';
 import { withImportLock } from '../src/lock.ts';
@@ -88,9 +89,15 @@ test("batched import writes the same resources as one batch, and as today's impo
     },
   });
   expect(snap).toHaveLength(614);
+  // Readings are keyed on their instants (UTC) since an export after a DST change doubled them; with each key read back as the
+  // first older key it records (the time as written), the digest is the one before (46006bf5...): only identifier values changed.
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('25d7377a44465b7dcf4fa73069305334dffa23c066aa7cac2eed40ef5b72d564');
+  const back = new Map<string, string>();
+  for await (const bt of appleBatches(exp, { size: 50, timeZone: 'America/New_York' })) for (const r of bt.resources) { const l = LEGACY.get(r); if (l) back.set((r as Observation).identifier![0].value!, l[0]); }
+  const old = snap.map((x) => x.replace(/[0-9a-f]{64}/g, (h) => back.get(h) ?? h));
   // The one R4 clinical record (an allergy) carries src-apple-clinical since Apple's hospital copies got their own kind; with that tag
   // read back as src-apple-health the digest is today's importer's (fa3b64e8...).
-  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('46006bf5e4c50ce75c364bf21a754ac0361a6fd403061265c293ad8dddc42f32');
+  expect(createHash('sha256').update(JSON.stringify([...old.slice(0, -1).sort(), old.at(-1)])).digest('hex')).toBe('46006bf5e4c50ce75c364bf21a754ac0361a6fd403061265c293ad8dddc42f32');
 }, 300_000);
 
 test('shuffled records give the same resources as sorted ones', async () => {
@@ -138,6 +145,59 @@ test('re-import of the same export writes nothing; a newer export updates only i
     writeFileSync(join(dir, 'export.xml'), xml.replace('</HealthData>', `${hr}</HealthData>`).replace('<ExportDate value="2016-01-31', '<ExportDate value="2016-02-01'));
     const newer = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
     expect(newer).toMatchObject({ created: 0, updated: 2 }); // that day's heart-rate mean, and the allergy (a clinical copy takes the export date) under the newer date
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}, 300_000);
+
+// Apple writes every timestamp in the phone's offset at export time: the same readings exported after a DST change.
+const summer = (from: string, to: string) => writeFileSync(join(to, 'export.xml'), readFileSync(join(from, 'export.xml'), 'utf8').replace(/"(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) -0500"/g, (_m, d, t) => {
+  const iso = new Date(Date.parse(`${d}T${t}Z`) + 3600e3).toISOString(); // the same instant's wall time in -04:00
+  return `"${iso.slice(0, 10)} ${iso.slice(11, 19)} -0400"`;
+}));
+const counts = async (client: MedplumClient, pid: string) => {
+  const c: Record<string, number> = {};
+  for await (const page of client.searchResourcePages('Observation', { subject: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' })) for (const o of page) c[o.code?.text ?? ''] = (c[o.code?.text ?? ''] ?? 0) + 1;
+  return c;
+};
+
+test('the same readings exported in another offset (after a DST change) are unchanged, not doubled', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-apple-dst-'));
+  try {
+    summer(exp, dir);
+    const a = await store();
+    await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50 });
+    const before = await counts(a.client, a.pid);
+    expect(before['Blood pressure panel']).toBeGreaterThan(0);
+    expect(before['Sleep, nightly (Apple Health)']).toBeGreaterThan(0);
+    const again = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
+    expect(again).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0 }); // compared as instants: nothing rewritten
+    expect(await counts(a.client, a.pid)).toEqual(before);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}, 300_000);
+
+test('readings an older import keyed by their time as written are found after a DST change, not doubled', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-apple-legacy-'));
+  try {
+    summer(exp, dir);
+    const a = await store();
+    await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50 });
+    // Give every reading the identifier the importer wrote before keys were instants: its time as written (-05:00).
+    const old = new Map<string, string>();
+    for await (const b of appleBatches(exp, { size: 50, timeZone: 'America/New_York' })) {
+      for (const r of b.resources) { const l = LEGACY.get(r); if (l) old.set((r as Observation).identifier![0].value!, l[0]); }
+    }
+    let rekeyed = 0;
+    for await (const page of a.client.searchResourcePages('Observation', { subject: `Patient/${a.pid}`, _count: '1000' }, { cache: 'no-cache' })) {
+      for (const o of page) {
+        const v = old.get(o.identifier?.[0]?.value ?? '');
+        if (v) { await a.client.updateResource({ ...o, identifier: [{ ...o.identifier![0], value: v }, ...o.identifier!.slice(1)] }); rekeyed++; }
+      }
+    }
+    expect(rekeyed).toBeGreaterThan(100);
+    const before = await counts(a.client, a.pid);
+    const again = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
+    expect(again).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0 });
+    expect(again.unchanged).toBeGreaterThanOrEqual(rekeyed);
+    expect(await counts(a.client, a.pid)).toEqual(before);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 300_000);
 

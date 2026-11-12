@@ -2,7 +2,7 @@ import type { Observation, ObservationComponent } from '@medplum/fhirtypes';
 import { offsetAt } from '../ehi/dates.ts';
 import { APPLE, sha256 as sha } from '../identity.ts';
 import type { AhRecord, AhSummary } from './read.ts';
-import { SUBJECT, UCUM, short } from './readings.ts';
+import { keyed, OFFSET, SUBJECT, short, UCUM, written, zone } from './readings.ts';
 
 const r = (n: number, d: number) => Number(n.toFixed(d));
 const q = (value: number, code: string) => ({ value, unit: code, system: UCUM, code });
@@ -28,9 +28,6 @@ const GAP = 3 * 3600e3;
 // instants plus their written offset (shared strings), from which appleDate's text is rebuilt exactly (whole seconds); the text
 // itself only when it is not rebuilt (an impossible date such as Feb 30, which Date.parse rolls over), so its identifier stays.
 type Iv = { s: number; e: number; so: string; eo: string; src: string; stage: string; sw?: string; ew?: string };
-const OFFSET = /[+-]\d\d:\d\d$/;
-const written = (ms: number, off: string) =>
-  `${new Date(ms + (off[0] === '-' ? -1 : 1) * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6))) * 60000).toISOString().slice(0, 19)}${off}`;
 const unless = (ms: number, off: string, text: string) => (Number.isFinite(ms) && written(ms, off) === text ? undefined : text);
 const merge = (ivs: { s: number; e: number }[]) => {
   const out: { s: number; e: number }[] = [];
@@ -44,7 +41,6 @@ const minutes = (ivs: { s: number; e: number }[]) => merge(ivs).reduce((a, i) =>
 // Apple writes every timestamp in the export device's offset at export time (e.g. -05:00 all year), so a reading's
 // calendar day and a day's bounds come from the user's time zone, DST included.
 // shortcut: one zone for the whole history (this machine's, as for EHI); travel days land on home-zone dates.
-const zone = (m: number) => `${m < 0 ? '-' : '+'}${String(Math.floor(Math.abs(m) / 60)).padStart(2, '0')}:${String(Math.abs(m) % 60).padStart(2, '0')}`;
 const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86400e3).toISOString().slice(0, 10);
 
 export class Daily {
@@ -149,7 +145,7 @@ export class Daily {
       const sStr = first.sw ?? written(first.s, first.so), eStr = last.ew ?? written(last.e, last.eo);
       const wake = this.localDay(eStr);
       const o = this.obs('sleep', { text: 'Sleep, nightly (Apple Health)' }, wake);
-      o.identifier = [{ system: APPLE, value: sha(`daily|sleep|${sStr}`) }]; // wake day can repeat (naps)
+      keyed(o, (at) => `daily|sleep|${at(sStr)}`); // keyed on its start: the wake day can repeat (naps)
       o.effectivePeriod = { start: sStr, end: eStr };
       o.valueQuantity = q(r(minutes(c), 1), 'min');
       const bySrc = new Map<string, number>();
