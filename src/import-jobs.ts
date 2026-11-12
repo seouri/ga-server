@@ -104,7 +104,9 @@ export function resumeJobs(dir: string, opts: Supervision = {}): number {
   // An hour old, so a job being recorded right now (a CLI next to the gateway) is never touched.
   if (existsSync(join(dir, 'imports'))) for (const id of readdirSync(join(dir, 'imports'))) {
     const d = jobDir(dir, id);
-    if (!existsSync(join(d, 'job.json')) && statSync(d).mtimeMs < Date.now() - 3_600_000) rmSync(d, { recursive: true, force: true });
+    try {
+      if (!existsSync(join(d, 'job.json')) && (statSync(d, { throwIfNoEntry: false })?.mtimeMs ?? Infinity) < Date.now() - 3_600_000) rmSync(d, { recursive: true, force: true });
+    } catch (e) { console.error(`import jobs: ${d} not cleaned (${(e as Error).message})`); } // never stops the gateway from starting
   }
   for (const j of running) {
     const stopped = existsSync(stopMark(dir, j.id)), inAttempt = stopped && readFileSync(stopMark(dir, j.id), 'utf8') === 'attempt';

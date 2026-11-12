@@ -1,6 +1,6 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import type { MedplumClient } from '@medplum/core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { archiveFolder, archiveTmp } from '../src/archive.ts';
 import { createGateway } from '../src/gateway/server.ts';
 import { unzipSafe } from '../src/gateway/uploads.ts';
@@ -465,7 +465,9 @@ test('resume removes an export a crash left in a job folder with no record (an h
     utimesSync(old, hourAgo, hourAgo);
     const kept = recordJob(dir, (writeFileSync(join(dir, 'u.zip'), 'x'), join(dir, 'u.zip')));
     utimesSync(join(dir, 'imports', kept.id), hourAgo, hourAgo);
-    resumeJobs(dir, { run: async () => {} });
+    symlinkSync(join(dir, 'gone'), join(dir, 'imports', 'dangling')); // a bad entry never stops the gateway from starting
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try { resumeJobs(dir, { run: async () => {} }); } finally { err.mockRestore(); }
     expect(existsSync(old)).toBe(false);
     expect(existsSync(fresh)).toBe(true);
     expect(existsSync(join(dir, 'imports', kept.id, 'job.json'))).toBe(true);
