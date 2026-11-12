@@ -30,6 +30,7 @@ describe.skipIf(SQLITE)('GraphQL (parity)', () => {
       const encounter = (subject: { reference: string }, basedOn?: { reference: string }[]) => s.create<Encounter>({
         resourceType: 'Encounter', identifier: [{ value: enc }], status: 'in-progress', class: { code: 'HH' }, subject, ...(basedOn && { basedOn }) });
       const encounter1 = await encounter(ref(patient), [ref(serviceRequest)]);
+      await new Promise((r) => setTimeout(r, 10)); // distinct lastUpdated: the sort rows compare the order
       const encounter2 = await encounter({ reference: `Patient/${randomUUID()}` });
       fx[s.name] = { patient, serviceRequest, encounter1, encounter2 };
     });

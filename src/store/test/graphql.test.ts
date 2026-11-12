@@ -48,6 +48,17 @@ describe('$graphql (store-only)', () => {
     expect((await gql('{ PatientList(_count: 1) { id } }'))).toEqual({ status: 200, json: { data: { PatientList: [] } } });
   });
 
+  it('a transaction with a failing $graphql entry fails whole', async () => {
+    const family = `tx-${Date.now()}`;
+    const r = await post('', { resourceType: 'Bundle', type: 'transaction', entry: [
+      { request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', name: [{ family }] } },
+      { request: { method: 'POST', url: '$graphql' }, resource: { query: '{ ConditionList { id } }' } },
+    ] });
+    expect(r.status).toBe(400);
+    expect(r.json.issue[0].details.text).toMatch(/ConditionList/);
+    expect((await gql(`{ PatientList(family: "${family}") { id } }`)).json).toEqual({ data: { PatientList: [] } });
+  });
+
   it('$graphql works as a batch entry', async () => {
     const r = await post('', { resourceType: 'Bundle', type: 'batch', entry: [{ request: { method: 'POST', url: '$graphql' }, resource: { query: '{ __typename }' } }] });
     expect(r.status).toBe(200);

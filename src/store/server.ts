@@ -298,7 +298,7 @@ function graphql(store: Store, r: Req): Answer {
     return a.json === undefined ? a.outcome : JSON.parse(a.json);
   };
   const { status, json } = graphqlHandler(r.body, fhir, { introspection: introspection.get(store) ?? false, types: storedTypes() });
-  if (status >= 400) return { status, outcome: JSON.parse(json) };
+  if (status >= 400) throw new StoreError(status as 400 | 403, [], JSON.parse(json)); // thrown: a transaction with this entry fails whole
   return { status, json, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store, no-cache, must-revalidate' } };
 }
 

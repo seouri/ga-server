@@ -733,7 +733,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/graphql.test.ts | GraphQL › IntrospectionQuery | skipped | graphql | skipped in Medplum 5.2.14 |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Get __schema | skipped | graphql | skipped in Medplum 5.2.14 |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Get __type | ported | graphql |  |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | skipped | platform | Medplum presigns attachment URLs (Binary storage), in REST reads too: its test asserts photo.url is http(s); the store keeps the stored url (the fhir-router row covers the read) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | skipped | graphql | Medplum presigns attachment URLs (Binary storage), in REST reads too: its test asserts photo.url is http(s); the store keeps the stored url (the fhir-router row covers the read) |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID not found | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Search | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _id | ported | graphql |  |
