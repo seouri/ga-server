@@ -93,7 +93,7 @@ describe('$expand (no built-ins)', () => {
   });
 
   it('a regex filter with a nested quantifier or over 256 characters is 400 (catastrophic backtracking)', () => {
-    for (const value of ['(a+)+b', '(x*)*', 'a'.repeat(257)]) {
+    for (const value of ['(a+)+b', '(x*)*', 'a'.repeat(257), '(a+[)]?)+b', '([)(]a*)*']) { // a ) or ( in a class hides no group
       const e = err(() => expand(include({ filter: [{ property: 'kind', op: 'regex', value }] })));
       expect([e.status, e.message]).toEqual([400, `Invalid regex in ValueSet filter: ${value}`]);
     }

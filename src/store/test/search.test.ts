@@ -919,6 +919,13 @@ describe.each(PLANS)('Store terminology search (%s plan)', (_plan, tuning) => {
     expect(ids(`code:not-in=${VS}&code:not-in=${builtinVs}`)).toEqual(['a', 'n', 'x']);
   });
 
+  it('code:in takes a relative ValueSet/<id> (R4: a relative or absolute uri)', () => {
+    const id = store.search('ValueSet', [['url', VS]], BASE).entry![0].resource!.id!;
+    expect(ids(`code:in=ValueSet/${id}`)).toEqual(['b', 'd']);
+    expect(ids(`code:not-in=ValueSet/${id}`)).toEqual(['a', 'f', 'g', 'n', 'x']);
+    expect([fail('code:in=ValueSet/nope').status, fail('code:in=ValueSet/nope').message]).toEqual([400, 'ValueSet ValueSet/nope not found']);
+  });
+
   it('code:below and :above follow is-a, cycles end', () => {
     expect(ids(`code:below=${CS}|A`)).toEqual(['a', 'b']); // A, B, C; no Condition is coded C
     expect(ids(`code:above=${CS}|C`)).toEqual(['a', 'b']);
@@ -965,5 +972,14 @@ describe.each(PLANS)('Store terminology search (%s plan)', (_plan, tuning) => {
     expect(ids(`_filter=code sb ${CS}|B`)).toEqual(['a', 'b']); // the value is subsumed by the record's code: :above
     expect(ids(`_filter=${encodeURIComponent(`code in ${VS} and not (code ss ${CS}|D)`)}`)).toEqual(['b']);
     expect(fail('_filter=onset-date ss 2024-01-01').message).toBe('Invalid operator: ss'); // tokens only, as Medplum's text elsewhere
+    // A chain applies ss and sb to its last parameter.
+    store.put({ resourceType: 'Patient', id: 'p', meta } as Resource);
+    const patients = (q: string) => (store.search('Patient', [...new URLSearchParams(q)], BASE).entry ?? []).map((e) => e.resource!.id!);
+    expect(patients(`_filter=_has:Condition:subject:code ss ${CS}|D`)).toEqual(['p']);
+    expect(patients(`_filter=_has:Condition:subject:code sb ${CS}|D`)).toEqual(['p']);
+    expect(patients(`_filter=_has:Condition:subject:code sb ${CS}|C`)).toEqual(['p']); // via the cycle
+    expect(patients(`_filter=not (_has:Condition:subject:code ss ${CS}|D)`)).toEqual([]);
+    const e = (() => { try { store.search('Patient', [...new URLSearchParams('_filter=_has:Condition:subject:onset-date ss 2024-01-01')], BASE); } catch (x) { return x as StoreError; } })();
+    expect(e?.message).toBe('Invalid operator: ss');
   });
 });

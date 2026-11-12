@@ -120,13 +120,14 @@ function functions(db: DatabaseSync): void {
 // group that holds a quantifier (`(a+)+`) is 400; overlapping alternation (`(a|aa)+`) and nested groups (`((a+))+`) still pass.
 // Upgrade to a linear-time engine if user patterns need those shapes.
 const MAX_PATTERN = 256;
+const CLASS = /\\.|\[(?:\\.|[^\]\\])*\]/g; // an escape, or a character class (one atom: a ( or ) inside it is no group)
 const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d)(?:[^()\\]|\\.)*\)(?:[+*]|\{\d)/;
 const patterns = new Map<string, RegExp>();
 function regex(pattern: string): RegExp {
   let r = patterns.get(pattern);
   if (!r) {
     try {
-      if (pattern.length > MAX_PATTERN || NESTED_QUANTIFIER.test(pattern)) throw new Error();
+      if (pattern.length > MAX_PATTERN || NESTED_QUANTIFIER.test(pattern.replace(CLASS, (m) => (m[0] === '[' ? 'x' : m)))) throw new Error();
       new RegExp(pattern, 'u');
       r = new RegExp(`^(?:${pattern})$`, 'u');
     } catch { throw bad(`Invalid regex in ValueSet filter: ${pattern}`); }
@@ -255,11 +256,14 @@ const excluded = (store: Store, vs: ValueSet, seen: string[], cache: Map<string,
 const isExcluded = (store: Store, ex: Sql | undefined, system: string, code: string): boolean =>
   !!ex && !!prep(store.db)(`select 1 from (${ex.sql}) where system = ? and code = ? limit 1`).get(...ex.args, system, code);
 
-// An SQL subquery of the (system, code) pairs in ValueSet `url`, for the token modifiers :in and :not-in. 400 when the store
-// does not hold the ValueSet, or the concepts of a CodeSystem it draws a whole or filtered include from.
+// An SQL subquery of the (system, code) pairs in ValueSet `url` (or a relative ValueSet/<id>: R4 takes either), for the token
+// modifiers :in and :not-in. 400 when the store does not hold the ValueSet, or the concepts of a CodeSystem it draws a whole or
+// filtered include from.
 export function inValueSet(store: Store, url: string): Sql {
-  const vs = findTerminology<ValueSet>(store, 'ValueSet', url);
-  return members(store, vs, [vs.url!], new Map(), true);
+  const id = /^ValueSet\/([^/|]+)$/.exec(url)?.[1];
+  const vs = id ? store.read('ValueSet', id) as ValueSet | undefined : findTerminology<ValueSet>(store, 'ValueSet', url);
+  if (!vs) throw bad(`ValueSet ${url} not found`);
+  return members(store, vs, [vs.url ?? url], new Map(), true);
 }
 
 // An SQL subquery (column `code`) of the codes at or under (below) or at or over (above) `code` in CodeSystem `system`, for

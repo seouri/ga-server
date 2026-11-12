@@ -557,8 +557,6 @@ function filterExpr(type: string, e: FhirFilterExpression, a: string): Cond {
   }
   if (e instanceof FhirFilterNegation) { const c = filterExpr(type, e.child, a); return { sql: `not (${c.sql})`, args: c.args }; }
   const c = e as FhirFilterComparison;
-  // ss and sb are concepts' subsumption (a uri's :above and :below are by path): elsewhere Medplum's parser text.
-  if ((c.operator === Operator.ABOVE || c.operator === Operator.BELOW) && param(type, c.path)?.type !== 'token') throw badRequest(`Invalid operator: ${c.operator === Operator.BELOW ? 'ss' : 'sb'}`);
   // A chain maps the operator on its last parameter (chainCond), as Medplum.
   const chain = c.path.startsWith('_has:') || c.path.includes('.');
   return cond(type, { code: c.path, operator: chain ? c.operator : filterOp(param(type, c.path), c.operator), value: c.value }, a);
@@ -606,7 +604,9 @@ function parseFilter(input: string): FhirFilterExpression {
 }
 
 // _filter's eq parses as EXACT: equality for tokens, references, uris and ranges; exact match for strings. sw is a string's default.
+// ss and sb are concepts' subsumption (a uri's :above and :below are by path): elsewhere Medplum's parser text.
 function filterOp(p: SearchParameter | undefined, op: Operator): Operator {
+  if ((op === Operator.ABOVE || op === Operator.BELOW) && p?.type !== 'token') throw badRequest(`Invalid operator: ${op === Operator.BELOW ? 'ss' : 'sb'}`);
   if (op === Operator.EXACT && p?.type !== 'string') return Operator.EQUALS;
   if (op === Operator.STARTS_WITH && p?.type === 'string') return Operator.EQUALS;
   return op;
