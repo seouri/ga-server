@@ -41,6 +41,6 @@ test('ga_import of a file stored by an import that wrote no records reuses the s
 test('ga_import of a file a record already cites is refused, naming the stored DocumentReference', async () => {
   order.length = 0;
   const { file, client } = setup([{ ...OBS, id: 'o1', derivedFrom: [{ reference: 'DocumentReference/d1' }], meta: { tag: [{ system: 'urn:ga-server:tag', code: 'extracted-by-llm' }] } } as Resource]);
-  await expect(importExtracted(client, { patientId: 'p' } as never, [OBS], file)).rejects.toThrow(/^already imported: report\.pdf \(DocumentReference\/d1\)$/);
+  await expect(importExtracted(client, { patientId: 'p' } as never, [OBS], file)).rejects.toThrow(/^already imported: report\.pdf \(DocumentReference\/d1\); .*delete the records that cite DocumentReference\/d1 to import it again$/);
   expect(order).not.toContain('import');
 });

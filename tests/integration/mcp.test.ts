@@ -75,7 +75,7 @@ test('ga_import stores document and links observations', async () => {
 test('ga_import of an already imported file is refused without writing', async () => {
   const r = await call('ga_import', { resources: [{ ...ldl(), valueQuantity: { value: 112, unit: 'mg/dL' } }], sourceFile: PDF, documentDate: '2024-03-02' });
   expect(r.isError).toBe(true);
-  expect(r.text).toMatch(/^already imported: labs-synthetic\.pdf \(DocumentReference\/[\w-]+\)$/);
+  expect(r.text).toMatch(/^already imported: labs-synthetic\.pdf \(DocumentReference\/[\w-]+\); /);
   expect(await count()).toBe(1);
 });
 

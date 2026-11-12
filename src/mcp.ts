@@ -91,7 +91,9 @@ export async function importExtracted(
     // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates. A stored copy no
     // record cites is a failed import's: reused.
     const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
-    if (seen && (await cited(client, patientId, seen))) throw new GaError(`already imported: ${basename(sourceFile)} (DocumentReference/${seen.id})`);
+    if (seen && (await cited(client, patientId, seen))) throw new GaError(
+        `already imported: ${basename(sourceFile)} (DocumentReference/${seen.id}); if an import of it failed partway, delete the records that cite DocumentReference/${seen.id} to import it again`,
+      );
     const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
     const linked = link(`DocumentReference/${docRef.id}`);
     // Immunizations have no content-key dedup in the engine: a dose GA already holds only gains this document as a source
