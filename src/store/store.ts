@@ -132,7 +132,7 @@ export class Store {
   close(): void { this.db.close(); }
 
   // Binaries are files under <db dir>/binary (0600 in a 0700 dir), written outside SQLite transactions (a rollback after a
-  // put leaves an orphan file; accepted, swept later). The stream goes to a temp file, fsynced and renamed into place, then the
+  // put leaves an orphan file unless the caller deletes it, as the HTTP server does for a refused bundle; nothing sweeps them). The stream goes to a temp file, fsynced and renamed into place, then the
   // row (content type, size) is inserted, so a row never points at a missing file; any failure removes both file names.
   // id: only the migration passes one (Medplum's Binary id, so attachment urls keep pointing at it).
   private binPath(id: string): string { return join(this.binDir, id); }

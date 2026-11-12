@@ -167,8 +167,8 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   const staged = !type && method === 'POST' ? await stageBinaries(store, json) : [];
   let a: Answer;
   try { a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base }); } catch (e) {
-    // A failed transaction keeps none of its Binaries; a batch's saved entries may reference them.
-    if ((json as Bundle | undefined)?.type === 'transaction') for (const id of staged) store.deleteBinary(id);
+    // A refused bundle keeps none of its Binaries: a transaction rolled back, and a batch throws only before its first entry runs.
+    for (const id of staged) store.deleteBinary(id);
     throw e;
   }
   const h: Record<string, string> = {};

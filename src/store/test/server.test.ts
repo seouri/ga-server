@@ -494,13 +494,16 @@ describe('store server: Medplum-compatible routes', () => {
     expect(got).not.toContain(late.id);
   });
 
-  it('a transaction that fails after a POST Binary entry leaves no Binary; a Bundle that is not a batch stages none', async () => {
+  it('a transaction that fails after a POST Binary entry, or a refused batch, leaves no Binary; a Bundle that is not a batch stages none', async () => {
     const files = () => (existsSync(join(dir, 'binary')) ? readdirSync(join(dir, 'binary')) : []);
     const bin = { request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'SGk=' } } as BundleEntry;
     const r = await tx('transaction', [bin, { request: { method: 'POST', url: 'Observation' }, resource: { resourceType: 'Observation' } as Resource }]);
     expect(r.status).toBe(400);
     expect(files()).toEqual([]);
     expect((await call('POST', '', { resourceType: 'Bundle', type: 'searchset', entry: [bin] })).status).toBe(400);
+    expect(files()).toEqual([]);
+    // A batch refused as a whole (an entry that is not an object) saved nothing, so it keeps none of its Binaries either.
+    expect((await tx('batch', [bin, null as unknown as BundleEntry])).status).toBe(400);
     expect(files()).toEqual([]);
     expect((await tx('batch', [bin])).json.entry[0].response.status).toBe('201');
     expect(files()).toHaveLength(1);
