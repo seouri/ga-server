@@ -88,6 +88,10 @@ describe('$graphql (store-only)', () => {
     expect(wrongType.json.errors[0].message).toBe('Invalid resourceType');
     const wrongId = await gql('mutation { PatientUpdate(id: "a", res: { resourceType: "Patient", id: "b" }) { id } }');
     expect(wrongId.json.errors[0].message).toBe('Invalid ID');
+    // a missing required input field (Extension.url) is a GraphQL validation error, before any write (as Medplum)
+    const noUrl = await gql('mutation { PatientCreate(res: { resourceType: "Patient", extension: [{ valueString: "a" }] }) { id } }');
+    expect(noUrl.status).toBe(400);
+    expect(noUrl.json.issue[0].details.text).toMatch(/Expected value of type "ExtensionCreate" to include required field "url"/);
     expect(await count()).toBe(before);
   });
 
@@ -103,5 +107,18 @@ describe('$graphql (store-only)', () => {
     r = await gql(`mutation { ${linked('a', p.id)} d: PatientDelete(id: "${p.id}") { id } ${linked('b', p.id)} }`);
     expect([gender(r.json.data, 'a'), gender(r.json.data, 'b')]).toEqual(['other', null]);
     expect(r.json.errors.map((e: { path: unknown[] }) => e.path[0])).toEqual(['b']);
+  });
+
+  it('a mutation in a transaction is kept with it, or rolled back with it', async () => {
+    const family = `txm-${Date.now()}`;
+    const mutation = { request: { method: 'POST', url: '$graphql' }, resource: { query: `mutation { PatientCreate(res: { resourceType: "Patient", name: [{ family: "${family}" }] }) { id } }` } };
+    const ok = await post('', { resourceType: 'Bundle', type: 'transaction', entry: [
+      { request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', name: [{ family }] } }, mutation] });
+    expect(ok.status).toBe(200);
+    expect((await gql(`{ PatientList(family: "${family}") { id } }`)).json.data.PatientList).toHaveLength(2);
+    const failed = await post('', { resourceType: 'Bundle', type: 'transaction', entry: [
+      mutation, { request: { method: 'POST', url: 'Patient' }, resource: { resourceType: 'Patient', name: [{ family }], birthDate: 'x' } }] });
+    expect(failed.status).toBe(400);
+    expect((await gql(`{ PatientList(family: "${family}") { id } }`)).json.data.PatientList).toHaveLength(2);
   });
 });
