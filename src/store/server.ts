@@ -582,9 +582,10 @@ async function stageBinaries(store: Store, b: unknown): Promise<string[]> {
 }
 
 const URN = /^urn:(uuid|oid):/;
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// A urn as written or with any of its colons URL-encoded (`urn%3Auuid%3A...` in a search string), as Medplum rewrites it.
-const urnPattern = (u: string) => esc(u).replaceAll(':', '(?::|%3A)');
+// Every whole urn in a text, as written or with its colons URL-encoded (`urn%3Auuid%3A...` in a search string), as Medplum
+// rewrites it; greedy, so urn:oid:1.2.3.4 is one urn (never urn:oid:1.2.3 inside it). One fixed pattern: linear in the text.
+const URN_TEXT = /urn(?::|%3A)(?:uuid|oid)(?::|%3A)[\w.-]+/g;
+const unencode = (m: string) => m.replaceAll('%3A', ':');
 const RANK: Record<string, number> = { DELETE: 0, POST: 1, PUT: 2, PATCH: 2 }; // then GET
 
 // A batch (each entry on its own, in order) or a transaction (all or nothing, one SQLite transaction, entries run DELETE,
@@ -601,22 +602,11 @@ function batch(store: Store, b: Bundle, base: string): Bundle {
   if (!b.entry?.length) return { resourceType: 'Bundle', type: `${b.type}-response` };
   const entries = b.entry;
   const urns = new Map<string, string>(), pre = new Map<number, string>();
-  // Every defined urn replaced, whole urns only (urn:oid:1.2.3 never rewrites inside urn:oid:1.2.3.4); the pattern is rebuilt
-  // only when a urn was added (once per transaction after the pre-pass, unless a GET defines one).
-  let re: RegExp | undefined, reSize = 0;
-  const rewrite = <T>(v: T): T => {
-    if (!urns.size) return v;
-    if (urns.size !== reSize) {
-      re = new RegExp(`(?:${[...urns.keys()].sort((x, y) => y.length - x.length).map(urnPattern).join('|')})(?![\\w.-])`, 'g');
-      reSize = urns.size;
-    }
-    return JSON.parse(JSON.stringify(v).replace(re!, (m) => urns.get(m.replaceAll('%3A', ':'))!));
-  };
+  // Every defined urn replaced, whole urns only; one not defined (yet) stays as written.
+  const rewrite = <T>(v: T): T => (urns.size ? JSON.parse(JSON.stringify(v).replace(URN_TEXT, (m) => urns.get(unencode(m)) ?? m)) : v);
   // Whether any entry's body (a PATCH's operations decoded) holds this whole urn, as rewrite would replace it.
-  const referenced = (urn: string): boolean => {
-    const at = new RegExp(`${urnPattern(urn)}(?![\\w.-])`);
-    return entries.some((x) => { try { return at.test(JSON.stringify(x.request?.method === 'PATCH' ? entryPatch(x.resource) : x.resource) ?? ''); } catch { return false; } });
-  };
+  const referenced = (urn: string): boolean =>
+    entries.some((x) => { try { return (JSON.stringify(x.request?.method === 'PATCH' ? entryPatch(x.resource) : x.resource) ?? '').match(URN_TEXT)?.some((m) => unencode(m) === urn) ?? false; } catch { return false; } });
   const run = (i: number): BundleEntry => {
     const e = entries[i];
     const { method = '', url = '', ifMatch, ifNoneExist } = e.request ?? {};

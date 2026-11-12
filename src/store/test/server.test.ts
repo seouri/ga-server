@@ -311,6 +311,18 @@ describe('store server: Medplum-compatible routes', () => {
   const ob = (extra: Partial<Observation> = {}): Observation => ({ resourceType: 'Observation', status: 'final', code: { text: 'x' }, ...extra });
   const count = async (q = '') => (await call('GET', `Observation?_summary=count${q}`)).json.total;
 
+  it('a batch of 1,000 entries with urn fullUrls rewrites in linear time (each entry once, not every earlier urn per entry)', async () => {
+    const A = 'urn:uuid:00000000-0000-4000-8000-000000000000';
+    const entry: BundleEntry[] = [{ fullUrl: A, resource: { resourceType: 'Patient' }, request: { method: 'POST', url: 'Patient' } }];
+    for (let i = 1; i <= 1000; i++) entry.push({ fullUrl: `urn:uuid:00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, resource: ob({ subject: { reference: A } }), request: { method: 'POST', url: 'Observation' } });
+    const t = Date.now();
+    const r = await tx('batch', entry);
+    // 20-27 s before (a regex of every earlier urn rebuilt per entry), 1.9 s after (most of it the 1,001 creates); limit 10 s.
+    expect(Date.now() - t).toBeLessThan(10_000);
+    expect(r.json.entry.map((e: BundleEntry) => e.response!.status)).toEqual(Array(1001).fill('201'));
+    expect(await count(`&subject=${r.json.entry[0].response.location}`)).toBe(1000);
+  }, 60_000);
+
   it('a transaction rewrites urn:uuid and urn:oid fullUrls everywhere (whole urns only); compartments follow the new Patient', async () => {
     const A = 'urn:uuid:11111111-1111-4111-8111-111111111111', B = 'urn:uuid:22222222-2222-4222-8222-222222222222', O = 'urn:oid:1.2.3';
     const r = await tx('transaction', [
