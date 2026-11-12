@@ -41,6 +41,12 @@ test('older last-seen is unconfirmed', () => {
 test('any matching source of several makes it current', () => {
   expect(currency(med({ seen: T0, keys: ['a', 'b'] }), ctx)).toBe('current');
 });
+// Source a dropped it (a synced after last-seen); a stale linked source b (older last success) must not confirm it.
+test('a stale linked source does not confirm a record its active source dropped', () => {
+  expect(currency(med({ seen: '2026-10-15T00:00:00Z', keys: ['a', 'b'] }), ctx)).toBe('unconfirmed');
+  expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a', 'b'] }), ctx)).toBe('current');
+  expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a', 'never'] }), ctx)).toBe('unconfirmed');
+});
 test('no last-seen: source-date vs newest import', () => {
   expect(currency(med({ date: T1 }), ctx)).toBe('current');
   expect(currency(med({ date: T0 }), ctx)).toBe('unconfirmed');
