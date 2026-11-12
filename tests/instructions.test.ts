@@ -21,6 +21,9 @@ describe('chatInstructions', () => {
     expect(t).not.toContain('`confirm` code');
     expect(t).toContain('record_followup');
     expect(t).toContain('health_maintenance');
+    // hospital_sync takes only a source: enabling or dropping types is hospital_enable (it replaces the enabled set).
+    expect(t).not.toContain('`hospital_sync` with `enable`');
+    expect(t).toContain('`hospital_enable` with the enabled types without them');
   });
   it('has no CLI or repo-only references', () => {
     for (const s of ['ga share', '/ga-import', 'AGENTS.md', 'ga connect', 'ga sync', 'sourceFile']) expect(t).not.toContain(s);

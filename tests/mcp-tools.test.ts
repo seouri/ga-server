@@ -39,7 +39,14 @@ test('portalWarning: none without stale sources; fix per status and transport', 
   expect(refused).toContain('`ga connect <its FHIR address>`');
   expect(refused).toContain('`ga sync --enable <the enabled types without MedicationRequest> <source>`');
   expect(refused).not.toContain('`ga sync`');
-  expect(portalWarning([s({ status: 'error', error: 'refused:MedicationRequest,Condition' })], true)).toMatch(/refused MedicationRequest, Condition: .*hospital_connect/);
+  const chat = portalWarning([s({ status: 'error', error: 'refused:MedicationRequest,Condition' })], true)!;
+  expect(chat).toMatch(/refused MedicationRequest, Condition: .*hospital_connect/);
+  // Chat users have no CLI: hospital_enable replaces the enabled set, so it drops a refused type; hospital_sync takes no types.
+  expect(chat).toContain('hospital_enable with the enabled types without them');
+  expect(chat).not.toMatch(/ga sync|GA computer/);
+  const notEnabled = portalWarning([s({ status: 'off', error: 'not_enabled' })], true)!;
+  expect(notEnabled).toContain('hospital_enable');
+  expect(notEnabled).not.toMatch(/hospital_sync|ga sync/);
 });
 
 test('read tools put portalWarning first; no Endpoints adds nothing; a failed check says status unknown', async () => {

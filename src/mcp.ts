@@ -200,13 +200,14 @@ export function portalWarning(sources: ReturnType<typeof endpointStatus>[], remo
   const stale = sources.filter((s) => s.stale);
   if (!stale.length) return undefined;
   // refused:<Type,...>: the hospital refuses those list searches, so syncing again fails again.
+  // Chat: hospital_enable replaces the enabled set, so it drops a refused type (hospital_sync takes no types).
   const refused = (types: string) =>
     `the hospital refused ${types.replaceAll(',', ', ')}: reconnect with ${types.includes(',') ? 'them' : 'it'} selected (${remote ? 'hospital_connect' : '`ga connect <its FHIR address>`'}) ` +
-    `or stop syncing ${types.includes(',') ? 'them' : 'it'} (\`ga sync --enable <the enabled types without ${types}> <source>\`${remote ? ' on the GA computer' : ''})`;
+    `or stop syncing ${types.includes(',') ? 'them' : 'it'} (${remote ? `hospital_enable with the enabled types without ${types.includes(',') ? 'them' : 'it'}` : `\`ga sync --enable <the enabled types without ${types}> <source>\``})`;
   const fix = (s: (typeof stale)[number]) =>
     s.error === 'disconnected' ? 'the user disconnected it on purpose'
     : s.error?.startsWith('refused:') ? refused(s.error.slice('refused:'.length))
-    : s.error === 'not_enabled' ? `no record types enabled yet, so GA holds nothing from it: ${remote ? 'hospital_sync with enable' : '`ga sync --enable <Type,...> <source>`'} after checking the dry-run counts`
+    : s.error === 'not_enabled' ? `no record types enabled yet, so GA holds nothing from it: ${remote ? 'hospital_enable (its preview shows the counts)' : '`ga sync --enable <Type,...> <source>` after checking the dry-run counts'}`
     : s.status === 'off' ? `reconnect: ${remote ? 'hospital_connect' : '`ga connect <its FHIR address>` (`ga status` lists it)'}`
     : `sync: ${remote ? 'hospital_sync' : '`ga sync`'}`;
   const lines = stale.map((s) => `${s.name || s.source} (${s.source}), status ${s.status}${s.error ? ` (${s.error})` : ''}, last success ${s.lastSuccess ?? 'never'}: ${fix(s)}`);
