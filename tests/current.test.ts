@@ -30,6 +30,11 @@ const ctx = currencyContext([], [ep('a', T1), ep('b', T0)]);
 test('last-seen equal to endpoint last success is current', () => {
   expect(currency(med({ seen: T1, keys: ['a'] }), ctx)).toBe('current');
 });
+// Sync stamps records before it writes the Endpoint: a sync dying in between leaves last-seen after last-success.
+test('last-seen after endpoint last success is current; a source with no last success confirms nothing', () => {
+  expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a'] }), ctx)).toBe('current');
+  expect(currency(med({ seen: T1, keys: ['never'] }), ctx)).toBe('unconfirmed');
+});
 test('older last-seen is unconfirmed', () => {
   expect(currency(med({ seen: T0, keys: ['a'] }), ctx)).toBe('unconfirmed');
 });

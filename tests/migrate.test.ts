@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent, Resource } from '@medplum/fhirtypes';
-import { auditKey, binaryIds, mismatches, normalise, rewriteShares, sourceDoc, stripExtracted } from '../src/migrate.ts';
+import { auditKey, binaryIds, mismatches, normalise, rewriteShares, stripExtracted } from '../src/migrate.ts';
+import { sourceDoc } from '../src/mcp.ts';
 import type { Share } from '../src/share/store.ts';
 
 const obs = {

@@ -14,7 +14,7 @@ import { defaultConfigPath, GaError, type GaConfig, getClient, loadConfig } from
 import { importEhi } from './ehi/import.ts';
 import { exportInfo } from './ehi/read.ts';
 import { sha256, SRC_DATE, TAG } from './identity.ts';
-import { importExtracted } from './mcp.ts';
+import { EXTRACT_TYPES, EXTRACTED_NOTE, importExtracted, sourceDoc } from './mcp.ts';
 import { walkReferences } from './patient.ts';
 import { setup } from './setup.ts';
 import { PATIENT_COMPARTMENT } from './share/scope.ts';
@@ -29,8 +29,6 @@ const TAG_ROWS = ['possible-duplicate', 'source-conflict', 'person-edited', 'ext
 const GA_LOG = 'urn:ga-server:share|,urn:ga-server:remote|'; // share and chat-app access logs (AuditEvent)
 const FILE = 'urn:ga-server:id:file';
 const ARCHIVE = { ehi: 'urn:ga-server:id:ehi-archive', apple: 'urn:ga-server:id:apple-health-archive' };
-const EXTRACT_TYPES = ['Observation', 'Condition', 'MedicationStatement', 'MedicationRequest', 'DiagnosticReport', 'Procedure', 'Encounter', 'AllergyIntolerance', 'Immunization'] as ResourceType[];
-const EXTRACTED_NOTE = /^Extracted from DocumentReference\/(\S+)$/;
 
 const paths = () => {
   const cfg = defaultConfigPath();
@@ -47,7 +45,7 @@ const srcDate = (r: Resource) => (r as { extension?: Extension[] }).extension?.f
 // shortcut: a reference from an extracted record to a record outside its document keeps the old id; none exist today
 // (ga_import batches are per document), revisit if extraction ever links to existing records.
 // What importExtracted adds on top of the agent's output: the patient, the link to the stored file. id is kept so the
-// engine maps references between records of one document; untrusted() in importExtracted drops meta and GA identifiers.
+// engine maps references between records of one document; untrusted() in importExtracted drops meta, GA extensions and every identifier.
 export function stripExtracted(r: Resource): Resource {
   const { meta: _m, subject: _s, patient: _p, ...out } = structuredClone(r) as Resource & Record<string, unknown>;
   const keep = <T>(k: string, f: (x: T) => boolean) => {
@@ -58,19 +56,6 @@ export function stripExtracted(r: Resource): Resource {
   keep<{ reference?: string }>('derivedFrom', (x) => !x.reference?.startsWith('DocumentReference/'));
   keep<{ text?: string }>('note', (x) => !EXTRACTED_NOTE.test(x.text ?? ''));
   return out as Resource;
-}
-
-// The source document of an extracted record: Observation.derivedFrom, the "Extracted from" note, else (Encounter,
-// DiagnosticReport have neither) the one file document named like meta.source.
-export function sourceDoc(r: Resource, docsByTitle: Map<string, string[]>): string | undefined {
-  const ref = (r as { derivedFrom?: { reference?: string }[] }).derivedFrom?.find((x) => x.reference?.startsWith('DocumentReference/'))?.reference;
-  if (ref) return ref.split('/')[1];
-  for (const n of (r as { note?: { text?: string }[] }).note ?? []) {
-    const m = EXTRACTED_NOTE.exec(n.text ?? '');
-    if (m) return m[1];
-  }
-  const ids = r.meta?.source ? docsByTitle.get(basename(r.meta.source)) : undefined;
-  return ids?.length === 1 ? ids[0] : undefined;
 }
 
 export type Row = { type: string; old: number; new: number };
@@ -213,15 +198,9 @@ async function plan(old: MedplumClient, project: string, oldCfg: GaConfig, newCl
           // A copy, not an import: no term searches and no new mappings (the old project's maps are copied as they are).
           return await importExtracted(c, { ...cfg, terminologyLookup: false }, rs.map(stripExtracted), file, srcDate(own));
         } catch (e) {
-          const docId = e instanceof GaError && e.message.startsWith('already imported') ? /DocumentReference\/([^\s)]+)/.exec(e.message)?.[1] : undefined;
-          if (!docId) throw e;
-          // Done on an earlier run only if its records made it too; a failed run left the file alone (importExtracted's hint).
-          const mine = new Map([[name, [docId]]]);
-          for (const type of EXTRACT_TYPES) {
-            const rs = await searchAll(c, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${cfg.patientId}` });
-            if (rs.some((r) => sourceDoc(r, mine) === docId)) return 'already imported';
-          }
-          throw new GaError(`${name}: stored in the GA project by an earlier run, but none of its records (${(e as Error).message})`);
+          // Refused only when its records made it on an earlier run (a failed run's stored file is reused).
+          if (e instanceof GaError && e.message.startsWith('already imported')) return 'already imported';
+          throw e;
         }
       },
     });

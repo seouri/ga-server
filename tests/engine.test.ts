@@ -170,6 +170,10 @@ test('sameValue compares quantities, strings, first codings and booleans (R19)',
   expect(sameValue(o({ valueString: 'a' }), o({ valueString: 'a' }))).toBe(true);
   expect(sameValue(o({ valueQuantity: { value: 1, unit: 'kg' } }), o({ valueQuantity: { value: 1, unit: 'g' } }))).toBe(false);
   expect(sameValue(o({}), o({}))).toBe(false);
+  // Component-only readings (BP) compare their components' numbers.
+  const bp = (sys: number, dia: number) => o({ component: [sys, dia].map((v) => ({ code: { text: 'x' }, valueQuantity: { value: v, unit: 'mm[Hg]' } })) });
+  expect(sameValue(bp(128, 82), bp(128, 82))).toBe(true);
+  expect(sameValue(bp(128, 82), bp(128, 80))).toBe(false);
 });
 
 // C1/I1: an EHI update never replaces a more specific existing value with a less specific one.

@@ -2,9 +2,21 @@ import { expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
-import { buildMcpServer, importExtracted, pageParams, portalWarning } from '../src/mcp.ts';
+import { buildMcpServer, importExtracted, pageParams, portalWarning, untrusted } from '../src/mcp.ts';
 
 const s = (o: object) => ({ source: 'h', name: 'Hosp', status: 'active', stale: true, enabledTypes: [], ...o });
+
+test('untrusted drops every identifier (an Epic one would replace the hospital record) and GA extensions, keeps the rest', () => {
+  const r = untrusted({
+    resourceType: 'Observation', id: 'x', status: 'final', code: { text: 'Creatinine' }, meta: { tag: [{ code: 'src-ehi' }] },
+    identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.0.1.7.2.798268', value: 'LAB1' }, { system: 'urn:ga-server:id:ehi:1', value: 'x' }],
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2030-01-01' }, { url: 'http://example.org/x', valueString: 'kept' }],
+  } as never) as unknown as Record<string, unknown>;
+  expect(r.identifier).toBeUndefined();
+  expect(r.meta).toBeUndefined();
+  expect(r.extension).toEqual([{ url: 'http://example.org/x', valueString: 'kept' }]);
+  expect(r.id).toBe('x');
+});
 
 test('importExtracted accepts a TIFF source file (reaches the file check, not the type check)', async () => {
   const obs = { resourceType: 'Observation', status: 'final', code: { text: 'Synthetic' } } as never;
@@ -21,6 +33,13 @@ test('portalWarning: none without stale sources; fix per status and transport', 
   expect(portalWarning([s({ status: 'error', lastSuccess: '2026-11-01T00:00:00Z' })], true)).toMatch(/last success 2026-11-01T00:00:00Z: sync: hospital_sync$/);
   expect(portalWarning([s({ status: 'off', error: 'disconnected' })], false)).toContain('disconnected it on purpose');
   expect(portalWarning([s({ status: 'error', error: 'not_enabled' })], false)).toContain('ga sync --enable');
+  // The hospital refused a list search: syncing again fails again; reconnect with the type selected or stop syncing it.
+  const refused = portalWarning([s({ status: 'error', error: 'refused:MedicationRequest' })], false)!;
+  expect(refused).toContain('refused MedicationRequest');
+  expect(refused).toContain('`ga connect <its FHIR address>`');
+  expect(refused).toContain('`ga sync --enable <the enabled types without MedicationRequest> <source>`');
+  expect(refused).not.toContain('`ga sync`');
+  expect(portalWarning([s({ status: 'error', error: 'refused:MedicationRequest,Condition' })], true)).toMatch(/refused MedicationRequest, Condition: .*hospital_connect/);
 });
 
 test('read tools put portalWarning first; no Endpoints adds nothing; a failed check says status unknown', async () => {

@@ -65,7 +65,8 @@ export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: st
   if (!isActive(r)) return undefined;
   const seen = extDate(r, LAST_SEEN);
   if (seen !== undefined) {
-    const k = smartKeys(r).find((k) => ctx.lastSuccess.get(k) === seen);
+    // At or after: sync stamps records before it writes the Endpoint, so a sync dying in between leaves last-seen newer.
+    const k = smartKeys(r).find((k) => (ctx.lastSuccess.get(k) ?? Infinity) <= seen);
     return k
       ? { currency: 'current', reason: `on the list at the latest ${k} portal sync` }
       : { currency: 'unconfirmed', reason: `the hospital portal stopped returning it (last returned ${day(seen)}); it may have been stopped` };
