@@ -34,7 +34,7 @@ describe('types option', () => {
       expect(cap.rest[0].resource.map((r: { type: string }) => r.type)).toEqual(['Binary', 'Observation', 'Patient']);
       // no CodeSystem or ValueSet in the set: no built-in terminology seed (and no marker)
       const raw = new DatabaseSync(join(dir, 'x.db'));
-      expect(raw.prepare('select (select count(*) from builtin) b, (select count(*) from meta) m').get()).toEqual({ b: 0, m: 0 });
+      expect(raw.prepare("select (select count(*) from builtin) b, (select count(*) from meta where key = 'terminology') m").get()).toEqual({ b: 0, m: 0 });
       raw.close();
       expect(() => loadDefinitions()).toThrow(/smaller type set/);
       expect(() => new Store(join(dir, 'y.db'))).toThrow(/one type set per process/);

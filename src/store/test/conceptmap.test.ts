@@ -123,7 +123,7 @@ describe('ConceptMap', () => {
   });
 
   it('a store whose types include ConceptMap but neither CodeSystem nor ValueSet indexes ConceptMaps without seeding terminology', () => {
-    expect(store.db.prepare('select (select count(*) from builtin) b, (select count(*) from meta) m').get()).toEqual({ b: 0, m: 0 });
+    expect(store.db.prepare("select (select count(*) from builtin) b, (select count(*) from meta where key = 'terminology') m").get()).toEqual({ b: 0, m: 0 });
     const cm = create();
     expect(store.db.prepare('select count(*) n from concept_mapping').get()).toEqual({ n: 2 });
     expect(codes(translate(store, P([coding(SYS, 'FSH')], cm.id)))).toEqual(['15067-2', '83001']);

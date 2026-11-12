@@ -38,7 +38,7 @@ export const INDEXED = new Set(['complete', 'example', 'fragment']); // Medplum'
 // Not @medplum/definitions' readJson (see definitions.ts); its file names start at dist/ (fhir/r4/...).
 const DIST = new URL('../', import.meta.resolve('@medplum/definitions'));
 const readJson = (f: string) => JSON.parse(readFileSync(new URL(f, DIST), 'utf8'));
-const DEFINITIONS_VERSION = JSON.parse(readFileSync(new URL('../package.json', DIST), 'utf8')).version as string;
+export const DEFINITIONS_VERSION = JSON.parse(readFileSync(new URL('../package.json', DIST), 'utf8')).version as string;
 
 // Prepared statements per database, by SQL.
 const cache = new WeakMap<DatabaseSync, Map<string, StatementSync>>();

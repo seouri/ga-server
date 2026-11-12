@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import {
-  OperationOutcomeError, convertToSearchableReferences, deepEquals, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
+  MEDPLUM_VERSION, OperationOutcomeError, convertToSearchableReferences, deepEquals, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameters,
   stringify, toTypedValue, validateResource,
 } from '@medplum/core';
 import type { Bundle, CodeSystem, ConceptMap, OperationOutcome, OperationOutcomeIssue, Resource } from '@medplum/fhirtypes';
@@ -16,7 +16,7 @@ import { PATIENT_COMPARTMENT_PARAMS, loadDefinitions } from './definitions.ts';
 import { SEARCH_SCHEMA, SearchError, searchJson, writeIndex } from './search.ts';
 import { inValueSet, subsumedCodes } from './expand.ts';
 import { CONCEPTMAP_SCHEMA, dropConceptMap, indexConceptMap } from './conceptmap.ts';
-import { TERMINOLOGY_SCHEMA, dropCodeSystem, indexCodeSystem, seedTerminology } from './terminology.ts';
+import { DEFINITIONS_VERSION, TERMINOLOGY_SCHEMA, dropCodeSystem, indexCodeSystem, seedTerminology } from './terminology.ts';
 
 export type StoreIssue = { expression?: string[]; text: string };
 
@@ -90,6 +90,18 @@ export class Store {
         throw new IndexFormatError(`FHIR store ${file} has search index format ${v}, this version needs ${INDEX_VERSION}: rebuild the file from its source`);
       }
       this.db.exec(`pragma user_version = ${INDEX_VERSION}`);
+    }
+    // Index rows come from @medplum/core's FHIRPath and @medplum/definitions' search parameters: after either package changes
+    // (or when the file does not say which wrote it), every resource is indexed again, in one transaction.
+    const deps = `@medplum/core ${MEDPLUM_VERSION}, @medplum/definitions ${DEFINITIONS_VERSION}`;
+    if ((this.prep("select value from meta where key = 'index'").get() as { value: string } | undefined)?.value !== deps) {
+      try {
+        this.transaction(() => {
+          this.db.exec('delete from idx; delete from comp; delete from sortkeys; delete from idx_text');
+          for (const { rid, json } of this.prep('select rid, json from resources').iterate() as Iterable<{ rid: number; json: string }>) writeIndex(this.prep, rid, JSON.parse(json));
+          this.prep("insert or replace into meta values ('index', ?)").run(deps);
+        });
+      } catch (e) { this.db.close(); throw e; }
     }
     try { seedTerminology(this, opts.terminology); } catch (e) { this.db.close(); throw e; }
   }

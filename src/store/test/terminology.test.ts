@@ -285,7 +285,7 @@ describe('built-in terminology', () => {
       const file = join(d, 'store.db');
       expect(() => new Store(file, { terminology: ['fhir/r4/valuesets-medplum.json', 'fhir/r4/no-such-file.json'] })).toThrow(/no-such-file/);
       const raw = new DatabaseSync(file);
-      expect(raw.prepare('select (select count(*) from builtin) b, (select count(*) from resources) r, (select count(*) from meta) m').get()).toEqual({ b: 0, r: 0, m: 0 });
+      expect(raw.prepare("select (select count(*) from builtin) b, (select count(*) from resources) r, (select count(*) from meta where key = 'terminology') m").get()).toEqual({ b: 0, r: 0, m: 0 });
       raw.close();
       const s = new Store(file);
       try { expect([count(s, 'CodeSystem'), count(s, 'ValueSet')]).toEqual([1108, 1346]); } finally { s.close(); }

@@ -188,4 +188,27 @@ describe('Store index format', () => {
       expect(() => new Store(file, { terminology: [] })).toThrow(IndexFormatError);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('a file indexed under other @medplum/core or @medplum/definitions versions (or none recorded) is reindexed on open', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'store-deps-'));
+    const file = join(dir, 'store.db');
+    try {
+      const s = new Store(file, { terminology: [] });
+      const id = s.create({ resourceType: 'Patient', name: [{ family: 'Smith' }] }).resource.id!;
+      const deps = (s.db.prepare("select value from meta where key = 'index'").get() as { value: string }).value;
+      expect(deps).toMatch(/^@medplum\/core \S+, @medplum\/definitions \S+$/);
+      s.close();
+      // A package upgrade changed a search parameter: rows written before it lack its index rows.
+      for (const marker of ["update meta set value = 'old' where key = 'index'", "delete from meta where key = 'index'"]) {
+        const raw = new DatabaseSync(file);
+        raw.exec(`${marker}; delete from idx; delete from sortkeys; delete from comp; delete from idx_text`);
+        raw.close();
+        const s2 = new Store(file, { terminology: [] });
+        expect(s2.search('Patient', [['name', 'smith']], '').entry?.map((e) => e.resource?.id)).toEqual([id]);
+        expect(s2.search('Patient', [['_sort', '-_lastUpdated']], '').entry?.map((e) => e.resource?.id)).toEqual([id]);
+        expect((s2.db.prepare("select value from meta where key = 'index'").get() as { value: string }).value).toBe(deps);
+        s2.close();
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
