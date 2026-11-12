@@ -58,9 +58,11 @@ test('a recreated container (same hostname, same pid) frees the lock its previou
 // own handler first (the gateway's exitOnStop) keeps its own shutdown.
 test('SIGINT or SIGTERM while holding the import lock releases it', async () => {
   const lock = JSON.stringify(new URL('../src/lock.ts', import.meta.url).href);
-  const run = async (sig: NodeJS.Signals, ownHandler = false) => {
+  const run = async (sig: NodeJS.Signals, ownHandler = false, drain = false) => {
     const d = mkdtempSync(join(tmpdir(), 'ga-lock-sig-'));
-    const own = `process.once('${sig}', () => { writeFileSync(${JSON.stringify(join(d, 'marker'))}, ''); process.exit(0); });`;
+    const done = `writeFileSync(${JSON.stringify(join(d, 'marker'))}, ''); process.exit(0);`;
+    // drain: a once handler that finishes its shutdown later (it is removed before it runs, so it no longer counts as a listener)
+    const own = `process.once('${sig}', () => { ${drain ? `setTimeout(() => { ${done} }, 200);` : done} });`;
     const code = `import { writeFileSync } from 'node:fs'; ${ownHandler ? own : ''}
       const { withImportLock } = await import(${lock});
       await withImportLock(() => { console.log('held'); return new Promise(() => setInterval(() => {}, 1000)); }, { dir: ${JSON.stringify(d)} });`;
@@ -76,4 +78,5 @@ test('SIGINT or SIGTERM while holding the import lock releases it', async () => 
   expect(await run('SIGINT')).toEqual({ exit: null, signal: 'SIGINT', left: false, marker: false });
   expect(await run('SIGTERM')).toEqual({ exit: null, signal: 'SIGTERM', left: false, marker: false });
   expect(await run('SIGTERM', true)).toEqual({ exit: 0, signal: null, left: false, marker: true });
+  expect(await run('SIGTERM', true, true)).toEqual({ exit: 0, signal: null, left: false, marker: true });
 });
