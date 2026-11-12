@@ -253,7 +253,7 @@ const QueryCostRule =
 class QueryCostVisitor {
   private readonly context: ValidationContext;
   private readonly maxCost: number;
-  private readonly fragmentCosts: Record<string, number>;
+  private fragmentCosts: Record<string, number>;
   private readonly variables: Record<string, unknown> | undefined;
   private operation: OperationDefinitionNode | undefined;
 
@@ -266,6 +266,7 @@ class QueryCostVisitor {
 
   OperationDefinition(node: OperationDefinitionNode): void {
     this.operation = node;
+    this.fragmentCosts = Object.create(null); // a fragment's cost depends on this operation's variable defaults
     let cost = 0;
     for (const child of node.selectionSet.selections) {
       cost += this.calculateCost(child);
@@ -337,7 +338,6 @@ class QueryCostVisitor {
     }
     return undefined;
   }
-
 }
 
 function isSearchField(node: FieldNode): boolean {

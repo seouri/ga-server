@@ -86,6 +86,8 @@ describe('$graphql resolvers (store-only)', () => {
     for (const query of [
       `query Q($n: Int = 1000) { PatientList(_count: $n) { ${nested} } }`, // no variables sent: the default runs
       `{ a: PatientList(_count: -1000) { ${nested} } b: PatientList(_count: 1000) { ${nested} } }`, // unclamped, a costs -27,992
+      // a shared fragment is costed per operation: B's cheap default must not stand for A's
+      `query B($n: Int = 2) { ...F } query A($n: Int = 1000) { ...F } fragment F on QueryType { PatientList(_count: $n) { ${nested} } }`,
     ]) {
       const r = run(query);
       expect(r, query).toMatchObject({ status: 400, json: { issue: [{ details: { text: 'Query too complex' } }] } });
