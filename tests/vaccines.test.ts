@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import type { Immunization } from '@medplum/fhirtypes';
 import { CONCEPT_SRC } from '../src/concept-apply.ts';
-import { doseOf, evaluateVaccines, loadSchedule } from '../src/vaccines.ts';
+import { addMonths, doseOf, evaluateVaccines, loadSchedule } from '../src/vaccines.ts';
 
 // Synthetic histories; expected statuses follow the shipped schedule's own rules.
 const schedule = loadSchedule();
@@ -177,4 +177,12 @@ test('doseOf: a GA-added CVX coding counts unless the record is concept-suggeste
   expect(doseOf(imm([ga])).cvx).toBe('187');
   expect(doseOf(imm([ga], ['concept-suggested'])).cvx).toBeUndefined();
   expect(doseOf(imm([{ system: 'urn:oid:2.16.840.1.113883.12.292', code: '187' }, ga], ['concept-suggested'])).cvx).toBe('187');
+});
+
+test('addMonths clamps to the last day of a shorter month', () => {
+  expect(addMonths('2025-01-31', 1)).toBe('2025-02-28');
+  expect(addMonths('2024-01-31', 1)).toBe('2024-02-29');
+  expect(addMonths('2024-02-29', 12)).toBe('2025-02-28');
+  expect(addMonths('2025-03-31', -1)).toBe('2025-02-28');
+  expect(addMonths('2025-01-15', 1)).toBe('2025-02-15');
 });

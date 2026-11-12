@@ -2,7 +2,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
-import { threadId } from 'node:worker_threads';
+import { isMainThread, threadId } from 'node:worker_threads';
 import { defaultConfigPath, GaError } from './config.ts';
 
 const LOCK_STALE_MS = 2 * 3_600_000;
@@ -64,9 +64,26 @@ export async function withImportLock<T>(fn: () => Promise<T>, opts: { dir?: stri
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const lock = await takeLock(join(dir, 'import.lock'), opts.waitMs ?? IMPORT_WAIT_MS);
   if (!lock) throw new GaError(IMPORT_BUSY);
+  // Ctrl-C or a stop must not leave the lock for 2 h. 'exit' covers a process.exit (the gateway's exitOnStop); a signal with no
+  // other listener is re-raised after the release, so the process still ends by it. Main thread only: a worker gets no signals,
+  // and one that dies keeps its lock for freeThreadLock.
+  const release = () => rmSync(lock, { force: true });
+  const onSignal = (sig: NodeJS.Signals) => {
+    if (process.listenerCount(sig)) return; // another handler owns the shutdown (and may drain): 'exit' releases
+    release();
+    process.kill(process.pid, sig);
+  };
+  if (isMainThread) {
+    process.on('exit', release);
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+  }
   try {
     return await fn();
   } finally {
-    rmSync(lock, { force: true });
+    release();
+    process.off('exit', release);
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
   }
 }

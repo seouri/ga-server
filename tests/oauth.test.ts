@@ -48,22 +48,22 @@ describe('FileAdapter', () => {
   it('sweepExpired removes expired records and keeps live ones', async () => {
     const d = tmp();
     let t = 1_000_000;
-    const a = new FileAdapter('AccessToken', d, () => t);
+    const a = new FileAdapter('Interaction', d, () => t);
     await a.upsert('old', { x: 1 }, 10);
     await a.upsert('new', { x: 2 }, 1000);
     await a.upsert('forever', { x: 3 });
     sweepExpired(d, t + 20_000);
-    expect(readdirSync(join(d, 'oidc', 'AccessToken'))).toHaveLength(2);
+    expect(readdirSync(join(d, 'oidc', 'Interaction'))).toHaveLength(2);
     expect(await a.find('new')).toEqual({ x: 2 });
   });
   it('sweepExpired ignores stray files and still removes expired records', async () => {
     const d = tmp();
-    const a = new FileAdapter('AccessToken', d, () => 1_000_000);
+    const a = new FileAdapter('Interaction', d, () => 1_000_000);
     await a.upsert('old', { x: 1 }, 10);
     writeFileSync(join(d, 'oidc', '.DS_Store'), 'x');
-    writeFileSync(join(d, 'oidc', 'AccessToken', '.DS_Store'), 'x');
+    writeFileSync(join(d, 'oidc', 'Interaction', '.DS_Store'), 'x');
     expect(() => sweepExpired(d, 1_000_000 + 20_000)).not.toThrow();
-    expect(readdirSync(join(d, 'oidc', 'AccessToken'))).toEqual(['.DS_Store']);
+    expect(readdirSync(join(d, 'oidc', 'Interaction'))).toEqual(['.DS_Store']);
   });
   it('round-trips, expires, consumes and revokes by grant', async () => {
     const d = tmp();
@@ -74,6 +74,8 @@ describe('FileAdapter', () => {
     const file = join(d, 'oidc', 'AccessToken', `${createHash('sha256').update('a1').digest('hex')}.json`);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     t += 61_000;
+    expect(await at.find('a1')).toBeDefined(); // an access token's record outlives its exp by 7 days (the gateway's plain 401)
+    t += 7 * 86400_000;
     expect(await at.find('a1')).toBeUndefined();
 
     const rt = new FileAdapter('RefreshToken', d, () => t);

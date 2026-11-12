@@ -59,7 +59,9 @@ const BARE = new Set(['measles', 'mumps', 'rubella', 'varicella', 'vzv']);
 const ANTIBODY = /\b(antibod\w*|ab|igg|immun\w*|titer|titre)\b/;
 export const addMonths = (date: string, n: number) => {
   const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  const day = d.getUTCDate();
   d.setUTCMonth(d.getUTCMonth() + n);
+  if (d.getUTCDate() !== day) d.setUTCDate(0); // ran past a shorter month's end: its last day (Jan 31 + 1 month = Feb 28)
   return d.toISOString().slice(0, 10);
 };
 export const addDays = (date: string, n: number) => new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
