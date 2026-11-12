@@ -28,7 +28,7 @@ ga status               # per source: status, last success, STALE flag, enabled 
 ga disconnect fhir-example-hospital-org   # deletes the tokens; records already fetched stay
 ```
 
-A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs; `ga status` shows it `off (not_enabled)` until you enable types. Two syncs of one source never run at once: the second waits up to 30 seconds, then reports `busy` and changes nothing. After `ga disconnect`, `ga connect` reconnects it.
+A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs; `ga status` shows it `off (not_enabled)` until you enable types. Two syncs of one source never run at once: the second waits up to 30 seconds, then reports `busy` and changes nothing; `ga disconnect` (or `hospital_disconnect`) during a sync of that source refuses at once with `sync running, try again`. After `ga disconnect`, `ga connect` reconnects it.
 
 ## 3. Daily sync
 

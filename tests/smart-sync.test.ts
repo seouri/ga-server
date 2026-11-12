@@ -1,11 +1,13 @@
 // syncSource's error paths against the synthetic mock portal and a fake client that records Endpoint writes (no Medplum).
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { MedplumClient } from '@medplum/core';
 import type { Endpoint, Resource } from '@medplum/fhirtypes';
-import { saveSecret, writeApp } from '../src/smart/store.ts';
+import { takeLock } from '../src/lock.ts';
+import { disconnectSource } from '../src/smart/actions.ts';
+import { loadSecret, saveSecret, writeApp, writeSources } from '../src/smart/store.ts';
 import type { SourceRec } from '../src/smart/store.ts';
 import { ENABLED_TYPES, LAST_SUCCESS, SOURCE_ID, syncSource } from '../src/smart/sync.ts';
 import { serveFixtures, startMock } from './smart/mock-server.ts';
@@ -66,5 +68,21 @@ describe('syncSource', () => {
     const { dir, src, client, writes } = setup({} as { clientId: string }); // no client id: fails before any fetch
     expect(await syncSource(client, dir, src, 'p')).toMatchObject({ status: 'error', error: 'no_client_id' });
     expect(ext(writes[0], ENABLED_TYPES)?.valueString).toBe('Observation');
+  });
+});
+
+describe('disconnectSource', () => {
+  it('fails fast while a sync of the source holds its lock, changing nothing; works once it is free', async () => {
+    const { dir, src, client, writes } = setup();
+    writeSources(dir, [src]);
+    const lock = (await takeLock(join(dir, `${src.key}.sync.lock`), 0))!;
+    await expect(disconnectSource(client, dir, src.key, 'p')).rejects.toThrow('sync running, try again');
+    expect(writes).toEqual([]);
+    expect(loadSecret(dir, src.key)).toBeTruthy();
+    rmSync(lock);
+    await disconnectSource(client, dir, src.key, 'p');
+    expect(writes[0]).toMatchObject({ status: 'off' });
+    expect(loadSecret(dir, src.key)).toBeUndefined();
+    expect(existsSync(lock)).toBe(false);
   });
 });
