@@ -257,7 +257,8 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       console.error(`smart sync ${src.key}: status_write_error`);
       error = 'status_write_error'; // the import itself succeeded
     }
-    // Automatic mapping only after the Endpoint: until it has this sync's last success, every record's new last-seen reads as unconfirmed.
+    // Automatic mapping only after the Endpoint, so a slow or failing mapping never delays this sync's status (records' new last-seen
+    // already reads current meanwhile: it is after the old last success).
     const mapped = dryRun ? ok : { ...ok, report: await afterImport(client, { ...lookupConfig(), patientId }, report).catch(() => report) };
     return error ? { ...mapped, error } : mapped;
   } catch (e) {
