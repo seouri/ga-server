@@ -73,17 +73,17 @@ function save(dir: string, j: JobRecord): JobRecord {
   return j;
 }
 
-// Writes the record, then moves the upload into the job's folder under a fixed name (out of reach of the 24-hour upload
-// sweep, never colliding with job.json or root). Not started.
+// Moves the upload into the job's folder under a fixed name (out of reach of the 24-hour upload sweep, never colliding with
+// job.json or root), then writes the record: a crash between leaves no record pointing at a missing export. Not started.
 export function recordJob(dir: string, upload: string, opts: { tz?: string; patientId?: string; batchSize?: number } = {}): JobRecord {
   const id = randomBytes(9).toString('base64url');
   mkdirSync(jobDir(dir, id), { recursive: true, mode: 0o700 });
-  const j = save(dir, {
-    id, upload: join(jobDir(dir, id), `upload${extname(upload)}`), tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId,
+  const moved = join(jobDir(dir, id), `upload${extname(upload)}`);
+  renameSync(upload, moved);
+  return save(dir, {
+    id, upload: moved, tz: opts.tz || process.env.GA_EHI_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone, patientId: opts.patientId,
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, batchSize: opts.batchSize ?? BATCH_SIZE, status: 'running', started: new Date().toISOString(), lastBatch: -1, attempts: 0,
   });
-  renameSync(upload, j.upload);
-  return j;
 }
 
 type Supervision = { run?: Run; busyRetryMs?: number };
