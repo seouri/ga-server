@@ -167,9 +167,10 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   const staged = !type && method === 'POST' ? await stageBinaries(store, json) : [];
   let a: Answer;
   try { a = dispatch(store, { method, parts, query, body: json, ifMatch: header(req, 'if-match'), ifNoneExist: header(req, 'if-none-exist'), base }); } catch (e) {
-    // A refused bundle (StoreError, HttpError: a transaction rolled back, a batch's checks before its first entry) keeps none of
-    // its Binaries. Any other error may come after entries committed (a response too big to serialize): their records keep theirs.
-    if (e instanceof StoreError || e instanceof HttpError) for (const id of staged) store.deleteBinary(id);
+    // A refused bundle keeps none of its Binaries: a transaction that threw rolled back; a batch throws a StoreError or HttpError
+    // only from its checks before the first entry. A response too big to serialize (committed) comes after the entries: kept.
+    const refused = !(e as { committed?: boolean }).committed && ((json as Bundle)?.type === 'transaction' || e instanceof StoreError || e instanceof HttpError);
+    if (refused) for (const id of staged) store.deleteBinary(id);
     throw e;
   }
   const h: Record<string, string> = {};
@@ -223,7 +224,10 @@ function dispatch(store: Store, r: Req): Answer {
   const { method, query } = r;
   const [type, id, op, vid] = r.parts;
   if (!type) {
-    if (method === 'POST') return { status: 200, json: JSON.stringify(batch(store, r.body as Bundle, r.base)) };
+    if (method === 'POST') {
+      const out = batch(store, r.body as Bundle, r.base);
+      try { return { status: 200, json: JSON.stringify(out) }; } catch (e) { throw Object.assign(e as Error, { committed: true }); }
+    }
     if (method === 'GET') return systemSearch(store, r);
     throw new HttpError(405, `${method} not allowed`);
   }

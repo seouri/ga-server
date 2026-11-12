@@ -572,6 +572,10 @@ describe('store server: Medplum-compatible routes', () => {
       const t = await tx('transaction', entries({ request: { method: 'POST', url: 'Observation' }, resource: { resourceType: 'Observation', status: 'bad' } as unknown as Resource }));
       expect(t.status).toBe(400);
       expect(readdirSync(join(dir, 'binary')).filter((f) => !f.startsWith('.'))).toEqual([url.slice('Binary/'.length)]);
+      // An unexpected error (not a refusal) inside a transaction rolls it back too: its staged Binary goes.
+      const u = await tx('transaction', entries({ request: { method: 'GET', url: 'Observation' } }));
+      expect(u.status).toBe(500);
+      expect(readdirSync(join(dir, 'binary')).filter((f) => !f.startsWith('.'))).toEqual([url.slice('Binary/'.length)]);
     } finally { boom.mockRestore(); err.mockRestore(); }
   });
 
