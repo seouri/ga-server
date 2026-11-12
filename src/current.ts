@@ -5,7 +5,8 @@ import { ENABLED_TYPES, LAST_SUCCESS, SOURCE_ID } from './smart/sync.ts';
 
 type Currency = 'current' | 'unconfirmed';
 // newestImport: newest C-CDA or EHI import (every type). portal: per type, the newest sync of a portal with that type enabled.
-export type Ctx = { lastSuccess: Map<string, number>; newestImport: number; portal: Map<string, number> };
+// lastSuccess: per source key; types: its enabled types (kinds), when its Endpoint lists them.
+export type Ctx = { lastSuccess: Map<string, number>; types: Map<string, Set<string>>; newestImport: number; portal: Map<string, number> };
 
 const SMART_ID = 'urn:ga-server:id:smart:';
 // Whole-record Epic imports. A portal sync raises the cutoff only for the types it syncs (Ctx.portal), never through its records.
@@ -23,20 +24,23 @@ const extDate = (r: Resource, url: string): number | undefined => {
 // newestImport: when given (a share's whole-record value), it replaces the scan of `resources`, which may be a narrow slice.
 export function currencyContext(resources: Resource[], endpoints: Endpoint[], newestImport = -Infinity): Ctx {
   const lastSuccess = new Map<string, number>();
+  const types = new Map<string, Set<string>>();
   const portal = new Map<string, number>();
   const scan = newestImport === -Infinity;
   for (const e of endpoints) {
     const t = extDate(e, LAST_SUCCESS);
     if (t === undefined) continue;
     const key = e.identifier?.find((i) => i.system === SOURCE_ID)?.value;
+    const enabled = e.extension?.find((x) => x.url === ENABLED_TYPES)?.valueString?.split(',').filter(Boolean);
     if (key) lastSuccess.set(key, t);
-    for (const type of e.extension?.find((x) => x.url === ENABLED_TYPES)?.valueString?.split(',') ?? []) portal.set(kind(type), Math.max(portal.get(kind(type)) ?? -Infinity, t));
+    if (key && enabled) types.set(key, new Set(enabled.map(kind)));
+    for (const type of enabled ?? []) portal.set(kind(type), Math.max(portal.get(kind(type)) ?? -Infinity, t));
   }
   for (const r of scan ? resources : []) {
     if (!r.meta?.tag?.some((t) => t.system === TAG && t.code && EPIC_TAGS.has(t.code))) continue;
     newestImport = Math.max(newestImport, extDate(r, SRC_DATE) ?? -Infinity);
   }
-  return { lastSuccess, newestImport, portal };
+  return { lastSuccess, types, newestImport, portal };
 }
 
 // A planned or proposed medication from a C-CDA Plan of Treatment (moodCode INT/PRP → intent plan/proposal): not something the
@@ -67,8 +71,10 @@ export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: st
   if (seen !== undefined) {
     // At or after the newest last success of its linked sources (sync stamps records before it writes the Endpoint, so a sync
     // dying in between leaves last-seen newer): a source that synced after last-seen dropped it, whatever an older one says.
-    // A linked key with no Endpoint (never synced, e.g. an Apple Health Records host) has no say.
-    const synced = smartKeys(r).flatMap((k) => (ctx.lastSuccess.has(k) ? [[k, ctx.lastSuccess.get(k)!] as const] : []));
+    // A linked key with no Endpoint (never synced, e.g. an Apple Health Records host), or whose portal no longer syncs this
+    // record type, has no say.
+    const syncs = (k: string) => ctx.lastSuccess.has(k) && (ctx.types.get(k)?.has(kind(r.resourceType)) ?? true);
+    const synced = smartKeys(r).flatMap((k) => (syncs(k) ? [[k, ctx.lastSuccess.get(k)!] as const] : []));
     const newest = synced.reduce<readonly [string, number] | undefined>((a, b) => (!a || b[1] > a[1] ? b : a), undefined);
     const k = newest && seen >= newest[1] ? newest[0] : undefined;
     return k

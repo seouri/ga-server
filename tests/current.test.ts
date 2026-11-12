@@ -87,3 +87,9 @@ test('a C-CDA planned MedicationRequest is not active; a portal one with the sam
   expect(currency(req('src-ccda'), ctx)).toBeUndefined();
   expect(currency(req('src-smart'), ctx)).toBe('current');
 });
+// A linked portal that no longer syncs medications (labs only now) has no say over one that still lists the medication.
+test('a linked source without this record type enabled does not make it unconfirmed', () => {
+  const c = currencyContext([], [ep('a', '2026-11-03T00:00:00Z', 'Observation'), ep('b', T1)]);
+  expect(currency(med({ seen: T1, keys: ['a', 'b'] }), c)).toBe('current');
+  expect(currency(med({ seen: T0, keys: ['a', 'b'] }), c)).toBe('unconfirmed'); // b synced after it and dropped it
+});
