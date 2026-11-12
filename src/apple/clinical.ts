@@ -1,13 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { Identifier, Resource } from '@medplum/fhirtypes';
+import type { DocumentReference, Identifier, Observation, Resource } from '@medplum/fhirtypes';
 import { COMPARTMENT } from '../engine.ts';
 import { APPLE, sha256 as sha } from '../identity.ts';
 import { sourceKey } from '../smart/auth.ts';
 import { mapForGa, type PendingBinary } from '../smart/fetch.ts';
 import type { SourceRec } from '../smart/store.ts';
 import { appleDate, type AhClinical } from './read.ts';
-import { SUBJECT } from './readings.ts';
+import { keyed, SUBJECT } from './readings.ts';
 
 // FHIR base and source key of a ClinicalRecord's sourceURL (".../<Type>/<id>"); undefined when it has no such shape.
 export function fhirBaseOf(sourceURL: string): { base: string; key: string } | undefined {
@@ -92,17 +92,23 @@ function ecg(folder: string, f: string, n: number): Resource[] | undefined {
   if (!h['Recorded Date'] || !h.Classification) return undefined;
   const recorded = appleDate(h['Recorded Date']);
   const id = `apple-ecg-${n}`;
-  return [{
+  const doc: DocumentReference = {
     resourceType: 'DocumentReference', id, status: 'current', subject: SUBJECT, type: { text: 'Apple Watch ECG' }, date: recorded,
     content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(text).toString('base64'), title: basename(f) } }],
-    identifier: [{ system: APPLE, value: sha(`ecg|${text}`) }],
-  }, {
+  };
+  // Keyed on the file with its Recorded Date line rewritten (Apple writes it in the offset at export time); as written, the old key.
+  keyed(doc, (at) => {
+    const t = at(recorded);
+    return `ecg|${t === recorded ? text : text.replace(/^(Recorded Date,).*$/m, `$1${t.replace('T', ' ').replace(/([+-]\d\d):(\d\d)$/, ' $1$2')}`)}`;
+  });
+  const o: Observation = {
     resourceType: 'Observation', status: 'final', code: { text: 'Apple Watch ECG classification' }, subject: SUBJECT,
     valueString: h.Classification, effectiveDateTime: recorded,
     derivedFrom: [{ reference: `DocumentReference/${id}` }],
-    identifier: [{ system: APPLE, value: sha(`ecg-class|${recorded}`) }],
     ...(h.Symptoms && { note: [{ text: h.Symptoms }] }),
-  } as Resource];
+  };
+  keyed(o, (at) => `ecg-class|${at(recorded)}`);
+  return [doc, o];
 }
 
 // One item per ECG file: its identifiers now, its DocumentReference and classification when built (the file is read again
