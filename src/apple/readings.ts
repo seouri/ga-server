@@ -32,7 +32,32 @@ export const short = (t: string) => t.replace(/^HK(?:Quantity|Category)TypeIdent
 export const SUBJECT = { reference: 'Patient/apple-patient' };
 export const UCUM = 'http://unitsofmeasure.org';
 
-function base(rec: AhRecord, key: string, code: Observation['code'], category: string): Observation {
+export const OFFSET = /[+-]\d\d:\d\d$/;
+const minutes = (off: string) => (off[0] === '-' ? -1 : 1) * (Number(off.slice(1, 3)) * 60 + Number(off.slice(4, 6)));
+// An instant as Apple writes it (appleDate's text, whole seconds) in the offset `off`.
+export const written = (ms: number, off: string) => `${new Date(ms + minutes(off) * 60000).toISOString().slice(0, 19)}${off}`;
+export const zone = (m: number) => `${m < 0 ? '-' : '+'}${String(Math.floor(Math.abs(m) / 60)).padStart(2, '0')}:${String(Math.abs(m) % 60).padStart(2, '0')}`;
+// The text rewritten by `to(ms, its offset)`; kept as written when it is no instant Apple's text rebuilds (an impossible date such as Feb 30).
+const recast = (text: string, to: (ms: number, off: string) => string) => {
+  const ms = Date.parse(text), off = OFFSET.exec(text)?.[0];
+  return Number.isFinite(ms) && off && written(ms, off) === text ? to(ms, off) : text;
+};
+
+// Identifier values older imports gave a record: they keyed it on its time as written, and Apple writes every timestamp in the
+// phone's offset at export time, so an export after a DST change re-keyed it. The importer looks these up when the instant key misses.
+export const LEGACY = new WeakMap<object, string[]>();
+// Keys o on its instants (UTC) and records the keys older imports may hold it under: its time as this export writes it, and an hour
+// either side (the export before or after a DST change). `text(at)` builds the key text, passing each timestamp through `at`.
+// shortcut: older exports taken in another zone (abroad) or a DST step other than an hour are not matched; their readings come in once more.
+export function keyed<T extends { identifier?: Observation['identifier'] }>(o: T, text: (at: (t: string) => string) => string): string {
+  const value = sha(text((t) => recast(t, (ms) => new Date(ms).toISOString())));
+  const shifted = (d: number) => text((t) => recast(t, (ms, off) => written(ms, zone(minutes(off) + d))));
+  LEGACY.set(o, [text((t) => t), shifted(-60), shifted(60)].map(sha).filter((v) => v !== value));
+  o.identifier = [{ system: APPLE, value }];
+  return value;
+}
+
+function base(rec: AhRecord, code: Observation['code'], category: string): Observation {
   const o: Observation = {
     resourceType: 'Observation',
     status: 'final',
@@ -40,7 +65,6 @@ function base(rec: AhRecord, key: string, code: Observation['code'], category: s
     code,
     subject: SUBJECT,
     device: { display: rec.sourceName },
-    identifier: [{ system: APPLE, value: key }],
   };
   if (rec.startDate === rec.endDate) o.effectiveDateTime = rec.startDate;
   else o.effectivePeriod = { start: rec.startDate, end: rec.endDate };
@@ -73,10 +97,9 @@ export class Readings {
       return true;
     }
     if (EVENTS[t]) {
-      const key = sha(`${t}|${rec.startDate}|${rec.endDate}|${rec.value ?? ''}|`);
-      const o = base(rec, key, { text: EVENTS[t] }, vs);
+      const o = base(rec, { text: EVENTS[t] }, vs);
       if (rec.value !== undefined) o.valueString = rec.value;
-      this.put(key, o);
+      this.put(keyed(o, (at) => `${t}|${at(rec.startDate)}|${at(rec.endDate)}|${rec.value ?? ''}|`), o);
       return true;
     }
     const def = READINGS[t];
@@ -84,23 +107,21 @@ export class Readings {
     const conv = rec.unit ? def.conv[rec.unit] : undefined;
     const raw = Number(rec.value);
     if (!conv || rec.value === undefined || rec.value === '' || !Number.isFinite(raw)) { this.skips.unexpectedUnit++; return true; }
-    const key = sha(`${t}|${rec.startDate}|${rec.endDate}|${rec.value}|${rec.unit}`);
     const code: Observation['code'] = { text: def.text };
     if (def.loinc) code.coding = [{ system: 'http://loinc.org', code: def.loinc }];
-    const o = base(rec, key, code, def.category);
+    const o = base(rec, code, def.category);
     o.valueQuantity = { value: conv(raw), unit: def.ucum, system: UCUM, code: def.ucum };
-    this.put(key, o);
+    this.put(keyed(o, (at) => `${t}|${at(rec.startDate)}|${at(rec.endDate)}|${rec.value}|${rec.unit}`), o);
     return true;
   }
 
   result(): { resources: Observation[]; skips: { sameReadingTwoSources: number; bpUnpaired: number; unexpectedUnit: number } } {
     for (const { sys, dia } of this.bpHalves.values()) {
       if (!sys || !dia) { this.skips.bpUnpaired++; continue; }
-      const key = sha(`BP|${sys.startDate}|${sys.endDate}|${sys.value}|${dia.value}`);
-      const o = base(sys, key, { coding: [{ system: 'http://loinc.org', code: '85354-9' }], text: 'Blood pressure panel' }, vs);
+      const o = base(sys, { coding: [{ system: 'http://loinc.org', code: '85354-9' }], text: 'Blood pressure panel' }, vs);
       const comp = (code: string, text: string, v: string) => ({ code: { coding: [{ system: 'http://loinc.org', code }], text }, valueQuantity: { value: Number(v), unit: 'mm[Hg]', system: UCUM, code: 'mm[Hg]' } });
       o.component = [comp('8480-6', 'Systolic blood pressure', sys.value!), comp('8462-4', 'Diastolic blood pressure', dia.value!)];
-      this.put(key, o);
+      this.put(keyed(o, (at) => `BP|${at(sys.startDate)}|${at(sys.endDate)}|${sys.value}|${dia.value}`), o);
     }
     this.bpHalves.clear();
     return { resources: this.out, skips: { ...this.skips } };

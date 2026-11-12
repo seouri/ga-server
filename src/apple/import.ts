@@ -10,14 +10,19 @@ import { uploadBinaries } from '../smart/sync.ts';
 import { appleBatches, type Batch } from './batches.ts';
 import type { ClinicalGroup } from './clinical.ts';
 import { exportDateOf } from './read.ts';
+import { LEGACY } from './readings.ts';
 
 const TAGGED = 'urn:ga-server:tag|src-apple-health';
 const CLINICAL = 'urn:ga-server:tag|src-apple-clinical';
 // Types the unchanged filter covers (readings and ECGs; any other type in a reading batch goes to the engine).
 const FILTERED = new Set(['Observation', 'DocumentReference']);
 
-const projection = (r: Record<string, unknown>) =>
-  JSON.stringify({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: r.effectiveDateTime, effectivePeriod: r.effectivePeriod }, sorted);
+// Times compare as instants: the same reading written in another offset (an export after a DST change) is unchanged.
+const at = (t: unknown) => (typeof t === 'string' && Number.isFinite(Date.parse(t)) ? new Date(Date.parse(t)).toISOString() : t);
+const projection = (r: Record<string, unknown>) => {
+  const p = r.effectivePeriod as { start?: string; end?: string } | undefined;
+  return JSON.stringify({ status: r.status, code: r.code, valueQuantity: r.valueQuantity, valueString: r.valueString, component: r.component, effectiveDateTime: at(r.effectiveDateTime), effectivePeriod: p && { start: at(p.start), end: at(p.end) } }, sorted);
+};
 const EMPTY = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0 };
 const firstId = (r: { identifier?: { system?: string; value?: string }[] }) => `${r.identifier?.[0]?.system}|${r.identifier?.[0]?.value}`;
 
@@ -87,6 +92,8 @@ export async function importAppleHealth(
   const total: ImportReport = { ...EMPTY, unmapped: [] };
   let unchanged = 0;
   let lastIndex = -1;
+  // Readings held before this import may carry an older key (LEGACY); none held (a first import): no lookup of older keys.
+  const older = !!(await client.searchOne('Observation', { subject: `Patient/${patientId}`, _tag: TAGGED, _elements: 'id' }, { cache: 'no-cache' }));
   const it = appleBatches(dir, { size: opts.batchSize ?? BATCH_SIZE, timeZone: opts.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
   let n: IteratorResult<Batch, { skips: Record<string, unknown>; clinical: { resources: Resource[]; groups: ClinicalGroup[] } }>;
   try {
@@ -97,6 +104,14 @@ export async function importAppleHealth(
       if (index <= (opts.skipThrough ?? -1)) continue;
       const report = await withImportLock(async () => {
         const have = await existing(client, patientId, resources);
+        // A reading an older import keyed on its time as written keeps that identifier, so it is compared and updated, not doubled.
+        const missed = older ? resources.filter((r) => LEGACY.has(r) && !have.has(firstId(r as never))) : [];
+        const stand = missed.flatMap((r) => (LEGACY.get(r) ?? []).map((value) => ({ resourceType: r.resourceType, identifier: [{ system: APPLE, value }] }) as Resource));
+        if (stand.length) for (const [k, v] of await existing(client, patientId, stand)) have.set(k, v);
+        for (const r of missed) {
+          const old = LEGACY.get(r)?.find((value) => have.has(`${APPLE}|${value}`));
+          if (old) (r as { identifier: Identifier[] }).identifier[0].value = old;
+        }
         const redo = opts.redo?.index === index ? { created: new Set(opts.redo.created), updated: new Set(opts.redo.updated) } : undefined;
         const p: Pending = { index, created: [], updated: [] };
         let kept = 0, created = 0, updated = 0;

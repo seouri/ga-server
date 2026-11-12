@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Readings } from '../src/apple/readings.ts';
+import { LEGACY, Readings } from '../src/apple/readings.ts';
 import type { AhClinical, AhRecord } from '../src/apple/read.ts';
 import { fhirBaseOf, mapClinical, mapEcgs } from '../src/apple/clinical.ts';
 import { sourceKey } from '../src/smart/auth.ts';
@@ -45,6 +45,20 @@ describe('Apple readings', () => {
     expect(r.resources).toHaveLength(1);
     expect(r.resources[0].component!.map((c) => c.valueQuantity!.value)).toEqual([120, 80]);
     expect(r.skips.bpUnpaired).toBe(1);
+  });
+  it('keys a reading on its UTC instant and knows the keys older imports wrote (the time as written, an hour either side)', () => {
+    const r = new Readings();
+    r.add(rec('BodyMass', '174', 'lb', 'Phone', '2017-11-03T10:13:05-05:00'));
+    const [o] = r.result().resources;
+    expect(o.identifier![0].value).toBe(sha256('BodyMass|2017-11-03T15:13:05.000Z|2017-11-03T15:13:05.000Z|174|lb'));
+    expect(LEGACY.get(o)).toEqual(expect.arrayContaining([
+      sha256('BodyMass|2017-11-03T10:13:05-05:00|2017-11-03T10:13:05-05:00|174|lb'), // the pre-fix key
+      sha256('BodyMass|2017-11-03T11:13:05-04:00|2017-11-03T11:13:05-04:00|174|lb'), // the same instant exported in summer
+    ]));
+    // An impossible date (Feb 30) keeps its text: no instant, no throw.
+    const bad = new Readings();
+    bad.add(rec('BodyMass', '79', 'kg', 'Phone', '2017-02-30T10:00:00-05:00'));
+    expect(bad.result().resources[0].identifier![0].value).toBe(sha256('BodyMass|2017-02-30T10:00:00-05:00|2017-02-30T10:00:00-05:00|79|kg'));
   });
   it('maps events and rejects unknown types', () => {
     const r = new Readings();
