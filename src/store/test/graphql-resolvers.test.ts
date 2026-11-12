@@ -11,6 +11,7 @@ describe('$graphql resolvers (store-only)', () => {
   beforeAll(() => loadDefinitions(types));
   const records: Resource[] = [
     { resourceType: 'Patient', id: 'p1', name: [{ family: 'One' }] },
+    { resourceType: 'Patient', id: 'p2', contained: [{ resourceType: 'Condition', id: 'c', subject: { reference: 'Patient/p2' } }] },
     { resourceType: 'Observation', id: 'o1', status: 'final', code: { text: 'a' }, subject: { reference: '#x' }, contained: [{ resourceType: 'Patient', id: 'x' }] },
     { resourceType: 'Observation', id: 'o2', status: 'final', code: { text: 'a' }, subject: { reference: 'http://other/Patient/1' } },
     { resourceType: 'Observation', id: 'o3', status: 'final', code: { text: 'a' }, subject: { reference: 'Patient/unknown' } },
@@ -78,6 +79,27 @@ describe('$graphql resolvers (store-only)', () => {
       expect(r.calls).toEqual([]);
     }
     expect(run(`{ PatientList(_count: 2) { ${nested} } }`).status).toBe(200);
+  });
+
+  it('a defaulted variable or a negative-count sibling does not evade the cost limit', () => {
+    const nested = `ObservationList(_reference: subject) { subject { resource { ... on Patient { id } } } }`;
+    for (const query of [
+      `query Q($n: Int = 1000) { PatientList(_count: $n) { ${nested} } }`, // no variables sent: the default runs
+      `{ a: PatientList(_count: -1000) { ${nested} } b: PatientList(_count: 1000) { ${nested} } }`, // unclamped, a costs -27,992
+    ]) {
+      const r = run(query);
+      expect(r, query).toMatchObject({ status: 400, json: { issue: [{ details: { text: 'Query too complex' } }] } });
+      expect(r.calls).toEqual([]);
+    }
+    expect(run(`query Q($n: Int = 1000) { PatientList(_count: $n) { ${nested} } }`, { n: 2 }).status).toBe(200); // a sent value wins
+  });
+
+  it('a contained resource of a type the store does not hold is a field error', () => {
+    const r = run(`{ Patient(id: "p2") { id contained { ... on Patient { id } } } }`);
+    expect(r.status).toBe(200);
+    expect(r.json.data.Patient).toEqual({ id: 'p2', contained: null });
+    expect(r.json.errors).toHaveLength(1);
+    expect(r.json.errors[0].path).toEqual(['Patient', 'contained', 0]);
   });
 
   it('a query deeper than 12 fields is 400; fragments count, inline fragments do not', () => {

@@ -6,7 +6,7 @@
 // types passed in (built on first use, one per type list), introspection is an option, and the depth (12) and cost (10,000)
 // rules refuse a query with Medplum's commented-out error texts, where 5.2.14 only logs (resolvers block the event loop, so a
 // fan-out must be refused before it runs). Not yet here: mutations (plan 3 Task 4).
-import { badRequest, forbidden } from '@medplum/core';
+import { badRequest, DEFAULT_MAX_SEARCH_COUNT, forbidden } from '@medplum/core';
 import type { OperationOutcome, Resource } from '@medplum/fhirtypes';
 import type { ArgumentNode, ASTNode, ASTVisitor, DocumentNode, ExecutionResult, FieldNode, GraphQLFieldConfigMap, GraphQLResolveInfo, OperationDefinitionNode, ValidationContext } from 'graphql';
 import { executeSync, GraphQLError, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, Kind, parse, specifiedRules, validate } from 'graphql';
@@ -255,6 +255,7 @@ class QueryCostVisitor {
   private readonly maxCost: number;
   private readonly fragmentCosts: Record<string, number>;
   private readonly variables: Record<string, unknown> | undefined;
+  private operation: OperationDefinitionNode | undefined;
 
   constructor(context: ValidationContext, variables: Record<string, unknown> | undefined, maxCost: number) {
     this.context = context;
@@ -264,6 +265,7 @@ class QueryCostVisitor {
   }
 
   OperationDefinition(node: OperationDefinitionNode): void {
+    this.operation = node;
     let cost = 0;
     for (const child of node.selectionSet.selections) {
       cost += this.calculateCost(child);
@@ -286,7 +288,8 @@ class QueryCostVisitor {
         let branchingFactor = 1;
         if (isSearchField(node)) {
           baseCost = 8;
-          branchingFactor = this.getCount(node.arguments) ?? 20;
+          // clamped: a negative count would buy a costly sibling; a search returns at most 1000 (applyMaxCount)
+          branchingFactor = Math.min(Math.max(this.getCount(node.arguments) ?? 20, 0), DEFAULT_MAX_SEARCH_COUNT);
         } else if (isLinkedResource(node)) {
           baseCost = 1;
           branchingFactor = 2;
@@ -319,16 +322,22 @@ class QueryCostVisitor {
 
   getCount(args?: readonly ArgumentNode[]): number | undefined {
     const countArg = args?.find((arg) => arg.name.value === '_count');
-    if (countArg?.value.kind === Kind.INT) {
-      return Number.parseInt(countArg.value.value, 10);
+    let value = countArg?.value;
+    if (value?.kind === Kind.VARIABLE) {
+      // Medplum counts only a literal; a `_count: $n` would otherwise cost 20 whatever $n is (sent, or its default)
+      const name = value.name.value;
+      if (this.variables && Object.hasOwn(this.variables, name)) {
+        const n = this.variables[name];
+        return typeof n === 'number' && Number.isInteger(n) ? n : undefined;
+      }
+      value = this.operation?.variableDefinitions?.find((d) => d.variable.name.value === name)?.defaultValue;
     }
-    if (countArg?.value.kind === Kind.VARIABLE) {
-      // Medplum counts only a literal; a `_count: $n` would otherwise cost 20 whatever $n is
-      const n = Number(this.variables?.[countArg.value.name.value]);
-      return Number.isInteger(n) ? n : undefined;
+    if (value?.kind === Kind.INT) {
+      return Number.parseInt(value.value, 10);
     }
     return undefined;
   }
+
 }
 
 function isSearchField(node: FieldNode): boolean {
