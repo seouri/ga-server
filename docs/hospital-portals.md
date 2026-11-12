@@ -28,7 +28,7 @@ ga status               # per source: status, last success, STALE flag, enabled 
 ga disconnect fhir-example-hospital-org   # deletes the tokens; records already fetched stay
 ```
 
-A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs; `ga status` shows it `off (not_enabled)` until you enable types. Two syncs of one source never run at once: the second waits up to 30 seconds, then reports `busy` and changes nothing. After `ga disconnect`, `ga connect` reconnects it.
+A source's name for these commands is its key (the FHIR host with `-` for `.`, shown by `ga status`) or its `--name`. A source with no enabled types only ever dry-runs; `ga status` shows it `off (not_enabled)` until you enable types. Two syncs of one source never run at once: the second waits up to 30 seconds, then reports `busy` and changes nothing; `ga disconnect` (or `hospital_disconnect`) during a sync of that source refuses at once with `sync running, try again`. After `ga disconnect`, `ga connect` reconnects it.
 
 ## 3. Daily sync
 
@@ -40,7 +40,7 @@ Synced: every patient-scoped type the portal offers (problems, diagnoses, labs, 
 
 Not synced: MyChart messages and some note types (they keep coming from EHI exports); Quest and LabCorp results not ordered through Epic; Apple Health (import its export); PDFs (`/ga-import`).
 
-**Stale sources.** If a source is `off` (login needed), `error`, or not synced for over 48 hours, `ga status` marks it STALE and your agent says so in the first line of its answer. `off`: run `ga connect <url>`, except `off (not_enabled)`: enable types with `ga sync --enable <Type,...> <source>`. `error`: retried on the next run, or `ga sync` now.
+**Stale sources.** If a source is `off` (login needed), `error`, or not synced for over 48 hours, `ga status` marks it STALE and your agent says so in the first line of its answer. `off`: run `ga connect <url>`, except `off (not_enabled)`: enable types with `ga sync --enable <Type,...> <source>`. `error`: retried on the next run, or `ga sync` now, except `error (refused:<Type,...>)`: the portal refused those medication, allergy or problem lists (not selected at login), so nothing was synced and the last success stays; reconnect with them selected (`ga connect <url>`) or enable the other types only (`ga sync --enable <Type,...> <source>`).
 
 **From chat.** Connected apps ([GA from chat apps](chat-apps.md)) can run `hospital_connect` (it returns the MyChart login link to open), `hospital_status`, `hospital_enable` (preview of the dry-run counts first, then you confirm on GA's confirm page), `hospital_sync` and `hospital_disconnect`. This needs the https redirect below; Epic's sandbox stays `ga connect` in Terminal.
 

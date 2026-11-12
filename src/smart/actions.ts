@@ -1,9 +1,10 @@
 // Hospital actions shared by the CLI, the chat tools and the gateway's /callback.
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import { GaError } from '../config.ts';
 import { COMPARTMENT } from '../engine.ts';
+import { takeLock } from '../lock.ts';
 import { finishLogin, pendingName, resultName, sourceKey } from './auth.ts';
 import type { LoginResult } from './auth.ts';
 import { deleteSecret, loadSecret, readSources, saveSecret, writeSources } from './store.ts';
@@ -35,11 +36,18 @@ export function enableTypes(dir: string, sourceKey: string, types: string[] | 'a
 }
 
 // Status first: if this write fails the tokens remain and the source still works. The source stays listed
-// (enabled types kept for a reconnect); with no tokens, sync skips it.
+// (enabled types kept for a reconnect); with no tokens, sync skips it. Under the source's sync lock, without waiting: a sync
+// finishing afterwards would write it active again, and its token refresh could restore the deleted tokens.
 export async function disconnectSource(client: MedplumClient, dir: string, sourceKey: string, patientId: string): Promise<void> {
   const src = source(dir, sourceKey);
-  await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
-  deleteSecret(dir, src.key);
+  const lock = await takeLock(join(dir, `${src.key}.sync.lock`), 0);
+  if (!lock) throw new GaError('sync running, try again');
+  try {
+    await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
+    deleteSecret(dir, src.key);
+  } finally {
+    rmSync(lock, { force: true });
+  }
 }
 
 // Pending and finished logins, read from the encrypted files in tokens/ (pending-<hash> waiting; result-<hash> finished or failed).

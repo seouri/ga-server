@@ -33,6 +33,8 @@ export const ENABLED_TYPES = `${X}enabled-types`;
 const PATIENT = `${X}patient`;
 const PENDING = 'urn:ga-server:pending-binary:';
 const STALE_MS = 48 * 3_600_000;
+// The list searches the currency rule reads (current.ts, lists.ts), as fetchAll names them in skipped.
+const LISTS = new Set(['MedicationRequest', 'MedicationStatement', 'AllergyIntolerance', 'Condition:problem-list-item']);
 
 export const isStale = (status: string, lastSuccess: string | undefined, now: Date): boolean =>
   status === 'off' || status === 'error' || !lastSuccess || !(now.getTime() - Date.parse(lastSuccess) <= STALE_MS); // NaN: stale
@@ -124,13 +126,15 @@ export async function writeEndpoint(
     // unreadable token store: no expiry to report
   }
   const lastSuccess = status === 'active' ? at : ext(prev, LAST_SUCCESS)?.valueDateTime;
+  // Types newly enabled count toward the currency cutoff only once a sync of them succeeds.
+  const types = status === 'active' ? src.enabledTypes?.join(',') : ext(prev, ENABLED_TYPES)?.valueString;
   const extension: Extension[] = [
     { url: PATIENT, valueReference: { reference: `Patient/${patientId}` } },
     { url: LAST_ATTEMPT, valueDateTime: at },
     ...(lastSuccess ? [{ url: LAST_SUCCESS, valueDateTime: lastSuccess }] : []),
     ...(error ? [{ url: LAST_ERROR, valueCode: error }] : []),
     ...(expires ? [{ url: ACCESS_EXPIRES, valueDateTime: new Date(expires).toISOString() }] : []),
-    ...(src.enabledTypes ? [{ url: ENABLED_TYPES, valueString: src.enabledTypes.join(',') }] : []),
+    ...(types ? [{ url: ENABLED_TYPES, valueString: types }] : []),
   ];
   const ep: Endpoint = {
     resourceType: 'Endpoint',
@@ -210,6 +214,10 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
       // unreadable: start counting again
     }
     const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes, { deferrals, now: new Date(at) });
+    // A list the currency rule reads, refused (e.g. 403: not selected at login): a success would make every record of it read
+    // "may have been stopped". 400 is Epic's answer for a category it never supports. Fail before importing anything.
+    const refused = [...new Set(Object.entries(fetched.skipped).filter(([k, v]) => LISTS.has(k) && v !== 'HTTP 400').map(([k]) => k.split(':')[0]))];
+    if (!dryRun && refused.length) throw new GaError(`refused:${refused.join(',')}`);
     const { resources, binaries } = mapForGa(fetched.resources, src, new Set(fetched.deferred));
     stage = 'import_error';
     const c = dryRun ? dryRunClient(client) : client;
@@ -255,7 +263,7 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
   } catch (e) {
     if (e instanceof GaError && e.message === IMPORT_BUSY) return busy(client, src, patientId);
     // Error codes only: messages from servers or the engine may carry content.
-    const code = e instanceof GaError && /^[a-z_]+$/.test(e.message) ? e.message : stage;
+    const code = e instanceof GaError && /^([a-z_]+|refused:[A-Za-z,]+)$/.test(e.message) ? e.message : stage;
     // No usable refresh token: only reconnecting helps.
     const status = code === 'invalid_grant' || code === 'no_refresh_token' || code === 'not_connected' ? 'off' : 'error';
     console.error(`smart sync ${src.key}: ${code}`);

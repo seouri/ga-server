@@ -46,7 +46,10 @@ function print(r: SyncResult, log: (s: string) => void = console.log): void {
   const c = r.report;
   const dry = r.dryRun ? ' (dry run: nothing written)' : '';
   const counts = c ? ` created ${c.created}, updated ${c.updated}, possible duplicates ${c.possibleDuplicates}, invalid ${c.invalid}${dry}` : '';
-  const hint = r.status === 'off' && r.error !== 'busy' ? ': run ga connect <fhir-base-url>' : '';
+  const hint =
+    r.error?.startsWith('refused:') ? `: the portal refused ${r.error.slice(8)}; reconnect with it selected (ga connect <fhir-base-url>) or enable the other types only (ga sync --enable <Type,...> ${r.source})`
+    : r.status === 'off' && r.error !== 'busy' ? ': run ga connect <fhir-base-url>'
+    : '';
   log(`${r.source}: ${r.status}${counts}${r.error ? ` error ${r.error}${hint}` : ''}`);
   const types = [...new Set([...Object.keys(r.fetched ?? {}), ...Object.keys(c?.byType ?? {})])].filter((t) => t !== 'Patient').sort();
   for (const t of types) {
