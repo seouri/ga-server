@@ -24,7 +24,7 @@ import {
   convertToSearchableNumbers, convertToSearchableQuantities, convertToSearchableReferences, convertToSearchableStrings,
   convertToSearchableTokens, convertToSearchableUris, evalFhirPathTyped, getParsedExpressionForResourceType, getSearchParameterDetails, getSearchParameters,
   initFhirPathParserBuilder, parseFhirPath, parseSearchRequest, Tokenizer, SearchParameterType, splitSearchOnComma, subsetResource, toTypedValue, tryGetDataType,
-  type Filter, type FhirFilterExpression, type FhirPathAtom, type SearchRequest, type TypedValue,
+  type Filter, type FhirFilterExpression, type FhirPathAtom, type IncludeTarget, type SearchRequest, type TypedValue,
 } from '@medplum/core';
 import type { Bundle, Resource, SearchParameter } from '@medplum/fhirtypes';
 import type { StatementSync } from 'node:sqlite';
@@ -874,6 +874,9 @@ function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEn
   for (const inc of [...(req.include ?? []), ...(req.revInclude ?? [])]) {
     if (param(inc.resourceType, inc.searchParam)?.type !== 'reference') throw badRequest(`Invalid include parameter: ${inc.resourceType}:${inc.searchParam}`); // Medplum's text
   }
+  // An include given twice finds nothing new the second time: each runs once.
+  const once = (incs: IncludeTarget[] = []) => [...new Map(incs.map((i) => [`${i.resourceType}:${i.searchParam}:${i.targetType}:${i.modifier}`, i])).values()];
+  const include = once(req.include), revInclude = once(req.revInclude);
   const seen = new Set(matches.map((m) => `${m.type}/${m.id}`));
   const read = (sql: string, ...args: Arg[]) => prep(sql).all(...args) as Found[];
   const byUrl = (t: string, url: string): Found[] => {
@@ -882,41 +885,46 @@ function includes(prep: Prep, req: SearchRequest, matches: Found[], entry: RawEn
     return read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select rid from idx where type = ? and code = 'url' and val = ?)${v === undefined ? ''
       : ` and r.rid in (select rid from idx where type = ? and code = 'version' and val = ?)`} order by r.rid`, t, u, ...(v === undefined ? [] : [t, v]));
   };
+  const limit = (depth: number) => badRequest(`Search with _(rev)include reached query scope limit: depth=${depth}, results=${entry.length}`); // Medplum's text
   let frontier = matches, iterateOnly = false;
   for (let depth = 0; frontier.length; depth++) {
-    if (depth >= MAX_INCLUDE_DEPTH || entry.length > MAX_INCLUDE_ENTRIES) throw badRequest(`Search with _(rev)include reached query scope limit: depth=${depth}, results=${entry.length}`); // Medplum's text
-    const found: Found[] = [];
+    if (depth >= MAX_INCLUDE_DEPTH) throw limit(depth);
+    // Each query's rows go straight into the round's results, so a round holds each resource once and stops at the cap: past it
+    // the next round would be refused anyway (it has something to follow), so refuse now, with that round's depth.
+    const next = new Map<string, Found>();
+    const add = (xs: Found[]) => {
+      for (const x of xs) {
+        const ref = `${x.type}/${x.id}`;
+        next.set(ref, x);
+        if (!seen.has(ref)) entry.push({ fullUrl: `${base}fhir/R4/${ref}`, mode: 'include', json: x.json });
+        seen.add(ref);
+      }
+      if (entry.length > MAX_INCLUDE_ENTRIES) throw limit(depth + 1);
+    };
     const rids = frontier.map((f) => f.rid);
-    for (const inc of req.include ?? []) {
+    for (const inc of include) {
       if (iterateOnly && inc.modifier !== Operator.ITERATE) continue;
       const p = param(inc.resourceType, inc.searchParam)!;
       const vals = prep(`select distinct val from idx where rid in (${qs(rids.length)}) and type = ? and code = ? order by rowid`).all(...rids, inc.resourceType, inc.searchParam) as { val: string }[];
       if (canonical(inc.resourceType, p)) {
-        for (const t of (p.target ?? []).filter((t) => !inc.targetType || t === inc.targetType)) for (const { val } of vals) found.push(...byUrl(t, val));
+        for (const t of (p.target ?? []).filter((t) => !inc.targetType || t === inc.targetType)) for (const { val } of vals) add(byUrl(t, val));
         continue;
       }
       for (const { val } of vals) {
         const [t, id, extra] = val.split('/');
         if (!t || !id || extra !== undefined || (inc.targetType && inc.targetType !== t)) continue;
-        found.push(...read('select rid, type, id, json from resources where type = ? and id = ?', t, id));
+        add(read('select rid, type, id, json from resources where type = ? and id = ?', t, id));
       }
     }
-    for (const inc of req.revInclude ?? []) {
+    for (const inc of revInclude) {
       if (iterateOnly && inc.modifier !== Operator.ITERATE) continue;
       const of = frontier.filter((f) => !inc.targetType || f.type === inc.targetType);
       const refs = canonical(inc.resourceType, param(inc.resourceType, inc.searchParam)!)
         ? of.flatMap((f) => { const r = JSON.parse(f.json) as { url?: string; version?: string }; return r.url ? [r.url, ...(r.version ? [`${r.url}|${r.version}`] : [])] : []; })
         : of.map((f) => `${f.type}/${f.id}`);
       if (!refs.length) continue;
-      found.push(...read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(refs.length)})) order by r.rid limit ${MAX_INCLUDE_ENTRIES + 1}`, // more is refused below
+      add(read(`select r.rid, r.type, r.id, r.json from resources r where r.rid in (select i.rid from idx i where i.type = ? and i.code = ? and i.val in (${qs(refs.length)})) order by r.rid limit ${MAX_INCLUDE_ENTRIES + 1}`, // more is refused
         inc.resourceType, inc.searchParam, ...refs));
-    }
-    const next = new Map<string, Found>();
-    for (const x of found) {
-      const ref = `${x.type}/${x.id}`;
-      next.set(ref, x);
-      if (!seen.has(ref)) entry.push({ fullUrl: `${base}fhir/R4/${ref}`, mode: 'include', json: x.json });
-      seen.add(ref);
     }
     frontier = [...next.values()];
     iterateOnly = true;

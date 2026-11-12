@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Bundle, Observation, Patient, Resource } from '@medplum/fhirtypes';
+import { StatementSync } from 'node:sqlite';
+import type { Bundle, Condition, Observation, Patient, Resource } from '@medplum/fhirtypes';
 import { Store, StoreError } from '../store.ts';
 import { searchTuning } from '../search.ts';
 
@@ -981,5 +982,35 @@ describe.each(PLANS)('Store terminology search (%s plan)', (_plan, tuning) => {
     expect(patients(`_filter=not (_has:Condition:subject:code ss ${CS}|D)`)).toEqual([]);
     const e = (() => { try { store.search('Patient', [...new URLSearchParams('_filter=_has:Condition:subject:onset-date ss 2024-01-01')], BASE); } catch (x) { return x as StoreError; } })();
     expect(e?.message).toBe('Invalid operator: ss');
+  });
+});
+
+describe('Store search: _(rev)include memory', () => {
+  let dir: string, store: Store;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'store-include-')); store = new Store(join(dir, 'store.db'), { terminology: [] }); });
+  afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  // Rows SQLite hands back during one search: what the include rounds hold in memory before the 1000-entry cap.
+  const rowsRead = (q: string): { rows: number; error?: string } => {
+    const all = StatementSync.prototype.all;
+    let rows = 0;
+    const spy = vi.spyOn(StatementSync.prototype, 'all').mockImplementation(function (this: StatementSync, ...a) { const r = all.apply(this, a); rows += r.length; return r; });
+    try { store.search('Patient', [...new URLSearchParams(q)], BASE); return { rows }; } catch (e) { return { rows, error: (e as Error).message }; } finally { spy.mockRestore(); }
+  };
+
+  it('a repeated identical _revinclude is read once; the entry cap is checked after each include query', () => {
+    const p = store.create({ resourceType: 'Patient' }).resource.id!;
+    const obs = (n: number) => { for (let i = 0; i < n; i++) store.create({ resourceType: 'Observation', status: 'final', code: { text: 'x' }, subject: { reference: `Patient/${p}` } } as Observation); };
+    store.transaction(() => obs(30));
+    const once = rowsRead(`_id=${p}&_revinclude=Observation:subject`), many = rowsRead(`_id=${p}${'&_revinclude=Observation:subject'.repeat(50)}`);
+    expect(many).toEqual(once); // 50 repeats read 50 times the rows before
+    expect(store.search('Patient', [['_id', p], ...Array(50).fill(['_revinclude', 'Observation:subject'])], BASE).entry).toHaveLength(31);
+    store.transaction(() => {
+      obs(870);
+      for (let i = 0; i < 100; i++) store.create({ resourceType: 'Condition', subject: { reference: `Patient/${p}` } } as Condition);
+    });
+    // Over the cap after the second query: the third (900 rows, all seen already) is never read.
+    const over = rowsRead(`_id=${p}&_revinclude=Observation:subject&_revinclude=Condition:subject&_revinclude=Observation:patient`);
+    expect(over.error).toBe('Search with _(rev)include reached query scope limit: depth=1, results=1001');
+    expect(over.rows).toBeLessThan(1500);
   });
 });
