@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
-// Ported from Medplum 5.2.14 packages/fhir-router/src/graphql/utils.ts and output-types.ts: the GraphQL output types of FHIR
-// types, the search arguments, the search, Connection and reference resolvers, reverse lookups and list-field arguments; also
+// Ported from Medplum 5.2.14 packages/fhir-router/src/graphql/utils.ts, output-types.ts and input-types.ts: the GraphQL output
+// and input types of FHIR types, the search arguments, the search, Connection and reference resolvers, reverse lookups and list-field arguments; also
 // getConnectionType and resolveByConnectionApi from graphql.ts (here, so the two files import one way). Changes: resolvers are
 // synchronous and go through the request's `fhir` callback (no repository, no DataLoader: a per-request map reads each
 // reference once); the type cache belongs to one schema, whose resource types are passed in (a store may hold only some types:
 // reverse lookups and `resource` cover only those; reverse lookups leave out every-type targets, see targetsEveryType); Medplum's batched reverse lookups and search counter (project settings)
-// are dropped. Not yet here: input types (mutations), plan 3 Task 4.
+// are dropped.
 import type { Filter, InternalSchemaElement, SearchRequest } from '@medplum/core';
 import {
   DEFAULT_MAX_SEARCH_COUNT,
@@ -21,6 +21,7 @@ import {
   getReferenceString,
   getSearchParameters,
   isLowerCase,
+  isResourceType,
   isReference,
   isResourceTypeSchema,
   isString,
@@ -36,6 +37,9 @@ import {
 import type { Bundle, ElementDefinitionType, OperationOutcome, Reference, Resource, ResourceType } from '@medplum/fhirtypes';
 import type {
   GraphQLEnumValueConfigMap,
+  GraphQLInputFieldConfig,
+  GraphQLInputFieldConfigMap,
+  GraphQLNullableInputType,
   GraphQLError,
   GraphQLFieldConfig,
   GraphQLFieldConfigArgumentMap,
@@ -45,7 +49,7 @@ import type {
   GraphQLResolveInfo,
   GraphQLScalarType,
 } from 'graphql';
-import { GraphQLBoolean, GraphQLEnumType, GraphQLFloat, GraphQLID, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLString, GraphQLUnionType, Kind } from 'graphql';
+import { GraphQLBoolean, GraphQLEnumType, GraphQLFloat, GraphQLID, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLString, GraphQLUnionType, Kind } from 'graphql';
 
 // A FHIR request on the store, path relative to the base; the parsed JSON body. An answer ≥ 400 throws its OperationOutcome.
 export type Fhir = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) => unknown;
@@ -678,4 +682,108 @@ function resolveByReference(t: OutputTypes, source: any, _args: any, ctx: GraphQ
  */
 function resolveTypeByReference(resource: Resource | undefined): string | undefined {
   return resource?.resourceType || undefined;
+}
+
+// --- input-types.ts ---
+// One cache for every schema, as Medplum: an input type names no resource type list (Resource fields are left out). Medplum keys
+// it by type alone, so `PatientUpdate(res:)` takes the `PatientCreate` built first; its error texts name that type.
+
+const inputTypeCache: Record<string, GraphQLNullableInputType | undefined> = {
+  ...typeCache,
+};
+
+let patchOperationInputType: GraphQLInputObjectType | undefined;
+
+export function getGraphQLInputType(inputType: string, nameSuffix: string): GraphQLNullableInputType {
+  let result = inputTypeCache[inputType];
+  if (!result) {
+    result = buildGraphQLInputType(inputType, nameSuffix);
+    inputTypeCache[inputType] = result;
+  }
+
+  return result;
+}
+
+function buildGraphQLInputType(resourceType: string, nameSuffix: string): GraphQLNullableInputType {
+  const schema = getDataType(resourceType);
+  return new GraphQLInputObjectType({
+    name: resourceType + nameSuffix,
+    description: schema.description,
+    fields: () => buildGraphQLInputFields(resourceType as ResourceType, nameSuffix),
+  });
+}
+
+function buildGraphQLInputFields(resourceType: ResourceType, nameSuffix: string): GraphQLInputFieldConfigMap {
+  const fields: GraphQLInputFieldConfigMap = {};
+
+  // Add resourceType field for root resource
+  if (isResourceType(resourceType)) {
+    const propertyFieldConfig: GraphQLInputFieldConfig = {
+      description: 'The type of resource',
+      type: GraphQLString,
+    };
+    fields['resourceType'] = propertyFieldConfig;
+  }
+
+  buildInputPropertyFields(resourceType, fields, nameSuffix);
+  return fields;
+}
+
+function buildInputPropertyFields(resourceType: string, fields: GraphQLInputFieldConfigMap, nameSuffix: string): void {
+  const schema = getDataType(resourceType);
+  for (const [key, elementDefinition] of Object.entries(schema.elements)) {
+    for (const type of elementDefinition.type as ElementDefinitionType[]) {
+      buildInputPropertyField(fields, key, elementDefinition, type, nameSuffix);
+    }
+  }
+}
+
+function buildInputPropertyField(
+  fields: GraphQLInputFieldConfigMap,
+  key: string,
+  elementDefinition: InternalSchemaElement,
+  elementDefinitionType: ElementDefinitionType,
+  nameSuffix: string
+): void {
+  let typeName = elementDefinitionType.code as string;
+  if (typeName === 'Resource') {
+    // GraphQL does not support union types on input, so bailing here
+    // That means we do not support Resource.contained on GraphQL input
+    return;
+  }
+  if (typeName === 'Element' || typeName === 'BackboneElement') {
+    typeName = elementDefinition.type[0].code;
+  }
+
+  const fieldConfig: GraphQLInputFieldConfig = {
+    description: elementDefinition.description, // TODO: elementDefinition.short
+    type: getGraphQLInputType(typeName, nameSuffix),
+  };
+
+  if (elementDefinition.max > 1) {
+    fieldConfig.type = new GraphQLList(new GraphQLNonNull(getGraphQLInputType(typeName, nameSuffix)));
+  }
+  if (elementDefinition.min > 0 && !key.endsWith('[x]')) {
+    fieldConfig.type = new GraphQLNonNull(fieldConfig.type as GraphQLNullableInputType);
+  }
+
+  const propertyName = (key.split('.').pop() as string).replace('[x]', capitalize(elementDefinitionType.code as string));
+  fields[propertyName] = fieldConfig;
+}
+
+export function getPatchOperationInputType(): GraphQLInputObjectType {
+  patchOperationInputType ??= new GraphQLInputObjectType({
+    name: 'PatchOperationInput',
+    description: 'A JSON Patch operation as per RFC 6902',
+    fields: {
+      op: { type: new GraphQLNonNull(GraphQLString), description: 'The operation to perform' },
+      path: { type: new GraphQLNonNull(GraphQLString), description: 'A JSON-Pointer' },
+      value: {
+        type: GraphQLString,
+        description:
+          'The value to use within the operations. (May be any scalar, but GraphQL input types are limited.)',
+      },
+    },
+  });
+  return patchOperationInputType;
 }

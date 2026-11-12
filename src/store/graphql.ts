@@ -1,21 +1,24 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 // POST [base]/$graphql, ported from Medplum 5.2.14 packages/fhir-router/src/graphql/graphql.ts: the handler and the root schema
-// (read by id, search, the Connection API) and the depth and cost rules. Changes: synchronous (executeSync; resolvers return
+// (read by id, search, the Connection API, create, update, patch and delete) and the depth and cost rules. Changes: synchronous (executeSync; resolvers return
 // values), every read and search goes through the `fhir` callback (the store's own request path), the schema covers the resource
 // types passed in (built on first use, one per type list), introspection is an option, and the depth (12) and cost (10,000)
 // rules refuse a query with Medplum's commented-out error texts, where 5.2.14 only logs (resolvers block the event loop, so a
-// fan-out must be refused before it runs). Not yet here: mutations (plan 3 Task 4).
-import { badRequest, DEFAULT_MAX_SEARCH_COUNT, forbidden } from '@medplum/core';
-import type { OperationOutcome, Resource } from '@medplum/fhirtypes';
-import type { ArgumentNode, ASTNode, ASTVisitor, DocumentNode, ExecutionResult, FieldNode, GraphQLFieldConfigMap, GraphQLResolveInfo, OperationDefinitionNode, ValidationContext } from 'graphql';
+// fan-out must be refused before it runs). A write goes through the `fhir` callback too, so it is validated as REST validates it,
+// and primes (or, for a delete, clears) the per-request read of its Type/id.
+import { badRequest, deepClone, DEFAULT_MAX_SEARCH_COUNT, forbidden, OperationOutcomeError } from '@medplum/core';
+import type { OperationOutcome, Resource, ResourceType } from '@medplum/fhirtypes';
+import type { ArgumentNode, ASTNode, ASTVisitor, DocumentNode, ExecutionResult, FieldNode, GraphQLFieldConfigArgumentMap, GraphQLFieldConfigMap, GraphQLResolveInfo, OperationDefinitionNode, ValidationContext } from 'graphql';
 import { executeSync, GraphQLError, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, Kind, parse, specifiedRules, validate } from 'graphql';
 import type { Fhir, GraphQLContext } from './graphql-types.ts';
 import {
   buildGraphQLOutputType,
   buildSearchArgs,
   getConnectionType,
+  getGraphQLInputType,
   getGraphQLOutputType,
+  getPatchOperationInputType,
   invalidRequest,
   outputTypes,
   readCached,
@@ -105,6 +108,7 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
 
   // Next, fill in all of the type properties
   const fields: GraphQLFieldConfigMap<any, GraphQLContext> = {};
+  const mutationFields: GraphQLFieldConfigMap<any, GraphQLContext> = {};
 
   for (const resourceType of types) {
     const graphQLOutputType = getGraphQLOutputType(t, resourceType);
@@ -134,6 +138,36 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
       args: buildSearchArgs(resourceType),
       resolve: resolveByConnectionApi,
     };
+
+    // Mutation API
+    mutationFields[resourceType + 'Create'] = {
+      type: graphQLOutputType,
+      args: buildCreateArgs(resourceType),
+      resolve: resolveByCreate,
+    };
+
+    mutationFields[resourceType + 'Update'] = {
+      type: graphQLOutputType,
+      args: buildUpdateArgs(resourceType),
+      resolve: resolveByUpdate,
+    };
+
+    mutationFields[resourceType + 'Patch'] = {
+      type: graphQLOutputType,
+      args: buildPatchArgs(resourceType),
+      resolve: resolveByPatch,
+    };
+
+    mutationFields[resourceType + 'Delete'] = {
+      type: graphQLOutputType,
+      args: {
+        id: {
+          type: new GraphQLNonNull(GraphQLID),
+          description: resourceType + ' ID',
+        },
+      },
+      resolve: resolveByDelete,
+    };
   }
 
   return new GraphQLSchema({
@@ -141,7 +175,48 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
       name: 'QueryType',
       fields,
     }),
+    mutation: new GraphQLObjectType({
+      name: 'MutationType',
+      fields: mutationFields,
+    }),
   });
+}
+
+function buildCreateArgs(resourceType: string): GraphQLFieldConfigArgumentMap {
+  const args: GraphQLFieldConfigArgumentMap = {
+    res: {
+      type: new GraphQLNonNull(getGraphQLInputType(resourceType, 'Create')),
+      description: resourceType + ' Create',
+    },
+  };
+  return args;
+}
+
+function buildUpdateArgs(resourceType: string): GraphQLFieldConfigArgumentMap {
+  const args: GraphQLFieldConfigArgumentMap = {
+    id: {
+      type: new GraphQLNonNull(GraphQLID),
+      description: resourceType + ' ID',
+    },
+    res: {
+      type: new GraphQLNonNull(getGraphQLInputType(resourceType, 'Update')),
+      description: resourceType + ' Update',
+    },
+  };
+  return args;
+}
+
+function buildPatchArgs(resourceType: string): GraphQLFieldConfigArgumentMap {
+  return {
+    id: {
+      type: new GraphQLNonNull(GraphQLID),
+      description: resourceType + ' ID',
+    },
+    patch: {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(getPatchOperationInputType()))),
+      description: 'Array of patch operations',
+    },
+  };
 }
 
 /**
@@ -156,6 +231,100 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
  */
 function resolveById(_source: any, args: any, ctx: GraphQLContext, info: GraphQLResolveInfo): Resource | undefined {
   return readCached(ctx, info.fieldName, args.id);
+}
+
+// The written record becomes this request's read of its Type/id (Medplum's repository writes through its cache the same way).
+function written(ctx: GraphQLContext, resource: Resource): Resource {
+  ctx.resources.set(`${resource.resourceType}/${resource.id}`, resource);
+  return resource;
+}
+
+/**
+ * GraphQL resolver function for create requests.
+ * The field name should end with "Create" (i.e., "PatientCreate" for updating a Patient).
+ * The args should include the data to be created for the specified resource type.
+ * @param _source - The source/root object. In the case of creates, this is typically not used and is thus ignored.
+ * @param args - The GraphQL arguments, containing the new data for the resource.
+ * @param ctx - The GraphQL context. This includes the store's request path.
+ * @param info - The GraphQL resolve info. This includes the schema, field details, and other query-specific information.
+ * @returns The created resource.
+ */
+function resolveByCreate(_source: any, args: Record<string, any>, ctx: GraphQLContext, info: GraphQLResolveInfo): Resource {
+  const fieldName = info.fieldName;
+  const resourceType = fieldName.substring(0, fieldName.length - 'Create'.length) as ResourceType;
+  const resourceArgs = args.res;
+  if (resourceArgs.resourceType !== resourceType) {
+    throw new OperationOutcomeError(badRequest('Invalid resourceType'));
+  }
+  // We have to deep clone the args before we try to make them into a resource, since the args are parsed from the request
+  // as objects with a null prototype (via Object.create(null)), which means that tree of objects have no `valueOf` method which
+  // we need for evalFhirPath to work properly
+  return written(ctx, ctx.fhir('POST', resourceType, deepClone(resourceArgs)) as Resource);
+}
+
+/**
+ * GraphQL resolver function for update requests.
+ * The field name should end with "Update" (i.e., "PatientUpdate" for updating a Patient).
+ * The args should include the data to be updated for the specified resource type.
+ * @param _source - The source/root object. In the case of updates, this is typically not used and is thus ignored.
+ * @param args - The GraphQL arguments, containing the new data for the resource.
+ * @param ctx - The GraphQL context. This includes the store's request path.
+ * @param info - The GraphQL resolve info. This includes the schema, field details, and other query-specific information.
+ * @returns The updated resource.
+ */
+function resolveByUpdate(_source: any, args: Record<string, any>, ctx: GraphQLContext, info: GraphQLResolveInfo): Resource {
+  const fieldName = info.fieldName;
+  const resourceType = fieldName.substring(0, fieldName.length - 'Update'.length) as ResourceType;
+  const resourceArgs = args.res;
+  const resourceId = args.id;
+  if (resourceArgs.resourceType !== resourceType) {
+    throw new OperationOutcomeError(badRequest('Invalid resourceType'));
+  }
+  if (resourceId !== resourceArgs.id) {
+    throw new OperationOutcomeError(badRequest('Invalid ID'));
+  }
+  // We have to deep clone the args before we try to make them into a resource, since the args are parsed from the request
+  // as objects with a null prototype (via Object.create(null)), which means that tree of objects have no `valueOf` method which
+  // we need for evalFhirPath to work properly
+  return written(ctx, ctx.fhir('PUT', `${resourceType}/${encodeURIComponent(resourceId)}`, deepClone(resourceArgs)) as Resource);
+}
+
+/**
+ * GraphQL resolver function for delete requests.
+ * The field name should end with "Delete" (e.g., "PatientDelete" for deleting a Patient).
+ * The args should include the ID of the resource to be deleted.
+ * @param _source - The source/root object. In the case of deletions, this is typically not used and is thus ignored.
+ * @param args - The GraphQL arguments, containing the ID of the resource to be deleted.
+ * @param ctx - The GraphQL context. This includes the store's request path.
+ * @param info - The GraphQL resolve info. This includes the schema, field details, and other query-specific information.
+ */
+function resolveByDelete(_source: any, args: Record<string, string>, ctx: GraphQLContext, info: GraphQLResolveInfo): void {
+  const fieldName = info.fieldName;
+  const resourceType = fieldName.substring(0, fieldName.length - 'Delete'.length) as ResourceType;
+  ctx.fhir('DELETE', `${resourceType}/${encodeURIComponent(args.id)}`);
+  ctx.resources.delete(`${resourceType}/${args.id}`); // a later read in this request reads it again: gone
+}
+
+/**
+ * GraphQL resolver function for patch requests.
+ * The field name should end with "Patch" (i.e., "PatientPatch" for patching a Patient).
+ * The args should include the id and patch array for the specified resource type.
+ * @param _source - The source/root object. In the case of patch, this is typically not used and is thus ignored.
+ * @param args - The GraphQL arguments, containing the id and patch array.
+ * @param ctx - The GraphQL context. This includes the store's request path.
+ * @param info - The GraphQL resolve info. This includes the schema, field details, and other query-specific information.
+ * @returns The patched resource.
+ */
+function resolveByPatch(_source: any, args: Record<string, any>, ctx: GraphQLContext, info: GraphQLResolveInfo): Resource {
+  const fieldName = info.fieldName;
+  const resourceType = fieldName.substring(0, fieldName.length - 'Patch'.length) as ResourceType;
+  const resourceId = args.id;
+  const patch = args.patch;
+  if (!resourceType || !resourceId || !Array.isArray(patch)) {
+    throw new OperationOutcomeError(badRequest('Invalid patch arguments'));
+  }
+  // Patch operation expects an array of operations (cloned: null-prototype objects, as for a create)
+  return written(ctx, ctx.fhir('PATCH', `${resourceType}/${encodeURIComponent(resourceId)}`, deepClone(patch)) as Resource);
 }
 
 const DEFAULT_MAX_DEPTH = 12;

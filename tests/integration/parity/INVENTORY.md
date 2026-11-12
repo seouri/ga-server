@@ -708,19 +708,19 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without count field | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without edges field | ported | graphql |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create Patient Record | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Updating Patient Record | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Update Mutation | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong ID error | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Delete Patient Record | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create Patient Record | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create wrong resourceType error | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Updating Patient Record | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Update Mutation | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong resourceType error | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong ID error | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Delete Patient Record | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Reference missing reference property | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Fragment inclusion | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Cursor pagination | ported | graphql |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Patch Patient Record | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Mutation | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Operations | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Patch Patient Record | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Mutation | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Operations | ported | graphql |  |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › validateResourceWithJsonSchema | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Array properties | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Additional properties | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |

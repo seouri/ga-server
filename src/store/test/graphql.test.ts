@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { operationOutcomeToString } from '@medplum/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { serveStore } from '../server.ts';
 
@@ -26,6 +27,7 @@ const post = async (path: string, body: unknown) => {
   return { status: r.status, json: await r.json() };
 };
 const gql = (query: string) => post('$graphql', { query });
+const count = async () => (await (await fetch(base + 'Patient?_summary=count', { headers })).json()).total;
 
 describe('$graphql (store-only)', () => {
   it('introspection is 403 when disabled; __typename is allowed', async () => {
@@ -71,5 +73,35 @@ describe('$graphql (store-only)', () => {
     expect(r.status).toBe(200);
     expect(r.json.entry[0].response.status).toBe('200');
     expect(r.json.entry[0].resource).toEqual({ data: { __typename: 'QueryType' } });
+  });
+
+  it('invalid create writes nothing and gives the REST error text', async () => {
+    const before = await count();
+    const rest = await post('Patient', { resourceType: 'Patient', birthDate: "x" });
+    expect(rest.status).toBe(400);
+    const r = await gql('mutation { PatientCreate(res: { resourceType: "Patient", birthDate: "x" }) { id } }');
+    expect(r.status).toBe(200);
+    expect(r.json.data).toEqual({ PatientCreate: null });
+    expect(r.json.errors[0].message).toBe(operationOutcomeToString(rest.json));
+    // Medplum's own checks, before any write
+    const wrongType = await gql('mutation { PatientCreate(res: { resourceType: "Observation" }) { id } }');
+    expect(wrongType.json.errors[0].message).toBe('Invalid resourceType');
+    const wrongId = await gql('mutation { PatientUpdate(id: "a", res: { resourceType: "Patient", id: "b" }) { id } }');
+    expect(wrongId.json.errors[0].message).toBe('Invalid ID');
+    expect(await count()).toBe(before);
+  });
+
+  it('a write in a request is what a later reference in that request reads', async () => {
+    const p = (await post('Patient', { resourceType: 'Patient', gender: 'female' })).json;
+    const linked = (alias: string, id: string) => `${alias}: PatientCreate(res: { resourceType: "Patient", link: [{ type: "seealso", other: { reference: "Patient/${id}" } }] }) { link { other { resource { ... on Patient { gender } } } } }`;
+    const gender = (data: any, alias: string) => data[alias]?.link[0].other.resource?.gender ?? null;
+    // update and patch prime the per-request read: a read before them is not reused after
+    let r = await gql(`mutation { ${linked('a', p.id)} u: PatientUpdate(id: "${p.id}", res: { resourceType: "Patient", id: "${p.id}", gender: "male" }) { id } ${linked('b', p.id)}
+      x: PatientPatch(id: "${p.id}", patch: [{ op: "replace", path: "/gender", value: "other" }]) { id } ${linked('c', p.id)} }`);
+    expect([gender(r.json.data, 'a'), gender(r.json.data, 'b'), gender(r.json.data, 'c')]).toEqual(['female', 'male', 'other']);
+    // delete clears it: the deleted record is not read from the cache
+    r = await gql(`mutation { ${linked('a', p.id)} d: PatientDelete(id: "${p.id}") { id } ${linked('b', p.id)} }`);
+    expect([gender(r.json.data, 'a'), gender(r.json.data, 'b')]).toEqual(['other', null]);
+    expect(r.json.errors.map((e: { path: unknown[] }) => e.path[0])).toEqual(['b']);
   });
 });

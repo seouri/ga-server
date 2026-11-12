@@ -39,3 +39,17 @@ Same tests and Linux script. Reverse lookups as Medplum builds them put every pa
 
 - The schema now costs about 29 MiB of heap with every R4 type and 18 MiB with GA's types (reverse lookups are most of it: 720 and 581 type pairs).
 - Both caps hold where they apply. GA's store keeps 23 MiB of headroom on Linux; Task 4's input types should be watched against it.
+
+## Task 4 rerun (mutations: input types, `PatchOperationInput`, the mutation root)
+
+Same tests and Linux script. The schema builds the mutation root with the query root, so the request measured (a query) builds the input types too.
+
+| Store | Platform | RSS before → after (MiB) | V8 heap before → after (MiB) |
+| --- | --- | --- | --- |
+| All types, growth | Linux (alpine, Node 26.13.0) | 172→219, 196→210, 197→210: **+14** (cap 128) | 26 → 59 |
+| All types, growth | macOS (Darwin 25.6, Node 26.13.0) | 269→284, 269→284, 269→284: **+15** (cap 128) | 26 → 59 |
+| GA's types, total | Linux (alpine, Node 26.13.0) | 164→196, 164→197, 166→200: **197** (cap 220) | 22 → 42 |
+| GA's types, total | macOS (Darwin 25.6, Node 26.13.0) | 247→259, 233→270, 233→269: **269** (printed only) | 22 → 42 |
+
+- Mutations add about 4 MiB of heap with every R4 type and 2 MiB with GA's types (input types are shared by every schema and keyed by FHIR type alone, as Medplum keys them).
+- Both caps hold where they apply. GA's store's median RSS on Linux is unchanged at 197 MiB (the 2 MiB of heap is inside run-to-run noise); headroom stays about 23 MiB.

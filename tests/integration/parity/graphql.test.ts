@@ -590,6 +590,179 @@ describe.skipIf(SQLITE)('GraphQL (parity)', () => {
     return g.json;
   }));
 
+  // Mutations (Task 4). A record a mutation creates answers 200, not 201, so the harness doesn't remember it: each row deletes its own.
+  const status400 = async (s: Side, query: string) => {
+    const g = await gql(s, query);
+    return { status: g.status, text: g.json?.issue?.[0]?.details?.text };
+  };
+
+  test(`GraphQL › Create Patient Record [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const g = await gql(s, `mutation {
+        PatientCreate(
+          res: {
+            resourceType: "Patient"
+            gender: "male"
+            name: [
+              {
+                given: "Bob"
+              }
+            ]
+          }
+        ) {
+          id
+          gender
+          name { given }
+        }
+      }`);
+    expect(g.status).toBe(200);
+    expect(g.json.data.PatientCreate).toBeDefined();
+    const read = await s.call('GET', `Patient/${g.json.data.PatientCreate.id}`);
+    await s.call('DELETE', `Patient/${g.json.data.PatientCreate.id}`);
+    expect(read.json.gender).toStrictEqual('male');
+    expect(read.json.name?.[0].given).toStrictEqual(['Bob']);
+    return { g: g.json, read: { gender: read.json.gender, name: read.json.name } };
+  }));
+
+  test(`GraphQL › Create wrong resourceType error [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const g = await gql(s, `mutation {
+        PatientCreate(res: { resourceType: "ServiceRequest" }) { id }
+      }`);
+    expect(g.status).toBe(200);
+    expect(g.json).toMatchObject({ errors: [{ message: 'Invalid resourceType', locations: [{ line: 2, column: 9 }], path: ['PatientCreate'] }], data: { PatientCreate: null } });
+    expect(g.type).toBe('application/json');
+    return g;
+  }));
+
+  test(`GraphQL › Updating Patient Record [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const patient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'] }] });
+    const g = await gql(s, `mutation {
+        PatientUpdate(
+          id: "${patient.id}"
+          res: {
+            id: "${patient.id}"
+            resourceType: "Patient"
+            gender: "male"
+            name: [
+              { given: "Bob" },
+              { family: "Smith" }
+            ]
+          }
+        ) {
+          id
+          gender
+          name {
+            given
+          }
+        }
+      }`);
+    expect(g.status).toBe(200);
+    const read = (await s.call('GET', `Patient/${patient.id}`)).json as Patient;
+    expect(read.gender).toStrictEqual('male');
+    expect(read.name?.[1].family).toStrictEqual('Smith');
+    return { g: g.json, read: { gender: read.gender, name: read.name } };
+  }));
+
+  test(`GraphQL › Invalid Update Mutation [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const patient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'] }] });
+    const r = await status400(s, `mutation {
+        PatientUpdate(
+          id: "${patient.id}"
+        ) {
+          id
+          gender
+          name {
+            given
+          }
+        }
+      }`);
+    expect(r.text).toStrictEqual('Argument "MutationType.PatientUpdate(res:)" of type "PatientCreate!" is required, but it was not provided.');
+    return r;
+  }));
+
+  const wrongUpdate = (message: string, res: (s: Side, id: string) => string) => () => same(sides, async (s) => {
+    const patient = await s.create<Patient>({ resourceType: 'Patient' });
+    const g = await gql(s, `mutation {
+        PatientUpdate(
+          id: "${patient.id}"
+          res: {
+            ${res(s, patient.id)}
+          }
+        ) { id }
+      }`);
+    expect(g.status).toBe(200);
+    expect(g.json).toMatchObject({ errors: [{ message, locations: [{ line: 2, column: 9 }], path: ['PatientUpdate'] }], data: { PatientUpdate: null } });
+    expect(g.type).toBe('application/json');
+    return g;
+  });
+  test('GraphQL › Update wrong resourceType error [fhir-router/src/graphql/graphql.test.ts]',
+    wrongUpdate('Invalid resourceType', (_s, id) => `resourceType: "ServiceRequest"\n            id: "${id}"`));
+  test('GraphQL › Update wrong ID error [fhir-router/src/graphql/graphql.test.ts]',
+    wrongUpdate('Invalid ID', () => `resourceType: "Patient"\n            id: "${randomUUID()}"`));
+
+  test(`GraphQL › Delete Patient Record [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const patient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'] }] });
+    const g = await gql(s, `mutation {
+        PatientDelete(
+          id: "${patient.id}"
+        ) { id }
+      }`);
+    expect(g.status).toBe(200);
+    const read = await error(s, `Patient/${patient.id}`);
+    expect(read.status).toBe(410); // Medplum's repository read of a deleted record: gone
+    return { g: g.json, read: read.status };
+  }));
+
+  test(`GraphQL › Patch Patient Record [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const testPatient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'], family: 'Original' }] });
+    const g = await gql(s, `mutation {
+        PatientPatch(
+          id: "${testPatient.id}"
+          patch: [
+            { op: "replace", path: "/name/0/family", value: "Smith" },
+            { op: "replace", path: "/gender", value: "male" }
+          ]
+        ) {
+          id
+          gender
+          name { family given }
+        }
+      }`);
+    expect(g.status).toBe(200);
+    expect(g.json.data.PatientPatch.gender).toBe('male');
+    expect(g.json.data.PatientPatch.name[0].family).toBe('Smith');
+    const updated = (await s.call('GET', `Patient/${testPatient.id}`)).json as Patient;
+    expect(updated.gender).toBe('male');
+    expect(updated.name?.[0].family).toBe('Smith');
+    return g.json;
+  }));
+
+  test(`GraphQL › Invalid Patch Mutation [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const testPatient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'], family: 'Original' }] });
+    const r = await status400(s, `mutation {
+        PatientPatch(
+          id: "${testPatient.id}"
+        ) {
+          id
+        }
+      }`);
+    expect(r.text).toMatch('Argument "MutationType.PatientPatch(patch:)" of type "[PatchOperationInput!]!" is required');
+    return r;
+  }));
+
+  test(`GraphQL › Invalid Patch Operations [fhir-router/src/graphql/graphql.test.ts]`, () => same(sides, async (s) => {
+    const testPatient = await s.create<Patient>({ resourceType: 'Patient', gender: 'female', name: [{ given: ['Alice'], family: 'Original' }] });
+    const r = await status400(s, `mutation {
+        PatientPatch(
+          id: "${testPatient.id}"
+          patch: "not-an-array"
+        ) {
+          id
+        }
+      }`);
+    expect(r.text).toMatch(/Expected value of type "PatchOperationInput" to be an object, found: "not-an-array"/);
+    return r;
+  }));
+
   // README: the depth (12) and cost (10,000) limits refuse a query, with Medplum's commented-out texts; Medplum 5.2.14 only logs.
   test('differs on purpose: a query over the depth or cost limit is refused [store-plan-3]', async () => {
     const careTeams = (inner: string, n: number): string => (n ? `participant { member { resource { ... on CareTeam { ${careTeams(inner, n - 1)} } } } }` : inner);
