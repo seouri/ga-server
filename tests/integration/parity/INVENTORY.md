@@ -2,7 +2,7 @@
 
 One row per Medplum test (a `test.each` counts once, by its title template). Columns: file (path below `packages/`), title (describe path joined with " › "), status, feature, note.
 
-- status: `ported` (a parity test titled `<title> [<file>]` exists), `skipped` (note says why), `plan-2` (terminology, all triaged by Task 1 of plan 2; none left), `plan-3` (GraphQL).
+- status: `ported` (a parity test titled `<title> [<file>]` exists), `skipped` (note says why), `plan-2` (terminology, all triaged by Task 1 of plan 2; none left), (`plan-3` is no longer used: all GraphQL rows are triaged).
 - feature: `existing`, `summary`, `type`, `include`, `chain`, `modifier`, `composite`, `filter`, `meta`, `terminology`, `graphql`, `platform`.
 - A note `not yet ported (Task N)` names the task that ports the row; the last task fails any row still carrying it.
 - `tests/parity-inventory.test.ts` checks this file against the parity tests.
@@ -676,51 +676,51 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves canonical references | ported | include |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Empty match set skips include processing | ported | existing |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Syntax error | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection forbidden | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection allowed | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Allows value introspection | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID not found | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _id | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _count | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with based-on | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference not found | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with _reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup on contained resource with invalid id | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup without _reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API and count | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API count only (no edges) | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth override | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › StructureDefinition query | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › _offset list field argument | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › _count list field argument | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › fhirpath list field argument | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument by name | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Extension list field argument | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument null values | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without count field | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without edges field | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create Patient Record | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create wrong resourceType error | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Updating Patient Record | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Update Mutation | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong resourceType error | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong ID error | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Delete Patient Record | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reference missing reference property | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Fragment inclusion | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Cursor pagination | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Patch Patient Record | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Mutation | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Operations | plan-3 | graphql | deferred to plan 3 (GraphQL) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Syntax error | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection forbidden | skipped | graphql | Medplum runs with introspection on; store-only test |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection allowed | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Allows value introspection | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID not found | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _id | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _count | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with based-on | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup on contained resource with invalid id | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup without _reference | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API and count | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API count only (no edges) | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth | skipped | graphql | skipped in Medplum 5.2.14 |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth override | skipped | graphql | skipped in Medplum 5.2.14 |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › StructureDefinition query | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › _offset list field argument | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › _count list field argument | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › fhirpath list field argument | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument by name | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Extension list field argument | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument null values | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without count field | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without edges field | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create Patient Record | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Create wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Updating Patient Record | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Update Mutation | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong ID error | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Delete Patient Record | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reference missing reference property | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Fragment inclusion | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Cursor pagination | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Patch Patient Record | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Mutation | skipped | graphql | not yet ported (Task 4) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Operations | skipped | graphql | not yet ported (Task 4) |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › validateResourceWithJsonSchema | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Array properties | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Additional properties | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
@@ -730,37 +730,37 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Undefined array element | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Nested null array element | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Deep nested null array element | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › IntrospectionQuery | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __schema | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __type | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID not found | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _id | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _filter | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _count | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with based-on | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference not found | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup with _reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup without _reference | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Max depth | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Hidden fields in nested lookups | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Cannot read resource type | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Cannot read resource type in nested lookups | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Access policy criteria | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Access policy criteria in nested lookups | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Max searches exceeded | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › disabled without project setting | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › Respect project boundary | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › Respect access policy | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Create Task with groupIdentifier | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Uses reader instance when available | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › GraphQL in batch users writer | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Cursor pagination | plan-3 | graphql | deferred to plan 3 (GraphQL) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › dataloader deduplicates reads | plan-3 | graphql | deferred to plan 3 (GraphQL) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › IntrospectionQuery | skipped | graphql | skipped in Medplum 5.2.14 |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __schema | skipped | graphql | skipped in Medplum 5.2.14 |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __type | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID not found | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _id | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _filter | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _count | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with based-on | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup without _reference | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Max depth | skipped | graphql | skipped in Medplum 5.2.14 |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Hidden fields in nested lookups | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Cannot read resource type | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Cannot read resource type in nested lookups | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Access policy criteria | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Access policy criteria in nested lookups | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Max searches exceeded | skipped | graphql | project setting |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › disabled without project setting | skipped | graphql | project setting |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › Respect project boundary | skipped | graphql | project setting |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › searchByReference › Respect access policy | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Create Task with groupIdentifier | skipped | graphql | access policy |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Uses reader instance when available | skipped | graphql | database platform (spy on pools or loaders) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › GraphQL in batch users writer | skipped | graphql | database platform (spy on pools or loaders) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Cursor pagination | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › dataloader deduplicates reads | skipped | graphql | database platform (spy on pools or loaders) |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Smoke Test | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Error cases › Invalid graph parameter | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Error cases › Missing Graph Definition | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
