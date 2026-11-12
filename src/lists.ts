@@ -6,7 +6,7 @@ import { trusted } from './concept-apply.ts';
 import { RXNORM } from './concepts.ts';
 import { currencyContext, explain, isPlanned, smartKeys, type Ctx } from './current.ts';
 import { TAG } from './identity.ts';
-import { bundles, collect, fit, flagsOf } from './labs.ts';
+import { bundles, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
@@ -39,13 +39,6 @@ export const medKeys = (cc?: CodeableConcept, owner?: Resource): string[] => {
   const name = concept(cc)?.toLowerCase().replace(/\s+/g, ' ').trim();
   return [...(rx ? [`rx:${rx}`] : []), ...(name ? [`name:${name}`] : [])];
 };
-
-// all: every fetched resource (all four covered types, any status, plus included Medications); the context needs them all.
-export function listRows(all: Resource[], ctx: Ctx, kind: Kind, include?: 'all'): ListRow[] {
-  const g = grouper();
-  listItems(all, medMap(all), ctx, kind, include).forEach(g.add);
-  return g.rows();
-}
 
 type ListItem = { row: ListRow; keys: string[]; code?: string };
 // The rows of `kind` among rs, before grouping. meds: the Medications they may reference (an _include brings them in the same page).
@@ -125,19 +118,10 @@ const searches = (patientId: string): Record<Kind, [ResourceType, URLSearchParam
   };
 };
 
-// Every covered record and the currency context, fetched once. eps: the patient's source Endpoints (read once, also for the stale-source warning).
-export async function loadLists(client: MedplumClient, patientId: string, eps: Endpoint[]): Promise<{ all: Resource[]; ctx: Ctx }> {
-  const s = searches(patientId);
-  const [ms, mr, cond, alg, newest] = await Promise.all([
-    ...[...s.medications, ...s.problems, ...s.allergies].map(([type, q]) => collect(client, type, q, (r: Resource) => r, Infinity).then((x) => x.rows)),
-    newestEpicImport(client, patientId),
-  ]) as [Resource[], Resource[], Resource[], Resource[], number];
-  return { all: [...ms, ...mr, ...cond, ...alg], ctx: currencyContext([], eps, newest) };
-}
-
-// The three lists' rows (as listRows), read page by page: each page is made rows and dropped, so only the rows are kept.
-// onPage: each page's records (its included Medications too), for a caller that derives more from them.
-export async function listsByKind(client: MedplumClient, patientId: string, eps: Endpoint[], onPage?: (page: Resource[]) => void): Promise<Record<Kind, ListRow[]>> {
+// The three lists' rows, read page by page: each page is made rows and dropped, so only the rows are kept. eps: the patient's
+// source Endpoints (read once, also for the stale-source warning). onPage: each page's records (its included Medications too),
+// for a caller that derives more from them. include 'all': inactive records too.
+export async function listsByKind(client: MedplumClient, patientId: string, eps: Endpoint[], onPage?: (page: Resource[]) => void, include?: 'all'): Promise<Record<Kind, ListRow[]>> {
   const ctx = currencyContext([], eps, await newestEpicImport(client, patientId));
   const s = searches(patientId);
   const read = async (kind: Kind) => {
@@ -145,7 +129,7 @@ export async function listsByKind(client: MedplumClient, patientId: string, eps:
     for (const [type, q] of s[kind]) {
       for await (const b of bundles(client, type, q)) {
         const page = (b.entry ?? []).flatMap((e) => (e.resource ? [e.resource] : []));
-        listItems(page, medMap(page), ctx, kind).forEach(g.add);
+        listItems(page, medMap(page), ctx, kind, include).forEach(g.add);
         onPage?.(page);
       }
     }
@@ -156,6 +140,5 @@ export async function listsByKind(client: MedplumClient, patientId: string, eps:
 }
 
 export async function currentList(client: MedplumClient, patientId: string, kind: Kind, include: 'all' | undefined, eps: Endpoint[]): Promise<{ rows: ListRow[]; total: number; truncated?: true }> {
-  const { all, ctx } = await loadLists(client, patientId, eps);
-  return fit(listRows(all, ctx, kind, include), 1000);
+  return fit((await listsByKind(client, patientId, eps, undefined, include))[kind], 1000);
 }
