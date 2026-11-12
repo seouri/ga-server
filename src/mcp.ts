@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
-import type { Bundle, Extension, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
+import type { Bundle, DocumentReference, Extension, Immunization, Narrative, Resource, ResourceType } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -12,11 +12,11 @@ import { afterImport } from './concept-auto.ts';
 import { importResources, type ImportReport } from './engine.ts';
 import { withImportLock } from './lock.ts';
 import { pairImmunizations } from './ehi/history.ts';
-import { sha256, type SourceInfo, stableIdentifier } from './identity.ts';
+import { sha256, type SourceInfo, stableIdentifier, TAG } from './identity.ts';
 import { cardiovascularRisk10yr } from './cardiovascular-risk.ts';
 import { liverFibrosisRisk } from './liver-fibrosis.ts';
 import { vaccineGaps } from './vaccines.ts';
-import { labResults } from './labs.ts';
+import { labResults, searchAll } from './labs.ts';
 import { healthSummary } from './health.ts';
 import { whatsNew } from './whats-new.ts';
 import { currentList, type Kind } from './lists.ts';
@@ -83,25 +83,30 @@ export async function importExtracted(
       throw new GaError(`invalid ${r.resourceType}${paths.length ? `: ${paths.join(' ')}` : ''}`);
     }
   }
-  // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates.
   const hash = sha256(readFileSync(sourceFile));
-  const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
-  if (seen) throw new GaError(`already imported: ${basename(sourceFile)} (if that import failed, delete DocumentReference/${seen.id} to retry)`);
-  const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
-  const linked = link(`DocumentReference/${docRef.id}`);
   const date = documentDate ?? statSync(sourceFile).mtime.toISOString();
   const source: SourceInfo = { kind: 'pdf', file: sourceFile, date, writer: 'agent', llm: true };
-  // Immunizations have no content-key dedup in the engine: a dose GA already holds only gains this document as a source
-  // (its identifier); the existing record's body stays as recorded.
-  const imms = linked.filter((r): r is Immunization => r.resourceType === 'Immunization');
-  const existing = imms.length ? await client.searchResources('Immunization', { patient: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' }) : [];
-  const pairs = pairImmunizations(existing, imms);
-  // The identifier can't be there yet: it embeds this file's hash, and a file is imported once (checked above).
-  for (const [n, m] of pairs.entries()) {
-    if (m) await client.updateResource<Immunization>({ ...m, identifier: [...(m.identifier ?? []), stableIdentifier(imms[n], source, fileHash, patientId)] });
-  }
-  const paired = new Set(imms.filter((_, n) => pairs[n]));
-  const report = await withImportLock(() => importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash));
+  // One lock from the check to the last write: two imports of one file can't both pass the check.
+  const { report, paired } = await withImportLock(async () => {
+    // Re-extraction gives different LLM output, so a second import of the same file would only add duplicates. A stored copy no
+    // record cites is a failed import's: reused.
+    const seen = await client.searchOne('DocumentReference', { identifier: `urn:ga-server:id:file|${hash}`, subject: `Patient/${patientId}` }, { cache: 'no-cache' });
+    if (seen && (await cited(client, patientId, seen))) throw new GaError(`already imported: ${basename(sourceFile)} (DocumentReference/${seen.id})`);
+    const { docRef, fileHash } = await storeDocument(client, sourceFile, patientId, contentType);
+    const linked = link(`DocumentReference/${docRef.id}`);
+    // Immunizations have no content-key dedup in the engine: a dose GA already holds only gains this document as a source
+    // (its identifier); the existing record's body stays as recorded.
+    const imms = linked.filter((r): r is Immunization => r.resourceType === 'Immunization');
+    const existing = imms.length ? await client.searchResources('Immunization', { patient: `Patient/${patientId}`, _count: '1000' }, { cache: 'no-cache' }) : [];
+    const pairs = pairImmunizations(existing, imms);
+    for (const [n, m] of pairs.entries()) {
+      const id = stableIdentifier(imms[n], source, fileHash, patientId);
+      // A failed earlier import of this file may have added it already.
+      if (m && !m.identifier?.some((i) => i.system === id.system && i.value === id.value)) await client.updateResource<Immunization>({ ...m, identifier: [...(m.identifier ?? []), id] });
+    }
+    const paired = new Set(imms.filter((_, n) => pairs[n]));
+    return { report: await importResources(client, linked.filter((r) => !paired.has(r as Immunization)), source, patientId, fileHash), paired };
+  });
   report.merged += paired.size;
   return afterImport(client, { ...cfg, patientId }, report, deps);
 }
@@ -114,6 +119,33 @@ export function untrusted(r: Resource): Resource {
   if (kept?.length) out.extension = kept;
   else delete out.extension;
   return out as Resource;
+}
+
+export const EXTRACT_TYPES = ['Observation', 'Condition', 'MedicationStatement', 'MedicationRequest', 'DiagnosticReport', 'Procedure', 'Encounter', 'AllergyIntolerance', 'Immunization'] as ResourceType[];
+export const EXTRACTED_NOTE = /^Extracted from DocumentReference\/(\S+)$/;
+
+// The source document of an extracted record: Observation.derivedFrom, the "Extracted from" note, else (Encounter,
+// DiagnosticReport have neither) the one file document named like meta.source.
+export function sourceDoc(r: Resource, docsByTitle: Map<string, string[]>): string | undefined {
+  const ref = (r as { derivedFrom?: { reference?: string }[] }).derivedFrom?.find((x) => x.reference?.startsWith('DocumentReference/'))?.reference;
+  if (ref) return ref.split('/')[1];
+  for (const n of (r as { note?: { text?: string }[] }).note ?? []) {
+    const m = EXTRACTED_NOTE.exec(n.text ?? '');
+    if (m) return m[1];
+  }
+  const ids = r.meta?.source ? docsByTitle.get(basename(r.meta.source)) : undefined;
+  return ids?.length === 1 ? ids[0] : undefined;
+}
+
+// Whether an extracted record cites this stored file (an import of it wrote something). Only reached for a file already stored.
+// shortcut: an Encounter or DiagnosticReport cites by file name only, so another same-named file's report counts too; rare.
+async function cited(client: MedplumClient, patientId: string, doc: DocumentReference): Promise<boolean> {
+  const byTitle = new Map([[doc.content?.[0]?.attachment?.title ?? '', [doc.id as string]]]);
+  for (const type of EXTRACT_TYPES) {
+    const rs = await searchAll(client, type, { _tag: `${TAG}|extracted-by-llm`, _compartment: `Patient/${patientId}` });
+    if (rs.some((r) => sourceDoc(r, byTitle) === doc.id)) return true;
+  }
+  return false;
 }
 
 // Keeps MCP output small: no narrative, meta reduced to source and tags.
