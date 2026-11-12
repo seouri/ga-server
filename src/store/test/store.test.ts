@@ -211,4 +211,26 @@ describe('Store index format', () => {
       }
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('the reindex recomputes meta.compartment (a definitions change can move a resource into a compartment)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'store-comp-'));
+    const file = join(dir, 'store.db');
+    try {
+      const s = new Store(file, { terminology: [] });
+      const p = s.create({ resourceType: 'Patient' }).resource.id!;
+      const o = s.create({ resourceType: 'Observation', status: 'final', code: { text: 'x' }, subject: { reference: `Patient/${p}` } }).resource;
+      s.close();
+      // As if written under definitions whose compartment params missed Observation.subject.
+      const raw = new DatabaseSync(file);
+      raw.exec(`update resources set json = json_remove(json, '$.meta.compartment') where type = 'Observation';
+        update history set json = json_remove(json, '$.meta.compartment') where type = 'Observation'; update meta set value = 'old' where key = 'index'`);
+      raw.close();
+      const s2 = new Store(file, { terminology: [] });
+      expect(s2.search('Observation', [['_compartment', `Patient/${p}`]], '').entry?.map((e) => e.resource?.id)).toEqual([o.id]);
+      const ref = [{ reference: `Patient/${p}` }];
+      expect(s2.read('Observation', o.id!)?.meta?.compartment).toEqual(ref);
+      expect(JSON.parse(s2.version('Observation', o.id!, o.meta!.versionId!)!.json).meta?.compartment).toEqual(ref);
+      s2.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
