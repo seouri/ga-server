@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import { UploadTooLarge, acceptUpload, cleanUploads, newUpload, unzipSafe, uploadPath } from '../src/gateway/uploads.ts';
+import { recordJob } from '../src/import-jobs.ts';
 
 const PUBLIC = 'https://ga.example.ts.net';
 const ZIPS = join(import.meta.dirname, 'fixtures', 'zips');
@@ -65,6 +66,16 @@ test('uploads older than 24 hours are swept', async () => {
   utimesSync(join(dir, 'uploads', old.fileId), t, t);
   cleanUploads(dir);
   expect(readdirSync(join(dir, 'uploads'))).toEqual([fresh.fileId]);
+});
+
+// Audit 15: a job queued or resumed after the gateway was down over 24 hours still has its export (recordJob moved it out of uploads/).
+test('the upload sweep never removes a recorded import job\'s export', async () => {
+  const u = newUpload(dir, PUBLIC);
+  await acceptUpload(dir, u.token, 'export.zip', body('PK synthetic'));
+  const job = recordJob(dir, uploadPath(dir, u.fileId));
+  cleanUploads(dir, Date.now() + 48 * 3600_000);
+  expect(readFileSync(job.upload, 'utf8')).toBe('PK synthetic');
+  expect(job.upload.startsWith(join(dir, 'imports', job.id))).toBe(true);
 });
 
 test('unzipSafe: a normal zip with one top folder returns that folder', async () => {
