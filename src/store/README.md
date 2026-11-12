@@ -7,7 +7,7 @@ This directory is the whole store, code and tests (`test/`): its files import on
 ## Requirements
 
 - Node >= 26 (`node:sqlite`; TypeScript runs as-is through Node's type stripping, no build step).
-- `@medplum/core` 5.2.14, `@medplum/definitions` 5.2.14, `@medplum/fhirtypes` 5.2.14 (types only). Tests: `vitest` 5.1.0.
+- `@medplum/core` 5.2.14, `@medplum/definitions` 5.2.14, `@medplum/fhirtypes` 5.2.14 (types only), `graphql` 17.0.2 (`$graphql`, Medplum's version). Tests: `vitest` 5.1.0.
 - No other dependencies, no native modules.
 
 ## Running it
@@ -31,7 +31,7 @@ No environment variables are read. SIGTERM and SIGINT close the server and the d
 
 From `server.ts`:
 
-- `serveStore(opts: ServeOptions): Promise<http.Server>` with `ServeOptions = { file; host?; port; tokenFile; maxBinaryBytes?; types? }`. Listens, then opens the token file and the database; the server's `close` closes the database.
+- `serveStore(opts: ServeOptions): Promise<http.Server>` with `ServeOptions = { file; host?; port; tokenFile; maxBinaryBytes?; types?; terminology?; graphqlIntrospection? }` (`graphqlIntrospection`: `$graphql` answers schema queries; off by default, as Medplum). Listens, then opens the token file and the database; the server's `close` closes the database.
 - `storeToken(file): string`: the token file's contents (created as above if missing).
 - `JSON_LIMIT`, `DEFAULT_BINARY_LIMIT`.
 
@@ -61,6 +61,7 @@ Under `/fhir/R4/`:
 - History: `<Type>/<id>/_history[/<vid>]`, `<Type>/_history`, `_history` (`_count`, `_since`).
 - `POST /` batch and transaction bundles (urn rewriting, also with its colons URL-encoded inside strings; conditional references; GET/POST/PUT/PATCH/DELETE entries, a PATCH entry's patch as a base64 JSON Patch `Binary` or a `Parameters` (FHIRPath Patch, or JSON Patch as `op` parts); `POST Binary` entries with base64 `data` (top-level entries; a failed transaction keeps none), a nested bundle as a `POST /` entry).
 - `Patient/<id>/$everything` (`_count`, `_offset`, `_since`, `_type`, `start` and `end` by Medplum's care dates); `<Type>/$validate`.
+- `POST $graphql` (`graphql.ts`, `graphql-types.ts`, ported from Medplum 5.2.14's `fhir-router` GraphQL): `{ query, operationName?, variables? }`; read by id (`Patient(id:)`) and search (`PatientList(...)`, every search parameter with `-` as `_`, `_count` at most 1000, `_sort`, `_filter`, `_cursor`) over the store's own types, each read and search a request through the REST path. A 200 is the GraphQL result as `application/json` (a missing read is `null` with its error, as Medplum); a missing query, a syntax error or a validation error (a type the store does not hold) is 400, a schema query (`__schema`, `__type`) with introspection off 403, each an OperationOutcome. The schema is built on the first request. Also a batch entry. `GET $graphql` is 400 `Unknown resource type`, as Medplum.
 - `Binary`: `POST` and `PUT Binary/<id>` stream the raw body to disk (`Content-Encoding` gzip or deflate decoded), `GET Binary/<id>` streams it back, `DELETE`.
 - `GET metadata`: a CapabilityStatement of what this store supports.
 - Writes drop empty values (`identifier: []`, `display: ''`), as Medplum; an empty array item (`''` or `{}`) is 400, as Medplum (R4 JSON has no empty values).
@@ -146,7 +147,7 @@ As its own repository, with history: `git subtree split --prefix=src/store -b fh
   "type": "module",
   "engines": { "node": ">=26" },
   "scripts": { "start": "node serve.ts", "test": "vitest run", "typecheck": "tsc --noEmit" },
-  "dependencies": { "@medplum/core": "5.2.14", "@medplum/definitions": "5.2.14", "@medplum/fhirtypes": "5.2.14" },
+  "dependencies": { "@medplum/core": "5.2.14", "@medplum/definitions": "5.2.14", "@medplum/fhirtypes": "5.2.14", "graphql": "17.0.2" },
   "devDependencies": { "@types/node": "26.6.6", "typescript": "7.0.2", "vitest": "5.1.0" }
 }
 ```

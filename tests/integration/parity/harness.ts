@@ -1,5 +1,5 @@
 // Side-by-side harness: the same request against Medplum (an admin login scoped to the long-lived ga-test-parity project, never
-// the owner's project) and against a temp store with every R4 type. Ported Medplum tests run through both().
+// the owner's project) and against a temp store with every R4 type (GraphQL introspection on, as that Medplum). Ported Medplum tests run through both().
 import { randomUUID } from 'node:crypto';
 import { MedplumClient } from '@medplum/core';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
@@ -111,7 +111,7 @@ export async function paritySides(): Promise<{ sides: [Side, Side]; close(): Pro
   }
   const created: string[] = [];
   const medplum = side('medplum', t.baseUrl, () => admin.getAccessToken() as string, created);
-  const store = await tempStore(undefined, 'all');
+  const store = await tempStore(undefined, 'all', { graphqlIntrospection: true }); // the owner's Medplum runs with introspection on
   return {
     sides: [medplum, side('store', store.base, () => store.token)],
     async close() {

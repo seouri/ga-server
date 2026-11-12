@@ -9,13 +9,14 @@ import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { createGunzip, createInflate } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
-import { applyPatch, evalFhirPathTyped, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
+import { OperationOutcomeError, applyPatch, evalFhirPathTyped, fhirpathPatchTypedValue, getSearchParameters, parseFhirPathPatchParameters, toTypedValue } from '@medplum/core';
 import type { Bundle, BundleEntry, OperationOutcome, Parameters, Resource } from '@medplum/fhirtypes';
 import { PATIENT_COMPARTMENT_PARAMS, storedTypes } from './definitions.ts';
 import { components, IGNORED } from './search.ts';
 import { type Row, Store, StoreError, multipleMatches } from './store.ts';
 import { importConceptMap, translate } from './conceptmap.ts';
 import { expand, validateCodeVs } from './expand.ts';
+import { type Fhir, graphqlHandler } from './graphql.ts';
 import { type Params, codeSystemImport, lookup, params, subsumes, validateCodeCs } from './terminology.ts';
 
 // Binaries stream to disk, so their limit (serveStore's maxBinaryBytes) can be gigabytes; JSON bodies are read whole.
@@ -81,7 +82,8 @@ function parse(text: string): any {
 }
 
 // types: the resource types the store accepts (default every R4 resource type).
-export type ServeOptions = { file: string; host?: string; port: number; tokenFile: string; maxBinaryBytes?: number; types?: readonly string[]; terminology?: readonly string[] };
+export type ServeOptions = { file: string; host?: string; port: number; tokenFile: string; maxBinaryBytes?: number; types?: readonly string[]; terminology?: readonly string[];
+  graphqlIntrospection?: boolean }; // $graphql schema queries (__schema, __type): off by default, as Medplum
 
 export async function serveStore(opts: ServeOptions): Promise<Server> {
   const binaryLimit = opts.maxBinaryBytes ?? DEFAULT_BINARY_LIMIT;
@@ -107,6 +109,7 @@ export async function serveStore(opts: ServeOptions): Promise<Server> {
   try {
     token = createHash('sha256').update(storeToken(opts.tokenFile)).digest();
     store = new Store(opts.file, { types: opts.types, terminology: opts.terminology });
+    introspection.set(store, opts.graphqlIntrospection ?? false);
   } catch (e) { server.close(); throw e; }
   server.on('close', () => store?.close());
   return server;
@@ -177,7 +180,7 @@ async function handle(store: Store, binaryLimit: number, req: IncomingMessage, r
   let out = a.json ?? JSON.stringify(a.outcome ?? OK);
   if (a.status < 300 && /\breturn=minimal\b/.test(header(req, 'prefer') ?? '')) out = ''; // as Medplum, on reads too
   else if (query.get('_pretty') === 'true') out = JSON.stringify(JSON.parse(out), undefined, 2);
-  send(res, a.status, out, h);
+  send(res, a.status, out, { ...h, ...a.headers });
 }
 
 // GET [base]?_type=A,B: a search across the listed types (Medplum's texts for no types, an unknown type and Binary). As Medplum,
@@ -202,7 +205,7 @@ const header = (req: IncomingMessage, name: string): string | undefined => {
 type Req = { method: string; parts: string[]; query: URLSearchParams; body: unknown; ifMatch?: string; ifNoneExist?: string; base: string; id?: string; entry?: boolean };
 // Its answer: a resource or Bundle as JSON text, or an OperationOutcome; row (one resource's version) gives ETag, Last-Modified,
 // Location (201) and a batch entry's location.
-type Answer = { status: number; json?: string; outcome?: OperationOutcome; row?: Pick<Row, 'type' | 'id' | 'versionId' | 'lastUpdated'> };
+type Answer = { status: number; json?: string; outcome?: OperationOutcome; row?: Pick<Row, 'type' | 'id' | 'versionId' | 'lastUpdated'>; headers?: Record<string, string> };
 
 const CREATED: OperationOutcome = { resourceType: 'OperationOutcome', id: 'created', issue: [{ severity: 'information', code: 'informational', details: { text: 'Created' } }] };
 const TYPE = /^[A-Z][A-Za-z]+$/;
@@ -224,7 +227,9 @@ function dispatch(store: Store, r: Req): Answer {
     throw new HttpError(405, `${method} not allowed`);
   }
   if (type === '_search' && !id && method === 'POST') return systemSearch(store, r); // R4's POST [base]/_search
-  if (type[0] === '$') throw new HttpError(404, `Not found: ${type}`); // no system-level operations
+  if (type === '$graphql' && !id && method === 'POST') return graphql(store, r);
+  if (type === '$graphql' && !id && method === 'GET') throw new HttpError(400, 'Unknown resource type'); // Medplum's answer
+  if (type[0] === '$') throw new HttpError(404, `Not found: ${type}`); // no other system-level operations
   if (method === 'GET' && !id && type === 'metadata') return { status: 200, json: capability() };
   if (method === 'GET' && !id && type === '_history') return history(store, r, {});
   if (r.query.has('_type') && ((method === 'GET' && !id) || (method === 'POST' && id === '_search' && !op))) return systemSearch(store, r);
@@ -272,6 +277,29 @@ function dispatch(store: Store, r: Req): Answer {
   if (method === 'PATCH') return written(patch(store, type, id, r), 200);
   if (method === 'DELETE') { store.delete(type, id, r.ifMatch); return { status: 200, outcome: OK }; }
   throw new HttpError(405, `${method} not allowed`);
+}
+
+// Whether a store's $graphql answers schema queries (serveStore's graphqlIntrospection).
+const introspection = new WeakMap<Store, boolean>();
+
+// POST [base]/$graphql: every read and search a resolver makes is a request through dispatch, so it is checked as in REST; an
+// answer >= 400 becomes the resolver's error (its OperationOutcome text). A 200 is plain JSON, as Medplum sends it.
+function graphql(store: Store, r: Req): Answer {
+  const fhir: Fhir = (method, path, body) => {
+    const url = new URL(path, 'http://store/');
+    let a: Answer;
+    try {
+      a = dispatch(store, { method, parts: url.pathname.split('/').filter(Boolean).map(decodeURIComponent), query: url.searchParams, body, base: r.base });
+    } catch (e) {
+      if (e instanceof HttpError) throw new OperationOutcomeError(outcome(e.status === 404 ? 'not-found' : 'invalid', e.message));
+      throw e;
+    }
+    if (a.status >= 400) throw new OperationOutcomeError(a.outcome ?? JSON.parse(a.json ?? '{}'));
+    return a.json === undefined ? a.outcome : JSON.parse(a.json);
+  };
+  const { status, json } = graphqlHandler(r.body, fhir, { introspection: introspection.get(store) ?? false, types: storedTypes() });
+  if (status >= 400) return { status, outcome: JSON.parse(json) };
+  return { status, json, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store, no-cache, must-revalidate' } };
 }
 
 // Operations by Type/$name, with the methods Medplum routes for each.

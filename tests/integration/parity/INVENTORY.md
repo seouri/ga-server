@@ -676,19 +676,19 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › _revinclude resolves canonical references | ported | include |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Invalid include parameter throws badRequest | ported | existing |  |
 | fhir-router/src/search-include.test.ts | MemoryRepository _include/_revinclude › Empty match set skips include processing | ported | existing |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Syntax error | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Missing query | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Syntax error | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection forbidden | skipped | graphql | Medplum runs with introspection on; store-only test |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection allowed | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Allows value introspection | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID not found | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _id | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _count | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with based-on | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | skipped | graphql | not yet ported (Task 2) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Introspection allowed | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Allows value introspection | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read by ID not found | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _id | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with _count | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with based-on | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |
@@ -698,7 +698,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API count only (no edges) | skipped | graphql | not yet ported (Task 3) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth | skipped | graphql | skipped in Medplum 5.2.14 |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth override | skipped | graphql | skipped in Medplum 5.2.14 |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › StructureDefinition query | skipped | graphql | not yet ported (Task 2) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › StructureDefinition query | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › _offset list field argument | skipped | graphql | not yet ported (Task 3) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › _count list field argument | skipped | graphql | not yet ported (Task 3) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › fhirpath list field argument | skipped | graphql | not yet ported (Task 3) |
@@ -732,16 +732,16 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/jsonschema.test.ts | FHIR JSONSchema › Deep nested null array element | skipped | platform | not in plan 1: operation $jsonschema, decide in plan 4 |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › IntrospectionQuery | skipped | graphql | skipped in Medplum 5.2.14 |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Get __schema | skipped | graphql | skipped in Medplum 5.2.14 |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __type | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID not found | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _id | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _filter | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _count | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with based-on | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | skipped | graphql | not yet ported (Task 2) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | skipped | graphql | not yet ported (Task 2) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Get __type | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID | skipped | platform | Medplum presigns attachment URLs (Binary storage), in REST reads too: its test asserts photo.url is http(s); the store keeps the stored url (the fhir-router row covers the read) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read by ID not found | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _id | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _filter | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with _count | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Search with based-on | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |

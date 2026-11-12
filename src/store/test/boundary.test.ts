@@ -7,12 +7,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const PACKAGES = ['@medplum/core', '@medplum/fhirtypes', '@medplum/definitions'];
+const PACKAGES = ['@medplum/core', '@medplum/fhirtypes', '@medplum/definitions', 'graphql'];
 // Where each package resolves (literal specifiers, so this file passes its own scan).
 const PKG_ENTRY: Record<string, () => string> = {
   '@medplum/core': () => import.meta.resolve('@medplum/core'),
   '@medplum/fhirtypes': () => import.meta.resolve('@medplum/fhirtypes'),
   '@medplum/definitions': () => import.meta.resolve('@medplum/definitions'),
+  graphql: () => import.meta.resolve('graphql'),
 };
 
 type Tok = { t: 'id' | 'str' | 'tpl' | 'num' | 'regex' | 'punct'; v: string; cond?: boolean }; // cond: a ) closing an if/while/for/with condition

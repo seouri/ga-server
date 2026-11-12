@@ -9,9 +9,9 @@ import { bearer } from '../src/config.ts';
 import { GA_STORE_TYPES } from '../src/store-serve.ts';
 import { serveStore } from '../src/store/server.ts';
 
-// types: GA's by default; 'all' opens every R4 type.
-export async function tempStore(dir = mkdtempSync(join(tmpdir(), 'ga-test-store-')), types: readonly string[] | 'all' = GA_STORE_TYPES) {
-  const server = await serveStore({ file: join(dir, 'store', 'ga.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token'), ...(types !== 'all' && { types }) });
+// types: GA's by default; 'all' opens every R4 type. graphqlIntrospection: as serveStore's (off by default).
+export async function tempStore(dir = mkdtempSync(join(tmpdir(), 'ga-test-store-')), types: readonly string[] | 'all' = GA_STORE_TYPES, opts: { graphqlIntrospection?: boolean } = {}) {
+  const server = await serveStore({ file: join(dir, 'store', 'ga.db'), host: '127.0.0.1', port: 0, tokenFile: join(dir, 'store', 'token'), ...(types !== 'all' && { types }), ...opts });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   const token = readFileSync(join(dir, 'store', 'token'), 'utf8').trim();
   return {
