@@ -33,6 +33,13 @@ test('portalWarning: none without stale sources; fix per status and transport', 
   expect(portalWarning([s({ status: 'error', lastSuccess: '2026-11-01T00:00:00Z' })], true)).toMatch(/last success 2026-11-01T00:00:00Z: sync: hospital_sync$/);
   expect(portalWarning([s({ status: 'off', error: 'disconnected' })], false)).toContain('disconnected it on purpose');
   expect(portalWarning([s({ status: 'error', error: 'not_enabled' })], false)).toContain('ga sync --enable');
+  // The hospital refused a list search: syncing again fails again; reconnect with the type selected or stop syncing it.
+  const refused = portalWarning([s({ status: 'error', error: 'refused:MedicationRequest' })], false)!;
+  expect(refused).toContain('refused MedicationRequest');
+  expect(refused).toContain('`ga connect <its FHIR address>`');
+  expect(refused).toContain('`ga sync --enable <the enabled types without MedicationRequest> <source>`');
+  expect(refused).not.toContain('`ga sync`');
+  expect(portalWarning([s({ status: 'error', error: 'refused:MedicationRequest,Condition' })], true)).toMatch(/refused MedicationRequest, Condition: .*hospital_connect/);
 });
 
 test('read tools put portalWarning first; no Endpoints adds nothing; a failed check says status unknown', async () => {
