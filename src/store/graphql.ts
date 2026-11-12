@@ -465,6 +465,7 @@ class QueryCostVisitor {
           branchingFactor = 2;
         }
 
+        // shortcut: mutation fields cost 0 (as Medplum), so thousands of aliased creates pass the cost rule; cost them if write traffic matters
         cost += baseCost + branchingFactor * this.calculateCost(...node.selectionSet.selections);
       } else if (node.kind === Kind.FRAGMENT_SPREAD) {
         const fragmentName = node.name.value;

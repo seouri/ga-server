@@ -4,6 +4,12 @@ Store parity plan 3, Task 2, R7. Question: does building the GraphQL schema on t
 
 Scope measured: Task 2's schema (read by id and search fields for each type, the output types of every reachable FHIR type). Reverse lookups, the Connection API, `resource` on Reference and list-field arguments (Task 3) and input types (Task 4) are not in it yet. Task 3 and 4 rerun both tests.
 
+## Conclusion (final, after Task 4)
+
+- GA's store (ga-store, `--max-old-space-size=192`): 197 MiB total RSS on Linux after the first `$graphql` request, 23 MiB under the 220 MiB budget. macOS prints about 269 MiB (not asserted: its accounting is about 65 MiB higher before GraphQL runs).
+- All types: RSS grows by +14 MiB on Linux (+15 macOS) from before to after the first request, against a 128 MiB cap.
+- That holds only because reverse lookups leave out `_compartment` and every-type parameters (Task 3: as Medplum builds them, all types grew +456 MiB and GA reached 286 MiB). Later task sections below record how each addition moved the figures.
+
 ## How it was measured
 
 Each test runs the store in a child process with `--expose-gc` and an `--import` hook. On SIGUSR2, the hook runs a full GC and prints `process.memoryUsage()` (RSS and V8 heap used). The test reads that line once before and once after one request, `{ PatientList(_count: 1) { id } }`. Reading after a full GC gives the steady state. Without the GC, start-up garbage (the R4 definitions parse) dominates RSS: `ps` RSS before the request ran 260-330 MiB and fell, or did not move, after it.

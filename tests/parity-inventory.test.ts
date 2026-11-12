@@ -55,7 +55,7 @@ test('no row is deferred to plan 3', () => {
   expect(rows.filter((r) => r.status === 'plan-3').map((r) => `${r.title} [${r.file}]`)).toEqual([]);
 });
 
-// Final gate: the last task of the plan sets PARITY_FINAL=1; until then ported-later rows carry `not yet ported (Task N)`.
-test.skipIf(!process.env.PARITY_FINAL)('no row is left "not yet ported"', () => {
+// Final gate: no row may still carry `not yet ported (Task N)`.
+test('no row is left "not yet ported"', () => {
   expect(rows.filter((r) => /not yet ported/i.test(r.note)).map((r) => `${r.title} [${r.file}]`)).toEqual([]);
 });

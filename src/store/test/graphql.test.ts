@@ -1,5 +1,6 @@
-// POST [base]/$graphql, store-only behaviour: introspection off (the default), a store that holds only some types, and $graphql
-// as a batch entry. One Patient-only store for the file (the definitions are loaded once per process).
+// POST [base]/$graphql, store-only behaviour: introspection off (the default), a store that holds only some types, a read by a
+// dot-segment id, $graphql as a batch or transaction entry, mutation errors (REST's text, nothing written), and a write seen by a later
+// read in the same request. One Patient-only store for the file (the definitions are loaded once per process).
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';

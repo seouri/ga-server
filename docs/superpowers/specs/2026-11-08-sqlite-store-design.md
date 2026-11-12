@@ -78,10 +78,11 @@ Which process owns the file; worker thread vs async driver vs better-sqlite3 for
 
 The store behaves like Medplum for what a FHIR client does with records. These are **not supported yet**; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it:
 
-- GraphQL (plan 3).
 - Plan 4 decides: `_text`, `_content`, `_contained`, special search parameters, `_include=*`, `_filter` `ew` and `po`, Binary as FHIR JSON and history, date values below day precision and comma lists of dates, and every other operation besides `$validate` and `Patient/$everything`.
 
 Done in store-parity plan 1 (checked against Medplum 5.2.14 by `tests/integration/parity`; deliberate differences in `src/store/README.md`): `_summary` (`true`, `data`, `text`, `count`, `false`), composite search parameters, the modifiers `:of-type`, `:identifier` and uri `:above`/`:below`, `_include`/`_revinclude` with `:iterate` and canonical references, chains and `_has` to Medplum's depth, `_compartment`, `_filter`, system-level search with `_type`, and the `meta` search parameters.
+
+Done in store-parity plan 3 (checked against Medplum 5.2.14; deliberate differences in `src/store/README.md`): `POST $graphql` (reads, searches, reverse lookups, the Connection API, create, update, patch and delete; also as a batch or transaction entry), with introspection as an option (off by default) and Medplum's depth and cost limits refused with 400. Schema memory: 197 MiB total on GA's types on Linux (ga-store's budget is 220), +14 MiB on an all-types store.
 
 Done in store-parity plan 2 (checked against Medplum 5.2.14; deliberate differences in `src/store/README.md`): built-in terminology (Medplum's five bundles, seeded once, read-only), the token modifiers `:above`, `:below`, `:in`, `:not-in`, `_filter` `ss`, `sb`, `in`, `ni`, `CodeSystem/$lookup`, `$validate-code`, `$subsumes`, `$import`, `ValueSet/$expand`, `$validate-code`, and `ConceptMap/$translate`, `$import`.
 

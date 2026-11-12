@@ -80,6 +80,9 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 
 ## Deliberate differences from Medplum
 
+- `$graphql` builds its schema from the store's own types (every type on an all-types store, GA's list on ga-store): a field for a type the store does not hold is a 400 validation error, not Medplum's schema with every R4 type. The schema is kept per type list and built on the first request.
+- A `$graphql` mutation with several fields is not atomic: in a transaction entry, the writes of earlier fields are kept when a later field fails, because field errors still answer 200 (as Medplum). Mutation fields cost 0 in the cost rule (as Medplum), so a query of thousands of aliased creates passes it.
+- Not ported from Medplum's GraphQL: per-project settings (`graphqlMaxDepth`, `graphqlMaxSearches`, `graphqlBatchedSearchSize`; the limits are fixed), access policies, the cache of introspection results (`shortcut: no introspection result cache`), and DataLoader (a per-request read cache replaces it).
 - `$graphql` reverse lookups (`<Type>List(_reference: …)`, `<Type>Connection(_reference: …)`) leave out `_compartment` and the R4 search parameters whose target is every resource type (`Provenance.target`, `List.item`, `Task.focus`, `Observation.focus`, …): with them every pair of types gets two fields carrying the child's search arguments, about 400 MiB more for the schema on a store with every type (Medplum's schema has them). Such a field is a 400 validation error; search by that parameter instead (`ProvenanceList(target: "Patient/<id>")`).
 - `$graphql` refuses a query deeper than 12 fields (`Field "<name>" exceeds max depth (depth=<n>, max=12)`; introspection fields don't count) or costing over 10,000 (`Query too complex`; Medplum's cost rule, also counting `*Connection` searches and a `_count` given as a variable), with 400 before anything runs: resolvers block the event loop. Medplum 5.2.14 only logs both, with those texts commented out. A search's `_count` is costed between 0 and 1000 (a literal, a sent variable, or the variable's default); fan-out through a list that is not a search (`contained`, a Bundle's entries) is costed at factor 1, as in Medplum's formula.
 - A concept's synonyms and designations are unique by code, text, language and canonical row; Medplum's key leaves out the language, so a translation whose text equals another language's (French "Patient") is dropped there and kept here (62 rows of the seeded terminology).
@@ -127,9 +130,8 @@ Search: the common FHIR search features (all parameter types, prefixes, the modi
 
 ## Next phase: full FHIR spec support
 
-Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it. Plan 3 (GraphQL) is next; plan 4 owns the rest:
+Not supported yet; each answers with an error (400, or 404/405 for an unknown route) and an OperationOutcome naming it. Plan 4 owns the rest:
 
-- Plan 3: GraphQL.
 - Plan 4 decides: `_text`, `_content`, `_contained`, special search parameters, `_include=*` (Medplum 5.2.14 refuses it too), `_filter` operators `ew` and `po` (Medplum's parser refuses both: `Invalid operator: ew`), Binary as FHIR JSON and its history, date search values below day precision (`2024`, `2024-05`) and comma lists of dates (400, as Medplum without its `range-search` project feature), and every other operation besides `$validate` and `Patient/$everything` (`$export`, `$graph`, `$match`, `Appointment/$book`, ... : the host repository's parity inventory of Medplum's tests lists them).
 - FHIR R4 only (the definitions ship R4); one patient-compartment definition (Patient).
 
