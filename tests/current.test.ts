@@ -38,14 +38,19 @@ test('last-seen after endpoint last success is current; a source with no last su
 test('older last-seen is unconfirmed', () => {
   expect(currency(med({ seen: T0, keys: ['a'] }), ctx)).toBe('unconfirmed');
 });
-test('any matching source of several makes it current', () => {
-  expect(currency(med({ seen: T0, keys: ['a', 'b'] }), ctx)).toBe('current');
+// Several linked sources: last-seen must be at or after the newest one's last success.
+test('several sources: the newest sync decides', () => {
+  expect(currency(med({ seen: T1, keys: ['a', 'b'] }), ctx)).toBe('current');
+  // b listed it at T0 and broke; a synced at T1 without it: equality with the stale b must not confirm it.
+  expect(currency(med({ seen: T0, keys: ['a', 'b'] }), ctx)).toBe('unconfirmed');
 });
 // Source a dropped it (a synced after last-seen); a stale linked source b (older last success) must not confirm it.
 test('a stale linked source does not confirm a record its active source dropped', () => {
   expect(currency(med({ seen: '2026-10-15T00:00:00Z', keys: ['a', 'b'] }), ctx)).toBe('unconfirmed');
   expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a', 'b'] }), ctx)).toBe('current');
-  expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a', 'never'] }), ctx)).toBe('unconfirmed');
+  // A linked key that never synced (no Endpoint) has no say; with no synced key at all nothing confirms it.
+  expect(currency(med({ seen: '2026-11-02T00:00:00Z', keys: ['a', 'never'] }), ctx)).toBe('current');
+  expect(currency(med({ seen: '2026-10-15T00:00:00Z', keys: ['a', 'never'] }), ctx)).toBe('unconfirmed');
 });
 test('no last-seen: source-date vs newest import', () => {
   expect(currency(med({ date: T1 }), ctx)).toBe('current');

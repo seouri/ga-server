@@ -65,11 +65,12 @@ export function explain(r: Resource, ctx: Ctx): { currency: Currency; reason: st
   if (!isActive(r)) return undefined;
   const seen = extDate(r, LAST_SEEN);
   if (seen !== undefined) {
-    // Equal to some linked source's last success, or after every one's (sync stamps records before it writes the Endpoint, so a
-    // sync dying in between leaves last-seen newer). A source that synced after last-seen dropped it, whatever a stale one says.
-    const keys = smartKeys(r);
-    const last = (k: string) => ctx.lastSuccess.get(k) ?? Infinity;
-    const k = keys.find((k) => last(k) === seen) ?? (keys.length && keys.every((k) => last(k) < seen) ? keys[0] : undefined);
+    // At or after the newest last success of its linked sources (sync stamps records before it writes the Endpoint, so a sync
+    // dying in between leaves last-seen newer): a source that synced after last-seen dropped it, whatever an older one says.
+    // A linked key with no Endpoint (never synced, e.g. an Apple Health Records host) has no say.
+    const synced = smartKeys(r).flatMap((k) => (ctx.lastSuccess.has(k) ? [[k, ctx.lastSuccess.get(k)!] as const] : []));
+    const newest = synced.reduce<readonly [string, number] | undefined>((a, b) => (!a || b[1] > a[1] ? b : a), undefined);
+    const k = newest && seen >= newest[1] ? newest[0] : undefined;
     return k
       ? { currency: 'current', reason: `on the list at the latest ${k} portal sync` }
       : { currency: 'unconfirmed', reason: `the hospital portal stopped returning it (last returned ${day(seen)}); it may have been stopped` };
