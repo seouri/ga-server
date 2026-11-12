@@ -1,8 +1,8 @@
 // The Epic EHI import in batches gives today's single-batch result (spec: same result), on a temp SQLite store.
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { importPath } from '../src/ccda.ts';
 import type { GaConfig } from '../src/config.ts';
@@ -83,4 +83,22 @@ test('re-import of the same export writes nothing and reports as today', async (
     skips: { ...SKIPS, labResultsLinked: 24, labResultsUnidentified: 0, immunizationsEpicLinked: 24 },
   });
   expect(await snapshot(a.client, a.pid)).toEqual(snap);
+}, 300_000);
+
+// Audit 17: a batch's linking passes read the store under the import lock, so a sync cannot write the same lab between the
+// read and the write (an extra possible duplicate).
+test("each batch's linking passes run under the import lock", async () => {
+  const a = await store();
+  const lock = join(dirname(process.env.GA_CONFIG!), 'import.lock');
+  const LINKING = /linkResultsToExisting|linkImmunizationsToExisting|resolveUnlinked|resolveRefs/;
+  const seen: boolean[] = [];
+  const real = a.client.searchResources.bind(a.client);
+  a.client.searchResources = ((...args: Parameters<typeof real>) => {
+    const stack = new Error().stack ?? '';
+    if (LINKING.test(stack) && !/learnAll/.test(stack)) seen.push(existsSync(lock)); // learnAll only reads, before any batch
+    return real(...args);
+  }) as typeof real;
+  await importEhi(a.client, a.cfg, exp, a.pid, TZ, { batchSize: 50 });
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.every(Boolean)).toBe(true);
 }, 300_000);

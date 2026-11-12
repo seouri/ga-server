@@ -185,10 +185,11 @@ const fileStored = async (client: MedplumClient, path: string, patientId: string
 // shortcut: a record the crashed attempt linked to another source's record (merged, updated) or flagged counts as created or
 // updated (Ruling 10); the records are exact.
 async function writeBatch(client: MedplumClient, b: Batch, ctx: EhiCtx, patientId: string, source: SourceInfo, opts: BatchOpts): Promise<ImportReport & { skips: LinkCounts }> {
-  const { resources, counts } = await link(client, b.resources, patientId);
-  await resolveRefs(client, resources, ctx, patientId);
   const redo = opts.redo?.index === b.index ? opts.redo : undefined;
   return withImportLock(async () => {
+    // Read under the lock too: a sync writing the same lab between this read and the write would leave a possible duplicate.
+    const { resources, counts } = await link(client, b.resources, patientId);
+    await resolveRefs(client, resources, ctx, patientId);
     const report: ImportReport = { created: 0, updated: 0, skipped: 0, merged: 0, conflicts: 0, possibleDuplicates: 0, invalid: 0, unmapped: [] };
     const have = await srcDates(client, resources, patientId);
     if (!redo) {
