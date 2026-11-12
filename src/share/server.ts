@@ -6,13 +6,14 @@ import { toPdf } from './export.ts';
 import { renderInactive, renderPage, renderQr, scopeWords } from './page.ts';
 import { BINARY_URL, type Scoped, inScope } from './scope.ts';
 import { findByToken, takeQuestion, type Share } from './store.ts';
-import { recordRows, summarize, toBundle } from './summary.ts';
+import { clean, recordRows, summarize, toBundle } from './summary.ts';
 
 export type ShareDeps = {
   dir: string;
   load: (share: Share) => Promise<Scoped>;
   log: (share: Share, e: AccessEvent) => Promise<void>;
-  fetchBinary: (ref: string) => Promise<{ data: Buffer; contentType: string }>;
+  // undefined: gone, or not this patient's.
+  fetchBinary: (ref: string, patientId: string) => Promise<{ data: Buffer; contentType: string } | undefined>;
   ask?: (q: string, s: Scoped, share: Share) => Promise<string>;
   now?: () => Date;
 };
@@ -75,10 +76,21 @@ const drained = (res: Res): Promise<void> => new Promise((ok) => {
 async function streamBundle(res: Res, s: Scoped, name: string): Promise<void> {
   res.writeHead(200, { 'Content-Type': 'application/fhir+json', ...attach(name) });
   res.write('{"resourceType":"Bundle","type":"collection","entry":[');
-  const entries = toBundle(s).entry ?? [];
-  for (let i = 0; i < entries.length; i++) {
+  let first = true;
+  const put = async (e: unknown): Promise<void> => {
+    if (!res.write((first ? '' : ',') + JSON.stringify(e))) await drained(res);
+    first = false;
+  };
+  for (const e of toBundle(s).entry ?? []) {
     if (res.destroyed) return;
-    if (!res.write((i ? ',' : '') + JSON.stringify(entries[i]))) await drained(res);
+    await put(e);
+  }
+  // Apple readings straight from the record, a page at a time: never all in memory.
+  for await (const page of s.applePages?.() ?? []) {
+    for (const r of page) {
+      if (res.destroyed) return;
+      await put({ resource: clean(r) });
+    }
   }
   res.end(']}');
 }
@@ -93,9 +105,10 @@ async function serveDoc(res: Res, id: string, s: Scoped, share: Share, deps: Sha
   }
   for (const a of atts) {
     const bid = a.url && BINARY_URL.exec(a.url)?.[1];
-    // Only a Binary that loadScoped fetched as support for an in-scope record.
-    if (!bid || !s.support.some((r) => r.resourceType === 'Binary' && r.id === bid)) continue;
-    const b = await deps.fetchBinary(`Binary/${bid}`);
+    // Only a Binary an in-scope record links (loadScoped's list), and only this patient's.
+    if (!bid || !s.binaries?.includes(bid)) continue;
+    const b = await deps.fetchBinary(`Binary/${bid}`, share.patientId);
+    if (!b) continue;
     send(res, 200, b.data, b.contentType || a.contentType || 'application/octet-stream', attach(a.title ?? `document-${id}`));
     return true;
   }

@@ -38,7 +38,7 @@ test('a stored file\'s attachment is Binary/<id> on the store; binaryFetcher dow
     const url = read.content[0].attachment.url as string;
     expect(url).toMatch(/^Binary\/[0-9a-f-]{36}$/);
     expect(BINARY_URL.exec(url)?.[1]).toBe(url.slice('Binary/'.length));
-    const got = await binaryFetcher(client)(url);
+    const got = (await binaryFetcher(client)(url, p.id as string))!;
     expect(got.data.toString('utf8')).toBe('<ClinicalDocument/>');
     expect(got.contentType).toMatch(/^application\/xml/);
     expect(await client.readResource('Binary', BINARY_URL.exec(url)?.[1] as string)).toMatchObject({ resourceType: 'Binary', contentType: 'application/xml' });

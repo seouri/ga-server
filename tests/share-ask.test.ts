@@ -147,6 +147,13 @@ test('system prompt: skill steps 1-9, no step 0, no Endpoint, patient and untrus
   expect(instructions(true)).not.toMatch(/ga share|^10\. /m);
 });
 
+test('system prompt carries the Apple summary lines when the share holds no Apple reading', async () => {
+  const last = { resourceType: 'Observation', id: 'a1', status: 'final', code: { text: 'Heart rate' }, effectiveDateTime: '2024-01-05', valueQuantity: { value: 61, unit: '/min' } } as Resource;
+  const { llm, reqs } = fake([]);
+  await ask('q', { ...scoped([]), apple: [{ n: 40, first: '2024-01-01', latest: '2024-01-05', last }] }, share({ groups: ['apple'] }), { llm, model });
+  expect(reqs[0].messages[0].content).toContain('"label":"Heart rate","value":"61 /min, latest; 40 readings, 2024-01-01 to 2024-01-05","date":"2024-01-05"');
+});
+
 const big = 'x'.repeat(2000);
 const pdf = { resourceType: 'DocumentReference', id: 'd2', status: 'current', date: '2026-03-01', description: 'Cardiology letter',
   content: [{ attachment: { contentType: 'application/pdf', title: 'letter.pdf', size: 9, data: 'JVBERi0xLjQgZmFrZQ==' } }] } as Resource;

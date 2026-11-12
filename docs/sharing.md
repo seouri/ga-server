@@ -37,7 +37,7 @@ Links use your machine's Tailscale name (`https://<machine>.<tailnet>.ts.net/s/.
 
 **Links work only while the GA Mac is awake and online.** For a patient portal upload, an email attachment or anyone who needs it offline, use `ga share export` and send the files instead.
 
-**Questions.** Recipients can ask an AI model about what the link shows, answered from the shared records only. Any provider with an OpenAI-compatible Chat Completions API works, as long as the model supports tool calling. Put three lines in `.env` (gitignored), then run `docker compose up -d ga-gateway`:
+**Questions.** Recipients can ask an AI model about what the link shows, answered from the shared records only (Apple Health readings from their one-line-per-type summary: the page never loads them one by one; the FHIR download still has every reading). Any provider with an OpenAI-compatible Chat Completions API works, as long as the model supports tool calling. Put three lines in `.env` (gitignored), then run `docker compose up -d ga-gateway`:
 
 | Provider | `GA_LLM_BASE_URL` | `GA_LLM_API_KEY` | `GA_LLM_MODEL` (example) |
 |---|---|---|---|

@@ -226,6 +226,24 @@ test("selectScoped: another record's link to a never-shared archive's Binary is 
   expect(out.resources).toEqual([report, note]);
   expect(out.refs).toEqual([]);
 });
+test('loadScoped: an Apple-tagged archive still loads for a share without Apple, so its Binary stays blocked', async () => {
+  const bin = '00000000-0000-0000-0000-000000000004';
+  const arch = r({ resourceType: 'DocumentReference', id: 'arch', ...inP, meta: { ...inP.meta, tag: [{ system: 'urn:ga-server:tag', code: 'src-apple-health' }] },
+    identifier: [{ system: 'urn:ga-server:id:apple-health-archive', value: 'a' }], content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const report = r({ resourceType: 'DiagnosticReport', id: 'dr', ...inP, status: 'final', code: { text: 'CBC' }, effectiveDateTime: '2026-01-01', presentedForm: [{ url: `Binary/${bin}` }] });
+  const client = {
+    readResource: async () => ({ resourceType: 'Patient', id: 'p' }),
+    searchResourcePages: async function* (t: string, q: Record<string, string>) {
+      if (t === 'DocumentReference' && !q['_tag:not']) yield [arch];
+      else if (t === 'DiagnosticReport') yield [report];
+      else yield [];
+    },
+    searchResources: async () => [],
+  } as unknown as MedplumClient;
+  const s = await loadScoped(client, share({ groups: ['labs'] }));
+  expect(s.resources.map((x) => x.id)).toEqual(['dr']);
+  expect(s.binaries).toEqual([]);
+});
 
 test('selectScoped: newestImport covers the whole compartment, not just the share', () => {
   const ehi = (date: string, extra: object = {}) => r({ ...inP, meta: { ...inP.meta, tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] },
@@ -237,19 +255,65 @@ test('selectScoped: newestImport covers the whole compartment, not just the shar
   expect(out.newestImport).toBe(Date.parse('2025-01-01T00:00:00Z'));
 });
 
-test('loadScoped fetches no Apple data for a share without the apple group', async () => {
+test('loadScoped fetches no Apple reading for any share; an Apple share streams them below', async () => {
   const queries = async (groups: Share['groups']) => {
     const qs: Record<string, string>[] = [];
     const client = {
       readResource: async () => ({ resourceType: 'Patient', id: 'p' }),
-      searchResourcePages: async function* (_t: string, q: Record<string, string>) { qs.push(q); yield []; },
+      searchResourcePages: async function* (t: string, q: Record<string, string>) { qs.push({ ...q, t }); yield []; },
       searchResources: async () => [],
     } as unknown as MedplumClient;
     await loadScoped(client, share({ groups }));
     return qs;
   };
-  for (const q of await queries(['labs', 'vitals'])) expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health');
-  for (const g of ['all', ['labs', 'apple']] as Share['groups'][]) for (const q of await queries(g)) expect(q['_tag:not']).toBeUndefined();
+  for (const g of [['labs', 'vitals'], 'all', ['labs', 'apple']] as Share['groups'][]) {
+    for (const q of await queries(g)) expect(q['_tag:not']).toBe(q.t === 'Observation' && !q._tag ? 'urn:ga-server:tag|src-apple-health' : undefined);
+  }
+});
+
+test('loadScoped keeps no Apple reading and reads no Binary: the Apple summary is aggregated page by page, readings stream for downloads', async () => {
+  const tag = { system: 'urn:ga-server:tag', code: 'src-apple-health' };
+  const hr = (i: number) => r({ resourceType: 'Observation', id: `a${i}`, status: 'final', meta: { ...inP.meta, tag: [tag] },
+    code: { coding: [{ system: 'http://loinc.org', code: '8867-4' }], text: 'Heart rate' }, effectiveDateTime: `2024-01-${String((i % 28) + 1).padStart(2, '0')}`, valueQuantity: { value: 60 + (i % 40), unit: '/min' } });
+  const steps = r({ resourceType: 'Observation', id: 's1', status: 'final', meta: { ...inP.meta, tag: [tag] }, code: { text: 'Steps, daily total (Apple Health)' }, effectiveDateTime: '2023-05-05', valueQuantity: { value: 9000 } });
+  const other = r({ ...hr(99), id: 'q1', meta: { compartment: [{ reference: 'Patient/q' }], tag: [tag] } }); // not this patient's: never counted
+  const ecg = r({ resourceType: 'DocumentReference', id: 'ecg', ...inP, meta: { ...inP.meta, tag: [tag] }, date: '2024-02-01', content: [{ attachment: { contentType: 'text/csv', data: 'eA==' } }] });
+  const bin = '00000000-0000-0000-0000-000000000009';
+  const note = r({ resourceType: 'DocumentReference', id: 'n', ...inP, date: '2025-02-01', content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const readings = [...Array.from({ length: 2500 }, (_, i) => hr(i)), steps];
+  const qs: [string, Record<string, string>][] = [];
+  const reads: string[] = [];
+  const client = {
+    readResource: async (t: string) => { reads.push(t); return { resourceType: 'Patient', id: 'p' }; },
+    searchResourcePages: async function* (t: string, q: Record<string, string>) {
+      qs.push([t, q]);
+      if (q._tag === tag.system + '|' + tag.code) for (let i = 0; i < readings.length; i += 1000) yield [...readings.slice(i, i + 1000), ...(i ? [] : [other])];
+      else if (t === 'DocumentReference') yield [ecg, note];
+      else yield [];
+    },
+    searchResources: async () => [],
+  } as unknown as MedplumClient;
+  const s = await loadScoped(client, share());
+  // Every Observation search leaves Apple out, except the summary's, which asks only for the fields the summary reads.
+  for (const [t, q] of qs.filter(([t]) => t === 'Observation')) {
+    if (q._tag) expect(q._elements, t).toBeDefined();
+    else expect(q['_tag:not']).toBe('urn:ga-server:tag|src-apple-health');
+  }
+  expect(qs.filter(([, q]) => q._tag)).toHaveLength(1);
+  expect(s.resources.map((x) => x.id).sort()).toEqual(['ecg', 'n']);
+  expect(reads).toEqual(['Patient']);
+  expect(s.binaries).toEqual([bin]);
+  expect(s.support).toEqual([]);
+  // Same summary as from every record in memory.
+  const { summarize } = await import('../src/share/summary.ts');
+  const full: Scoped = { ...s, resources: [ecg, note, ...readings], apple: undefined };
+  expect(summarize(s).apple).toEqual(summarize(full).apple);
+  expect(summarize(s).apple.find((a) => a.label === 'Heart rate')?.value).toContain('2500 readings');
+  // Downloads stream the full readings, this patient's only.
+  const streamed: Resource[] = [];
+  for await (const page of s.applePages!()) streamed.push(...page);
+  expect(streamed.map((x) => x.id)).toEqual(readings.map((x) => x.id));
+  expect(qs.at(-1)![1]._elements).toBeUndefined();
 });
 
 test('newestEpicImport reads the date stored on the Patient and scans nothing; without it, it scans', async () => {

@@ -110,7 +110,7 @@ test('logAccess writes an AuditEvent that readLog finds by share and system-wide
 test('binaryFetcher returns the Binary bytes and content type', async () => {
   const b = await client.createBinary({ data: 'test note bytes', contentType: 'text/plain', securityContext: { reference: `Patient/${pid}` } });
   binaries.push(b.id as string);
-  const got = await binaryFetcher(client)(`Binary/${b.id}`);
+  const got = (await binaryFetcher(client)(`Binary/${b.id}`, pid))!;
   expect(got.data.toString('utf8')).toBe('test note bytes');
   expect(got.contentType).toMatch(/^text\/plain/);
 });

@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import type { Bundle, Resource } from '@medplum/fhirtypes';
 import { currency, currencyContext, type Ctx } from '../current.ts';
 import { hasTag } from '../identity.ts';
-import { BINARY_URL, dateOf, groupOf, hasCategory, trimPatient } from './scope.ts';
+import { appleLines, BINARY_URL, cc, codeKey, dateOf, groupOf, hasCategory, trimPatient } from './scope.ts';
 import type { Scoped } from './scope.ts';
 
 export type Item = { label: string; value?: string; date?: string; source?: string; note?: string; ref: string };
@@ -14,12 +14,6 @@ export type Summary = {
 export type Row = { group: string; items: Item[] };
 
 type Any = Record<string, any>; // FHIR resources are read loosely here, every access is optional-chained.
-const cc = (c?: Any): string | undefined => c?.text ?? c?.coding?.[0]?.display ?? c?.coding?.[0]?.code;
-const codeKey = (r: Any): string => {
-  const c = (r.code ?? r.medicationCodeableConcept ?? r.vaccineCode)?.coding?.[0];
-  const t = cc(r.code);
-  return c?.code ? `${c.system ?? ''}|${c.code}` : t ? `text|${t}` : `type|${r.resourceType}`;
-};
 const qty = (q?: Any): string | undefined => (q?.value === undefined ? undefined : [q.value, q.unit ?? q.code].filter((x) => x !== undefined).join(' '));
 const val = (o: Any): string | undefined => qty(o.valueQuantity) ?? o.valueString ?? cc(o.valueCodeableConcept) ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)) ?? (o.valueInteger === undefined ? undefined : String(o.valueInteger));
 const formatValue = (r: Resource): string | undefined => {
@@ -62,13 +56,7 @@ export function summarize(s: Scoped): Summary {
   };
   const p = trimPatient(s.patient);
   const n = p.name?.[0];
-  const apple = new Map<string, Resource[]>();
-  for (const r of of((x) => groupOf(x) === 'apple')) {
-    const k = codeKey(r);
-    const list = apple.get(k);
-    if (list) list.push(r);
-    else apple.set(k, [r]);
-  }
+  const apple = s.apple ?? [...appleLines(of((x) => groupOf(x) === 'apple')).values()];
   return {
     patient: { name: n?.text ?? [...(n?.given ?? []), n?.family].filter(Boolean).join(' '), birthDate: p.birthDate, gender: p.gender },
     problems: of((r) => r.resourceType === 'Condition' && active(r) && hasCategory(r, 'problem-list-item')).map(item),
@@ -78,12 +66,10 @@ export function summarize(s: Scoped): Summary {
     vitals: latest(of((r) => r.resourceType === 'Observation' && groupOf(r) === 'vitals')),
     immunizations: of((r) => r.resourceType === 'Immunization' && (r as Any).status === 'completed').map(item).sort(newestFirst),
     // Apple readings are never listed one by one: one line per type.
-    apple: [...apple.values()].map((rs) => {
-      const dates = rs.map((r) => dateOf(r)).filter((d): d is string => !!d).sort();
-      const last = rs.reduce((a, b) => ((dateOf(b) ?? '') > (dateOf(a) ?? '') ? b : a));
+    apple: apple.map(({ n, first, latest, last }) => {
       const i = item(last);
       const v = i.value ? `${i.value}, latest; ` : '';
-      return { ...i, value: `${v}${rs.length} readings, ${dates[0] ?? '?'} to ${dates.at(-1) ?? '?'}`, date: dates.at(-1), note: [i.note, 'home reading'].filter(Boolean).join('; ') };
+      return { ...i, value: `${v}${n} readings, ${first ?? '?'} to ${latest ?? '?'}`, date: latest, note: [i.note, 'home reading'].filter(Boolean).join('; ') };
     }),
   };
 }
@@ -110,11 +96,13 @@ const dropStorageUrls = (r: Resource): Resource =>
     return { ...c, attachment };
   }) };
 
+export const clean = (r0: Resource): Resource => {
+  const r = dropStorageUrls(r0);
+  return r.meta?.source ? { ...r, meta: { ...r.meta, source: basename(r.meta.source) } } : r;
+};
+
+// Without Apple readings (Scoped never holds them): the downloads add them from applePages.
 export function toBundle(s: Scoped): Bundle {
-  const clean = (r0: Resource): Resource => {
-    const r = dropStorageUrls(r0);
-    return r.meta?.source ? { ...r, meta: { ...r.meta, source: basename(r.meta.source) } } : r;
-  };
   return {
     resourceType: 'Bundle',
     type: 'collection',

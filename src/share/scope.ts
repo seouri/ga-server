@@ -7,7 +7,13 @@ import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
 // newestImport: newest Epic import over the whole record (not just the share), for the medication currency rule.
-export type Scoped = { patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[]; newestImport?: number };
+// Apple readings are most of a record (73k readings ~160 MiB) and never kept: `apple` is their summary, one line per type,
+// and `applePages` streams them for the FHIR download. `binaries`: the Binary ids the share may serve, read only when opened.
+export type Scoped = {
+  patient: Patient; resources: Resource[]; support: Resource[]; endpoints: Endpoint[]; newestImport?: number;
+  apple?: AppleLine[]; applePages?: () => AsyncIterable<Resource[]>; binaries?: string[];
+};
+export type AppleLine = { n: number; first?: string; latest?: string; last: Resource };
 
 // Patient goes out only through trimPatient; billing and contact records stay home like the Patient's own; Group lists other patients.
 // Composition: the C-CDA narrative, every section including insurance (payer name, member ID).
@@ -57,6 +63,14 @@ const SUPPORT_REF = /^(Medication|Practitioner|PractitionerRole|Organization|Loc
 export const BINARY_URL = /(?:^|\/)(?:Binary|storage)\/([0-9a-f-]{36})/;
 
 type Any = Record<string, unknown>;
+type Cc = { text?: string; coding?: { system?: string; code?: string; display?: string }[] };
+export const cc = (c?: Cc): string | undefined => c?.text ?? c?.coding?.[0]?.display ?? c?.coding?.[0]?.code;
+export const codeKey = (r: Resource): string => {
+  const o = r as { code?: Cc; medicationCodeableConcept?: Cc; vaccineCode?: Cc };
+  const c = (o.code ?? o.medicationCodeableConcept ?? o.vaccineCode)?.coding?.[0];
+  const t = cc(o.code);
+  return c?.code ? `${c.system ?? ''}|${c.code}` : t ? `text|${t}` : `type|${r.resourceType}`;
+};
 export const hasCategory = (r: Resource, code: string): boolean =>
   ((r as { category?: { coding?: { code?: string }[] }[] }).category ?? []).some((c) => c.coding?.some((x) => x.code === code));
 
@@ -168,18 +182,50 @@ export async function storeNewestImport(client: MedplumClient, patientId: string
   }
 }
 
+// One summary line's numbers per type (codeKey), fed page by page: count, date range and the newest reading (first one on a tie).
+export function appleLines(rs: Iterable<Resource>, into = new Map<string, AppleLine>()): Map<string, AppleLine> {
+  for (const r of rs) {
+    const k = codeKey(r);
+    const d = dateOf(r);
+    const a = into.get(k);
+    if (!a) { into.set(k, { n: 1, first: d, latest: d, last: r }); continue; }
+    a.n++;
+    if (d && (!a.first || d < a.first)) a.first = d;
+    if (d && (!a.latest || d > a.latest)) a.latest = d;
+    if ((d ?? '') > (dateOf(a.last) ?? '')) a.last = r;
+  }
+  return into;
+}
+
+const APPLE_TAG = `${TAG}|src-apple-health`;
+// What summarize reads of a reading; choice fields by base and concrete name (the store takes either, Medplum's handling unchecked).
+const APPLE_FIELDS = 'code,effective,effectiveDateTime,effectivePeriod,issued,value,valueQuantity,valueString,valueCodeableConcept,valueBoolean,valueInteger,component';
+const withApple = (share: Share): boolean => share.groups === 'all' || share.groups.includes('apple');
+// This share's Apple readings (Observations; the rest of Apple's records load with the compartment), one page at a time.
+async function* applePages(client: MedplumClient, share: Share, elements?: string): AsyncGenerator<Resource[]> {
+  const q = { _compartment: `Patient/${share.patientId}`, _tag: APPLE_TAG, _sort: '_lastUpdated', _count: '1000', ...(elements && { _elements: elements }) };
+  for await (const page of client.searchResourcePages('Observation', q, { cache: 'no-cache' })) yield selectScoped(page, share).resources;
+}
+
 export async function loadScoped(client: MedplumClient, share: Share): Promise<Scoped> {
   const opts = { cache: 'no-cache' as const };
   const p = await client.readResource('Patient', share.patientId, opts);
   // Per type, not $everything: Medplum caps _offset at 10000. _sort=_lastUpdated with _count >= 20 makes it page by _cursor.
   const compartment: Resource[] = [];
-  // Apple data is most of the record: not even fetched for a share without it.
-  const noApple = share.groups !== 'all' && !share.groups.includes('apple') ? { '_tag:not': `${TAG}|src-apple-health` } : {};
+  // Apple readings (Observations) are never loaded here (below: summarized page by page). Apple's few other records load and
+  // inScope drops them from a share without Apple: a never-shared archive DocumentReference always loads and blocks its Binary.
+  const apple = withApple(share);
   for (const type of COMPARTMENT_TYPES) {
-    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...noApple };
+    const q = { _compartment: `Patient/${share.patientId}`, _sort: '_lastUpdated', _count: '1000', ...(type === 'Observation' && { '_tag:not': APPLE_TAG }) };
     for await (const page of client.searchResourcePages(type, q, opts)) compartment.push(...page);
   }
   const { resources, refs, newestImport } = selectScoped(compartment, share);
+  let lines: AppleLine[] | undefined;
+  if (apple) {
+    const acc = appleLines(resources.filter((r) => groupOf(r) === 'apple'));
+    for await (const page of applePages(client, share, APPLE_FIELDS)) appleLines(page, acc);
+    lines = [...acc.values()];
+  }
   const ids = new Map<string, string[]>();
   for (const ref of refs) {
     const [type, id] = ref.split('/');
@@ -187,20 +233,17 @@ export async function loadScoped(client: MedplumClient, share: Share): Promise<S
   }
   const support: Resource[] = [];
   for (const [type, list] of ids) {
+    if (type === 'Binary') continue; // read only when opened (binaryFetcher checks it is this patient's)
     for (let i = 0; i < list.length; i += 100) {
       const chunk = list.slice(i, i + 100);
-      if (type === 'Binary') {
-        // Binary is not searchable in Medplum; a deleted one is just left out.
-        for (const id of chunk) {
-          const b = await client.readResource('Binary', id, opts).catch(() => undefined);
-          const ctx = b?.securityContext?.reference;
-          if (b && !(ctx?.startsWith('Patient/') && ctx !== `Patient/${share.patientId}`)) support.push(b);
-        }
-      } else support.push(...(await client.searchResources(type as ResourceType, { _id: chunk.join(','), _count: '1000' }, opts)));
+      support.push(...(await client.searchResources(type as ResourceType, { _id: chunk.join(','), _count: '1000' }, opts)));
     }
   }
   const eps = await client.searchResources('Endpoint', { identifier: `${SOURCE_ID}|`, _count: '1000' }, opts);
-  return { patient: trimPatient(p), resources, support, endpoints: eps.filter(forPatient(share.patientId)), newestImport };
+  return {
+    patient: trimPatient(p), resources, support, endpoints: eps.filter(forPatient(share.patientId)), newestImport, binaries: ids.get('Binary') ?? [],
+    ...(lines && { apple: lines, applePages: () => applePages(client, share) }),
+  };
 }
 
 export function scopedCache(load: typeof loadScoped, ttlMs = 300_000): typeof loadScoped {
