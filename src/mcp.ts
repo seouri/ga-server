@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { type MedplumClient, OperationOutcomeError, projectAdminResourceTypes, protectedResourceTypes } from '@medplum/core';
-import type { Bundle, Extension, Identifier, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
+import type { Bundle, Extension, Immunization, Narrative, Resource } from '@medplum/fhirtypes';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -106,15 +106,13 @@ export async function importExtracted(
   return afterImport(client, { ...cfg, patientId }, report, deps);
 }
 
-// Trust boundary: agent output must not pre-set GA bookkeeping (tags, source date, GA identifiers).
-const ours = (x: { url?: string; system?: string }) => (x.url ?? x.system ?? '').startsWith('urn:ga-server:');
-function untrusted(r: Resource): Resource {
-  const { meta: _m, ...out } = r as Resource & { extension?: Extension[]; identifier?: Identifier[] };
-  for (const k of ['extension', 'identifier'] as const) {
-    const kept = (out[k] as { url?: string; system?: string }[] | undefined)?.filter((x) => !ours(x));
-    if (kept?.length) Object.assign(out, { [k]: kept });
-    else delete out[k];
-  }
+// Trust boundary: agent output must not pre-set GA bookkeeping (tags, source date) or any identifier: a hospital's (Epic)
+// identifier would match that hospital's record and replace it. The extraction rules say agents set none.
+export function untrusted(r: Resource): Resource {
+  const { meta: _m, identifier: _i, ...out } = r as Resource & { extension?: Extension[]; identifier?: unknown };
+  const kept = out.extension?.filter((x) => !x.url.startsWith('urn:ga-server:'));
+  if (kept?.length) out.extension = kept;
+  else delete out.extension;
   return out as Resource;
 }
 

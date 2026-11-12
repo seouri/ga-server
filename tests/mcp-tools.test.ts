@@ -2,9 +2,21 @@ import { expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { MedplumClient } from '@medplum/core';
-import { buildMcpServer, importExtracted, pageParams, portalWarning } from '../src/mcp.ts';
+import { buildMcpServer, importExtracted, pageParams, portalWarning, untrusted } from '../src/mcp.ts';
 
 const s = (o: object) => ({ source: 'h', name: 'Hosp', status: 'active', stale: true, enabledTypes: [], ...o });
+
+test('untrusted drops every identifier (an Epic one would replace the hospital record) and GA extensions, keeps the rest', () => {
+  const r = untrusted({
+    resourceType: 'Observation', id: 'x', status: 'final', code: { text: 'Creatinine' }, meta: { tag: [{ code: 'src-ehi' }] },
+    identifier: [{ system: 'urn:oid:1.2.840.114350.1.13.0.1.7.2.798268', value: 'LAB1' }, { system: 'urn:ga-server:id:ehi:1', value: 'x' }],
+    extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: '2030-01-01' }, { url: 'http://example.org/x', valueString: 'kept' }],
+  } as never) as unknown as Record<string, unknown>;
+  expect(r.identifier).toBeUndefined();
+  expect(r.meta).toBeUndefined();
+  expect(r.extension).toEqual([{ url: 'http://example.org/x', valueString: 'kept' }]);
+  expect(r.id).toBe('x');
+});
 
 test('importExtracted accepts a TIFF source file (reaches the file check, not the type check)', async () => {
   const obs = { resourceType: 'Observation', status: 'final', code: { text: 'Synthetic' } } as never;

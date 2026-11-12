@@ -47,7 +47,7 @@ const srcDate = (r: Resource) => (r as { extension?: Extension[] }).extension?.f
 // shortcut: a reference from an extracted record to a record outside its document keeps the old id; none exist today
 // (ga_import batches are per document), revisit if extraction ever links to existing records.
 // What importExtracted adds on top of the agent's output: the patient, the link to the stored file. id is kept so the
-// engine maps references between records of one document; untrusted() in importExtracted drops meta and GA identifiers.
+// engine maps references between records of one document; untrusted() in importExtracted drops meta, GA extensions and every identifier.
 export function stripExtracted(r: Resource): Resource {
   const { meta: _m, subject: _s, patient: _p, ...out } = structuredClone(r) as Resource & Record<string, unknown>;
   const keep = <T>(k: string, f: (x: T) => boolean) => {
