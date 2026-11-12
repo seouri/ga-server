@@ -217,6 +217,16 @@ test('selectScoped: a source-file DocumentReference is dropped and its Binary ne
   expect(out.refs).toEqual([]);
 });
 
+test("selectScoped: another record's link to a never-shared archive's Binary is not followed", () => {
+  const bin = '00000000-0000-0000-0000-000000000003';
+  const arch = r({ resourceType: 'DocumentReference', ...inP, identifier: [{ system: 'urn:ga-server:id:ehi-archive', value: 'a' }], content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const report = r({ resourceType: 'DiagnosticReport', ...inP, status: 'final', code: { text: 'CBC' }, effectiveDateTime: '2026-01-01', presentedForm: [{ url: `/storage/${bin}/x` }] });
+  const note = r({ resourceType: 'DocumentReference', ...inP, date: '2025-02-01', content: [{ attachment: { url: `Binary/${bin}` } }] });
+  const out = selectScoped([arch, report, note], share());
+  expect(out.resources).toEqual([report, note]);
+  expect(out.refs).toEqual([]);
+});
+
 test('selectScoped: newestImport covers the whole compartment, not just the share', () => {
   const ehi = (date: string, extra: object = {}) => r({ ...inP, meta: { ...inP.meta, tag: [{ system: 'urn:ga-server:tag', code: 'src-ccda' }] },
     extension: [{ url: 'urn:ga-server:ext:source-date', valueDateTime: date }], ...extra });

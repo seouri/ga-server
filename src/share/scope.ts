@@ -30,7 +30,7 @@ export const PATIENT_COMPARTMENT = [
 ] as ResourceType[];
 export const COMPARTMENT_TYPES = PATIENT_COMPARTMENT.filter((t) => !NEVER.has(t));
 // Archives and imported source files (C-CDA, EHI media, PDFs): untrimmed demographics, MRN, insurance and out-of-scope data.
-// Only the records extracted from them are shared; their Binary is never followed because they never enter `resources`.
+// Only the records extracted from them are shared; their Binary is never followed, not even from another record that links it.
 export const NEVER_DOCS = new Set(['urn:ga-server:id:ehi-archive', 'urn:ga-server:id:apple-health-archive', 'urn:ga-server:id:dicom-archive', 'urn:ga-server:id:file']);
 const BY_TYPE: Record<string, Group> = {
   DiagnosticReport: 'labs',
@@ -132,7 +132,9 @@ export function selectScoped(compartment: Resource[], share: Share): { resources
   const resources = own.filter((r) => inScope(r, share));
   const refs = new Set<string>();
   for (const r of resources) supportRefs(r, refs);
-  return { resources, refs: [...refs], newestImport: currencyContext(own, []).newestImport };
+  const blocked = new Set<string>();
+  for (const r of own) if (r.resourceType === 'DocumentReference' && neverShared(r)) supportRefs(r, blocked);
+  return { resources, refs: [...refs].filter((x) => !(x.startsWith('Binary/') && blocked.has(x))), newestImport: currencyContext(own, []).newestImport };
 }
 
 // Newest Epic import over the whole record, as selectScoped computes it from a loaded compartment, for callers that don't load it:
