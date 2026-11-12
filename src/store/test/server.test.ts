@@ -600,6 +600,16 @@ describe('store server: Medplum-compatible routes', () => {
         const d = (await call('GET', `DocumentReference?description=${type}`)).json.entry[0].resource;
         expect(await (await fetch(`${base}fhir/R4/${d.content[0].attachment.url}`, { headers: { authorization: `Bearer ${token}`, accept: '*/*' } })).text()).toBe('hello');
       }
+      // A nested batch whose response fails inside a transaction: the transaction rolls back, so its staged Binary goes.
+      const before = readdirSync(join(dir, 'binary')).filter((f) => !f.startsWith('.')).length;
+      fail = true;
+      const n = await tx('transaction', [
+        { fullUrl: 'urn:uuid:23232323-2323-4232-8232-232323232323', request: { method: 'POST', url: 'Binary' }, resource: { resourceType: 'Binary', contentType: 'text/plain', data: 'aGVsbG8=' } },
+        { request: { method: 'POST', url: '/' }, resource: { resourceType: 'Bundle', type: 'batch', entry: [] } as Resource },
+      ]);
+      fail = false;
+      expect(n.status).toBe(500);
+      expect(readdirSync(join(dir, 'binary')).filter((f) => !f.startsWith('.')).length).toBe(before);
     } finally { big.mockRestore(); err.mockRestore(); }
   });
 

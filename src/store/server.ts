@@ -226,7 +226,8 @@ function dispatch(store: Store, r: Req): Answer {
   if (!type) {
     if (method === 'POST') {
       const out = batch(store, r.body as Bundle, r.base);
-      try { return { status: 200, json: JSON.stringify(out) }; } catch (e) { throw Object.assign(e as Error, { committed: true }); }
+      // A nested bundle (r.entry) has not committed: the outer transaction may still roll back.
+      try { return { status: 200, json: JSON.stringify(out) }; } catch (e) { throw r.entry ? e : Object.assign(e as Error, { committed: true }); }
     }
     if (method === 'GET') return systemSearch(store, r);
     throw new HttpError(405, `${method} not allowed`);
