@@ -10,7 +10,7 @@
 import { badRequest, deepClone, DEFAULT_MAX_SEARCH_COUNT, forbidden, OperationOutcomeError } from '@medplum/core';
 import type { OperationOutcome, Resource, ResourceType } from '@medplum/fhirtypes';
 import type { ArgumentNode, ASTNode, ASTVisitor, DocumentNode, ExecutionResult, FieldNode, GraphQLFieldConfigArgumentMap, GraphQLFieldConfigMap, GraphQLResolveInfo, OperationDefinitionNode, ValidationContext } from 'graphql';
-import { executeSync, GraphQLError, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, Kind, parse, specifiedRules, validate } from 'graphql';
+import { executeSync, GraphQLError, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, Kind, parse, validate } from 'graphql';
 import type { Fhir, GraphQLContext } from './graphql-types.ts';
 import {
   buildGraphQLOutputType,
@@ -50,14 +50,17 @@ export function graphqlHandler(body: unknown, fhir: Fhir, opts: { introspection:
 
   let document: DocumentNode;
   try {
-    document = parse(query);
+    document = parse(query, { maxTokens: 1000 }); // graphql-js's overlapping-fields rule is quadratic in same-name fields
   } catch (_err) {
     return answer(400, badRequest('GraphQL syntax error.'));
   }
 
   const schema = getRootSchema(opts.types);
-  const validationRules = [...specifiedRules, MaxDepthRule(), QueryCostRule(variables)];
-  const validationErrors = validate(schema, document, validationRules);
+  // the depth and cost rules follow fragment spreads, so they run only once the standard rules (NoFragmentCycles) pass
+  let validationErrors = validate(schema, document);
+  if (validationErrors.length === 0) {
+    validationErrors = validate(schema, document, [MaxDepthRule(), QueryCostRule(variables)]);
+  }
   if (validationErrors.length > 0) {
     return answer(400, invalidRequest(validationErrors));
   }

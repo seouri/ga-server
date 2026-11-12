@@ -138,6 +138,8 @@ function parseSearchArgsWithReference(
 
   // Parse the search request
   const searchRequest = parseSearchRequest(resourceType, args);
+  // Medplum searches the SearchRequest; here it goes through formatSearchQuery, which writes sort codes unencoded: encoded, `_sort: "_id&_count=0"` is one unknown sort parameter (400, as Medplum), not two parameters
+  for (const s of searchRequest.sortRules ?? []) s.code = encodeURIComponent(s.code);
   return { searchRequest, referenceFilter };
 }
 

@@ -58,6 +58,30 @@ describe('$graphql (store-only)', () => {
     }
   });
 
+  it('a query over 1000 tokens is a 400 syntax error; one at the limit with many same-name fields validates fast', async () => {
+    // graphql-js's OverlappingFieldsCanBeMerged rule is quadratic in same-name fields and blocks the event loop; the token limit bounds it
+    expect(await gql(`{ ${'__typename '.repeat(999)}}`)).toMatchObject({ status: 400, json: { issue: [{ details: { text: 'GraphQL syntax error.' } }] } });
+    const t = Date.now();
+    expect((await gql(`{ ${'__typename '.repeat(998)}}`)).status).toBe(200);
+    expect((await gql(`{ Patient(id: "1") { ${'id '.repeat(990)}} }`)).status).toBe(200);
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+
+  it('a self-spreading fragment is a 400 validation error, not a stack overflow', async () => {
+    for (const q of ['{ Patient(id: "x") { ...F } } fragment F on Patient { ...F }',
+      '{ PatientList { ...F } } fragment F on Patient { link { other { resource { ... on Patient { ...F } } } } }']) {
+      const r = await gql(q);
+      expect(r.status, q).toBe(400);
+      expect(r.json.issue[0].details.text, q).toMatch(/Cannot spread fragment "F" within itself/);
+    }
+  });
+
+  it('_sort cannot smuggle another search parameter', async () => {
+    const r = await gql('{ PatientList(_sort: "_id&_count=0") { id } }');
+    expect(r.json.data).toEqual({ PatientList: null });
+    expect(r.json.errors[0].message).toBe('Unknown search parameter: _id&_count=0');
+  });
+
   it('a transaction with a failing $graphql entry fails whole', async () => {
     const family = `tx-${Date.now()}`;
     const r = await post('', { resourceType: 'Bundle', type: 'transaction', entry: [
