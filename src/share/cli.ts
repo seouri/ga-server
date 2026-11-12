@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import OpenAI from 'openai';
 import type { MedplumClient } from '@medplum/core';
+import type { Resource } from '@medplum/fhirtypes';
 import QRCode from 'qrcode';
 import { GaError, getClient, loadConfig } from '../config.ts';
 import { writeAtomic } from '../smart/store.ts';
@@ -129,7 +130,10 @@ async function exportShare(argv: string[]): Promise<void> {
   const { values, positionals } = args(argv, { out: { type: 'string' } });
   usage(positionals.length === 1);
   const s = find(positionals[0]);
-  const scoped = await loadScoped(await getClient(loadConfig()), s);
+  const loaded = await loadScoped(await getClient(loadConfig()), s);
+  const apple: Resource[] = []; // all in memory here: the CLI runs on the owner's computer, not the gateway
+  for await (const page of loaded.applePages?.() ?? []) apple.push(...page);
+  const scoped = { ...loaded, resources: [...loaded.resources, ...apple] };
   const out = (values.out as string | undefined) ?? process.cwd();
   const at = new Date();
   const [pdfFile, jsonFile] = (['health-summary.pdf', 'health-records-FHIR.json'] as const).map((f) => join(out, downloadName(scoped, f, at)));
@@ -139,9 +143,13 @@ async function exportShare(argv: string[]): Promise<void> {
 }
 
 // Downloads through the client's base URL, so it works in the container where Medplum's presigned localhost URLs do not.
-export const binaryFetcher = (client: MedplumClient) => async (ref: string): Promise<{ data: Buffer; contentType: string }> => {
+// Another patient's Binary (by its securityContext) or a deleted one: undefined.
+export const binaryFetcher = (client: MedplumClient) => async (ref: string, patientId: string): Promise<{ data: Buffer; contentType: string } | undefined> => {
   const id = BINARY_URL.exec(ref)?.[1];
   if (!id) throw new GaError('not a Binary reference');
+  const meta = await client.readResource('Binary', id, { cache: 'no-cache' }).catch(() => undefined);
+  const ctx = meta?.securityContext?.reference;
+  if (!meta || (ctx?.startsWith('Patient/') && ctx !== `Patient/${patientId}`)) return undefined;
   const blob = await client.download(client.fhirUrl('Binary', id));
   return { data: Buffer.from(await blob.arrayBuffer()), contentType: blob.type };
 };

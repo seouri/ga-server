@@ -4,6 +4,7 @@ import type { AuditEvent, Binary, DocumentReference, Endpoint, Medication, Medic
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { getClient, loadConfig } from '../../src/config.ts';
 import { storeDocument } from '../../src/document.ts';
+import { binaryFetcher } from '../../src/share/cli.ts';
 import { BINARY_URL, loadScoped } from '../../src/share/scope.ts';
 import { toBundle } from '../../src/share/summary.ts';
 import type { Group, Share } from '../../src/share/store.ts';
@@ -105,11 +106,13 @@ test("notes share follows the attachment to its own Binary, not another patient'
   const s = await loadScoped(client, share(['notes']));
   expect(s.resources.map((r) => r.resourceType)).toEqual(['DocumentReference']); // the archive stays out
   expect(BINARY_URL.exec((s.resources[0] as DocumentReference).content[0].attachment.url ?? '')?.[1]).toBe(bin.id); // Medplum: a presigned /storage/ url
-  // Medplum drops B's Binary by its securityContext. The store does not keep Binary.securityContext (GA never sets it; one
-  // patient per store), so there only A's own Binary is checked.
-  if (SQLITE) expect(ids(s.support)).toContain(`Binary/${bin.id}`);
-  else expect(ids(s.support)).toEqual([`Binary/${bin.id}`]);
-  const bundle = JSON.stringify(toBundle(s)); // the note's presigned url is dropped; the support Binary carries no url
+  // Binaries are listed, not read, at load; opening one drops B's by its securityContext. The store does not keep
+  // Binary.securityContext (GA never sets it; one patient per store), so there only A's own Binary is checked.
+  expect(s.binaries).toContain(bin.id);
+  expect(s.support).toEqual([]);
+  expect((await binaryFetcher(client)(`Binary/${bin.id}`, pid))?.data.toString('utf8')).toBe('test note');
+  if (!SQLITE) expect(await binaryFetcher(client)(`Binary/${binB.id}`, pid)).toBeUndefined();
+  const bundle = JSON.stringify(toBundle(s)); // the note's presigned url is dropped
   expect(bundle).not.toMatch(/"url":"[^"]*(Binary|storage)\//);
 });
 
@@ -119,7 +122,7 @@ test("patient B's records never appear in A's share", async () => {
   expect(s.resources.length).toBe(3); // lab, statement, note
   for (const r of bRecords) expect(got.has(`${r.resourceType}/${r.id}`)).toBe(false);
   // Medplum only: GA never sets Binary.securityContext; the store (one patient) keeps none, so this guard is Medplum's.
-  if (!SQLITE) expect(got.has(`Binary/${binB.id}`)).toBe(false);
+  if (!SQLITE) expect(await binaryFetcher(client)(`Binary/${binB.id}`, pid)).toBeUndefined();
   expect(got.has(`Patient/${pidB}`)).toBe(false);
   for (const r of s.resources) expect(r.meta?.compartment?.map((c) => c.reference)).toContain(`Patient/${pid}`);
 });
@@ -129,6 +132,6 @@ test('an imported source file and its Binary never appear, even for all', async 
   const s = await loadScoped(client, share('all'));
   const got = new Set(ids([...s.resources, ...s.support]));
   expect(got.has(`DocumentReference/${srcDoc.id}`)).toBe(false);
-  expect(got.has(`Binary/${srcBinId}`)).toBe(false);
+  expect(s.binaries).not.toContain(srcBinId);
   expect(s.resources.filter((r) => r.resourceType === 'DocumentReference')).toHaveLength(1); // only the note
 });

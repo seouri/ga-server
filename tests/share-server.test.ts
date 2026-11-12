@@ -30,7 +30,7 @@ const note = { resourceType: 'DocumentReference', id: 'd1', status: 'current', d
 const linked = { resourceType: 'DocumentReference', id: 'd2', status: 'current', date: '2026-02-02', meta: cpt, content: [{ attachment: { contentType: 'application/pdf', url: 'Binary/11111111-2222-3333-4444-555555555555' } }] } as Resource;
 const archive = { resourceType: 'DocumentReference', id: 'arch', status: 'current', identifier: [{ system: 'urn:ga-server:id:ehi-archive', value: 'x' }], content: [{ attachment: { data: b64('everything') } }] } as Resource;
 const binary = { resourceType: 'Binary', id: '11111111-2222-3333-4444-555555555555', contentType: 'application/pdf' } as Resource;
-const scoped: Scoped = { patient: { resourceType: 'Patient', id: 'p', name: [{ text: 'Test Person' }], birthDate: '1970-01-01' }, resources: [med, note, linked], support: [binary], endpoints: [] };
+const scoped: Scoped = { patient: { resourceType: 'Patient', id: 'p', name: [{ text: 'Test Person' }], birthDate: '1970-01-01' }, resources: [med, note, linked], support: [], endpoints: [], binaries: [binary.id!] };
 
 let dir: string;
 let server: Server;
@@ -144,6 +144,17 @@ test('/doc: archive DocumentReference in s.resources is still refused (inScope r
   expect((await get(`/s/${token}/doc/d3`)).status).toBe(404);
 });
 
+test('records.json streams the Apple readings from applePages; /doc is 404 when fetchBinary refuses the Binary', async () => {
+  const hr = (id: string) => ({ resourceType: 'Observation', id, status: 'final', code: { text: 'Heart rate' }, meta: { ...cpt, source: '/data/export.xml' } }) as Resource;
+  const applePages = async function* () { yield [hr('a1'), hr('a2')]; yield [hr('a3')]; };
+  await start({ load: async () => ({ ...scoped, applePages }), fetchBinary: async () => undefined });
+  const { token } = share();
+  const b = await (await get(`/s/${token}/download/records.json`)).json();
+  expect(b.entry.map((e: any) => e.resource.id)).toEqual(['p', 'm1', 'd1', 'd2', 'a1', 'a2', 'a3']);
+  expect(b.entry.at(-1).resource.meta.source).toBe('export.xml');
+  expect((await get(`/s/${token}/doc/d2`)).status).toBe(404);
+});
+
 test('downloads: records.json is the scoped Bundle, summary.pdf is a PDF', async () => {
   await start();
   const { token } = share();
@@ -154,7 +165,7 @@ test('downloads: records.json is the scoped Bundle, summary.pdf is a PDF', async
   const b = await r.json();
   expect(b.resourceType).toBe('Bundle');
   expect(b.entry.map((e: any) => `${e.resource.resourceType}/${e.resource.id}`).sort()).toEqual(
-    ['Patient/p', 'MedicationStatement/m1', 'DocumentReference/d1', 'DocumentReference/d2', `Binary/${binary.id}`].sort());
+    ['Patient/p', 'MedicationStatement/m1', 'DocumentReference/d1', 'DocumentReference/d2'].sort());
   const pdf = await get(`/s/${token}/download/summary.pdf`);
   expect(pdf.status).toBe(200);
   expect(pdf.headers.get('content-type')).toBe('application/pdf');
