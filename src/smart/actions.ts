@@ -1,5 +1,5 @@
 // Hospital actions shared by the CLI, the chat tools and the gateway's /callback.
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import { GaError } from '../config.ts';
@@ -40,13 +40,24 @@ export function enableTypes(dir: string, sourceKey: string, types: string[] | 'a
 // finishing afterwards would write it active again, and its token refresh could restore the deleted tokens.
 export async function disconnectSource(client: MedplumClient, dir: string, sourceKey: string, patientId: string): Promise<void> {
   const src = source(dir, sourceKey);
-  const lock = await takeLock(join(dir, `${src.key}.sync.lock`), 0);
-  if (!lock) throw new GaError('sync running, try again');
+  const f = join(dir, `${src.key}.sync.lock`);
+  const lock = await takeLock(f, 0);
+  if (!lock) throw new GaError(`sync running, try again${lockTaken(f)}`);
   try {
     await writeEndpoint(client, dir, src, patientId, 'off', new Date().toISOString(), 'disconnected');
     deleteSecret(dir, src.key);
   } finally {
     rmSync(lock, { force: true });
+  }
+}
+
+// When a held lock was taken (takeLock's 2 h rule: a killed ga-sync's lock blocks until then).
+function lockTaken(f: string): string {
+  try {
+    const started = (JSON.parse(readFileSync(f, 'utf8')) as { started?: number }).started ?? statSync(f).mtimeMs;
+    return ` (its lock was taken ${new Date(started).toISOString()}; a lock older than 2 hours, e.g. from a killed sync, is cleared)`;
+  } catch {
+    return ''; // released meanwhile, or mid-write
   }
 }
 

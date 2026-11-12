@@ -101,7 +101,9 @@ describe('disconnectSource', () => {
     const { dir, src, client, writes } = setup();
     writeSources(dir, [src]);
     const lock = (await takeLock(join(dir, `${src.key}.sync.lock`), 0))!;
-    await expect(disconnectSource(client, dir, src.key, 'p')).rejects.toThrow('sync running, try again');
+    await expect(disconnectSource(client, dir, src.key, 'p')).rejects.toThrow(
+      /^sync running, try again \(its lock was taken \d{4}-\d\d-\d\dT[\d:.]+Z; a lock older than 2 hours, e.g. from a killed sync, is cleared\)$/,
+    );
     expect(writes).toEqual([]);
     expect(loadSecret(dir, src.key)).toBeTruthy();
     rmSync(lock);
