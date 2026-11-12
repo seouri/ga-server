@@ -25,3 +25,17 @@ Linux numbers come from the same steps in `node:26.13.0-alpine` (docker, worktre
 - The schema costs about 6 MiB of heap with every R4 type and 3 MiB with GA's types.
 - Both caps hold where they apply.
 - On macOS, ga-store already sits at 232-235 MiB before any `$graphql` request. That is above 220 MiB, without GraphQL. It is the platform's accounting: the same process on Linux holds 164-178 MiB.
+
+## Task 3 rerun (references, reverse lookups, list arguments, the Connection API)
+
+Same tests and Linux script. Reverse lookups as Medplum builds them put every pair of types in the schema (Medplum's `_compartment` targets every type): 21,462 pairs on an all-types store, about 600k search arguments, measured at +456 MiB (macOS) and +409 MiB (Linux) of RSS, and GA's store at 286 MiB on Linux. Ruling (controller, 2026-11-11): reverse lookups leave out `_compartment` and the R4 parameters whose target is every type (README, deliberate differences); the caps stay. With that:
+
+| Store | Platform | RSS before → after (MiB) | V8 heap before → after (MiB) |
+| --- | --- | --- | --- |
+| All types, growth | Linux (alpine, Node 26.13.0) | 165→209, 166→211, 198→209: **+44** (cap 128) | 26 → 55 |
+| All types, growth | macOS (Darwin 25.6, Node 26.13.0) | 234→283, 271→285, 234→283: **+49** (cap 128) | 26 → 55 |
+| GA's types, total | Linux (alpine, Node 26.13.0) | 163→198, 164→187, 162→197: **197** (cap 220) | 22 → 40 |
+| GA's types, total | macOS (Darwin 25.6, Node 26.13.0) | 232→267, 233→270, 249→258: **267** (printed only) | 22 → 40 |
+
+- The schema now costs about 29 MiB of heap with every R4 type and 18 MiB with GA's types (reverse lookups are most of it: 720 and 581 type pairs).
+- Both caps hold where they apply. GA's store keeps 23 MiB of headroom on Linux; Task 4's input types should be watched against it.

@@ -1,16 +1,27 @@
 // SPDX-FileCopyrightText: Copyright Orangebot, Inc. and Medplum contributors
 // SPDX-License-Identifier: Apache-2.0
 // POST [base]/$graphql, ported from Medplum 5.2.14 packages/fhir-router/src/graphql/graphql.ts: the handler and the root schema
-// (read by id, search). Changes: synchronous (executeSync; resolvers return values), every read and search goes through the
-// `fhir` callback (the store's own request path), the schema covers the resource types passed in (built on first use, one per
-// type list), introspection is an option. Not yet here: the Connection API (plan 3 Task 3), mutations (Task 4), and Medplum's
-// depth and cost rules, which in 5.2.14 only log (Task 3 makes the cost rule refuse).
-import { badRequest, forbidden, normalizeOperationOutcome, OperationOutcomeError } from '@medplum/core';
+// (read by id, search, the Connection API) and the depth and cost rules. Changes: synchronous (executeSync; resolvers return
+// values), every read and search goes through the `fhir` callback (the store's own request path), the schema covers the resource
+// types passed in (built on first use, one per type list), introspection is an option, and the depth (12) and cost (10,000)
+// rules refuse a query with Medplum's commented-out error texts, where 5.2.14 only logs (resolvers block the event loop, so a
+// fan-out must be refused before it runs). Not yet here: mutations (plan 3 Task 4).
+import { badRequest, forbidden } from '@medplum/core';
 import type { OperationOutcome, Resource } from '@medplum/fhirtypes';
-import type { DocumentNode, ExecutionResult, GraphQLFieldConfigMap, GraphQLResolveInfo } from 'graphql';
-import { executeSync, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, parse, specifiedRules, validate } from 'graphql';
+import type { ArgumentNode, ASTNode, ASTVisitor, DocumentNode, ExecutionResult, FieldNode, GraphQLFieldConfigMap, GraphQLResolveInfo, OperationDefinitionNode, ValidationContext } from 'graphql';
+import { executeSync, GraphQLError, GraphQLID, GraphQLList, GraphQLNonNull, GraphQLObjectType, GraphQLSchema, Kind, parse, specifiedRules, validate } from 'graphql';
 import type { Fhir, GraphQLContext } from './graphql-types.ts';
-import { buildGraphQLOutputType, buildSearchArgs, getGraphQLOutputType, invalidRequest, outputTypes, resolveBySearch } from './graphql-types.ts';
+import {
+  buildGraphQLOutputType,
+  buildSearchArgs,
+  getConnectionType,
+  getGraphQLOutputType,
+  invalidRequest,
+  outputTypes,
+  readCached,
+  resolveByConnectionApi,
+  resolveBySearch,
+} from './graphql-types.ts';
 
 export type { Fhir } from './graphql-types.ts';
 
@@ -42,7 +53,8 @@ export function graphqlHandler(body: unknown, fhir: Fhir, opts: { introspection:
   }
 
   const schema = getRootSchema(opts.types);
-  const validationErrors = validate(schema, document, specifiedRules);
+  const validationRules = [...specifiedRules, MaxDepthRule(), QueryCostRule(variables)];
+  const validationErrors = validate(schema, document, validationRules);
   if (validationErrors.length > 0) {
     return answer(400, invalidRequest(validationErrors));
   }
@@ -115,6 +127,13 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
       args: buildSearchArgs(resourceType),
       resolve: resolveBySearch,
     };
+
+    // FHIR GraphQL Connection API
+    fields[resourceType + 'Connection'] = {
+      type: getConnectionType(t, resourceType, graphQLOutputType),
+      args: buildSearchArgs(resourceType),
+      resolve: resolveByConnectionApi,
+    };
   }
 
   return new GraphQLSchema({
@@ -136,15 +155,186 @@ function buildRootSchema(types: readonly string[]): GraphQLSchema {
  * @returns The resource for the query.
  */
 function resolveById(_source: any, args: any, ctx: GraphQLContext, info: GraphQLResolveInfo): Resource | undefined {
-  const reference = `${info.fieldName}/${args.id}`;
-  try {
-    let resource = ctx.resources.get(reference);
-    if (!resource) {
-      resource = ctx.fhir('GET', `${info.fieldName}/${encodeURIComponent(args.id)}`) as Resource;
-      ctx.resources.set(reference, resource);
-    }
-    return resource;
-  } catch (err) {
-    throw new OperationOutcomeError(normalizeOperationOutcome(err), { cause: err });
+  return readCached(ctx, info.fieldName, args.id);
+}
+
+const DEFAULT_MAX_DEPTH = 12;
+
+/**
+ * Custom GraphQL rule that enforces max depth constraint.
+ * @param maxDepth - The maximum allowed depth.
+ * @returns A function that is an ASTVisitor that validates the maximum depth rule.
+ */
+const MaxDepthRule =
+  (maxDepth: number = DEFAULT_MAX_DEPTH) =>
+  (context: ValidationContext): ASTVisitor =>
+    new MaxDepthVisitor(context, maxDepth);
+
+type DepthRecord = { depth: number; node?: FieldNode };
+
+class MaxDepthVisitor {
+  private readonly context: ValidationContext;
+  private readonly maxDepth: number;
+  private readonly fragmentDepths: Record<string, DepthRecord>;
+
+  constructor(context: ValidationContext, maxDepth: number) {
+    this.context = context;
+    this.fragmentDepths = Object.create(null);
+    this.maxDepth = maxDepth;
   }
+
+  OperationDefinition(node: OperationDefinitionNode): void {
+    const result = this.getDepth(...node.selectionSet.selections);
+    if (result.depth > this.maxDepth) {
+      this.context.reportError(
+        new GraphQLError(
+          `Field "${result.node?.name.value}" exceeds max depth (depth=${result.depth}, max=${this.maxDepth})`,
+          {
+            nodes: result.node,
+          }
+        )
+      );
+    }
+  }
+
+  /**
+   * Returns the depth of the GraphQL node in a query.
+   * We use field depth as the representation of depth: the number of concrete fields (not counting fragment expansions)
+   * @param nodes - The AST nodes.
+   * @returns The maximum "depth" of the nodes.
+   */
+  private getDepth(...nodes: ASTNode[]): DepthRecord {
+    let deepest: DepthRecord = { depth: -1 };
+    for (const node of nodes) {
+      let current: DepthRecord = { depth: 0 };
+      if (node.kind === Kind.FIELD && node.name.value.startsWith('__')) {
+        // Introspection (__schema, __type) reads the schema, not records: the standard IntrospectionQuery is 15 deep
+      } else if (node.kind === Kind.FIELD) {
+        if (node.selectionSet?.selections) {
+          current = this.getDepth(...node.selectionSet.selections);
+          current.depth += 1;
+        } else {
+          current = { depth: 0, node }; // Leaf field node
+        }
+      } else if (node.kind === Kind.FRAGMENT_SPREAD) {
+        const fragmentName = node.name.value;
+        const fragment = this.context.getFragment(fragmentName);
+        const cachedDepth = this.fragmentDepths[fragmentName];
+
+        if (cachedDepth) {
+          current = cachedDepth;
+        } else if (fragment) {
+          current = this.getDepth(...fragment.selectionSet.selections);
+          this.fragmentDepths[fragmentName] = current;
+        }
+      } else if (node.kind === Kind.INLINE_FRAGMENT) {
+        current = this.getDepth(...node.selectionSet.selections);
+      }
+
+      if (current.depth > this.maxDepth) {
+        return current; // Short circuit, no need to keep computing
+      }
+      if (current.depth > deepest.depth) {
+        deepest = current;
+      }
+    }
+
+    return deepest;
+  }
+}
+
+const DEFAULT_MAX_COST = 10_000;
+
+const QueryCostRule =
+  (variables: Record<string, unknown> | undefined, maxCost: number = DEFAULT_MAX_COST) =>
+  (context: ValidationContext): ASTVisitor =>
+    new QueryCostVisitor(context, variables, maxCost);
+
+class QueryCostVisitor {
+  private readonly context: ValidationContext;
+  private readonly maxCost: number;
+  private readonly fragmentCosts: Record<string, number>;
+  private readonly variables: Record<string, unknown> | undefined;
+
+  constructor(context: ValidationContext, variables: Record<string, unknown> | undefined, maxCost: number) {
+    this.context = context;
+    this.variables = variables;
+    this.maxCost = maxCost;
+    this.fragmentCosts = Object.create(null);
+  }
+
+  OperationDefinition(node: OperationDefinitionNode): void {
+    let cost = 0;
+    for (const child of node.selectionSet.selections) {
+      cost += this.calculateCost(child);
+      if (cost > this.maxCost) {
+        this.context.reportError(
+          new GraphQLError('Query too complex', {
+            extensions: { cost, limit: this.maxCost },
+          })
+        );
+        break; // one error per operation (Medplum's commented-out report would repeat it for every later child)
+      }
+    }
+  }
+
+  private calculateCost(...nodes: ASTNode[]): number {
+    let cost = 0;
+    for (const node of nodes) {
+      if (node.kind === Kind.FIELD && node.selectionSet) {
+        let baseCost = 0;
+        let branchingFactor = 1;
+        if (isSearchField(node)) {
+          baseCost = 8;
+          branchingFactor = this.getCount(node.arguments) ?? 20;
+        } else if (isLinkedResource(node)) {
+          baseCost = 1;
+          branchingFactor = 2;
+        }
+
+        cost += baseCost + branchingFactor * this.calculateCost(...node.selectionSet.selections);
+      } else if (node.kind === Kind.FRAGMENT_SPREAD) {
+        const fragmentName = node.name.value;
+        const fragment = this.context.getFragment(fragmentName);
+        const cachedCost = this.fragmentCosts[fragmentName];
+
+        if (cachedCost !== undefined) {
+          cost += cachedCost;
+        } else if (fragment) {
+          const fragmentCost = this.calculateCost(...fragment.selectionSet.selections);
+          this.fragmentCosts[fragmentName] = fragmentCost;
+          cost += fragmentCost;
+        }
+      } else if (node.kind === Kind.INLINE_FRAGMENT) {
+        cost += this.calculateCost(...node.selectionSet.selections);
+      }
+
+      if (cost > this.maxCost) {
+        return cost; // Short circuit return, no need to keep processing
+      }
+    }
+
+    return cost;
+  }
+
+  getCount(args?: readonly ArgumentNode[]): number | undefined {
+    const countArg = args?.find((arg) => arg.name.value === '_count');
+    if (countArg?.value.kind === Kind.INT) {
+      return Number.parseInt(countArg.value.value, 10);
+    }
+    if (countArg?.value.kind === Kind.VARIABLE) {
+      // Medplum counts only a literal; a `_count: $n` would otherwise cost 20 whatever $n is
+      const n = Number(this.variables?.[countArg.value.name.value]);
+      return Number.isInteger(n) ? n : undefined;
+    }
+    return undefined;
+  }
+}
+
+function isSearchField(node: FieldNode): boolean {
+  return node.name.value.endsWith('List') || node.name.value.endsWith('Connection'); // Medplum: List only; a Connection searches too
+}
+
+function isLinkedResource(node: FieldNode): boolean {
+  return node.name.value === 'resource';
 }

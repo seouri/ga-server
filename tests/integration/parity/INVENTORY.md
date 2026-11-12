@@ -689,25 +689,25 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Search with based-on | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | ported | graphql |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup on contained resource with invalid id | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup without _reference | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API and count | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API count only (no edges) | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Read resource by reference not found | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with _reference | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup on contained resource with invalid id | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup without _reference | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API and count | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reverse lookup with Connection API count only (no edges) | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth | skipped | graphql | skipped in Medplum 5.2.14 |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Max depth override | skipped | graphql | skipped in Medplum 5.2.14 |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › StructureDefinition query | ported | graphql |  |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › _offset list field argument | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › _count list field argument | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › fhirpath list field argument | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument by name | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Extension list field argument | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument null values | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without count field | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without edges field | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › _offset list field argument | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › _count list field argument | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › fhirpath list field argument | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument by name | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Extension list field argument | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › List field argument null values | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without count field | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Connection API without edges field | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Create Patient Record | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Create wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Updating Patient Record | skipped | graphql | not yet ported (Task 4) |
@@ -715,9 +715,9 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong resourceType error | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Update wrong ID error | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Delete Patient Record | skipped | graphql | not yet ported (Task 4) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reference missing reference property | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Fragment inclusion | skipped | graphql | not yet ported (Task 3) |
-| fhir-router/src/graphql/graphql.test.ts | GraphQL › Cursor pagination | skipped | graphql | not yet ported (Task 3) |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Reference missing reference property | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Fragment inclusion | ported | graphql |  |
+| fhir-router/src/graphql/graphql.test.ts | GraphQL › Cursor pagination | ported | graphql |  |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Patch Patient Record | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Mutation | skipped | graphql | not yet ported (Task 4) |
 | fhir-router/src/graphql/graphql.test.ts | GraphQL › Invalid Patch Operations | skipped | graphql | not yet ported (Task 4) |
@@ -742,10 +742,10 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Search with based-on | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated asc | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Sort by _lastUpdated desc | ported | graphql |  |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference | skipped | graphql | not yet ported (Task 3) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference not found | skipped | graphql | not yet ported (Task 3) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup with _reference | skipped | graphql | not yet ported (Task 3) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup without _reference | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Read resource by reference not found | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup with _reference | ported | graphql |  |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Reverse lookup without _reference | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Max depth | skipped | graphql | skipped in Medplum 5.2.14 |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Hidden fields in nested lookups | skipped | graphql | access policy |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Cannot read resource type | skipped | graphql | access policy |
@@ -759,7 +759,7 @@ One row per Medplum test (a `test.each` counts once, by its title template). Col
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Create Task with groupIdentifier | skipped | graphql | access policy |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › Uses reader instance when available | skipped | graphql | database platform (spy on pools or loaders) |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › GraphQL in batch users writer | skipped | graphql | database platform (spy on pools or loaders) |
-| server/src/fhir/operations/graphql.test.ts | GraphQL › Cursor pagination | skipped | graphql | not yet ported (Task 3) |
+| server/src/fhir/operations/graphql.test.ts | GraphQL › Cursor pagination | ported | graphql |  |
 | server/src/fhir/operations/graphql.test.ts | GraphQL › dataloader deduplicates reads | skipped | graphql | database platform (spy on pools or loaders) |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Smoke Test | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
 | server/src/fhir/operations/resourcegraph.test.ts | Resource $graph › Error cases › Invalid graph parameter | skipped | platform | not in plan 1: operation $graph, decide in plan 4 |
