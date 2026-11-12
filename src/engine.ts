@@ -239,7 +239,9 @@ export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueCodeableConcept && b.valueCodeableConcept) return !!firstCoding(a) && firstCoding(a) === firstCoding(b);
   if (a.valueBoolean !== undefined || b.valueBoolean !== undefined) return a.valueBoolean === b.valueBoolean;
   if (a.valueString !== undefined || b.valueString !== undefined) return a.valueString === b.valueString;
-  return sameNumbers(a, b); // component-only readings (BP)
+  // Component-only readings (BP): only when every component holds a number; coded or string components are not compared.
+  const numeric = (o: Observation) => !!o.component?.length && o.component.every((c) => c.valueQuantity);
+  return numeric(a) && numeric(b) && sameNumbers(a, b);
 }
 
 // Copies of one record from the in-process converter: a visit (one Encounter per visit id), or an id-less record keyed by its

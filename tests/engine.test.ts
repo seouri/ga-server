@@ -174,6 +174,10 @@ test('sameValue compares quantities, strings, first codings and booleans (R19)',
   const bp = (sys: number, dia: number) => o({ component: [sys, dia].map((v) => ({ code: { text: 'x' }, valueQuantity: { value: v, unit: 'mm[Hg]' } })) });
   expect(sameValue(bp(128, 82), bp(128, 82))).toBe(true);
   expect(sameValue(bp(128, 82), bp(128, 80))).toBe(false);
+  // Components with coded or string values are not compared (their numbers would all be null): never equal.
+  const comp = (v: object) => o({ component: [{ code: { text: 'c' }, ...v }] });
+  expect(sameValue(comp({ valueCodeableConcept: { coding: [{ system: 's', code: 'pos' }] } }), comp({ valueCodeableConcept: { coding: [{ system: 's', code: 'neg' }] } }))).toBe(false);
+  expect(sameValue(comp({ valueString: 'A' }), comp({ valueString: 'B' }))).toBe(false);
 });
 
 // C1/I1: an EHI update never replaces a more specific existing value with a less specific one.
