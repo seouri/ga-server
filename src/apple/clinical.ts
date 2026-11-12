@@ -96,7 +96,7 @@ function ecg(folder: string, f: string, n: number): Resource[] | undefined {
     resourceType: 'DocumentReference', id, status: 'current', subject: SUBJECT, type: { text: 'Apple Watch ECG' }, date: recorded,
     content: [{ attachment: { contentType: 'text/plain; charset=utf-8', data: Buffer.from(text).toString('base64'), title: basename(f) } }],
   };
-  // Keyed on the file with its Recorded Date line rewritten (Apple writes it in the offset at export time); as written, the old key.
+  // Keyed on the file with its Recorded Date line rewritten (the offset Apple writes may differ between exports); as written, the old key.
   keyed(doc, (at) => {
     const t = at(recorded);
     return `ecg|${t === recorded ? text : text.replace(/^(Recorded Date,).*$/m, `$1${t.replace('T', ' ').replace(/([+-]\d\d):(\d\d)$/, ' $1$2')}`)}`;

@@ -104,7 +104,7 @@ ga import file.pdf --llm api   # PDF/image via the Anthropic API (needs ANTHROPI
 
 An Epic EHI export brings encounters, problems, labs, medications, immunizations, vitals, social and family history, questionnaires, health maintenance, clinical notes (DocumentReference) and MyChart messages (Communication). The whole export is also archived as one DocumentReference. Re-importing the same export is a no-op. Without `--tz`, `GA_EHI_TZ` or this machine's zone is used.
 
-An Apple Health export brings per-reading vitals, daily summaries (heart rate, steps, distance, activity rings), nightly sleep, ECGs, and the Health Records inside it (allergies, patient identifiers). The folder is archived as one DocumentReference; re-importing is a no-op, also for an export taken after a daylight-saving change, and a newer export updates the changed days.
+An Apple Health export brings per-reading vitals, daily summaries (heart rate, steps, distance, activity rings), nightly sleep, ECGs, and the Health Records inside it (allergies, patient identifiers). The folder is archived as one DocumentReference; re-importing is a no-op, also when a later export writes the same times in another UTC offset, and a newer export updates the changed days.
 
 Known limit (rare, not fixed): Health Records are identified by their hospital's host, like a portal sync. When two hospitals share one FHIR host (two tenants), the first FHIR base in sorted order gets the plain host key and the other a hashed key. A later export that adds or drops a tenant on that host can shift which tenant holds the plain key, and a portal sync (`ga connect`) of either tenant always uses the plain host key.
 

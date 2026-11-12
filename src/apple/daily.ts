@@ -38,7 +38,7 @@ const merge = (ivs: { s: number; e: number }[]) => {
   return out;
 };
 const minutes = (ivs: { s: number; e: number }[]) => merge(ivs).reduce((a, i) => a + (i.e - i.s), 0) / 60000;
-// Apple writes every timestamp in the export device's offset at export time (e.g. -05:00 all year), so a reading's
+// The offset Apple writes is not the reading's local one (one export writes -05:00 on some summer dates), so a reading's
 // calendar day and a day's bounds come from the user's time zone, DST included.
 // shortcut: one zone for the whole history (this machine's, as for EHI); travel days land on home-zone dates.
 const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86400e3).toISOString().slice(0, 10);

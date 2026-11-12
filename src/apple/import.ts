@@ -17,7 +17,7 @@ const CLINICAL = 'urn:ga-server:tag|src-apple-clinical';
 // Types the unchanged filter covers (readings and ECGs; any other type in a reading batch goes to the engine).
 const FILTERED = new Set(['Observation', 'DocumentReference']);
 
-// Times compare as instants: the same reading written in another offset (an export after a DST change) is unchanged.
+// Times compare as instants: the same reading written in another offset (a later export may use another one) is unchanged.
 const at = (t: unknown) => (typeof t === 'string' && Number.isFinite(Date.parse(t)) ? new Date(Date.parse(t)).toISOString() : t);
 const projection = (r: Record<string, unknown>) => {
   const p = r.effectivePeriod as { start?: string; end?: string } | undefined;

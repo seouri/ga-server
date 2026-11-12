@@ -43,11 +43,11 @@ const recast = (text: string, to: (ms: number, off: string) => string) => {
   return Number.isFinite(ms) && off && written(ms, off) === text ? to(ms, off) : text;
 };
 
-// Identifier values older imports gave a record: they keyed it on its time as written, and Apple writes every timestamp in the
-// phone's offset at export time, so an export after a DST change re-keyed it. The importer looks these up when the instant key misses.
+// Identifier values older imports gave a record: they keyed it on its time as written. The offset Apple writes is not tied to the
+// reading (one export mixes -05:00 and -04:00 on summer dates), so a later export may write the same reading in another one. The importer looks these up when the instant key misses.
 export const LEGACY = new WeakMap<object, string[]>();
 // Keys o on its instants (UTC) and records the keys older imports may hold it under: its time as this export writes it, and an hour
-// either side (the export before or after a DST change). `text(at)` builds the key text, passing each timestamp through `at`.
+// either side (the same reading written in the other DST offset). `text(at)` builds the key text, passing each timestamp through `at`.
 // shortcut: older exports taken in another zone (abroad) or a DST step other than an hour are not matched; their readings come in once more.
 export function keyed<T extends { identifier?: Observation['identifier'] }>(o: T, text: (at: (t: string) => string) => string): string {
   const value = sha(text((t) => recast(t, (ms) => new Date(ms).toISOString())));
