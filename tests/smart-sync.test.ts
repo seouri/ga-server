@@ -16,10 +16,11 @@ import type { MockSmart } from './smart/mock-server.ts';
 const P = 'synthetic-patient-1';
 const T0 = '2026-01-01T09:00:00.000Z';
 let m: MockSmart;
+let medStatus = 403;
 beforeAll(async () => {
   m = await startMock({ clientId: 'synthetic-client', jwks: { keys: [] } });
   serveFixtures(m);
-  m.route('/fhir/MedicationRequest', (_q, res) => void res.writeHead(403).end()); // not selected at login
+  m.route('/fhir/MedicationRequest', (_q, res) => void res.writeHead(medStatus).end()); // 403: not selected at login
 });
 afterAll(() => m.close());
 
@@ -54,6 +55,18 @@ describe('syncSource', () => {
     expect(writes[0]).toMatchObject({ status: 'error' });
     expect(ext(writes[0], LAST_SUCCESS)?.valueDateTime).toBe(T0);
     expect(ext(writes[0], 'urn:ga-server:ext:smart-last-error')?.valueCode).toBe('refused:MedicationRequest');
+  });
+
+  // 400 is exempt only for a category search (Epic's answer for a category it never supports), not a whole list.
+  it('a 400 on a whole medication list also fails the sync', async () => {
+    const { dir, src, client, writes } = setup();
+    medStatus = 400;
+    try {
+      expect(await syncSource(client, dir, src, 'p')).toMatchObject({ status: 'error', error: 'refused:MedicationRequest' });
+    } finally {
+      medStatus = 403;
+    }
+    expect(ext(writes[0], LAST_SUCCESS)?.valueDateTime).toBe(T0);
   });
 
   it('a dry run still reports the refused list as skipped', async () => {

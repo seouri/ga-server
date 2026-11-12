@@ -215,8 +215,9 @@ async function runSync(client: MedplumClient, dir: string, src: SourceRec, patie
     }
     const fetched = await fetchAll(src.fhirBase, token, patient, dryRun ? undefined : src.enabledTypes, { deferrals, now: new Date(at) });
     // A list the currency rule reads, refused (e.g. 403: not selected at login): a success would make every record of it read
-    // "may have been stopped". 400 is Epic's answer for a category it never supports. Fail before importing anything.
-    const refused = [...new Set(Object.entries(fetched.skipped).filter(([k, v]) => LISTS.has(k) && v !== 'HTTP 400').map(([k]) => k.split(':')[0]))];
+    // "may have been stopped". 400 is Epic's answer for a category it never supports (a category search, Type:category), never
+    // for a whole list. Fail before importing anything.
+    const refused = [...new Set(Object.entries(fetched.skipped).filter(([k, v]) => LISTS.has(k) && (v !== 'HTTP 400' || !k.includes(':'))).map(([k]) => k.split(':')[0]))];
     if (!dryRun && refused.length) throw new GaError(`refused:${refused.join(',')}`);
     const { resources, binaries } = mapForGa(fetched.resources, src, new Set(fetched.deferred));
     stage = 'import_error';
