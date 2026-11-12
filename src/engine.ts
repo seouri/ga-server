@@ -238,7 +238,8 @@ export function sameValue(a: Observation, b: Observation): boolean {
   if (a.valueQuantity && b.valueQuantity) return a.valueQuantity.value === b.valueQuantity.value && a.valueQuantity.unit === b.valueQuantity.unit;
   if (a.valueCodeableConcept && b.valueCodeableConcept) return !!firstCoding(a) && firstCoding(a) === firstCoding(b);
   if (a.valueBoolean !== undefined || b.valueBoolean !== undefined) return a.valueBoolean === b.valueBoolean;
-  return a.valueString !== undefined && a.valueString === b.valueString;
+  if (a.valueString !== undefined || b.valueString !== undefined) return a.valueString === b.valueString;
+  return sameNumbers(a, b); // component-only readings (BP)
 }
 
 // Copies of one record from the in-process converter: a visit (one Encounter per visit id), or an id-less record keyed by its
