@@ -309,11 +309,18 @@ export function endpointStatus(e: Endpoint) {
 export async function readStatus(
   client: MedplumClient,
   patientId: string,
-  dir?: string, // given: configured sources with no Endpoint yet (never synced for real) are listed as pending
-): Promise<{ source: string; name: string; status: string; lastSuccess?: string; error?: string; stale: boolean; enabledTypes: string[] }[]> {
-  const listed = (await patientEndpoints(client, patientId)).map(endpointStatus);
+  // given: configured sources with no Endpoint yet (never synced for real) are listed as pending, and enabledTypes are the
+  // configured ones; the Endpoint keeps the last success's (syncedTypes, when they differ: a sync with the new ones hasn't succeeded).
+  dir?: string,
+): Promise<{ source: string; name: string; status: string; lastSuccess?: string; error?: string; stale: boolean; enabledTypes: string[]; syncedTypes?: string[] }[]> {
+  const sources = dir ? readSources(dir) : [];
+  const listed = (await patientEndpoints(client, patientId)).map(endpointStatus).map((s) => {
+    const cfg = sources.find((x) => x.key === s.source);
+    const configured = cfg?.enabledTypes ?? [];
+    return !cfg || configured.join(',') === s.enabledTypes.join(',') ? s : { ...s, enabledTypes: configured, syncedTypes: s.enabledTypes };
+  });
   const have = new Set(listed.map((s) => s.source));
-  const pending = (dir ? readSources(dir) : [])
+  const pending = sources
     .filter((s) => !have.has(s.key))
     .map((s) => ({ source: s.key, name: s.name, status: 'pending', stale: true, enabledTypes: s.enabledTypes ?? [] }));
   return [...listed, ...pending];

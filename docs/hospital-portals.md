@@ -24,7 +24,7 @@ ga connect https://fhir.example-hospital.org/api/FHIR/R4 --client-id <client ID>
 ga sync --enable Condition,Observation,MedicationRequest fhir-example-hospital-org
 ga sync                 # fetch every connected source now (prints counts only)
 ga sync --dry-run       # counts only, writes nothing
-ga status               # per source: status, last success, STALE flag, enabled types
+ga status               # per source: status, last success, STALE flag, enabled types (and the last synced ones until a sync with them succeeds)
 ga disconnect fhir-example-hospital-org   # deletes the tokens; records already fetched stay
 ```
 

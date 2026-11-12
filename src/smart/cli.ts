@@ -179,7 +179,9 @@ export async function smartCommand(argv: string[]): Promise<boolean> {
     }
     const { client, patientId } = await ga();
     for (const s of await readStatus(client, patientId, dir)) {
-      const types = s.enabledTypes.length ? s.enabledTypes.join(',') : 'none (dry run only)';
+      const types =
+        (s.enabledTypes.length ? s.enabledTypes.join(',') : 'none (dry run only)') +
+        (s.syncedTypes ? ` (not yet synced; last synced: ${s.syncedTypes.join(',') || 'none'})` : '');
       console.log(
         `${s.name} (${s.source}): ${s.status}${s.error ? ` (${s.error})` : ''}, last success ${s.lastSuccess ?? 'never'}${s.stale ? ', STALE' : ''}, types: ${types}`,
       );

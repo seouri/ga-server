@@ -9,7 +9,7 @@ import { takeLock } from '../src/lock.ts';
 import { disconnectSource } from '../src/smart/actions.ts';
 import { loadSecret, saveSecret, writeApp, writeSources } from '../src/smart/store.ts';
 import type { SourceRec } from '../src/smart/store.ts';
-import { ENABLED_TYPES, LAST_SUCCESS, SOURCE_ID, syncSource } from '../src/smart/sync.ts';
+import { ENABLED_TYPES, LAST_SUCCESS, readStatus, SOURCE_ID, syncSource } from '../src/smart/sync.ts';
 import { serveFixtures, startMock } from './smart/mock-server.ts';
 import type { MockSmart } from './smart/mock-server.ts';
 
@@ -81,6 +81,18 @@ describe('syncSource', () => {
     const { dir, src, client, writes } = setup({} as { clientId: string }); // no client id: fails before any fetch
     expect(await syncSource(client, dir, src, 'p')).toMatchObject({ status: 'error', error: 'no_client_id' });
     expect(ext(writes[0], ENABLED_TYPES)?.valueString).toBe('Observation');
+  });
+});
+
+describe('readStatus', () => {
+  // After a failed --enable the Endpoint keeps the last success's types: status shows the configured ones and what last synced.
+  it('reports the configured enabled types, and the last synced ones when they differ', async () => {
+    const { dir, src, client } = setup();
+    writeSources(dir, [src]);
+    expect(await readStatus(client, 'p', dir)).toMatchObject([{ source: 'mock', enabledTypes: ['Observation', 'MedicationRequest'], syncedTypes: ['Observation'] }]);
+    writeSources(dir, [{ ...src, enabledTypes: ['Observation'] }]);
+    expect((await readStatus(client, 'p', dir))[0]).not.toHaveProperty('syncedTypes');
+    expect((await readStatus(client, 'p'))[0]).toMatchObject({ enabledTypes: ['Observation'] });
   });
 });
 

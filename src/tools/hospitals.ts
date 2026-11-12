@@ -45,7 +45,7 @@ export function registerHospitalTools(server: McpServer, deps: ToolDeps, dir = s
   server.registerTool(
     'hospital_status',
     {
-      description: 'Hospital sources (status, last success, enabled types, stale) and pending logins: waiting, finished (with the counts per type the portal returned) or failed.',
+      description: 'Hospital sources (status, last success, enabled types, stale; syncedTypes: the types of the last success, when a sync with the enabled ones has not succeeded yet) and pending logins: waiting, finished (with the counts per type the portal returned) or failed.',
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
