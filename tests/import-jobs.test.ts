@@ -1,6 +1,6 @@
 // import_file jobs: a worker thread per attempt, a checkpoint per batch, resume after a crash or restart (temp SQLite stores).
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -454,4 +454,20 @@ test('macOS AppleDouble entries (__MACOSX/, ._*) do not make a JSON-only zip rea
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('resume removes an export a crash left in a job folder with no record (an hour old), never a recorded job or a fresh folder', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ga-jobs-orphan-'));
+  try {
+    const old = join(dir, 'imports', 'orphan'), fresh = join(dir, 'imports', 'fresh');
+    for (const d of [old, fresh]) { mkdirSync(d, { recursive: true }); writeFileSync(join(d, 'upload.zip'), 'x'); }
+    const hourAgo = (Date.now() - 2 * 3_600_000) / 1000;
+    utimesSync(old, hourAgo, hourAgo);
+    const kept = recordJob(dir, (writeFileSync(join(dir, 'u.zip'), 'x'), join(dir, 'u.zip')));
+    utimesSync(join(dir, 'imports', kept.id), hourAgo, hourAgo);
+    resumeJobs(dir, { run: async () => {} });
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(join(dir, 'imports', kept.id, 'job.json'))).toBe(true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
