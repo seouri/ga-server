@@ -1,6 +1,6 @@
 // The Apple Health import in batches gives today's single-batch result (spec: same result), on a temp SQLite store.
 import { createHash } from 'node:crypto';
-import { mkdtempSync, type ReadStream, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, type ReadStream, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
@@ -89,9 +89,9 @@ test("batched import writes the same resources as one batch, and as today's impo
     },
   });
   expect(snap).toHaveLength(614);
-  // Readings are keyed on their instants (UTC) since an export after a DST change doubled them; with each key read back as the
+  // Readings and ECGs are keyed on their instants (UTC) since an export after a DST change doubled them; with each key read back as the
   // first older key it records (the time as written), the digest is the one before (46006bf5...): only identifier values changed.
-  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('25d7377a44465b7dcf4fa73069305334dffa23c066aa7cac2eed40ef5b72d564');
+  expect(createHash('sha256').update(JSON.stringify(snap)).digest('hex')).toBe('b510a259b594344fb387c4cc4b7a5defada5b5072b587e130e84fff4273037c0');
   const back = new Map<string, string>();
   for await (const bt of appleBatches(exp, { size: 50, timeZone: 'America/New_York' })) for (const r of bt.resources) { const l = LEGACY.get(r); if (l) back.set((r as Observation).identifier![0].value!, l[0]); }
   const old = snap.map((x) => x.replace(/[0-9a-f]{64}/g, (h) => back.get(h) ?? h));
@@ -148,14 +148,25 @@ test('re-import of the same export writes nothing; a newer export updates only i
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 300_000);
 
-// Apple writes every timestamp in the phone's offset at export time: the same readings exported after a DST change.
-const summer = (from: string, to: string) => writeFileSync(join(to, 'export.xml'), readFileSync(join(from, 'export.xml'), 'utf8').replace(/"(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) -0500"/g, (_m, d, t) => {
+// Apple writes every timestamp in the phone's offset at export time: the same readings and ECGs exported after a DST change.
+const shift = (x: string) => x.replace(/(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) -0500/g, (_m, d, t) => {
   const iso = new Date(Date.parse(`${d}T${t}Z`) + 3600e3).toISOString(); // the same instant's wall time in -04:00
-  return `"${iso.slice(0, 10)} ${iso.slice(11, 19)} -0400"`;
-}));
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} -0400`;
+});
+const summer = (from: string, to: string) => {
+  cpSync(from, to, { recursive: true });
+  for (const f of ['export.xml', ...readdirSync(join(to, 'electrocardiograms')).map((e) => join('electrocardiograms', e))]) writeFileSync(join(to, f), shift(readFileSync(join(from, f), 'utf8')));
+};
 const counts = async (client: MedplumClient, pid: string) => {
   const c: Record<string, number> = {};
-  for await (const page of client.searchResourcePages('Observation', { subject: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' })) for (const o of page) c[o.code?.text ?? ''] = (c[o.code?.text ?? ''] ?? 0) + 1;
+  for (const t of ['Observation', 'DocumentReference'] as const) {
+    for await (const page of client.searchResourcePages(t, { subject: `Patient/${pid}`, _count: '1000' }, { cache: 'no-cache' })) {
+      for (const o of page) {
+        const text = (o as Observation).code?.text ?? (o as { type?: { text?: string } }).type?.text;
+        if (text) c[`${t} ${text}`] = (c[`${t} ${text}`] ?? 0) + 1; // untyped: the folder's archive, one per export folder
+      }
+    }
+  }
   return c;
 };
 
@@ -166,8 +177,9 @@ test('the same readings exported in another offset (after a DST change) are unch
     const a = await store();
     await importAppleHealth(a.client, a.cfg, exp, a.pid, { batchSize: 50 });
     const before = await counts(a.client, a.pid);
-    expect(before['Blood pressure panel']).toBeGreaterThan(0);
-    expect(before['Sleep, nightly (Apple Health)']).toBeGreaterThan(0);
+    expect(before['Observation Blood pressure panel']).toBeGreaterThan(0);
+    expect(before['Observation Sleep, nightly (Apple Health)']).toBeGreaterThan(0);
+    expect(before['DocumentReference Apple Watch ECG']).toBe(2);
     const again = await importAppleHealth(a.client, a.cfg, dir, a.pid, { batchSize: 50 });
     expect(again).toMatchObject({ created: 0, updated: 0, possibleDuplicates: 0 }); // compared as instants: nothing rewritten
     expect(await counts(a.client, a.pid)).toEqual(before);
@@ -186,7 +198,7 @@ test('readings an older import keyed by their time as written are found after a 
       for (const r of b.resources) { const l = LEGACY.get(r); if (l) old.set((r as Observation).identifier![0].value!, l[0]); }
     }
     let rekeyed = 0;
-    for await (const page of a.client.searchResourcePages('Observation', { subject: `Patient/${a.pid}`, _count: '1000' }, { cache: 'no-cache' })) {
+    for (const t of ['Observation', 'DocumentReference'] as const) for await (const page of a.client.searchResourcePages(t, { subject: `Patient/${a.pid}`, _count: '1000' }, { cache: 'no-cache' })) {
       for (const o of page) {
         const v = old.get(o.identifier?.[0]?.value ?? '');
         if (v) { await a.client.updateResource({ ...o, identifier: [{ ...o.identifier![0], value: v }, ...o.identifier!.slice(1)] }); rekeyed++; }
