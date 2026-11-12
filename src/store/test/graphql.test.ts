@@ -48,6 +48,13 @@ describe('$graphql (store-only)', () => {
     expect((await gql('{ PatientList(_count: 1) { id } }'))).toEqual({ status: 200, json: { data: { PatientList: [] } } });
   });
 
+  it('a read by a dot-segment id is not found, never another route', async () => {
+    for (const id of ['.', '..', '%2e', '%2E', '']) {
+      const r = await gql(`{ Patient(id: "${id}") { id resourceType } }`);
+      expect(r, id).toMatchObject({ status: 200, json: { data: { Patient: null }, errors: [{ message: 'Not found' }] } });
+    }
+  });
+
   it('a transaction with a failing $graphql entry fails whole', async () => {
     const family = `tx-${Date.now()}`;
     const r = await post('', { resourceType: 'Bundle', type: 'transaction', entry: [

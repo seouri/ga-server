@@ -286,10 +286,13 @@ const introspection = new WeakMap<Store, boolean>();
 // answer >= 400 becomes the resolver's error (its OperationOutcome text). A 200 is plain JSON, as Medplum sends it.
 function graphql(store: Store, r: Req): Answer {
   const fhir: Fhir = (method, path, body) => {
-    const url = new URL(path, 'http://store/');
+    // Parts from the string itself: a URL would treat an id of `.` or `..` as a dot segment and reach another route.
+    const q = path.indexOf('?');
+    const parts = (q < 0 ? path : path.slice(0, q)).split('/').map(decodeURIComponent);
+    if (parts.some((p) => !p)) throw new OperationOutcomeError(outcome('not-found', 'Not found')); // an empty id: never a search
     let a: Answer;
     try {
-      a = dispatch(store, { method, parts: url.pathname.split('/').filter(Boolean).map(decodeURIComponent), query: url.searchParams, body, base: r.base });
+      a = dispatch(store, { method, parts, query: new URLSearchParams(q < 0 ? '' : path.slice(q + 1)), body, base: r.base });
     } catch (e) {
       if (e instanceof HttpError) throw new OperationOutcomeError(outcome(e.status === 404 ? 'not-found' : 'invalid', e.message));
       throw e;
