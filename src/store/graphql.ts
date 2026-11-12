@@ -323,9 +323,6 @@ function resolveByPatch(_source: any, args: Record<string, any>, ctx: GraphQLCon
   const resourceType = fieldName.substring(0, fieldName.length - 'Patch'.length) as ResourceType;
   const resourceId = args.id;
   const patch = args.patch;
-  if (!resourceType || !resourceId || !Array.isArray(patch)) {
-    throw new OperationOutcomeError(badRequest('Invalid patch arguments'));
-  }
   // Patch operation expects an array of operations (cloned: null-prototype objects, as for a create)
   return written(ctx, ctx.fhir('PATCH', `${resourceType}/${encodeURIComponent(resourceId)}`, deepClone(patch)) as Resource);
 }
@@ -461,7 +458,7 @@ class QueryCostVisitor {
         let branchingFactor = 1;
         if (isSearchField(node)) {
           baseCost = 8;
-          // clamped: a negative count would buy a costly sibling; a search returns at most 1000 (applyMaxCount)
+          // clamped: a negative count would buy a costly sibling; a search returns at most 1000 (DEFAULT_MAX_SEARCH_COUNT)
           branchingFactor = Math.min(Math.max(this.getCount(node.arguments) ?? 20, 0), DEFAULT_MAX_SEARCH_COUNT);
         } else if (isLinkedResource(node)) {
           baseCost = 1;

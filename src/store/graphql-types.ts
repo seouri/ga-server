@@ -110,11 +110,8 @@ export const typeCache: Record<string, GraphQLScalarType | undefined> = {
 
 // --- utils.ts ---
 
-function parseSearchArgsWithReference(
-  resourceType: ResourceType,
-  source: any,
-  args: Record<string, string>
-): { searchRequest: SearchRequest; referenceFilter: Filter | undefined } {
+// Medplum keeps the reference filter apart for its batched reverse lookups (not ported); here it is the first filter.
+export function parseSearchArgs(resourceType: ResourceType, source: any, args: Record<string, string>): SearchRequest {
   let referenceFilter: Filter | undefined = undefined;
   if (source) {
     // Sanity check: nested resources (contained, Bundle entries) can have arbitrary ids
@@ -140,26 +137,10 @@ function parseSearchArgsWithReference(
   const searchRequest = parseSearchRequest(resourceType, args);
   // Medplum searches the SearchRequest; here it goes through formatSearchQuery, which writes sort codes unencoded: encoded, `_sort: "_id&_count=0"` is one unknown sort parameter (400, as Medplum), not two parameters
   for (const s of searchRequest.sortRules ?? []) s.code = encodeURIComponent(s.code);
-  return { searchRequest, referenceFilter };
-}
-
-function addFilter(searchRequest: SearchRequest, filter: Filter): void {
-  const existingFilters = searchRequest.filters || [];
-  searchRequest.filters = [filter, ...existingFilters];
-}
-
-export function parseSearchArgs(resourceType: ResourceType, source: any, args: Record<string, string>): SearchRequest {
-  const { searchRequest, referenceFilter } = parseSearchArgsWithReference(resourceType, source, args);
-
   if (referenceFilter) {
-    addFilter(searchRequest, referenceFilter);
+    searchRequest.filters = [referenceFilter, ...(searchRequest.filters ?? [])];
   }
-
   return searchRequest;
-}
-
-export function applyMaxCount(searchRequest: SearchRequest, maxCount: number | undefined): void {
-  searchRequest.count = Math.min(searchRequest.count ?? DEFAULT_SEARCH_COUNT, maxCount ?? DEFAULT_MAX_SEARCH_COUNT);
 }
 
 export function graphQLFieldToFhirParam(code: string): string {
@@ -184,7 +165,7 @@ export function resolveBySearch(source: any, args: Record<string, string>, ctx: 
   const fieldName = info.fieldName;
   const resourceType = fieldName.substring(0, fieldName.length - 'List'.length) as ResourceType;
   const searchRequest = parseSearchArgs(resourceType, source, args);
-  applyMaxCount(searchRequest, undefined);
+  searchRequest.count = Math.min(searchRequest.count ?? DEFAULT_SEARCH_COUNT, DEFAULT_MAX_SEARCH_COUNT);
   const bundle = search(ctx, searchRequest);
   return (bundle.entry ?? []).map((e) => e.resource as Resource); // Medplum's search Bundle always has entry; the store's omits an empty one
 }
@@ -266,7 +247,7 @@ export function resolveByConnectionApi(source: any, args: Record<string, string>
   if (!isFieldRequested(info, 'edges')) {
     searchRequest.count = 0;
   }
-  applyMaxCount(searchRequest, undefined);
+  searchRequest.count = Math.min(searchRequest.count ?? DEFAULT_SEARCH_COUNT, DEFAULT_MAX_SEARCH_COUNT);
   const bundle = search(ctx, searchRequest);
   return {
     count: bundle.total,
