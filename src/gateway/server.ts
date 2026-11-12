@@ -156,20 +156,22 @@ export function createGateway(deps: GatewayDeps): http.Server {
     send(res, 200, pages.callbackDone());
   }
 
-  // The token must exist, be unexpired (find() does not check exp), carry scope ga for GA's /mcp, and belong to a client that still exists.
-  async function bearer(req: Req): Promise<{ redirectUris: string[] } | undefined> {
+  // The token must exist, be unexpired, carry scope ga for GA's /mcp, and belong to a client that still exists. 'expired': one
+  // of ours past its exp (kept a while by the adapter), which the chat app refreshes on a 401.
+  async function bearer(req: Req): Promise<{ redirectUris: string[] } | 'expired' | undefined> {
     const m = /^Bearer ([A-Za-z0-9_-]{1,200})$/.exec(req.headers.authorization ?? '');
-    const at = m && (await provider.AccessToken.find(m[1]));
-    if (!at || at.isExpired || at.aud !== resource || !at.scopes.has('ga')) return undefined;
+    const at = m && (await provider.AccessToken.find(m[1], { ignoreExpiration: true }));
+    if (!at || at.aud !== resource || !at.scopes.has('ga')) return undefined;
+    if (at.isExpired) return 'expired';
     return provider.Client.find(at.clientId);
   }
 
   async function mcp(req: Req, res: Res, ip: string): Promise<void> {
     const client = await bearer(req);
-    if (!client) {
+    if (!client || client === 'expired') {
       const reply = () => json(res, 401, { error: 'invalid_token' }, unauthorized);
-      // No Authorization header is a client discovering GA, not a failed attempt.
-      return req.headers.authorization ? failed(res, ip, reply) : reply();
+      // No Authorization header is a client discovering GA, and an expired token of ours a client due to refresh: neither is a failed attempt.
+      return req.headers.authorization && !client ? failed(res, ip, reply) : reply();
     }
     // Stateless: no session, so no GET stream and nothing to DELETE.
     if (req.method !== 'POST') return json(res, 405, { error: 'method_not_allowed' }, { Allow: 'POST' });

@@ -147,6 +147,27 @@ test('20 failed bearer attempts per IP, then 429; a valid token is never limited
   await r.text();
 });
 
+// A chat app back after an idle hour presents its expired token: 401 (so it refreshes), never 429, and not counted.
+test('an expired token of ours gets 401 even after junk tokens from its IP, and is not counted', async () => {
+  await start();
+  const old = await mint();
+  // An hour later, as the store sees it: the token's exp and the adapter's own expiry both moved back an hour.
+  const f = join(dir, 'oidc', 'AccessToken', `${createHash('sha256').update(old.token).digest('hex')}.json`);
+  const e = JSON.parse(readFileSync(f, 'utf8'));
+  e.payload.exp -= 3601;
+  e.expiresAt -= 3601_000;
+  writeFileSync(f, JSON.stringify(e));
+  for (let i = 0; i < 20; i++) await expect401(await initialize('bad', '203.0.113.7'));
+  for (let i = 0; i < 5; i++) {
+    const r = await initialize(old.token, '203.0.113.7');
+    await expect401(r);
+    expect(await r.json()).toEqual({ error: 'invalid_token' });
+  }
+  for (let i = 0; i < 25; i++) await expect401(await initialize(old.token, '203.0.113.10'));
+  await expect401(await initialize('bad', '203.0.113.10'));
+  expect(calls).toEqual([]);
+});
+
 test('protected resource metadata is exact', async () => {
   await start();
   for (const p of ['/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-protected-resource']) {

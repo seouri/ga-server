@@ -5,6 +5,9 @@ import { writeAtomic } from '../smart/store.ts';
 
 type Payload = Record<string, unknown>;
 type Entry = { payload: Payload; expiresAt?: number };
+// An access token's record outlives its exp by this much, so the gateway still knows it when a chat app presents it after an
+// idle spell (a plain 401 that makes it refresh, not a failed attempt). oidc-provider itself still refuses it at exp.
+const ACCESS_TOKEN_KEEP_S = 7 * 86400;
 
 // oidc-provider adapter storing each model under <dir>/oidc/<Model>/<sha256(id)>.json.
 // shortcut: no locking or indexes, single process only; move to Redis if the gateway ever runs several.
@@ -48,7 +51,8 @@ export class FileAdapter {
   }
 
   async upsert(id: string, payload: Payload, expiresIn?: number): Promise<void> {
-    const e: Entry = { payload, expiresAt: expiresIn === undefined ? undefined : this.now() + expiresIn * 1000 };
+    const keep = this.model === 'AccessToken' ? ACCESS_TOKEN_KEEP_S : 0;
+    const e: Entry = { payload, expiresAt: expiresIn === undefined ? undefined : this.now() + (expiresIn + keep) * 1000 };
     writeAtomic(this.file(id), JSON.stringify(e), 0o600);
   }
 
