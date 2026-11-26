@@ -10,7 +10,7 @@ import { bundles, fit, flagsOf } from './labs.ts';
 import { newestEpicImport } from './share/scope.ts';
 
 export type Kind = 'medications' | 'problems' | 'allergies';
-type ListRow = { name?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string; ids?: string[] };
+type ListRow = { name?: string; directions?: string; status?: string; currency?: string; reason?: string; since?: string; source?: string; flags?: string[]; type?: string; id?: string; ids?: string[] };
 
 type Any = Record<string, any>;
 const TYPES: Record<Kind, string[]> = { medications: ['MedicationStatement', 'MedicationRequest'], problems: ['Condition'], allergies: ['AllergyIntolerance'] };
@@ -56,6 +56,8 @@ function listItems(rs: Resource[], meds: ReturnType<typeof medMap>, ctx: Ctx, ki
     const tags = new Set(r.meta?.tag?.filter((t: Any) => t.system === TAG).map((t: Any) => t.code));
     const row: ListRow = {
       name: concept(r.medicationCodeableConcept) ?? concept(meds.get(r.medicationReference?.reference)?.code) ?? r.medicationReference?.display ?? concept(r.code),
+      // how to take it, as the prescriber wrote it (medications only)
+      directions: kind === 'medications' ? [...new Set(((r.dosageInstruction ?? r.dosage ?? []) as Any[]).map((d) => d.text?.trim()).filter(Boolean))].join('; ') || undefined : undefined,
       status: status ?? 'not stated',
       currency: e?.currency ?? (unstated ? undefined : isPlanned(res) ? 'planned' : 'inactive'),
       reason: e?.reason ?? (unstated ? 'no clinical status recorded; treat as possibly active' : isPlanned(res) ? 'planned or proposed in a plan of treatment; not taken yet' : undefined),

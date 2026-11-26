@@ -11,6 +11,7 @@ import { GaError } from './config.ts';
 import { loadMaps, lookup, type Maps, sourceKey, termKey, upsertEntries } from './conceptmap.ts';
 import { COMPARTMENT } from './engine.ts';
 import { effective, type SourceInfo, TAG } from './identity.ts';
+import { sha256File } from './upload-stream.ts';
 
 const TYPES = ['Observation', 'Immunization', 'Procedure', 'MedicationStatement', 'MedicationRequest', 'Condition'];
 const KINDS = ['ccda', 'ehi', 'apple-health', 'apple-clinical', 'pdf', 'smart'] as const;
@@ -42,7 +43,14 @@ function sourceResolver(client: MedplumClient, patientId: string, maps: () => Ma
         for await (const page of client.searchResourcePages('DocumentReference', q, { cache: 'no-cache' })) out.push(...page);
         return out;
       })();
-      const mine = (await docs).filter((d) => d.content?.[0]?.attachment?.title === basename(file) && d.content[0].attachment.url);
+      let mine = (await docs).filter((d) => d.content?.[0]?.attachment?.title === basename(file) && d.content[0].attachment.url);
+      // Two exports name their files alike (every Epic portal export has DOC0001.XML ...): the stored file whose content is
+      // this path's file, when that file is still there; otherwise the names below must agree.
+      if (mine.length > 1) {
+        const hash = await sha256File(file).catch(() => undefined);
+        const exact = mine.filter((d) => d.identifier?.some((i) => i.system === 'urn:ga-server:id:file' && i.value === hash));
+        if (exact.length) mine = exact;
+      }
       const names = new Set<string | undefined>();
       for (const d of mine) names.add(custodian(await (await client.download(d.content?.[0].attachment?.url as string)).text()));
       return names.size === 1 ? { org: [...names][0] } : undefined;

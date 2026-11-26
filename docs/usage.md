@@ -12,7 +12,7 @@ To use GA from any folder instead, register it once for your user:
 claude mcp add --scope user ga-server -- node /absolute/path/to/ga-server/src/cli.ts mcp
 ```
 
-The server tells Claude that GA is your health record, so plain questions work. Claude starts with `health_summary` (a one-call snapshot), reads lab results with `lab_results`, medications, problems and allergies with `current_medications`, `current_problems` and `allergies`, vital signs with `vitals`, note and message text with `notes_search`, and everything else with `fhir_search`/`fhir_read`, and cites the records it used.
+The server tells Claude that GA is your health record, so plain questions work. Claude starts with `health_summary` (a one-call snapshot), reads lab results with `lab_results`, medications, problems and allergies with `current_medications`, `current_problems` and `allergies`, vital signs with `vitals`, note, message and report text with `notes_search`, and everything else with `fhir_search`/`fhir_read`, and cites the records it used.
 
 **Slash commands** (shipped in `.claude/skills/`; anyone who clones the repo gets them):
 

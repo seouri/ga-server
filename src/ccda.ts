@@ -3,6 +3,7 @@ import { basename, join } from 'node:path';
 import type { MedplumClient } from '@medplum/core';
 import type { CodeableConcept, Composition, Condition, Identifier, MedicationStatement, Observation, Resource } from '@medplum/fhirtypes';
 import { XMLParser } from 'fast-xml-parser';
+import { rtfToText } from './ehi/rtf.ts';
 import { convertCcdaToFhir, convertXmlToCcda, mapCcdaSystemToFhir, mapTimestampOrBooleanValue, nodeToPlainText, OBSERVATION_VALUE_CONTENT } from '../vendor/medplum-ccda/index.ts';
 import { mapCcdaAllergyCategoryAndType } from '../vendor/medplum-ccda/systems.ts';
 import * as OID from '../vendor/medplum-ccda/oids.ts';
@@ -156,9 +157,14 @@ export function ccdaFiles(path: string): string[] {
 // Clinical statements an entry may hold (CDA R2): each is one record or is named in notImported.
 const STATEMENTS = ['act', 'encounter', 'observation', 'observationMedia', 'organizer', 'procedure', 'regionOfInterest', 'substanceAdministration', 'supply'];
 // Observation value types the library converts (processVitalsObservation); any other is dropped with a console.warn.
-const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT', 'REAL', 'TS', 'BL']);
+const VALUE_TYPES = new Set(['PQ', 'CO', 'CD', 'CE', 'ST', 'INT', 'REAL', 'TS', 'BL', 'IVL_PQ', 'IVL_REAL']);
 // An ED value the library reads (medplum#11242): text, inline or by narrative reference; binary ED (a PDF) has no value[x] type.
-const textED = (v: CcdaReference) => (v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT';
+const textED = (v: CcdaReference) => ((v['@_mediaType'] ?? 'text/plain').startsWith('text/') && (v['@_representation'] ?? 'TXT') === 'TXT') || rtfED(v);
+// Epic's pathology text: base64 RTF, read with GA's RTF reader (the library's rtfToText option); unread when it is not base64 or has no text.
+const rtfED = (v: CcdaReference) => {
+  if (v['@_mediaType'] !== 'text/rtf' || v['@_representation'] !== 'B64' || !v['#text']) return false;
+  try { return !!rtfToText(atob(v['#text'].replace(/\s+/g, ''))).trim(); } catch { return false; }
+};
 const ENCOUNTER_DIAGNOSIS = [OID.OID_ENCOUNTER_DIAGNOSIS, OID.OID_ENCOUNTER_DIAGNOSIS_V2];
 // Sections whose concern acts the library reads as one record per SUBJ observation (processConditionAct, processAllergyIntoleranceAct).
 const ALLERGIES = [OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED, OID.OID_ALLERGIES_SECTION_ENTRIES_OPTIONAL, OID.OID_ALLERGIES_SECTION_ENTRIES_REQUIRED_V2,
@@ -190,7 +196,7 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
   const ccda = sanitizeNullFlavors(convertXmlToCcda(xml)); // what the library reads: the same sections, in its order
   const sections = (ccda.component?.structuredBody?.component ?? []).flatMap((c) => c.section ?? []);
   // Unsupported sections are not silently skipped: they are accounted below.
-  const resources = (convertCcdaToFhir(ccda, { ignoreUnsupportedSections: true }).entry ?? []).map((e) => e.resource as Resource);
+  const resources = (convertCcdaToFhir(ccda, { ignoreUnsupportedSections: true, rtfToText }).entry ?? []).map((e) => e.resource as Resource);
   const byRef = new Map(resources.map((r) => [`${r.resourceType}/${r.id}`, r]));
   const comp = resources.find((r): r is Composition => r.resourceType === 'Composition');
   const notImported: NotImported[] = [];
@@ -274,7 +280,12 @@ export function convertCcdaLocal(xml: string): { resources: Resource[]; notImpor
       const raw = (o.value as X | undefined)?.['@_value'] as string | undefined;
       // A number that does not parse: the library writes no value, never NaN.
       const unread = ((type === 'TS' || type === 'BL') && !Object.keys(mapTimestampOrBooleanValue(o.value as CcdaTimestampOrBoolean)).length) ||
-        (NUMERIC.has(type ?? '') && raw !== undefined && !Number.isFinite(Number.parseFloat(raw)));
+        (NUMERIC.has(type ?? '') && raw !== undefined && !Number.isFinite(Number.parseFloat(raw))) ||
+        // An interval with no number on either bound (the library reads a bound's own value, else its translation's).
+        ((type === 'IVL_PQ' || type === 'IVL_REAL') && !['low', 'high'].some((k) => {
+          const b = (o.value as X)[k] as X | undefined;
+          return Number.isFinite(Number.parseFloat((b?.['@_value'] ?? (arr(b?.translation)[0] as X | undefined)?.['@_value'] ?? '') as string));
+        }));
       if (type && (unread || (!VALUE_TYPES.has(type) && !(type === 'ED' && textED(o.value as CcdaReference))))) add(name, root0(o.templateId), 1, `${type} value not converted`);
       for (const er of o.entryRelationship ?? []) for (const c of er.observation ?? []) walk(c, true);
     };

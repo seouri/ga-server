@@ -15,4 +15,6 @@ Import `$ARGUMENTS` into GA. If no path was given, ask for one. The path must ex
   - Epic FHIR export (`.json`): ask the user for the portal's FHIR base URL; never guess; add `--fhir-base <url>`.
   - DICOM study (folder containing `DICOMDIR`).
 
+Before and after the import, follow [docs/import-guide.md](../../../docs/import-guide.md): a path with a space fails, a health-skillz FHIR file must be converted first, every count in the report must be accounted for, and unmapped terms are mapped from `concepts_to_review`. If something goes wrong or the user corrects a result, add a lesson to that guide, scoped to the provenance and data type it applies to.
+
 Re-importing is safe: GA deduplicates, and an unchanged source changes nothing. If the CLI fails with "GA is not running" or "run ga setup first", tell the user to run `docker compose up -d` or `node src/cli.ts setup`.

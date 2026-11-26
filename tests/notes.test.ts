@@ -12,6 +12,8 @@ test('noteText: inline text/plain only; archives, source files and RTF skipped',
   expect(noteText(doc('b', 'x', { identifier: [{ system: 'urn:ga-server:id:file', value: 'h' }] }))).toBeUndefined();
   expect(noteText(doc('c', 'x', { content: [{ attachment: { contentType: 'text/rtf', data: b64('{\\rtf') } }] }))).toBeUndefined();
   expect(noteText(doc('e', 'ecg csv', { identifier: [{ system: 'urn:ga-server:id:apple-health', value: 'h' }] }))).toBeUndefined();
+  // a hospital note also found in the phone's Health Records carries both identifiers: still a note
+  expect(noteText(doc('f', 'visit note', { identifier: [{ system: 'urn:ga-server:id:smart:hospital-example', value: 'DocumentReference/1' }, { system: 'urn:ga-server:id:apple-health', value: 'h' }] }))).toBe('visit note');
   expect(noteText(doc('d', 'x', { content: [{ attachment: { contentType: 'text/plain', url: 'Binary/1' } }] }))).toBeUndefined();
 });
 
@@ -30,7 +32,7 @@ test('notesSearch: notes and messages merged newest first, case-insensitive, dat
     DocumentReference: [doc('n1', 'Patient reports knee pain.'), doc('n2', 'Nothing relevant.')],
     Communication: [{ resourceType: 'Communication', id: 'm1', status: 'completed', sent: '2025-03-01T10:00:00Z', sender: { display: 'Nurse B' }, payload: [{ contentString: 'Your KNEE x-ray is normal' }] } as Resource],
   };
-  const client = { search: async (t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: by[t].map((resource) => ({ resource })) }) } as unknown as MedplumClient;
+  const client = { search: async (t: string, q: URLSearchParams) => ({ resourceType: 'Bundle', entry: (by[t] ?? []).map((resource) => ({ resource })) }) } as unknown as MedplumClient;
   const r = await notesSearch(client, 'p', { text: 'Knee', since: '2025-01-01' });
   expect(r.rows).toEqual([
     { date: '2025-03-01', kind: 'message', author: 'Nurse B', snippet: 'Your KNEE x-ray is normal', type: 'Communication', id: 'm1' },
@@ -46,22 +48,22 @@ function fake(by: Record<string, any[]>) {
   const client = { search: async (t: string, q: URLSearchParams) => {
     const stamp = q.get('_count') === '1';
     calls.push(`${t}${stamp ? ':stamp' : ':full'}`);
-    const all = by[t];
+    const all = by[t] ?? [];
     const newest = [...all].sort((a, b) => b.meta.lastUpdated.localeCompare(a.meta.lastUpdated))[0];
-    return { resourceType: 'Bundle', total: all.length, entry: (stamp ? [newest] : all).map((resource) => ({ resource })) };
+    return { resourceType: 'Bundle', total: all.length, entry: (stamp ? (newest ? [newest] : []) : all).map((resource) => ({ resource })) };
   } } as unknown as MedplumClient;
   return { client, calls };
 }
 const lu = (r: any, lastUpdated = '2025-01-01T00:00:00Z') => ({ ...r, meta: { lastUpdated } });
 
-test('notesSearch cache: unchanged stamp makes only the two stamp requests; a change reloads', async () => {
+test('notesSearch cache: unchanged stamp makes only the stamp requests; a change reloads', async () => {
   const by = { DocumentReference: [lu(doc('n1', 'colonoscopy done'))], Communication: [] as any[] };
   const { client, calls } = fake(by);
   const pid = 'cache1';
   expect((await notesSearch(client, pid, { text: 'colonoscopy' })).rows.map((r) => r.id)).toEqual(['n1']);
   calls.length = 0;
   expect((await notesSearch(client, pid, { text: 'colonoscopy' })).rows.map((r) => r.id)).toEqual(['n1']);
-  expect(calls.sort()).toEqual(['Communication:stamp', 'DocumentReference:stamp']);
+  expect(calls.sort()).toEqual(['Communication:stamp', 'DiagnosticReport:stamp', 'DocumentReference:stamp', 'Observation:stamp', 'Observation:stamp']);
   by.DocumentReference.push(lu(doc('n2', 'second colonoscopy note'), '2025-06-01T00:00:00Z')); // total and lastUpdated change
   calls.length = 0;
   expect((await notesSearch(client, pid, { text: 'colonoscopy' })).rows.map((r) => r.id).sort()).toEqual(['n1', 'n2']);
@@ -87,4 +89,44 @@ test('notesSearch cache: since/until inclusive on the row date; excluded docs ne
   expect(await ids({ since: '2025-01-01', until: '2025-01-31' })).toEqual(['a', 'b', 'm1']);
   expect(await ids({})).toEqual(['a', 'b', 'c', 'm1', 'm2']);
   await expect(ids({ since: 'nope' })).rejects.toThrow();
+});
+
+test('notesSearch reads report text: a conclusion, a text attachment, and a long text result; short values and link-only reports are not text', async () => {
+  const by = {
+    DocumentReference: [], Communication: [],
+    DiagnosticReport: [
+      lu({ resourceType: 'DiagnosticReport', id: 'r1', status: 'final', code: { text: 'CT chest' }, effectiveDateTime: '2025-04-01T10:00:00Z', conclusion: 'No nodule seen.', resultsInterpreter: [{ display: 'Dr. R' }],
+        presentedForm: [{ contentType: 'text/plain; charset=utf-8', data: b64('FINDINGS: the lungs are clear.') }] }),
+      lu({ resourceType: 'DiagnosticReport', id: 'r2', status: 'final', code: { text: 'XR hand' }, effectiveDateTime: '2025-04-02', presentedForm: [{ contentType: 'text/html', url: 'https://hospital.example/Binary/1' }] }),
+    ],
+    Observation: [
+      lu({ resourceType: 'Observation', id: 'o1', status: 'final', code: { text: 'Final Diagnosis' }, basedOn: [{ display: 'SURGICAL PATHOLOGY' }], effectiveDateTime: '2025-05-01',
+        valueString: `A. COLON POLYP: tubular adenoma, no high grade dysplasia. ${'Margins are clear of the lesion. '.repeat(3)}` }),
+      lu({ resourceType: 'Observation', id: 'o2', status: 'final', code: { text: 'Nitrite' }, effectiveDateTime: '2025-05-01', valueString: 'Negative for adenoma' }),
+    ],
+  };
+  const { client } = fake(by);
+  const find = async (text: string) => (await notesSearch(client, 'reports', { text })).rows;
+  expect(await find('lungs are clear')).toEqual([{ date: '2025-04-01', kind: 'report: CT chest', author: 'Dr. R', snippet: 'No nodule seen. FINDINGS: the lungs are clear.', type: 'DiagnosticReport', id: 'r1' }]);
+  expect((await find('adenoma')).map((r) => [r.id, r.kind])).toEqual([['o1', 'report text: Final Diagnosis (SURGICAL PATHOLOGY)']]);
+  expect((await notesSearch(client, 'reports', {})).rows.map((r) => r.id)).toEqual(['o1', 'r1']);
+});
+
+test('notesSearch reads an echo: the named conclusion and the findings filed under the report\'s order are one row, the report\'s', async () => {
+  const order = { reference: 'ServiceRequest/s1', display: 'ECHO COMPLETE TTE' };
+  const finding = (id: string, name: string, items: string[], basedOn = [order]) => lu({ resourceType: 'Observation', id, status: 'final', code: { text: name }, basedOn, effectiveDateTime: '2025-06-01',
+    category: [{ coding: [{ code: 'study-finding' }] }], hasMember: items.map((display) => ({ display })) });
+  const by = {
+    DiagnosticReport: [lu({ resourceType: 'DiagnosticReport', id: 'e1', status: 'final', code: { text: 'Adult Echo TTE' }, basedOn: [order], effectiveDateTime: '2025-06-01', conclusionCode: [{ text: 'Aneurysm of ascending aorta' }] })],
+    Observation: [finding('f1', 'Aortic Valve Finding', ['FINDINGS - TESTS - IMAGING - AORTIC VALVE - TRILEAFLET', 'FINDINGS - TESTS - IMAGING - AORTIC VALVE - NO STENOSIS']), finding('f2', 'Lone Finding', ['FINDINGS - PE - MURMUR ABSENT'], [])],
+  };
+  const { client } = fake(by);
+  const rows = (await notesSearch(client, 'echo', { text: 'trileaflet' })).rows;
+  expect(rows).toEqual([{ date: '2025-06-01', kind: 'report: Adult Echo TTE', author: undefined, snippet: 'Aneurysm of ascending aorta Aortic Valve Finding: aortic valve - trileaflet; aortic valve - no stenosis.', type: 'DiagnosticReport', id: 'e1' }]);
+  expect((await notesSearch(client, 'echo', { text: 'murmur' })).rows.map((r) => [r.id, r.kind])).toEqual([['f2', 'report text: findings']]);
+});
+
+test('notesSearch: a note stored twice under two ids with the same day, kind and text is one row', async () => {
+  const { client } = fake({ DocumentReference: [lu(doc('d1', 'Colonoscopy  to the cecum.')), lu(doc('d2', 'Colonoscopy to the cecum.')), lu(doc('d3', 'Colonoscopy to the cecum.', { date: '2020-01-01' }))], Communication: [] });
+  expect((await notesSearch(client, 'twice', { text: 'cecum' })).rows.map((r) => r.id).sort()).toEqual(['d1', 'd3']);
 });

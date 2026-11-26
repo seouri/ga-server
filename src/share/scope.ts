@@ -2,7 +2,7 @@
 import { getStatus, OperationOutcomeError, type MedplumClient } from '@medplum/core';
 import type { Endpoint, Patient, Resource, ResourceType } from '@medplum/fhirtypes';
 import { currencyContext, EPIC_TAGS, isActive } from '../current.ts';
-import { hasTag, NEWEST_IMPORT, TAG } from '../identity.ts';
+import { cardiacStudy, hasTag, NEWEST_IMPORT, TAG } from '../identity.ts';
 import { SOURCE_ID, forPatient } from '../smart/sync.ts';
 import type { Group, Share } from './store.ts';
 
@@ -77,6 +77,7 @@ export const hasCategory = (r: Resource, code: string): boolean =>
 export function groupOf(r: Resource): Group | undefined {
   if (hasTag(r, 'src-apple-health')) return 'apple';
   if (r.resourceType === 'Observation') {
+    if (cardiacStudy(r)) return undefined; // echo and ECG measurements are not labs; their report carries them
     if (hasCategory(r, 'laboratory')) return 'labs';
     if (hasCategory(r, 'vital-signs')) return 'vitals';
     // GA's PDF extraction emits lab results without a category.

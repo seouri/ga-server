@@ -27,6 +27,18 @@ export const sha256 = (s: string | Buffer): string => createHash('sha256').updat
 export const APPLE = 'urn:ga-server:id:apple-health';
 export const TAG = 'urn:ga-server:tag';
 export const SRC_DATE = 'urn:ga-server:ext:source-date';
+// Echo and ECG measurements: Epic files them under category "laboratory" next to its own section category (Echo, ECG).
+// They are measurements of a cardiology study, not lab results; their report (DiagnosticReport, category Cardiology) lists them.
+const CARDIAC: [RegExp, 'echo' | 'ecg'][] = [[/^echo(cardiogra(phy|m))?$/i, 'echo'], [/^(ecg|ekg|electrocardiogra(m|phy))$/i, 'ecg']];
+export function cardiacStudy(r: { category?: { text?: string; coding?: { code?: string; display?: string }[] }[] }): 'echo' | 'ecg' | undefined {
+  for (const c of r.category ?? []) {
+    for (const s of [c.text, ...(c.coding ?? []).flatMap((x) => [x.code, x.display])]) {
+      const hit = s && CARDIAC.find(([re]) => re.test(s.trim()));
+      if (hit) return hit[1];
+    }
+  }
+  return undefined;
+}
 export const hasTag = (r: Resource, code: string) => !!r.meta?.tag?.some((t) => t.system === TAG && t.code === code);
 // From a hospital source (EHI export, C-CDA, portal sync, or Apple's copy of a hospital record). A PDF or photo does not say where a reading was taken.
 export const isClinic = (r: Resource) => ['src-ehi', 'src-ccda', 'src-smart', 'src-fhir-export', 'src-dicom', 'src-apple-clinical'].some((c) => hasTag(r, c));
@@ -150,3 +162,14 @@ export function stamp(r: Resource, s: SourceInfo, id: Identifier): Resource {
 // Same numbers in order, ignoring unit spelling: the value (or text value), then a panel's components. Two empty readings are not the same.
 const nums = (o: Observation) => JSON.stringify([o.valueQuantity?.value ?? o.valueString, ...(o.component ?? []).map((c) => c.valueQuantity?.value)]);
 export const sameNumbers = (a: Observation, b: Observation): boolean => nums(a) !== JSON.stringify([null]) && nums(a) === nums(b);
+
+// A genetic test result or report: filed under a genetics category (v2-0074 GE, "genetics"), or named as one (exome, genome,
+// sequencing, karyotype, microarray, copy number, variants, a pharmacogenomic or methylation test). It stays a lab result for
+// the read tools; the chronology page lists it under its own kind, so genetic data can be found before it has a rendering of its own.
+const GENETIC_NAME = /\b(exome|genome|genomic|sequenc\w*|genetic\w*|karyotyp\w*|microarray|copy number|cnv|acmg|variants?|pharmacogen\w*|methylation|fish)\b/i;
+export function geneticTest(r: { category?: { coding?: { code?: string }[]; text?: string }[]; code?: { text?: string; coding?: { display?: string }[] } }): boolean {
+  const cats = (r.category ?? []).flatMap((c) => [c.text, ...(c.coding ?? []).map((x) => x.code)]);
+  if (cats.some((c) => c !== undefined && /^(GE|genetics?)$/i.test(c))) return true;
+  return [r.code?.text, ...(r.code?.coding ?? []).map((c) => c.display)].some((n) => n !== undefined && GENETIC_NAME.test(n));
+}
+

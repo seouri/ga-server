@@ -225,6 +225,8 @@ function mapProblemClinicalStatus(observation: CcdaObservation, act?: CcdaAct): 
 }
 
 export interface CcdaToFhirOptions {
+  /** Plain text of an RTF document: given, a base64 `text/rtf` observation value becomes its text (`valueString`). */
+  rtfToText?: (rtf: string) => string;
   ignoreUnsupportedSections?: boolean;
 }
 
@@ -2237,6 +2239,11 @@ class CcdaToFhirConverter {
           result.valueQuantity = this.mapQuantity(observation.value);
           break;
 
+        case 'IVL_PQ': // An interval: one bound is a result beyond a limit ("<0.2 mg/dL"), two are a range
+        case 'IVL_REAL':
+          Object.assign(result, this.mapIntervalValue(observation.value));
+          break;
+
         case 'CD': // Code
         case 'CE': // Code with Extensions
         case 'CO': // Coded Ordinal (a code with an order, such as 1+ or Positive)
@@ -2299,6 +2306,18 @@ class CcdaToFhirConverter {
   private mapEncapsulatedDataToString(value: CcdaReference): string | undefined {
     const mediaType = value['@_mediaType'] ?? 'text/plain';
     const representation = value['@_representation'] ?? 'TXT';
+    if (mediaType === 'text/rtf' && representation === 'B64' && this.options?.rtfToText && value['#text']) {
+      // Epic: a pathology result's text (final diagnosis, gross description) as base64 RTF; the caller's reader makes it plain text
+      try {
+        // A FHIR string allows space, tab and line breaks only: a no-break space or a control character becomes a space
+        const text = this.options.rtfToText(atob(value['#text'].replace(/\s+/g, ''))).replace(/[^\S \r\n\t]|[\u0000-\u0008\u000e-\u001f]/g, ' ').trim();
+        if (text) {
+          return text;
+        }
+      } catch {
+        // not base64: unread, as below
+      }
+    }
     if (!mediaType.startsWith('text/') || representation !== 'TXT') {
       // Binary content, such as a PDF, has no Observation.value[x] type in FHIR R4
       console.warn(`Unhandled observation value type: ED (${mediaType}, ${representation})`);
@@ -2356,7 +2375,52 @@ class CcdaToFhirConverter {
       return undefined;
     }
 
-    return referenceRange.map((r) => this.mapReferenceRange(r)).filter(Boolean) as ObservationReferenceRange[];
+    const ranges = referenceRange.map((r) => this.mapReferenceRange(r)).filter(Boolean) as ObservationReferenceRange[];
+    return ranges.length ? ranges : undefined; // never an empty array
+  }
+
+  /**
+   * One bound of an interval (IVL_PQ, IVL_REAL): its own value and unit, or (Epic, for a unit that is not UCUM: nullFlavor
+   * OTH) its translation's value with the unit in originalText. An open bound (NINF, PINF) or one without a number is no bound.
+   * @param bound - The low or high element.
+   * @returns The quantity, or undefined.
+   */
+  private mapIntervalBound(bound: CcdaQuantity | undefined): Quantity | undefined {
+    if (!bound) {
+      return undefined;
+    }
+    const own = Number.parseFloat(bound['@_value'] ?? '');
+    if (Number.isFinite(own)) {
+      const unit = bound['@_unit'];
+      return { value: own, ...(unit && { unit, system: UCUM, code: unit }) };
+    }
+    const translation = Array.isArray(bound.translation) ? bound.translation[0] : bound.translation;
+    const value = Number.parseFloat(translation?.['@_value'] ?? '');
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+    const unit = nodeToString(translation?.originalText)?.trim();
+    return { value, ...(unit && { unit }) }; // the unit as written: not a UCUM code
+  }
+
+  /**
+   * An interval value: a result beyond a limit (one bound: a quantity with a comparator) or a range (two bounds).
+   * @param value - The IVL_PQ or IVL_REAL value.
+   * @returns The value[x], or data-absent when neither bound has a number.
+   */
+  private mapIntervalValue(value: CcdaQuantity): Pick<Observation, 'valueQuantity' | 'valueRange' | 'dataAbsentReason'> {
+    const low = this.mapIntervalBound(value.low);
+    const high = this.mapIntervalBound(value.high);
+    if (low && high) {
+      return { valueRange: { low, high } };
+    }
+    if (high) {
+      return { valueQuantity: { ...high, comparator: value.high?.['@_inclusive'] === 'false' ? '<' : '<=' } };
+    }
+    if (low) {
+      return { valueQuantity: { ...low, comparator: value.low?.['@_inclusive'] === 'false' ? '>' : '>=' } };
+    }
+    return { dataAbsentReason: { coding: [{ system: DATA_ABSENT_REASON_CODE_SYSTEM, code: 'unknown' }] } };
   }
 
   private mapReferenceRange(referenceRange: CcdaReferenceRange | undefined): ObservationReferenceRange | undefined {
@@ -2374,25 +2438,26 @@ class CcdaToFhirConverter {
     result.extension = this.mapTextReference(observationRange.text);
 
     const value = observationRange.value as CcdaQuantity | undefined;
-    if (value?.low) {
-      result.low = {
-        value: value.low['@_value'] ? Number.parseFloat(value.low['@_value']) : undefined,
-        unit: value.low['@_unit'],
-        system: UCUM,
-        code: value.low['@_unit'],
-      };
+    const low = this.mapIntervalBound(value?.low);
+    const high = this.mapIntervalBound(value?.high);
+    if (low) {
+      result.low = low;
     }
-    if (value?.high) {
-      result.high = {
-        value: value.high['@_value'] ? Number.parseFloat(value.high['@_value']) : undefined,
-        unit: value.high['@_unit'],
-        system: UCUM,
-        code: value.high['@_unit'],
-      };
+    if (high) {
+      result.high = high;
+    }
+    // The range as written ("38 - 234 IU/L", "<5 mcg/dL", "Negative"): its text, else a text value
+    const text = (nodeToString(observationRange.text) ?? nodeToString(observationRange.value as CcdaText | undefined))?.trim();
+    if (text) {
+      result.text = text;
     }
 
-    if (!result.extension && !result.low && !result.high) {
+    // FHIR obs-3: a reference range has a low, a high or text
+    if (!result.low && !result.high && !result.text) {
       return undefined;
+    }
+    if (!result.extension) {
+      delete result.extension;
     }
 
     return result;
@@ -2613,7 +2678,7 @@ const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot:
  * @returns The plain text, or undefined when there is none.
  */
 // What makes an observation value say something (anything else is its nullFlavor, stripped by sanitizeNullFlavors)
-export const OBSERVATION_VALUE_CONTENT = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText', 'translation'];
+export const OBSERVATION_VALUE_CONTENT = ['@_value', '@_code', '@_displayName', '#text', 'reference', 'originalText', 'translation', 'low', 'high'];
 const DATA_ABSENT_REASON_CODE_SYSTEM = 'http://terminology.hl7.org/CodeSystem/data-absent-reason';
 // FHIR R4 dateTime
 const FHIR_DATE_TIME =

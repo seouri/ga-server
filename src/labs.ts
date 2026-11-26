@@ -6,11 +6,11 @@ import { trusted } from './concept-apply.ts';
 import { termKey } from './conceptmap.ts';
 import { type Concept, codesFor, concepts, conceptNamed, conceptOf, isVitalCode, LOINC } from './concepts.ts';
 import { GaError } from './config.ts';
-import { TAG } from './identity.ts';
+import { cardiacStudy, TAG } from './identity.ts';
 
 const BUDGET = 140_000; // stays under the remote 150k tool-result cap, so rows are never cut mid-JSON
 
-export type LabRow = { date?: string; name?: string; value?: string; range?: string; interpretation?: string; source?: string; flags?: string[]; id?: string };
+export type LabRow = { date?: string; name?: string; value?: string; range?: string; interpretation?: string; comment?: string; source?: string; flags?: string[]; id?: string };
 
 export const qty = (q?: Quantity) => (q?.value === undefined ? undefined : `${q.comparator ?? ''}${q.value}${q.unit ?? q.code ? ` ${q.unit ?? q.code}` : ''}`);
 
@@ -43,6 +43,7 @@ export function labRow(o: Observation, m = conceptMatch(o)): LabRow {
       ?? (o.valueBoolean === undefined ? undefined : String(o.valueBoolean)),
     range,
     interpretation: o.interpretation?.[0]?.coding?.[0]?.code ?? o.interpretation?.[0]?.text,
+    comment: o.note?.map((n) => n.text?.trim()).filter(Boolean).join(' ') || undefined, // the lab's own comment on this result
     source: o.meta?.source ? basename(o.meta.source) : undefined,
     flags: flags.length ? flags : undefined,
     id: o.id,
@@ -296,7 +297,8 @@ export async function labResults(
   { name, since, until, limit = 200, summary = false, keyOnly = false }: { name?: string | string[]; since?: string; until?: string; limit?: number; summary?: boolean; keyOnly?: boolean },
 ): Promise<{ rows: (LabRow | LabTrend)[]; total: number; truncated?: true }> {
   // An extracted result with some other category, or uncategorised with a vital's code (src/vitals.ts reads those), is not a lab.
-  const isLab = (o: Observation) => !isPanel(o) && (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
+  // Echo and ECG measurements carry Epic's "laboratory" category too: they are study measurements (cardiacStudy), not labs.
+  const isLab = (o: Observation) => !isPanel(o) && !cardiacStudy(o) && (!o.category?.length ? !isVitalCode(o.code) : o.category.some((c) => c.coding?.some((x) => x.code === 'laboratory')));
   // Older PDF imports have no category: the OR keeps them. _id breaks date ties so offset paging neither skips nor repeats.
   const query = (n?: string) => {
     const q = new URLSearchParams([

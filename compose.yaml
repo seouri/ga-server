@@ -1,3 +1,5 @@
+# A second person on this computer: a second copy of this folder with COMPOSE_PROJECT_NAME and the GA_*_PORT values in its .env
+# (docs/operations.md, "A second person"). COMPOSE_PROJECT_NAME takes precedence over this name.
 name: ga-server
 
 services:
@@ -55,15 +57,15 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - '127.0.0.1:8103:8103'
+      - '127.0.0.1:${GA_FHIR_PORT:-8103}:8103'
     command: ['env']
     volumes:
       - ga-binary:/usr/src/medplum/binary
     environment:
       MEDPLUM_PORT: 8103
-      MEDPLUM_BASE_URL: 'http://localhost:8103/'
-      MEDPLUM_APP_BASE_URL: 'http://localhost:3000/'
-      MEDPLUM_STORAGE_BASE_URL: 'http://localhost:8103/storage/'
+      MEDPLUM_BASE_URL: 'http://localhost:${GA_FHIR_PORT:-8103}/'
+      MEDPLUM_APP_BASE_URL: 'http://localhost:${GA_APP_PORT:-3000}/'
+      MEDPLUM_STORAGE_BASE_URL: 'http://localhost:${GA_FHIR_PORT:-8103}/storage/'
       MEDPLUM_DATABASE_HOST: 'postgres'
       MEDPLUM_DATABASE_PORT: 5432
       MEDPLUM_DATABASE_DBNAME: 'medplum'
@@ -78,7 +80,7 @@ services:
       MEDPLUM_MAX_BATCH_SIZE: '50mb'
       MEDPLUM_DEFAULT_FHIR_QUOTA: '10000000' # per login per minute; Medplum's 50,000 stops large imports by GA's ordinary (non-super-admin) login
       MEDPLUM_VM_CONTEXT_BOTS_ENABLED: 'false'
-      MEDPLUM_ALLOWED_ORIGINS: 'http://localhost:3000'
+      MEDPLUM_ALLOWED_ORIGINS: 'http://localhost:${GA_APP_PORT:-3000}'
       MEDPLUM_INTROSPECTION_ENABLED: 'true'
       MEDPLUM_SHUTDOWN_TIMEOUT_MILLISECONDS: 30000
     healthcheck:
@@ -101,7 +103,9 @@ services:
       medplum-server:
         condition: service_healthy
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:${GA_APP_PORT:-3000}:3000'
+    environment:
+      MEDPLUM_BASE_URL: 'http://localhost:${GA_FHIR_PORT:-8103}/' # the admin app talks to this install's FHIR server
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:3000']
       interval: 10s
@@ -120,7 +124,7 @@ services:
     user: '${UID:-1000}:${GID:-1000}'
     working_dir: /ga
     ports:
-      - '127.0.0.1:8120:8120'
+      - '127.0.0.1:${GA_STORE_PORT:-8120}:8120'
     volumes:
       - .:/ga:ro
       - ./.ga:/ga/.ga
@@ -176,7 +180,7 @@ services:
         required: false # off on a default install (sqlite profile)
     working_dir: /ga
     ports:
-      - '127.0.0.1:8110:8110'
+      - '127.0.0.1:${GA_GATEWAY_PORT:-8110}:8110'
     extra_hosts:
       - 'host.docker.internal:host-gateway' # a local LLM server (Ollama) on Linux; Docker Desktop has it built in
     volumes:

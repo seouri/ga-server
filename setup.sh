@@ -48,11 +48,18 @@ if [ -f .ga/config.json ] && grep -q '"store": *"sqlite"' .ga/config.json; then
 else
   echo "==> docker compose up -d (waits until the FHIR server is healthy)"
   docker compose up -d --wait --wait-timeout 300
+  # This install's FHIR port (.env GA_FHIR_PORT: a second person on this computer has their own); default 8103.
+  port=$(sed -n 's/^GA_FHIR_PORT=//p' .env 2>/dev/null | tail -1)
   echo "==> ga setup"
-  node src/cli.ts setup
+  node src/cli.ts setup "http://localhost:${port:-8103}/"
 fi
-echo "==> npm link (puts 'ga' on your PATH)"
-npm link || echo "npm link failed; use 'node src/cli.ts' instead of 'ga'"
+# A second person's copy (.env names its own project) must not take over the 'ga' command, which belongs to the first install.
+if grep -q '^COMPOSE_PROJECT_NAME=' .env 2>/dev/null; then
+  echo "==> 'ga' on your PATH stays with your first install; in this folder use: node src/cli.ts <command>"
+else
+  echo "==> npm link (puts 'ga' on your PATH)"
+  npm link || echo "npm link failed; use 'node src/cli.ts' instead of 'ga'"
+fi
 
 echo
 echo "GA is ready. Start Claude Code in this folder:  claude"

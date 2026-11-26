@@ -300,9 +300,12 @@ export interface CcdaSubstanceAdministration {
 }
 
 export interface CcdaQuantity {
-  '@_xsi:type'?: 'PQ' | 'IVL_PQ' | 'REAL';
+  '@_xsi:type'?: 'PQ' | 'IVL_PQ' | 'IVL_REAL' | 'REAL';
   '@_value'?: string;
   '@_unit'?: string;
+  '@_inclusive'?: string; // an interval bound: "false" excludes the bound itself (< rather than <=)
+  translation?: CcdaQuantity | CcdaQuantity[]; // Epic: a bound whose unit is not UCUM (nullFlavor OTH) has its number here
+  originalText?: CcdaText | string; // ... and its unit here
   low?: CcdaQuantity;
   high?: CcdaQuantity;
 }

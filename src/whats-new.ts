@@ -5,7 +5,7 @@ import type { MedplumClient } from '@medplum/core';
 import type { Bundle, CodeableConcept, Condition, Endpoint, Observation, Resource, ResourceType } from '@medplum/fhirtypes';
 import { defaultConfigPath } from './config.ts';
 import { isPlanned } from './current.ts';
-import { arrivedAt, hasTag, TAG } from './identity.ts';
+import { arrivedAt, cardiacStudy, hasTag, TAG } from './identity.ts';
 import { type LabelSections, drugLabel } from './drug-labels.ts';
 import { eachObservation, eachPage, fit, highLow, isPanel, labRow, olderInGroup } from './labs.ts';
 import { concept, listsByKind, medCode, medKeys, medMap } from './lists.ts';
@@ -25,6 +25,7 @@ export function kindOf(r: Resource): Kind {
       if (hasTag(r, 'src-apple-health')) return 'Apple Health readings';
       if (isPanel(r)) return 'other'; // its members are the readings
       if (hasCategory(r, 'vital-signs')) return 'vital signs';
+      if (cardiacStudy(r)) return 'other'; // echo and ECG measurements: part of their report, not lab results
       // Uncategorised (older PDF imports) and AI-read results count as labs; social history, assessments and the like do not.
       return !r.category?.length || hasCategory(r, 'laboratory') || hasTag(r, 'extracted-by-llm') ? 'lab results' : 'other';
     case 'MedicationStatement': case 'MedicationRequest': return 'medications';
@@ -306,7 +307,7 @@ export async function whatsNew(client: MedplumClient, patientId: string, eps: Pr
   }));
   const labsP = (async () => {
     const f = labFold(asOf);
-    await eachObservation(client, patientId, (os) => { for (const o of os) if (hasCategory(o, 'laboratory') || hasTag(o, 'extracted-by-llm')) f.add(o); });
+    await eachObservation(client, patientId, (os) => { for (const o of os) if (!cardiacStudy(o) && (hasCategory(o, 'laboratory') || hasTag(o, 'extracted-by-llm'))) f.add(o); });
     return f.result();
   })();
   const [arrived, lists, labs, status, upkeep] = await Promise.all([

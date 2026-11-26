@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { afterImport } from './concept-auto.ts';
 import { defaultConfigPath, GaError, getClient, loadConfig } from './config.ts';
 import { detectKind, DOCUMENT_EXT, importAny } from './import.ts';
@@ -10,9 +11,19 @@ import { setup } from './setup.ts';
 import { shareCommand } from './share/cli.ts';
 import { smartCommand } from './smart/cli.ts';
 
+// A second install on this computer runs on its own port: a re-run of ga setup must go back to it, never to the default port (another person's record).
+function writtenBaseUrl(): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(defaultConfigPath(), 'utf8')) as { baseUrl?: string }).baseUrl || undefined;
+  } catch {
+    return undefined; // first run
+  }
+}
+
 try {
   if (process.argv[2] === 'setup') {
-    const cfg = await setup();
+    // ga setup [fhir-base-url]: the address given, else the one this install's config already has, else the default (port 8103).
+    const cfg = await setup(process.argv[3] || writtenBaseUrl());
     console.log(`GA ready. Patient/${cfg.patientId}`);
     console.log(cfg.terminologyLookup === false
       ? 'Code lookup is off: term names stay on this machine.'
@@ -132,8 +143,10 @@ try {
     const [arg, , since] = process.argv.slice(3);
     const lookup = cfg.terminologyLookup !== false;
     console.log(JSON.stringify(arg === 'apply' ? await applyAll(client, pid, { lookup }) : arg === '--agent' ? await agentMappings(client, since) : await reviewList(client, pid, arg ? 'suggested' : 'unmapped', undefined, { lookup })));
+  } else if (process.argv[2] === 'ui' && /^( --port \d{2,5})?$/.test(process.argv.slice(3).map((a) => ` ${a}`).join(''))) {
+    await (await import('./ui/server.ts')).serveUi(process.argv[4] ? Number(process.argv[4]) : undefined); // keeps running: the page is served until Ctrl-C
   } else if (!(await smartCommand(process.argv.slice(2))) && !(await shareCommand(process.argv.slice(2)))) {
-    throw new GaError('usage: ga setup | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
+    throw new GaError('usage: ga setup [fhir-base-url] | ga migrate [--delete-old] [--accept] | ga migrate-store [--file <path>] [--yes] [--services-stopped] | ga concepts [--suggested|--agent [--since YYYY-MM-DD]|apply] | ga import <path> [--tz <IANA zone>] | ga whats-new [--since YYYY-MM-DD] | ga maintenance [--as-of YYYY-MM-DD] | ga perf [--days N] | ga ui [--port N] | ga mcp | ga keys | ga connect <fhir-base-url> | ga sync | ga status | ga disconnect <source> | ga share … | ga calendar [revoke] | ga notify setup|test|status|off | ga gateway serve | ga passkey link | ga apps [disconnect <clientId>] | ga shares | ga revoke <id>');
   }
 } catch (e) {
   if (e instanceof GaError) {

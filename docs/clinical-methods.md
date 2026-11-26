@@ -299,3 +299,7 @@ The RxNorm code of each medication that arrived since the person last looked.
 - Scores and statuses are as of a date. Epic health maintenance is as of its export date.
 - GA computes; it does not recommend. The scores' cut-offs and the guideline statuses are inputs for a conversation with a clinician, not decisions.
 - The shipped rule files (USPSTF topics, CDC schedule) are versioned snapshots. They do not update themselves when a guideline changes.
+
+## Growth z-scores (weight-for-age, height-for-age)
+
+The chronology page computes a weight z-score and a height z-score for each clinic reading of a person under 20 (WHO standards under 2 years, CDC 2000 charts from 2 to 20), and sets aside readings that are probably errors. The method, the screening rules in force, their limits and the validation are in their own note: [Growth z-scores](z-scores.md).

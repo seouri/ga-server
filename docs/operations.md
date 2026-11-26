@@ -27,6 +27,19 @@ All ports bind to `127.0.0.1`. Nothing is reachable from the network unless you 
 
 After changing `.env`, run `docker compose up -d`. The services restart on their own after a reboot or Docker restart. Share links, chat apps and daily sync work only while the computer is awake and online: on a Mac, keep it plugged in and stop it sleeping (System Settings, Battery or Lock Screen, or run `caffeinate -s`).
 
+## A second person
+
+One GA install holds one person's record. For another person on the same computer, make a second copy of this folder (without `.ga/`, `backups/` and `.env`) and give it a project name and ports of its own in its `.env` before `./setup.sh`:
+
+```sh
+COMPOSE_PROJECT_NAME=ga-server-2
+GA_FHIR_PORT=8203
+GA_APP_PORT=3100
+GA_GATEWAY_PORT=8210
+```
+
+The copy has its own database and stored files (Docker volumes `ga-server-2_ga-postgres` and `ga-server-2_ga-binary`), its own `.ga/` (config, portal connections, shares) and its own backups, so the two records never mix. Check with `docker compose config | head -1` in the copy that the name is the new one before starting it: without `COMPOSE_PROJECT_NAME`, Docker would treat the copy as the first install. Its admin app is at `http://localhost:<GA_APP_PORT>`. The `ga` command stays with the first install; in the copy, run `node src/cli.ts <command>` (a re-run of `ga setup` there returns to the copy's own port). An agent started in a folder talks to that folder's record. Public access (Tailscale Funnel, `GA_PUBLIC_URL`) for the copy needs its own Funnel port pointing at its gateway port; `ga notify` (texts) reaches only the install on port 8110.
+
 ## Backup
 
 A backup holds all of your health records: keep it encrypted, for example on a FileVault disk or in an encrypted disk image, never in an unencrypted cloud folder.

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GA chronology</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Chronology</h1>
+  <span id="readout"></span>
+  <span class="grow"></span>
+  <button id="all" title="Every kind of record GA holds, drawn or not">All records</button>
+  <button id="today" title="Focus on today (T)">Today</button>
+  <button id="out" title="Wider focus window ([)">−</button>
+  <button id="in" title="Narrower focus window (])">+</button>
+  <label title="Plain linear time, to compare (L)"><input type="checkbox" id="linear"> linear</label>
+</header>
+<main>
+  <div id="stage"><canvas id="c"></canvas><div id="tip" hidden></div></div>
+  <aside id="panel" hidden><button id="wide" title="Wider or narrower panel">⇔</button><button id="close" title="Close (Esc)">×</button><div id="detail"></div></aside>
+</main>
+<footer>
+  <p id="key"></p>
+  <details><summary>Not drawn</summary><ul id="left"></ul></details>
+  <p class="hint">Drag or swipe sideways to move the focus · pinch or ⌘/Ctrl-scroll to widen or narrow it · double-click a date to jump · click a mark for its detail; blue words in the panel lead on to related records · All records lists what no lane draws</p>
+</footer>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
